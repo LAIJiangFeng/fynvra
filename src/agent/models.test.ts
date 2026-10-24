@@ -1,7 +1,9 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { ModelQuery } from '@shared/types/agent';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createModelRegistry, createWorkerModelRuntime } from './models';
 
@@ -144,5 +146,143 @@ describe('createModelRegistry', () => {
     expect(runtime.getModels().filter((model) => model.provider === 'anthropic')).toEqual(
       catalogBefore
     );
+  });
+});
+
+describe('createModelRegistry thinking levels', () => {
+  const levelsOf = (query: ModelQuery) => createModelRegistry(runtime).describe(query);
+
+  it('gives each catalog model exactly the levels pi offers for it (no uniform six levels)', () => {
+    const anthropic = (modelId: string) => levelsOf({ api: 'anthropic-messages', modelId });
+    // pi 1.4.0 目录：opus / sonnet 5.5 的 off、minimal 映射为 null，haiku 5.5 只有 minimal 为 null
+    expect(anthropic('claude-opus-5-5')).toEqual({
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+    });
+    expect(anthropic('claude-sonnet-5-5').thinkingLevels).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+    expect(anthropic('claude-haiku-5-5').thinkingLevels).toEqual([
+      'off',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+    expect(anthropic('claude-fable-5-1').thinkingLevels).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ]);
+    // 没有 xhigh 映射的老模型：pi 只在显式映射时提供 xhigh
+    expect(anthropic('claude-opus-4-5').thinkingLevels).toEqual([
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+    const google = (modelId: string) => levelsOf({ api: 'google-generative-ai', modelId });
+    expect(google('gemini-pro-latest').thinkingLevels).toEqual(['low', 'medium', 'high']);
+    expect(google('gemini-flash-latest').thinkingLevels).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+  });
+
+  it('maps OpenAI models with the official openai provider entry, not the first gateway that lists the id', () => {
+    const openai = (modelId: string) => levelsOf({ api: 'openai-responses', modelId });
+    // cloudflare-ai-gateway 排在 openai 前面，它的 gpt-5.5 没有 off；官方 openai 的 off 映射为 "none"
+    expect(openai('gpt-5.5').thinkingLevels).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
+    // pi 另有 max 档位，fynvra 的 ThinkingLevel 没有它
+    expect(openai('gpt-6.1-sol')).toEqual({
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+    });
+  });
+
+  it('has no levels for models without reasoning', () => {
+    expect(levelsOf({ api: 'openai-responses', modelId: 'gpt-4.1' })).toEqual({
+      thinkingLevels: [],
+    });
+    expect(levelsOf({ api: 'openai-completions', modelId: 'my-local-model' })).toEqual({
+      thinkingLevels: [],
+    });
+  });
+
+  it('uses the reasoning flag from settings only for models the catalog does not know', () => {
+    expect(
+      levelsOf({ api: 'openai-completions', modelId: 'qwen3-coder-local', reasoning: true })
+    ).toEqual({
+      thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'],
+      defaultThinking: 'medium',
+    });
+    // 目录里有的模型以目录为准：标记改不了它的能力
+    expect(levelsOf({ api: 'openai-responses', modelId: 'gpt-4.1', reasoning: true })).toEqual({
+      thinkingLevels: [],
+    });
+    expect(
+      levelsOf({ api: 'anthropic-messages', modelId: 'claude-opus-5-5', reasoning: false })
+        .thinkingLevels
+    ).toEqual(['low', 'medium', 'high', 'xhigh']);
+  });
+
+  it('registers the same template it describes, so the levels shown are the levels pi accepts', async () => {
+    const registry = createModelRegistry(runtime);
+    const queries: ModelQuery[] = [
+      { api: 'anthropic-messages', modelId: 'claude-opus-5-5' },
+      { api: 'anthropic-messages', modelId: 'claude-haiku-5-5' },
+      { api: 'openai-responses', modelId: 'gpt-5.5' },
+      { api: 'google-generative-ai', modelId: 'gemini-flash-latest' },
+      { api: 'openai-completions', modelId: 'qwen3-coder-local', reasoning: true },
+      { api: 'openai-completions', modelId: 'plain-local' },
+    ];
+    for (const query of queries) {
+      const { model } = await registry.resolve({
+        ...query,
+        providerId: KEY_A,
+        baseUrl: 'http://127.0.0.1:9/v1',
+        apiKey: 'k',
+      });
+      const accepted = model.reasoning
+        ? getSupportedThinkingLevels(model).filter((level) => level !== 'max')
+        : [];
+      expect(registry.describe(query).thinkingLevels).toEqual(accepted);
+    }
+    // 官方 openai 条目的上下文是 272k（网关条目写的是 1M），与设置页模板一致
+    expect(runtime.getModel(KEY_A, 'gpt-5.5')?.contextWindow).toBe(272_000);
+  });
+
+  it("applies the requested level when the model offers it, otherwise the model's default", async () => {
+    const registry = createModelRegistry(runtime);
+    const resolve = (modelId: string, thinking?: 'off' | 'xhigh' | 'high') =>
+      registry.resolve({
+        providerId: KEY_B,
+        api: 'anthropic-messages',
+        apiKey: 'k',
+        modelId,
+        ...(thinking ? { thinking } : {}),
+      });
+    expect((await resolve('claude-opus-5-5', 'xhigh')).thinking).toBe('xhigh');
+    // opus 5.5 没有 off：回落到默认档位（pi 自己 clamp 会就近取 low）
+    expect((await resolve('claude-opus-5-5', 'off')).thinking).toBe('medium');
+    expect((await resolve('claude-haiku-5-5', 'off')).thinking).toBe('off');
+    expect((await resolve('claude-opus-5-5')).thinking).toBe('medium');
+    const plain = await registry.resolve({
+      providerId: KEY_B,
+      api: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      apiKey: 'k',
+      modelId: 'plain-local',
+      thinking: 'high',
+    });
+    expect(plain.thinking).toBeUndefined();
   });
 });
