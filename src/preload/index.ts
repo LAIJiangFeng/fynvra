@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createOrchestrationApi } from './domains/orchestration';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -23,6 +24,7 @@ const api: FynvraApi = {
     remove: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_REMOVE, id),
     onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, () => callback()),
   },
+  orchestration: createOrchestrationApi(ipcRenderer),
   window: {
     platform: process.platform,
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),

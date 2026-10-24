@@ -1,0 +1,206 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createFakeLauncher } from '../services/orchestration/testing';
+
+const mocks = vi.hoisted(() => ({
+  userData: '',
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  send: vi.fn(),
+}));
+
+vi.mock('electron', () => ({
+  app: { getPath: () => mocks.userData, on: () => {} },
+  ipcMain: {
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
+      mocks.handlers.set(channel, handler),
+  },
+  BrowserWindow: {
+    fromWebContents: () => null,
+    getAllWindows: () => [
+      { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: mocks.send } },
+    ],
+  },
+  dialog: { showOpenDialog: vi.fn() },
+  nativeTheme: { themeSource: 'system', shouldUseDarkColors: false },
+}));
+
+const WORKSPACE_ID = 'ws-1';
+const DISPATCH_ID = 'dispatch_0mh4x2k1c7q2v9z0d3f';
+const SNAPSHOT = {
+  version: 1,
+  runs: [
+    {
+      id: 'run_1',
+      workspaceId: WORKSPACE_ID,
+      coordinatorSessionId: 'session_coord',
+      objective: 'demo',
+      createdAt: 1,
+    },
+  ],
+  tasks: [
+    {
+      id: 'task_1',
+      runId: 'run_1',
+      title: 'Add toggle',
+      spec: 'S',
+      roleId: 'worker',
+      status: 'in-progress',
+      dependsOn: [],
+    },
+  ],
+  dispatches: [
+    {
+      id: DISPATCH_ID,
+      taskId: 'task_1',
+      workerSessionId: 'session_w1',
+      worktreeId: 'wt_1',
+      branch: 'fynvra/add-toggle',
+      startedAt: 2,
+    },
+  ],
+  worktrees: [] as unknown[],
+  messages: [] as unknown[],
+};
+
+const invoke = (channel: string, ...args: unknown[]) =>
+  mocks.handlers.get(channel)?.({ sender: {} }, ...args);
+
+beforeAll(async () => {
+  mocks.userData = mkdtempSync(join(tmpdir(), 'fynvra-ipc-orchestration-'));
+  const repoPath = join(mocks.userData, 'repo');
+  SNAPSHOT.worktrees.push({
+    id: 'wt_1',
+    workspaceId: WORKSPACE_ID,
+    // 目录不存在：review-diff 走 git 失败路径
+    path: join(mocks.userData, 'worktrees', WORKSPACE_ID, 'add-toggle'),
+    branch: 'fynvra/add-toggle',
+    baseRef: 'main',
+    baseCommit: 'abc1234',
+  });
+  writeFileSync(
+    join(mocks.userData, 'settings.json'),
+    JSON.stringify({
+      version: 1,
+      preferences: {},
+      workspaces: [{ id: WORKSPACE_ID, name: 'demo', repoPath, defaultBranch: 'main' }],
+    })
+  );
+  mkdirSync(join(mocks.userData, 'orchestration'));
+  writeFileSync(
+    join(mocks.userData, 'orchestration', `${WORKSPACE_ID}.json`),
+    JSON.stringify(SNAPSHOT)
+  );
+  const { registerOrchestrationHandlers } = await import('./orchestration');
+  registerOrchestrationHandlers();
+});
+
+afterAll(() => {
+  rmSync(mocks.userData, { recursive: true, force: true });
+});
+
+describe('orchestration IPC', () => {
+  it('注册 §9.4 的三个通道', () => {
+    expect([...mocks.handlers.keys()].sort()).toEqual(
+      [
+        IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT,
+        IPC_CHANNELS.ORCHESTRATION_REVIEW_DIFF,
+        IPC_CHANNELS.ORCHESTRATION_SNAPSHOT,
+      ].sort()
+    );
+  });
+
+  it.each([42, '', null, '../settings.json', 'C:\\repos\\x', { id: WORKSPACE_ID }])(
+    'snapshot 拒绝非法工作区 id %j',
+    async (raw) => {
+      expect(await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, raw)).toEqual({
+        ok: false,
+        error: '无效的工作区 id',
+      });
+    }
+  );
+
+  it('snapshot：未知工作区返回错误；已挂入的返回磁盘上的编排状态（不含 version）', async () => {
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, 'ws-unknown')).toEqual({
+      ok: false,
+      error: '工作区不存在',
+    });
+    const { version: _version, ...view } = SNAPSHOT;
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, WORKSPACE_ID)).toEqual({
+      ok: true,
+      ...view,
+    });
+  });
+
+  it.each([
+    undefined,
+    DISPATCH_ID,
+    { dispatchId: DISPATCH_ID },
+    { dispatchId: DISPATCH_ID, cursor: -1 },
+    { dispatchId: DISPATCH_ID, cursor: 1.5 },
+    { dispatchId: DISPATCH_ID, cursor: '0' },
+    { dispatchId: '../dispatch', cursor: 0 },
+    { dispatchId: 'C:\\worktrees\\x', cursor: 0 },
+  ])('read-worker-output 拒绝非法入参 %j', async (raw) => {
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT, raw)).toEqual({
+      ok: false,
+      error: '无效的 dispatch id 或 cursor',
+    });
+  });
+
+  it('read-worker-output：launcher 接线前返回错误；接上后读 dispatch 对应的 worker 会话', async () => {
+    const input = { dispatchId: DISPATCH_ID, cursor: 3 };
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT, input)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('not connected'),
+    });
+
+    const { getOrchestrationRegistry } = await import('./orchestration');
+    const launcher = createFakeLauncher();
+    launcher.readTranscript.mockResolvedValue({ ok: true, text: 'lo', total: 5, done: true });
+    getOrchestrationRegistry().setLauncher(launcher);
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT, input)).toEqual({
+      ok: true,
+      text: 'lo',
+      total: 5,
+      // 这次尝试还没结算
+      done: false,
+    });
+    expect(launcher.readTranscript).toHaveBeenCalledWith('session_w1', 3);
+    expect(
+      await invoke(IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT, {
+        dispatchId: 'dispatch_missing',
+        cursor: 0,
+      })
+    ).toEqual({ ok: false, error: 'dispatch 不存在' });
+  });
+
+  it('review-diff：校验 id；worktree 目录不在时返回 git 的错误而不是抛异常', async () => {
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_REVIEW_DIFF, 42)).toEqual({
+      ok: false,
+      error: '无效的 dispatch id',
+    });
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_REVIEW_DIFF, 'dispatch_missing')).toEqual({
+      ok: false,
+      error: 'dispatch 不存在',
+    });
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_REVIEW_DIFF, DISPATCH_ID)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('could not read the diff'),
+    });
+  });
+
+  it('编排状态变更后按 workspaceId 广播 orchestration:changed', async () => {
+    const { getOrchestrationRegistry } = await import('./orchestration');
+    await getOrchestrationRegistry().openAll();
+    mocks.send.mockClear();
+    const worker = getOrchestrationRegistry().workerHostFor('session_w1');
+    expect(await worker?.reportDone('succeeded', 'Done.')).toEqual({ ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.ORCHESTRATION_CHANGED, WORKSPACE_ID);
+    const snapshot = await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, WORKSPACE_ID);
+    expect(snapshot).toMatchObject({ ok: true, tasks: [{ status: 'in-review' }] });
+  });
+});

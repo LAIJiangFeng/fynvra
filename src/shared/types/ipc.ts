@@ -21,6 +21,16 @@ export const IPC_CHANNELS = {
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
   /** Main → Renderer：窗口最大化状态变化 */
   WINDOW_MAXIMIZED_CHANGED: 'window:maximized-changed',
+
+  // --- orchestration ---
+  /** 工作区的编排快照（Run / Task / Dispatch / Worktree / Message） */
+  ORCHESTRATION_SNAPSHOT: 'orchestration:snapshot',
+  /** 按 dispatch id 分页读 worker 输出（与 read_worker_output 同源） */
+  ORCHESTRATION_READ_WORKER_OUTPUT: 'orchestration:read-worker-output',
+  /** 按 dispatch id 取 worker 分支相对基准提交的改动 */
+  ORCHESTRATION_REVIEW_DIFF: 'orchestration:review-diff',
+  /** Main → Renderer：某工作区的编排状态已变更（参数：workspaceId） */
+  ORCHESTRATION_CHANGED: 'orchestration:changed',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

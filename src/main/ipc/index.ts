@@ -1,3 +1,4 @@
+import { registerOrchestrationHandlers } from './orchestration';
 import { registerSettingsHandlers } from './settings';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
@@ -6,5 +7,6 @@ import { registerWorkspaceHandlers } from './workspaces';
 export function registerIpcHandlers(): void {
   registerSettingsHandlers();
   registerWorkspaceHandlers();
+  registerOrchestrationHandlers();
   registerWindowHandlers();
 }
