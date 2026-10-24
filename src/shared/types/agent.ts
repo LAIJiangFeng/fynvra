@@ -1,6 +1,8 @@
 import {
+  type ApprovalMode,
   type FynvraSessionEvent,
   type FynvraSessionEventBody,
+  isApprovalMode,
   normalizeThinkingLevel,
   parseRole,
   type Role,
@@ -154,6 +156,11 @@ export type AgentCommand =
    * 下一次 prompt 起生效，pi 的会话历史保留
    */
   | { type: 'set-model'; identity: SessionIdentity; model: ResolvedModelSpec }
+  /**
+   * 换会话的审批档位：worker 调审批门的 setMode，即时生效（运行中也可以，下一次需要审批的工具调用起按新档位）。
+   * allowSession 的记忆保留，从 full 切回更严的档位时清空
+   */
+  | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
   /** 查模型的思考档位（进程级，不带 identity）；worker 回同一 requestId 的 models-described */
   | { type: 'describe-models'; requestId: string; models: ModelQuery[] }
   /** 关闭全部会话后退出进程（进程级，不带 identity） */
@@ -243,6 +250,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       const model = parseModelSpec(record.model);
       return model ? { type: 'set-model', identity, model } : null;
     }
+    case 'set-approval-mode':
+      return isApprovalMode(record.mode)
+        ? { type: 'set-approval-mode', identity, mode: record.mode }
+        : null;
     case 'prompt':
       return isNonEmptyString(record.text) ? { type: 'prompt', identity, text: record.text } : null;
     case 'steer':
