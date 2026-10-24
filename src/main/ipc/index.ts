@@ -1,6 +1,10 @@
 import { registerOrchestrationHandlers } from './orchestration';
 import { registerSessionHandlers } from './sessions';
+import { registerMcpHandlers } from './mcp';
+import { registerProviderHandlers } from './providers';
+import { registerRoleHandlers } from './roles';
 import { registerSettingsHandlers } from './settings';
+import { registerSkillHandlers } from './skills';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
 
@@ -11,4 +15,8 @@ export function registerIpcHandlers(): void {
   registerOrchestrationHandlers();
   registerWindowHandlers();
   registerSessionHandlers();
+  registerProviderHandlers();
+  registerRoleHandlers();
+  registerSkillHandlers();
+  registerMcpHandlers();
 }

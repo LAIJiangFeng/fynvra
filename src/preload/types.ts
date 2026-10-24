@@ -45,6 +45,10 @@ export interface FynvraApi {
   orchestration: OrchestrationApi;
   window: WindowApi;
   sessions: import('./domains/sessions').SessionsApi;
+  providers: import('./domains/providers').ProvidersApi;
+  roles: import('./domains/roles').RolesApi;
+  skills: import('./domains/skills').SkillsApi;
+  mcp: import('./domains/mcp').McpApi;
 }
 
 declare global {

@@ -22,23 +22,21 @@ beforeAll(async () => {
 });
 
 describe('preload bridge', () => {
-  it('只以 window.fynvra 暴露 settings / workspaces / window / sessions，不提供通用 invoke', () => {
+  it('只以 window.fynvra 按领域暴露 API，不提供通用 invoke', () => {
     expect(mocks.exposeInMainWorld).toHaveBeenCalledTimes(1);
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
+      'mcp',
       'orchestration',
+      'providers',
+      'roles',
       'sessions',
       'settings',
+      'skills',
       'window',
       'workspaces',
     ]);
-    const members = [
-      api.settings,
-      api.workspaces,
-      api.orchestration,
-      api.window,
-      api.sessions,
-    ].flatMap(Object.keys);
+    const members = Object.values(api).flatMap(Object.keys);
     expect(members).not.toContain('invoke');
     expect(members).not.toContain('send');
   });
