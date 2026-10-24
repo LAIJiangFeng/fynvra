@@ -1,13 +1,16 @@
-import { FolderGit2, GitBranch, MessagesSquare, Plus } from 'lucide-react';
+import { FolderGit2, GitBranch, Plus } from 'lucide-react';
+import { ChatPlaceholder, ChatView } from '@/components/chat/ChatView';
 import { Button } from '@/components/ui/button';
+import { selectActiveSessionId, useSessionsStore } from '@/stores/sessions';
 import { selectSelectedWorkspace, useWorkspacesStore } from '@/stores/workspaces';
 
-/** 中栏：未选工作区时给出引导；选中后展示工作区信息（会话区在 Wave 2 接入）。 */
+/** 中栏：未选工作区时给出引导；选中会话时是聊天视图，否则展示工作区信息。 */
 export function MainArea() {
   const workspace = useWorkspacesStore(selectSelectedWorkspace);
   const hasWorkspaces = useWorkspacesStore((state) => state.workspaces.length > 0);
   const adding = useWorkspacesStore((state) => state.adding);
   const add = useWorkspacesStore((state) => state.add);
+  const activeSessionId = useSessionsStore(selectActiveSessionId);
 
   if (!workspace) {
     return (
@@ -24,6 +27,8 @@ export function MainArea() {
     );
   }
 
+  if (activeSessionId) return <ChatView key={activeSessionId} sessionId={activeSessionId} />;
+
   return (
     <main className="flex min-w-0 flex-1 flex-col">
       <header className="border-b px-6 py-4">
@@ -38,10 +43,7 @@ export function MainArea() {
           </span>
         </p>
       </header>
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-        <MessagesSquare className="size-10 text-muted-foreground/60" />
-        <p className="text-muted-foreground text-sm">还没有会话</p>
-      </div>
+      <ChatPlaceholder workspaceId={workspace.id} />
     </main>
   );
 }
