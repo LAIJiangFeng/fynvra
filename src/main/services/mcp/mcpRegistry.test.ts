@@ -109,23 +109,85 @@ describe('createMcpRegistry.upsert', () => {
 });
 
 describe('createMcpRegistry.addMany / setEnabled / remove', () => {
-  it('导入按命令+参数 / URL 去重（含已登记的与批内的），同名 id 加后缀', async () => {
+  it('导入按规整后的命令+参数 / URL 去重（含已登记的与批内的）并说明与谁相同；名称被占用时加后缀', async () => {
     const registry = createMcpRegistry({ filePath });
     await registry.upsert(github);
     const result = await registry.addMany([
       {
         name: 'github',
         transport: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-github'],
+        command: 'cmd',
+        args: ['/c', 'npx', '-y', '@modelcontextprotocol/server-github'],
       },
       { name: 'github', transport: 'stdio', command: 'npx', args: ['-y', 'other-github'] },
-      { name: 'docs', transport: 'http', url: 'https://mcp.example.com/mcp/' },
+      {
+        name: 'docs',
+        transport: 'http',
+        url: 'https://mcp.example.com/mcp/',
+        headers: { Authorization: 'Bearer docs-secret' },
+      },
       { name: 'docs-again', transport: 'sse', url: 'https://mcp.example.com/mcp' },
     ]);
-    expect(result.skipped).toBe(2);
-    expect(result.added.map((server) => server.id)).toEqual(['github-2', 'docs']);
-    expect(result.added.every((server) => server.enabled)).toBe(true);
+    expect(result).toEqual([
+      { ok: false, error: '与「GitHub」的命令和参数相同' },
+      {
+        ok: true,
+        server: {
+          id: 'github-2',
+          name: 'github (2)',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', 'other-github'],
+          enabled: true,
+        },
+      },
+      {
+        ok: true,
+        server: {
+          id: 'docs',
+          name: 'docs',
+          transport: 'http',
+          url: 'https://mcp.example.com/mcp/',
+          enabled: true,
+          headers: { Authorization: 'Bearer docs-secret' },
+        },
+      },
+      { ok: false, error: '与「docs」的 URL 相同' },
+    ]);
+    expect(readDisk().servers.map((server: { id: string }) => server.id)).toEqual([
+      'github',
+      'github-2',
+      'docs',
+    ]);
+    expect(readDisk().servers[2].headers).toEqual({ Authorization: 'Bearer docs-secret' });
+  });
+
+  it('全是重复时不写盘；加后缀后名称仍不超过 80 个字符', async () => {
+    const registry = createMcpRegistry({ filePath });
+    expect(
+      await registry.addMany([
+        { name: 'a', transport: 'stdio', command: 'node' },
+        { name: 'b', transport: 'stdio', command: 'NODE' },
+      ])
+    ).toMatchObject([{ ok: true }, { ok: false, error: '与「a」的命令和参数相同' }]);
+
+    const longName = 'x'.repeat(80);
+    const [first, second] = await registry.addMany([
+      { name: longName, transport: 'stdio', command: 'one' },
+      { name: longName, transport: 'stdio', command: 'two' },
+    ]);
+    expect(first).toMatchObject({ ok: true, server: { name: longName } });
+    expect(second).toMatchObject({ ok: true, server: { name: `${'x'.repeat(76)} (2)` } });
+
+    const other = createMcpRegistry({ filePath: join(dir, 'untouched.json') });
+    await other.upsert({ ...github, env: undefined });
+    const before = readFileSync(join(dir, 'untouched.json'), 'utf8');
+    expect(
+      await other.addMany([
+        { name: 'again', transport: 'stdio', command: 'npx', args: [...(github.args ?? [])] },
+      ])
+    ).toEqual([{ ok: false, error: '与「GitHub」的命令和参数相同' }]);
+    expect(readFileSync(join(dir, 'untouched.json'), 'utf8')).toBe(before);
   });
 
   it('setEnabled / remove 按 id 操作', async () => {
@@ -172,6 +234,26 @@ describe('视图与去重键', () => {
     expect(mcpDedupeKey({ command: 'npx', args: ['a b'] })).not.toBe(
       mcpDedupeKey({ command: 'npx', args: ['a', 'b'] })
     );
+  });
+
+  it('mcpDedupeKey 规整 stdio：小写、`\\` 与 `/`、Windows 的 cmd /c 外壳、.cmd / .exe 后缀、npx 自己的 -y', () => {
+    const key = (command: string, ...args: string[]) => mcpDedupeKey({ command, args });
+    const context7 = key('npx', '-y', '@upstash/context7-mcp');
+    // Claude Code 在 Windows 上写的是 cmd /c npx …，CC Switch 存的是 npx …
+    expect(key('cmd', '/c', 'npx', '-y', '@upstash/context7-mcp')).toBe(context7);
+    expect(
+      key('C:\\Windows\\System32\\cmd.exe', '/d', '/s', '/c', 'npx', '@upstash/context7-mcp')
+    ).toBe(context7);
+    expect(key('npx.cmd', '--yes', '@Upstash/Context7-MCP')).toBe(context7);
+    expect(key('c:\\Users\\me\\bin\\server.exe', '--app', 'x')).toBe(
+      key('C:/Users/me/bin/server', '--APP', 'x')
+    );
+    // 包名之后的 -y 是服务器自己的参数
+    expect(key('npx', 'pkg', '-y')).not.toBe(key('npx', 'pkg'));
+    // 不是完整的 cmd /c <命令> 不拆
+    expect(key('cmd', '/c')).not.toBe(key('/c'));
+    expect(key('cmd', '/k', 'npx', 'pkg')).not.toBe(key('npx', 'pkg'));
+    expect(key('uvx', 'mcp-server-time')).not.toBe(key('npx', 'mcp-server-time'));
   });
 
   it('parseStoredMcpServer 宽松收窄磁盘记录', () => {

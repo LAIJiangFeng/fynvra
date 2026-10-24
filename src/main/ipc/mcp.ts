@@ -70,9 +70,12 @@ export function registerMcpHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_IMPORT_CLAUDE, async (): Promise<McpImportResult> => {
     try {
       const { servers, sources } = await importClaudeMcp({ home: homedir() });
-      const { added, skipped } = await getMcpRegistry().addMany(servers);
+      const outcomes = await getMcpRegistry().addMany(servers);
+      const added = outcomes.flatMap((outcome) =>
+        outcome.ok ? [toMcpServerView(outcome.server)] : []
+      );
       if (added.length > 0) sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
-      return { ok: true, added: added.map(toMcpServerView), skipped, sources };
+      return { ok: true, added, skipped: outcomes.length - added.length, sources };
     } catch (error) {
       return { ok: false, error: `导入失败：${errorMessage(error)}` };
     }
