@@ -26,7 +26,8 @@ const isMissing = (error: unknown) => (error as NodeJS.ErrnoException).code === 
 /** 文本文件；不存在返回 null。去掉 Windows 编辑器可能加的 UTF-8 BOM（JSON.parse 不认它）。 */
 export async function readTextIfExists(path: string): Promise<string | null> {
   try {
-    return (await readFile(path, 'utf8')).replace(/^﻿/, '');
+    const text = await readFile(path, 'utf8');
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
