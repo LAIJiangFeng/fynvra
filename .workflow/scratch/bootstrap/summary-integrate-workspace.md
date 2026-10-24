@@ -2,7 +2,7 @@
 
 分支 `LAIJiangFeng/integrate-workspace`。worktree 建在 `f5c2e91`（Initial commit）上，看不到任务书。开工前（还没有任何提交）用 `git merge --ff-only main` 把分支快进到 `main@eb9a8d4`，`main` 本身没动。
 
-相对 `eb9a8d4` 共 9 个改动提交，加上本总结共 10 个，涉及 29 个文件，全部在任务书「范围」内。每个提交都带 `Co-Authored-By: Claude Opus 5.5`。没有 BLOCKED 项。Biome 没有要求自动修复源码，所以没有 `style:` 提交。
+相对 `eb9a8d4` 有 9 个改动提交，涉及 29 个文件，全部在任务书「范围」内；另有总结文件本身的 `docs(bootstrap)` 提交。每个提交都带 `Co-Authored-By: Claude Opus 5.5`。没有 BLOCKED 项。Biome 没有要求自动修复源码，所以没有 `style:` 提交。
 
 ## 做了什么
 
