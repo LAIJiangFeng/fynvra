@@ -37,6 +37,6 @@
     }
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/coverage", "!pnpm-lock.yaml"]
+    "includes": ["**", "!**/node_modules", "!**/coverage", "!pnpm-lock.yaml", "!**/*.md"]
   }
 }
