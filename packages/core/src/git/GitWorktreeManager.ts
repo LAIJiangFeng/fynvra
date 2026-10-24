@@ -6,7 +6,9 @@ import type { Worktree } from '../types';
 export interface ExecResult {
   /** 退出码；非零照常 resolve。 */
   code: number;
+  /** 标准输出（UTF-8 原文，不 trim）。 */
   stdout: string;
+  /** 标准错误（UTF-8 原文，不 trim）。 */
   stderr: string;
 }
 
@@ -29,6 +31,7 @@ export type ExecFn = (cmd: string, args: readonly string[], cwd: string) => Prom
 
 /** {@link GitWorktreeManager} 构造参数。 */
 export interface GitWorktreeManagerOptions {
+  /** 执行 git 的函数；所有 git 调用都经过它。 */
   exec: ExecFn;
 }
 
@@ -135,6 +138,7 @@ export class GitWorktreeManager {
   readonly #exec: ExecFn;
   #pendingCreate: Promise<unknown> = Promise.resolve();
 
+  /** @param options - 注入的 {@link ExecFn}。 */
   constructor(options: GitWorktreeManagerOptions) {
     this.#exec = options.exec;
   }

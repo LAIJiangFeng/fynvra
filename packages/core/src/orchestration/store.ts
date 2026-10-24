@@ -29,6 +29,7 @@ export const ORCHESTRATION_SNAPSHOT_VERSION = 1;
 
 /** 编排状态的 JSON 快照（`userData/orchestration.json`）。 */
 export interface OrchestrationSnapshot {
+  /** 格式版本；读取时不等于 {@link ORCHESTRATION_SNAPSHOT_VERSION} 即拒绝。 */
   version: typeof ORCHESTRATION_SNAPSHOT_VERSION;
   runs: Run[];
   tasks: Task[];
@@ -47,10 +48,15 @@ export interface OrchestrationSnapshot {
  * 不校验跨表引用（如 `task.runId` 是否存在）。
  */
 export interface OrchestrationStore {
+  /** 编排（命名空间 + 收件箱）。 */
   readonly runs: EntityTable<Run>;
+  /** 任务；改 `status` 走迁移表。 */
   readonly tasks: EntityTable<Task>;
+  /** 任务尝试；同一任务最多一个未结算，结算后不可改。 */
   readonly dispatches: EntityTable<Dispatch>;
+  /** 仍登记在案（未清理）的 worktree。 */
   readonly worktrees: EntityTable<Worktree>;
+  /** 收件箱消息；通常经 `Inbox` 读写。 */
   readonly messages: EntityTable<Message>;
   /** 某次 run 的全部任务（插入顺序）。 */
   listTasks(runId: string): Task[];

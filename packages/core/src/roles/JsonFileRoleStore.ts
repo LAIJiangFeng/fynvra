@@ -44,6 +44,7 @@ export class JsonFileRoleStore implements RoleStore {
   readonly #dir: string;
   readonly #onInvalidFile: (file: string, error: string) => void;
 
+  /** @param options - 注入的文件系统、角色目录与无效文件回调。 */
   constructor(options: JsonFileRoleStoreOptions) {
     this.#fs = options.fs;
     this.#dir = options.dir;

@@ -6,11 +6,17 @@ import { type EntityTable, InMemoryOrchestrationStore } from './store';
  * 消息过滤条件；给出的条件之间是 AND。`types` 只匹配列出的类型（空数组不匹配任何消息），省略则不限。
  */
 export interface MessageFilter {
+  /** 属于该 run。 */
   runId?: string;
+  /** 关联该尝试。 */
   dispatchId?: string;
+  /** 发送方会话 id。 */
   from?: string;
+  /** 接收方会话 id（coordinator 收件箱就是 `to: coordinatorSessionId`）。 */
   to?: string;
+  /** 回复某条消息（等 `question` 的 `reply` 用）。 */
   replyTo?: string;
+  /** 消息类型白名单。 */
   types?: readonly MessageType[];
 }
 
@@ -70,6 +76,7 @@ export class Inbox {
   readonly #now: () => number;
   readonly #waiters = new Set<Waiter>();
 
+  /** @param options - 消息表与时钟，都可省略。 */
   constructor(options: InboxOptions = {}) {
     this.#messages = options.messages ?? new InMemoryOrchestrationStore().messages;
     this.#now = options.now ?? Date.now;
