@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
+import type {
+  ApprovalGateRequest,
+  ApprovalPolicyHooks,
+  OrchestrationHost,
+  WorkerHost,
+} from '@fynvra/agent-runtime';
 import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import {
@@ -49,6 +54,11 @@ export interface OpenSessionInput {
   host: OrchestrationHost | null;
   /** 仅 `spec.worker` 的会话有：ask_coordinator / report_done 经 host-invoke 转给 Main */
   workerHost: WorkerHost | null;
+  /**
+   * 审批门的通道（createRoleSession 的 `approval`）：请求经 Main 交给 Renderer 的审批条。
+   * supervisor 总会提供；缺省时需要审批的调用一律拒绝（fail-closed）。
+   */
+  approval?: ApprovalPolicyHooks;
 }
 
 export type OpenSession = (input: OpenSessionInput) => Promise<SupervisedSession>;
@@ -58,13 +68,6 @@ export interface SupervisorOptions {
   openSession: OpenSession;
   hostCalls?: HostInvokerOptions;
   approvalTimeoutMs?: number;
-}
-
-export interface ApprovalInput {
-  toolCallId: string;
-  toolName: string;
-  args: unknown;
-  reason?: string;
 }
 
 interface ManagedSession {
@@ -152,24 +155,51 @@ export class SessionSupervisor {
   }
 
   /**
-   * 审批门：发出 approval_request 并挂起，直到 Main 回 respond-approval 或超时（按 deny）。
-   * 工具调用拦截（按 role.approvalMode）尚未接线：需要 agent-runtime 开放 tool_call 扩展点。
+   * 审批门（agent-runtime 按 role.approvalMode 拦截的工具调用）的人工审批：
+   * 先发 approval-request 让 Main 记下并推审批条，再发 approval_request 会话事件进时间线，然后挂起，
+   * 直到 Main 回 respond-approval。审批门撤回（超时、回合中止）、会话中止 / 关闭 / settle 都按 deny 结束。
    */
   async requestApproval(
     identity: SessionIdentity,
-    input: ApprovalInput
+    request: ApprovalGateRequest,
+    signal?: AbortSignal
   ): Promise<ApprovalDecision> {
     const managed = this.#current(identity);
-    if (!managed?.events || managed.closed) return 'deny';
+    if (!managed?.events || managed.closed || signal?.aborted) return 'deny';
     const requestId = randomUUID();
     const decision = this.#approvals.request(
       identity.sessionId,
       requestId,
       this.#approvalTimeoutMs
     );
-    managed.events.emit({ type: 'approval_request', requestId, ...input });
+    const withdraw = () => this.#approvals.cancel(requestId);
+    signal?.addEventListener('abort', withdraw, { once: true });
+    const { toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } = request;
+    this.#post({
+      type: 'approval-request',
+      identity,
+      request: {
+        requestId,
+        toolCallId,
+        toolName,
+        kind,
+        title,
+        detail,
+        ...(protectedAction ? { protectedAction } : {}),
+        expiresAt,
+      },
+    });
+    managed.events.emit({
+      type: 'approval_request',
+      requestId,
+      toolCallId,
+      toolName,
+      args: request.args,
+      ...(protectedAction ? { reason: `protected action: ${protectedAction}` } : {}),
+    });
     this.#setStatus(managed, 'waiting-approval');
     const result = await decision;
+    signal?.removeEventListener('abort', withdraw);
     if (managed.status === 'waiting-approval' && !this.#approvals.hasPending(identity.sessionId)) {
       this.#setStatus(managed, 'running');
     }
@@ -215,6 +245,10 @@ export class SessionSupervisor {
         host:
           spec.role.tools === 'orchestrator' ? orchestrationHostProxy(call('orchestration')) : null,
         workerHost: spec.worker ? workerHostProxy(call('worker')) : null,
+        approval: {
+          request: (request, signal) => this.requestApproval(identity, request, signal),
+          timeoutMs: this.#approvalTimeoutMs,
+        },
       });
     } catch (error) {
       managed.closed = true;

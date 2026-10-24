@@ -25,7 +25,7 @@ export interface PiSessionFactoryOptions {
  * 按角色经 createRoleSession 组装工具 / 提示词 / skills / MCP，事件统一走 subscribeNormalized。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
-  return async ({ spec, host, workerHost }) => {
+  return async ({ spec, host, workerHost, approval }) => {
     const model = await options.resolveModel(spec.model);
     const sessionManager = SessionManager.open(
       spec.sessionFile,
@@ -39,6 +39,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       sessionManager,
       host,
       workerHost,
+      approval,
       resourcePaths: { skills: spec.skills, mcpServers: spec.mcpServers.map(toMcpServerConfig) },
       agentDir: options.agentDir,
       roles: spec.roles,

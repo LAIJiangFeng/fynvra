@@ -1,6 +1,12 @@
+import type {
+  ApprovalGateRequest,
+  ApprovalDecision as RuntimeApprovalDecision,
+  ApprovalKind as RuntimeApprovalKind,
+} from '@fynvra/agent-runtime';
 import type { FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
 import type { AgentWorkerEvent, SessionIdentity, SpawnSessionSpec } from '@shared/types/agent';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ApprovalDecision, ApprovalKind } from '@shared/types/chat';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   type OpenSession,
   type OpenSessionInput,
@@ -415,28 +421,74 @@ describe('SessionSupervisor hosts', () => {
 });
 
 describe('SessionSupervisor approvals', () => {
-  it('emits approval_request, waits for respond-approval and restores running', async () => {
-    const { supervisor, of } = setup();
-    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
-    supervisor.handle({ type: 'prompt', identity: id1, text: 'hi' });
+  const gateRequest = (patch: Partial<ApprovalGateRequest> = {}): ApprovalGateRequest => ({
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    kind: 'command',
+    title: 'bash',
+    detail: 'rm -rf build',
+    args: { command: 'rm -rf build' },
+    protectedAction: 'rm -rf',
+    expiresAt: 1_700_000_600_000,
+    ...patch,
+  });
+
+  /** 会话已 spawn 并在跑一轮；返回工厂交给会话的审批通道 */
+  async function running() {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    env.supervisor.handle({ type: 'prompt', identity: id1, text: 'hi' });
     await settle();
-    const decision = supervisor.requestApproval(id1, {
+    const approval = env.inputs[0]?.approval;
+    if (!approval) throw new Error('the session factory got no approval channel');
+    return { ...env, approval };
+  }
+
+  it('hands every session an approval channel with the worker timeout', async () => {
+    const { approval } = await running();
+    expect(approval.timeoutMs).toBe(1_000);
+  });
+
+  it('announces the request to Main, then emits approval_request, and waits for the answer', async () => {
+    const { supervisor, approval, posted, of } = await running();
+    const decision = approval.request(gateRequest(), new AbortController().signal);
+
+    const announced = of('approval-request');
+    expect(announced).toEqual([
+      {
+        type: 'approval-request',
+        identity: id1,
+        request: {
+          requestId: expect.any(String),
+          toolCallId: 'call-1',
+          toolName: 'bash',
+          kind: 'command',
+          title: 'bash',
+          detail: 'rm -rf build',
+          protectedAction: 'rm -rf',
+          expiresAt: 1_700_000_600_000,
+        },
+      },
+    ]);
+    const requestId = announced[0]?.request.requestId ?? '';
+    const event = of('session-event').at(-1);
+    expect(event?.event).toMatchObject({
+      type: 'approval_request',
+      requestId,
       toolCallId: 'call-1',
       toolName: 'bash',
       args: { command: 'rm -rf build' },
+      reason: 'protected action: rm -rf',
     });
-    const request = of('session-event').at(-1)?.event;
-    expect(request).toMatchObject({
-      type: 'approval_request',
-      toolName: 'bash',
-      toolCallId: 'call-1',
-    });
-    expect(of('session-status').map((event) => event.status)).toEqual([
+    // Main 先记下待审批（推审批条），时间线事件随后到达
+    expect(posted.indexOf(announced[0] as AgentWorkerEvent)).toBeLessThan(
+      posted.indexOf(event as AgentWorkerEvent)
+    );
+    expect(of('session-status').map((status) => status.status)).toEqual([
       'running',
       'waiting-approval',
     ]);
 
-    const requestId = request?.type === 'approval_request' ? request.requestId : '';
     supervisor.handle({
       type: 'respond-approval',
       identity: { ...id1, generation: 2 },
@@ -445,34 +497,82 @@ describe('SessionSupervisor approvals', () => {
     });
     supervisor.handle({ type: 'respond-approval', identity: id1, requestId, decision: 'allow' });
     await expect(decision).resolves.toBe('allow');
-    expect(of('session-status').map((event) => event.status)).toEqual([
+    expect(of('session-status').map((status) => status.status)).toEqual([
       'running',
       'waiting-approval',
       'running',
     ]);
-    expect(of('log').map((event) => event.message)).toEqual([
+    expect(of('log').map((log) => log.message)).toEqual([
       expect.stringContaining(`no pending approval ${requestId}`),
     ]);
   });
 
+  it('leaves out the reason when no protected action was hit', async () => {
+    const { approval, of } = await running();
+    void approval.request(
+      gateRequest({ protectedAction: undefined }),
+      new AbortController().signal
+    );
+    expect(of('approval-request')[0]?.request).not.toHaveProperty('protectedAction');
+    expect(of('session-event').at(-1)?.event).not.toHaveProperty('reason');
+  });
+
+  it('drops the pending request when the gate withdraws it', async () => {
+    const { supervisor, approval, of } = await running();
+    const withdraw = new AbortController();
+    const decision = approval.request(gateRequest(), withdraw.signal);
+    withdraw.abort();
+    await expect(decision).resolves.toBe('deny');
+    const requestId = of('approval-request')[0]?.request.requestId ?? '';
+    supervisor.handle({ type: 'respond-approval', identity: id1, requestId, decision: 'allow' });
+    expect(of('log').at(-1)?.message).toContain(`no pending approval ${requestId}`);
+    expect(of('session-status').at(-1)?.status).toBe('running');
+  });
+
+  it('denies without asking when the gate has already given up', async () => {
+    const { approval, of } = await running();
+    const withdraw = new AbortController();
+    withdraw.abort();
+    await expect(approval.request(gateRequest(), withdraw.signal)).resolves.toBe('deny');
+    expect(of('approval-request')).toEqual([]);
+  });
+
+  it('denies a pending request when the run is aborted', async () => {
+    const { supervisor, approval } = await running();
+    const decision = approval.request(gateRequest(), new AbortController().signal);
+    supervisor.handle({ type: 'abort', identity: id1 });
+    await expect(decision).resolves.toBe('deny');
+  });
+
+  it('denies a pending request when the session is disposed', async () => {
+    const { supervisor, approval } = await running();
+    const decision = approval.request(gateRequest(), new AbortController().signal);
+    supervisor.handle({ type: 'dispose-session', identity: id1 });
+    await expect(decision).resolves.toBe('deny');
+  });
+
+  it('denies a pending request when the turn settles', async () => {
+    const { approval, sessions } = await running();
+    const decision = approval.request(gateRequest(), new AbortController().signal);
+    sessions[0]?.emit({ type: 'agent_settled', aborted: false });
+    await expect(decision).resolves.toBe('deny');
+  });
+
   it('denies an approval that is not answered in time', async () => {
-    const { supervisor } = setup();
-    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
-    await settle();
+    const { approval } = await running();
     vi.useFakeTimers();
-    const decision = supervisor.requestApproval(id1, {
-      toolCallId: 'c',
-      toolName: 'bash',
-      args: {},
-    });
+    const decision = approval.request(gateRequest(), new AbortController().signal);
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(decision).resolves.toBe('deny');
   });
 
   it('denies requests for sessions it does not hold', async () => {
     const { supervisor } = setup();
-    await expect(
-      supervisor.requestApproval(id1, { toolCallId: 'c', toolName: 'bash', args: {} })
-    ).resolves.toBe('deny');
+    await expect(supervisor.requestApproval(id1, gateRequest())).resolves.toBe('deny');
+  });
+
+  it('uses the same approval kinds and decisions as the Renderer contract', () => {
+    expectTypeOf<RuntimeApprovalKind>().toEqualTypeOf<ApprovalKind>();
+    expectTypeOf<RuntimeApprovalDecision>().toEqualTypeOf<ApprovalDecision>();
   });
 });
