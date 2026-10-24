@@ -4,7 +4,6 @@ import type { McpImportSource, McpServerEntryView } from '@shared/types/llm';
 import { create } from 'zustand';
 import type {
   McpImportCandidatesResult,
-  McpImportResult,
   McpSaveResult,
   McpScanImportsResult,
   McpUpsertInput,
@@ -19,7 +18,6 @@ export interface McpState {
   upsert(input: McpUpsertInput): Promise<McpSaveResult>;
   remove(id: string): Promise<IpcResult>;
   toggle(id: string, enabled: boolean): Promise<McpSaveResult>;
-  importClaude(): Promise<McpImportResult>;
   /** 扫描本机各工具的 MCP 配置（只读，候选只有 env / header 的键名） */
   scanImports(sources: McpImportSource[]): Promise<McpScanImportsResult>;
   /** 导入最近一次扫描里的候选，成功后重读列表 */
@@ -64,12 +62,6 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
   async toggle(id, enabled) {
     const result = await safely(() => api.toggle({ id, enabled }));
-    if (result.ok) await get().refresh();
-    return result;
-  },
-
-  async importClaude() {
-    const result = await safely(() => api.importClaude());
     if (result.ok) await get().refresh();
     return result;
   },
