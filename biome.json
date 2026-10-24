@@ -88,6 +88,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["packages/agent-runtime/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
     }
   ]
 }

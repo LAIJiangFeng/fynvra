@@ -11,8 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "biome check --config-path=biome.json .",
-    "lint:fix": "biome check --config-path=biome.json --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "test": "vitest run"
   },
   "devDependencies": {
