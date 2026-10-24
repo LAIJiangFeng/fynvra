@@ -5,6 +5,7 @@ import type {
   ProviderApi,
   ProviderImportCandidate,
   ProviderImportSource,
+  RemoteModelEntry,
 } from '@shared/types/llm';
 
 /** `providers:upsert` 入参。apiKey 明文只在这一跳出现：缺省保留已保存的 key，`null` 清除。 */
@@ -44,6 +45,29 @@ export type ProviderImportResult = IpcResult<{
   skipped: ProviderImportSkipped[];
 }>;
 
+/**
+ * `providers:list-remote-models` 入参。已保存的服务传 providerId，key 从 providers.json 取；
+ * 还没保存的服务（或表单里改了协议 / 地址、填了新 key）传 draft，apiKey 明文只在这一跳。
+ * 两个都传时协议与地址以 draft 为准（draft 没写地址就是协议的官方地址），key 以 draft 优先、没带就用已保存的。
+ */
+export interface ListRemoteModelsInput {
+  providerId?: string;
+  draft?: {
+    api: ProviderApi;
+    /** 缺省用协议的官方地址 */
+    baseUrl?: string;
+    apiKey?: string;
+  };
+}
+export type ListRemoteModelsResult = IpcResult<{
+  /** 按 id 去重、排序 */
+  models: RemoteModelEntry[];
+  /** 返回这份列表的地址（不含 query） */
+  endpoint: string;
+  /** 可直接展示的提示：改用了另一种请求形态、跳过 / 略过的条目、列表不完整等；不含 key */
+  warnings: string[];
+}>;
+
 export interface ProvidersApi {
   /** key 已脱敏：只有 hasApiKey 与末 4 位 apiKeyHint */
   list(): Promise<ProviderListResult>;
@@ -55,6 +79,8 @@ export interface ProvidersApi {
   scanImports(input?: ProviderScanImportsInput): Promise<ProviderScanImportsResult>;
   /** 导入最近一次扫描里的候选；只传候选 id，key 由 Main 从扫描缓存取 */
   importCandidates(input: { candidateIds: string[] }): Promise<ProviderImportResult>;
+  /** 拉取服务端的模型列表，不写盘；加入哪些由界面合并进表单、随保存提交 */
+  listRemoteModels(input: ListRemoteModelsInput): Promise<ListRemoteModelsResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -76,6 +102,7 @@ export function createProvidersApi(ipc: Invoker, subscribe: Subscribe): Provider
         ? ipc.invoke(IPC_CHANNELS.PROVIDERS_SCAN_IMPORTS, input)
         : ipc.invoke(IPC_CHANNELS.PROVIDERS_SCAN_IMPORTS),
     importCandidates: (input) => ipc.invoke(IPC_CHANNELS.PROVIDERS_IMPORT, input),
+    listRemoteModels: (input) => ipc.invoke(IPC_CHANNELS.PROVIDERS_LIST_REMOTE_MODELS, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PROVIDERS_CHANGED, () => callback()),
   };
 }
