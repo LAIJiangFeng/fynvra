@@ -540,7 +540,7 @@ describe('createAgentHost crash recovery', () => {
     expect(env.processes).toHaveLength(2);
     env.worker().emit({ type: 'ready' });
     expect(
-      env.sent().map((command) => [command.type, command.type !== 'shutdown' && command.identity])
+      env.sent().map((command) => [command.type, 'identity' in command && command.identity])
     ).toEqual([
       ['spawn-session', { sessionId: running.id, generation: 2 }],
       ['spawn-session', { sessionId: idle.id, generation: 2 }],

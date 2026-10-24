@@ -86,6 +86,31 @@ describe('parseAgentCommand', () => {
     { type: 'host-result', identity, callId: '7', result: { ok: true, task: { id: 'task_1' } } },
     { type: 'host-result', identity, callId: '8', result: { ok: false, error: 'not wired' } },
     { type: 'shutdown' },
+    {
+      type: 'spawn-session',
+      identity,
+      spec: { ...spec, model: { ...spec.model, reasoning: true } },
+    },
+    { type: 'set-model', identity, model: spec.model },
+    {
+      type: 'set-model',
+      identity,
+      model: {
+        providerId: 'fynvra-1',
+        api: 'openai-completions',
+        modelId: 'qwen3',
+        reasoning: false,
+      },
+    },
+    {
+      type: 'describe-models',
+      requestId: 'describe-1',
+      models: [
+        { api: 'anthropic-messages', modelId: 'claude-opus-5-5' },
+        { api: 'openai-completions', modelId: 'qwen3-coder', reasoning: true },
+      ],
+    },
+    { type: 'describe-models', requestId: 'describe-2', models: [] },
   ];
 
   it.each(valid)('accepts a well-formed $type command', (command) => {
@@ -109,6 +134,19 @@ describe('parseAgentCommand', () => {
     expect(parsed?.type === 'spawn-session' && parsed.spec.roles).toEqual([
       { id: 'worker', name: 'Worker' },
     ]);
+    // describe-models 是进程级命令：identity 与查询项里的多余字段都丢掉
+    expect(
+      parseAgentCommand({
+        type: 'describe-models',
+        identity,
+        requestId: 'describe-1',
+        models: [{ api: 'anthropic-messages', modelId: 'claude-opus-5-5', apiKey: 'sk-x' }],
+      })
+    ).toEqual({
+      type: 'describe-models',
+      requestId: 'describe-1',
+      models: [{ api: 'anthropic-messages', modelId: 'claude-opus-5-5' }],
+    });
   });
 
   it.each([
@@ -165,6 +203,34 @@ describe('parseAgentCommand', () => {
     [
       'a failed host result without error',
       { type: 'host-result', identity, callId: '1', result: { ok: false } },
+    ],
+    ['a string reasoning flag', withModel({ reasoning: 'yes' })],
+    ['a set-model without identity', { type: 'set-model', model: spec.model }],
+    ['a set-model without model', { type: 'set-model', identity }],
+    [
+      'a set-model with an empty model id',
+      { type: 'set-model', identity, model: { ...spec.model, modelId: '' } },
+    ],
+    [
+      'a set-model with an unknown thinking level',
+      { type: 'set-model', identity, model: { ...spec.model, thinking: 'max' } },
+    ],
+    ['a describe-models without request id', { type: 'describe-models', models: [] }],
+    [
+      'a describe-models whose models are not a list',
+      { type: 'describe-models', requestId: 'd', models: { api: 'a', modelId: 'm' } },
+    ],
+    [
+      'a describe-models query without model id',
+      { type: 'describe-models', requestId: 'd', models: [{ api: 'anthropic-messages' }] },
+    ],
+    [
+      'a describe-models query with a numeric reasoning flag',
+      {
+        type: 'describe-models',
+        requestId: 'd',
+        models: [{ api: 'a', modelId: 'm', reasoning: 1 }],
+      },
     ],
   ])('rejects %s', (_label, raw) => {
     expect(parseAgentCommand(raw)).toBeNull();
@@ -261,6 +327,22 @@ describe('parseAgentWorkerEvent', () => {
       identity,
       request: { ...approvalRequest, protectedAction: 'git push', detail: '' },
     },
+    {
+      type: 'models-described',
+      requestId: 'describe-1',
+      result: {
+        ok: true,
+        models: [
+          { thinkingLevels: ['low', 'medium', 'high', 'xhigh'], defaultThinking: 'medium' },
+          { thinkingLevels: [] },
+        ],
+      },
+    },
+    {
+      type: 'models-described',
+      requestId: 'describe-2',
+      result: { ok: false, error: 'the model catalog is not ready' },
+    },
   ];
 
   it.each(valid)('accepts a well-formed $type event', (event) => {
@@ -299,6 +381,26 @@ describe('parseAgentWorkerEvent', () => {
     identity,
     seq,
     event: { seq: 1, ...event },
+  });
+  const described = (result: Record<string, unknown>, requestId = 'describe-1') => ({
+    type: 'models-described',
+    requestId,
+    result,
+  });
+
+  it('drops unknown fields of a models-described answer', () => {
+    expect(
+      parseAgentWorkerEvent({
+        ...described({
+          ok: true,
+          models: [{ thinkingLevels: ['high'], defaultThinking: 'high', provider: 'openai' }],
+          extra: 1,
+        }),
+        identity,
+      })
+    ).toEqual(
+      described({ ok: true, models: [{ thinkingLevels: ['high'], defaultThinking: 'high' }] })
+    );
   });
 
   it.each([
@@ -396,6 +498,27 @@ describe('parseAgentWorkerEvent', () => {
       { type: 'approval-request', request: approvalRequest },
     ],
     ['an approval request without request', { type: 'approval-request', identity }],
+    ['a models-described without request id', described({ ok: true, models: [] }, '')],
+    ['a models-described without result', { type: 'models-described', requestId: 'd' }],
+    ['a models-described result with a string ok', described({ ok: 'true', models: [] })],
+    ['a successful models-described without models', described({ ok: true })],
+    ['a failed models-described without error', described({ ok: false })],
+    [
+      'a capability whose levels are not a list',
+      described({ ok: true, models: [{ thinkingLevels: 'low' }] }),
+    ],
+    [
+      'a capability with a level fynvra does not know',
+      described({ ok: true, models: [{ thinkingLevels: ['high', 'max'] }] }),
+    ],
+    [
+      'a capability that repeats a level',
+      described({ ok: true, models: [{ thinkingLevels: ['low', 'low'] }] }),
+    ],
+    [
+      'a default level the model does not offer',
+      described({ ok: true, models: [{ thinkingLevels: ['low'], defaultThinking: 'medium' }] }),
+    ],
     ...(
       [
         ['an empty request id', { requestId: '' }],
