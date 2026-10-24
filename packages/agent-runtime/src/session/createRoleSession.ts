@@ -31,7 +31,10 @@ export interface ResolvedModel {
   /** pi 的模型 / 凭据运行时；同一 worker 进程内的会话可共享 */
   runtime: ModelRuntime;
   model: Model<Api>;
-  /** 思考档位；缺省用 role.model?.thinking，再缺省由 pi 决定（medium，按模型能力 clamp） */
+  /**
+   * 思考档位（含 pi 的 max）；缺省用 role.model?.thinking，再缺省由 pi 决定（medium，按模型能力 clamp）。
+   * 原样交给 pi，不在这里过滤：模型没有的档位由 pi 就近 clamp，按模型落定档位是调用方的事。
+   */
   thinking?: ThinkingLevel;
 }
 

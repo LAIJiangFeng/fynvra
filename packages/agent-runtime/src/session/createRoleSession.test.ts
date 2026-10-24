@@ -182,6 +182,42 @@ describe('createRoleSession tool policies', () => {
     });
     expect(session.thinkingLevel).toBe('high');
   });
+
+  describe("pi's max level", () => {
+    // 像 claude-fable-5-1 / gpt-6-sol 那样显式映射了 xhigh 与 max 的推理模型
+    const withMax = () => ({
+      ...faux.getModel(),
+      thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+    });
+
+    it('passes max through to pi when the model offers it', async () => {
+      const { session } = await open({
+        role: role({}),
+        model: { runtime, model: withMax(), thinking: 'max' },
+      });
+      expect(session.thinkingLevel).toBe('max');
+      expect(session.getAvailableThinkingLevels()).toContain('max');
+    });
+
+    it("passes the role's max through when the session has no level of its own", async () => {
+      const { session } = await open({
+        role: role({
+          model: { providerId: 'fynvra-faux', modelId: 'faux-reasoner', thinking: 'max' },
+        }),
+        model: { runtime, model: withMax() },
+      });
+      expect(session.thinkingLevel).toBe('max');
+    });
+
+    it('does not filter levels itself: pi clamps max on a model without it', async () => {
+      // 落定档位是 worker（models.ts 的 pickThinkingLevel）的事；这里原样交给 pi，pi 就近取到 high
+      const { session } = await open({
+        role: role({}),
+        model: { runtime, model: faux.getModel(), thinking: 'max' },
+      });
+      expect(session.thinkingLevel).toBe('high');
+    });
+  });
 });
 
 describe('createRoleSession end to end with a scripted model', () => {
