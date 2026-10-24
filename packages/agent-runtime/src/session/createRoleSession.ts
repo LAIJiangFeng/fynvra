@@ -10,7 +10,7 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import type { Role, ThinkingLevel } from '../coreTypes';
+import type { Role, ThinkingLevel } from '@fynvra/core';
 import type { ExecFn } from '../exec';
 import type { OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';

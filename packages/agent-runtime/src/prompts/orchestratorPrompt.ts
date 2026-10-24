@@ -1,4 +1,4 @@
-import type { Role } from '../coreTypes';
+import type { Role } from '@fynvra/core';
 
 /**
  * `tools: 'orchestrator'` 角色的系统提示词追加段：工作循环（ARCHITECTURE §6）、不自己改代码、

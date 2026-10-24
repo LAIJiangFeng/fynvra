@@ -104,14 +104,43 @@ export interface Message {
 
 ## 5. Agent 运行时（`packages/agent-runtime`，`@fynvra/agent-runtime`）
 
-- `createRoleSession(opts: { role: Role; cwd: string; model: ResolvedModel; sessionManager; host: OrchestrationHost | null; resourcePaths: { skills: string[]; mcpServers: McpServerConfig[] } })` → 根据角色创建 pi `AgentSession`：
+- `createRoleSession(opts: CreateRoleSessionOptions): Promise<RoleSession>` → 根据角色创建 pi `AgentSession`：
+
+  ```ts
+  interface CreateRoleSessionOptions {
+    role: Role;
+    cwd: string;                        // orchestrator 为工作区仓库，worker 为它的 worktree
+    model: ResolvedModel;
+    sessionManager: SessionManager;
+    host: OrchestrationHost | null;     // tools: 'orchestrator' 必须提供，其他策略传 null
+    resourcePaths: { skills: string[]; mcpServers: McpServerConfig[] };
+    agentDir: string;                   // 必填：pi 的 agentDir，Fynvra 用 userData/agent（与用户的 ~/.pi 隔离）
+    workerHost?: WorkerHost | null;     // 提供即为 worker 会话
+    workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
+    roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
+    settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
+    exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
+    onExtensionError?: (error: ExtensionError) => void;
+  }
+  interface RoleSession {
+    session: AgentSession;
+    warnings: string[];                 // skill 路径缺失、MCP 服务器名非法等配置问题，供 Main 展示
+    dispose(): Promise<void>;           // 先发 session_shutdown（关闭 MCP 连接）再释放；可重复调用
+  }
+  // Main 按 role.model 解析；thinking 缺省取 role.model?.thinking
+  interface ResolvedModel { runtime: ModelRuntime; model: Model<Api>; thinking?: ThinkingLevel }
+  // pi 的 McpServerConfig 不带名字；未声明 exposure 时默认 'direct'（pi 默认的 'codemode' 需要额外扩展）
+  type McpServerConfig = PiMcpServerConfig & { name: string };
+  ```
+
   - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具；
-  - `tools: 'readonly'` → 只读 pi 工具；`'all'` → pi 默认工具 + worker 工具。
+  - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
+  - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现），与 EnsoCode `AgentControlInvoker` 同构。`OrchestrationHost` 的方法名与上述工具一一对应。
-- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（只能调用一次，再次调用返回错误）。
+- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（每轮只能成功调用一次，同一轮再次调用返回错误；新的 agent run 开始时重新开放，因此 Main 要把 `reject_work` 的 feedback 作为新 prompt 发给 worker，worker 才能再次汇报）。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）

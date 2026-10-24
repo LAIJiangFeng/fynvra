@@ -8,15 +8,16 @@
   "main": "./out/main/index.js",
   "packageManager": "pnpm@10.26.2",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "pnpm typecheck:node && pnpm typecheck:web",
+    "typecheck": "pnpm typecheck:node && pnpm typecheck:web && pnpm typecheck:packages",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck:packages": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/agent-runtime",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

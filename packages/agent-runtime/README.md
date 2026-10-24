@@ -14,7 +14,8 @@
 | `src/events/normalize.ts` | pi 会话事件 → `FynvraSessionEvent`（带 `seq`） |
 | `src/host.ts` | `OrchestrationHost` / `WorkerHost` 契约 |
 | `src/pi/` | pi 适配层（升级复检点，见文末） |
-| `src/coreTypes.ts` | §4 类型的临时副本，Task 02 合并后改为从 `@fynvra/core` 导入 |
+
+§4 领域类型（`Role`、`Task`、`Dispatch`、`Message` 等）以 `import type` 方式从 `@fynvra/core` 引入，本包不再保存副本。
 
 ## 工具策略
 
@@ -176,9 +177,17 @@ await dispose();                          // 先发 session_shutdown（关闭 MC
 
 ## 开发
 
+本包是根 pnpm workspace 的成员：只声明 pi 三件套（钉 1.4.0）和 `@fynvra/core`（`workspace:*`），依赖装在根锁文件里；
+TypeScript / Biome / Vitest 由根 `package.json` 提供，`tsconfig.json` 继承根配置（只多了 `include: ["src"]`），
+lint 和测试直接使用根目录的 `biome.json` 与 `vitest.config.ts`。
+
 ```bash
-cd packages/agent-runtime
-pnpm install && pnpm typecheck && pnpm lint && pnpm test
+# 仓库根目录：安装依赖，并检查全部代码（包括本包）
+pnpm install
+pnpm typecheck && pnpm lint && pnpm test
+
+# 只检查本包
+pnpm -F @fynvra/agent-runtime typecheck   # 也可以换成 lint / test
 ```
 
 测试不联网、不需要 API key：`createRoleSession` 用 `SessionManager.inMemory()` 加 pi-ai 的 faux provider 跑真实会话，

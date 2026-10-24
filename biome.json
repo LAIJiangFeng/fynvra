@@ -25,7 +25,7 @@
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100,
-    "lineEnding": "auto"
+    "lineEnding": "lf"
   },
   "javascript": {
     "formatter": {
@@ -85,6 +85,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/agent-runtime/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
           }
         }
       }

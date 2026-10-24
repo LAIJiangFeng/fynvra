@@ -1,6 +1,6 @@
 import { type Static, StringEnum, type TSchema, Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { Dispatch, Message, Role, Task } from '../coreTypes';
+import type { Dispatch, Message, Role, Task } from '@fynvra/core';
 import type {
   DispatchRef,
   DispatchTaskInput,

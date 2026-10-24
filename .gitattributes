@@ -1,0 +1,15 @@
+# 仓库与工作区统一 LF：不受各机器 core.autocrlf 影响（Windows 默认 true 会检出 CRLF），
+# 与 biome.json 的 formatter.lineEnding: "lf" 配套，两处必须一起改。
+* text=auto eol=lf
+
+# 二进制资源：不做行尾转换与文本 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
