@@ -39,6 +39,8 @@ export interface RoleSource {
 export interface RoleResources {
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
+  warnings: string[];
 }
 
 export interface AgentHostDeps {
@@ -51,7 +53,7 @@ export interface AgentHostDeps {
   models: ModelResolver;
   /** Main → Renderer 推送（生产为 sendToAllWindows） */
   broadcast(channel: string, ...args: unknown[]): void;
-  /** role.skillIds / mcpServerIds → 路径与服务器配置；settings-ui 的注册表接入前默认都为空 */
+  /** role.skillIds / mcpServerIds → 路径与服务器配置（生产为 createRoleResourceResolver）；缺省都为空 */
   resolveResources?(role: Role): Promise<RoleResources>;
   workerOptions?: Pick<
     WorkerClientOptions,
@@ -137,7 +139,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const newId = deps.newId ?? randomUUID;
   const log = deps.log ?? defaultLog;
   const resolveResources =
-    deps.resolveResources ?? (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [] }));
+    deps.resolveResources ??
+    (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
   let orchestrationHostFor: (
@@ -236,6 +239,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const resolved = await deps.models.resolve(stored.model ?? modelRefOf(role));
       if (!resolved.ok) return resolved;
       const resources = await resolveResources(role);
+      for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       return {
         ok: true,

@@ -186,6 +186,33 @@ describe('createAgentHost sessions', () => {
     expect(env.host.list('ws-1')[0]?.title).toBe('Fix the flaky build');
   });
 
+  it('spawns with the skills and MCP servers resolved for the role and logs their warnings', async () => {
+    const logs: string[] = [];
+    const resolveResources = vi.fn(async () => ({
+      skills: ['/skills/pdf'],
+      mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
+      warnings: ['skill "gone" of role "tester" is no longer registered; skipped'],
+    }));
+    const env = setup({
+      resolveResources,
+      log: (level, message) => logs.push(`${level}: ${message}`),
+    });
+    const session = await createSession(env, 'tester');
+    await env.host.prompt(session.id, 'go');
+
+    expect(resolveResources).toHaveBeenCalledWith(tester);
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec).toMatchObject({
+      skills: ['/skills/pdf'],
+      mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
+    });
+    expect(logs).toContain(
+      `warn: session ${session.id}: skill "gone" of role "tester" is no longer registered; skipped`
+    );
+    // MCP env 明文只走 Main → worker 这一跳
+    expect(JSON.stringify(env.broadcasts)).not.toContain('ghp_secret');
+  });
+
   it('gives orchestrator sessions the role list for dispatch_task', async () => {
     const env = setup();
     const session = await createSession(env, 'orchestrator');
