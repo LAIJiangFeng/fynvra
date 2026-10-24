@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProviderUpsertInput } from '../../../preload/domains/providers';
 import {
+  apiKeyHint,
   createProviderStore,
   parseStoredProvider,
+  providerFingerprint,
   type StoredProvider,
   toProviderView,
 } from './providerStore';
@@ -92,6 +94,100 @@ describe('createProviderStore', () => {
     expect(await store.remove('ghost')).toBe(false);
     expect(await store.remove('anthropic')).toBe(true);
     expect(readDisk().providers).toEqual([]);
+  });
+});
+
+describe('addMany（从本机导入）', () => {
+  const relay: ProviderUpsertInput = {
+    name: 'Claude Code',
+    api: 'anthropic-messages',
+    baseUrl: 'https://relay.example.com',
+    enabled: true,
+    models: [],
+    apiKey: 'sk-relay-key-5678',
+  };
+
+  it('一次写入多条；名称重复时加「 (2)」后缀，id 按新名称生成', async () => {
+    const store = createProviderStore({ filePath });
+    await store.upsert({ ...anthropic, name: 'Claude Code' });
+    const outcomes = await store.addMany([
+      relay,
+      { ...relay, name: 'claude code', apiKey: 'sk-other-key-0000' },
+      { ...relay, name: 'Codex', api: 'openai-responses', apiKey: 'sk-codex-key-1111' },
+    ]);
+    expect(outcomes).toEqual([
+      {
+        ok: true,
+        provider: expect.objectContaining({ id: 'claude-code-2', name: 'Claude Code (2)' }),
+      },
+      {
+        ok: true,
+        provider: expect.objectContaining({ id: 'claude-code-3', name: 'claude code (3)' }),
+      },
+      { ok: true, provider: expect.objectContaining({ id: 'codex', name: 'Codex' }) },
+    ]);
+    expect(readDisk().providers.map((provider: StoredProvider) => provider.apiKey)).toEqual([
+      'sk-ant-secret-1234',
+      'sk-relay-key-5678',
+      'sk-other-key-0000',
+      'sk-codex-key-1111',
+    ]);
+  });
+
+  it('与已有服务或本批更早的条目地址和 key 都相同的不写入，并说明与谁重复', async () => {
+    const store = createProviderStore({ filePath });
+    await store.upsert({ ...relay, name: '公司中转', baseUrl: 'https://relay.example.com/' });
+    const outcomes = await store.addMany([
+      relay,
+      { ...relay, name: 'Other', apiKey: 'sk-other-key-0000' },
+      { ...relay, name: 'Again', apiKey: 'sk-other-key-0000' },
+    ]);
+    expect(outcomes).toEqual([
+      { ok: false, error: '与「公司中转」的地址和 API Key 都相同' },
+      { ok: true, provider: expect.objectContaining({ name: 'Other' }) },
+      { ok: false, error: '与「Other」的地址和 API Key 都相同' },
+    ]);
+    expect(readDisk().providers).toHaveLength(2);
+  });
+
+  it('全部重复时不写盘', async () => {
+    const store = createProviderStore({ filePath });
+    await store.upsert(relay);
+    const before = readFileSync(filePath, 'utf8');
+    expect(await store.addMany([relay])).toMatchObject([{ ok: false }]);
+    expect(readFileSync(filePath, 'utf8')).toBe(before);
+  });
+
+  it('名称加后缀后仍不超过 80 个字符', async () => {
+    const store = createProviderStore({ filePath });
+    const long = 'x'.repeat(80);
+    await store.upsert({ ...relay, name: long, apiKey: 'sk-first-key-0001' });
+    const [outcome] = await store.addMany([{ ...relay, name: long }]);
+    expect(outcome).toMatchObject({ ok: true, provider: { name: `${'x'.repeat(76)} (2)` } });
+  });
+});
+
+describe('providerFingerprint', () => {
+  it('按实际请求地址比较：末尾 `/`、留空与官方地址相同；key 不同就不同', () => {
+    const key = 'sk-ant-secret-1234';
+    const base = providerFingerprint({ api: 'anthropic-messages', apiKey: key });
+    expect(
+      providerFingerprint({
+        api: 'anthropic-messages',
+        baseUrl: 'https://api.anthropic.com/',
+        apiKey: key,
+      })
+    ).toBe(base);
+    expect(providerFingerprint({ api: 'anthropic-messages', apiKey: `${key}x` })).not.toBe(base);
+    expect(providerFingerprint({ api: 'anthropic-messages' })).not.toBe(base);
+  });
+});
+
+describe('apiKeyHint', () => {
+  it('末 4 位；没有 key 或 key 不到 8 位不给', () => {
+    expect(apiKeyHint('sk-ant-secret-1234')).toBe('1234');
+    expect(apiKeyHint('abc123')).toBeUndefined();
+    expect(apiKeyHint(undefined)).toBeUndefined();
   });
 });
 
