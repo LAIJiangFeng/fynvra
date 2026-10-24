@@ -9,8 +9,11 @@ export type ApprovalMode = 'supervised' | 'auto-edits' | 'full';
 /** 会话可用工具集：`all` pi 默认工具 + worker 工具；`readonly` 只读工具；`orchestrator` 只读 + 编排工具。 */
 export type ToolPolicy = 'all' | 'readonly' | 'orchestrator';
 
-/** 模型思考档位。 */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+/**
+ * 模型思考档位，由低到高；与 pi 的档位同一组（含 `max`）。每个模型实际可选哪些由 pi 的模型目录决定。
+ * OpenAI 把「关闭」叫 `none`：外部输入经 `normalizeThinkingLevel` 归一为 `off`。
+ */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** 角色 = 系统提示词 + 技能 + MCP + 模型 / 思考档位 + 工具策略 + 审批档位，每个 agent 会话挂一个。 */
 export interface Role {

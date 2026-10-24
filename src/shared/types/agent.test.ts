@@ -213,7 +213,7 @@ describe('parseAgentCommand', () => {
     ],
     [
       'a set-model with an unknown thinking level',
-      { type: 'set-model', identity, model: { ...spec.model, thinking: 'max' } },
+      { type: 'set-model', identity, model: { ...spec.model, thinking: 'ultra' } },
     ],
     ['a describe-models without request id', { type: 'describe-models', models: [] }],
     [
@@ -509,7 +509,7 @@ describe('parseAgentWorkerEvent', () => {
     ],
     [
       'a capability with a level fynvra does not know',
-      described({ ok: true, models: [{ thinkingLevels: ['high', 'max'] }] }),
+      described({ ok: true, models: [{ thinkingLevels: ['high', 'ultra'] }] }),
     ],
     [
       'a capability that repeats a level',

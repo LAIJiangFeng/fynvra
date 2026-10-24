@@ -154,9 +154,9 @@ describe('createModelRegistry thinking levels', () => {
 
   it('gives each catalog model exactly the levels pi offers for it (no uniform six levels)', () => {
     const anthropic = (modelId: string) => levelsOf({ api: 'anthropic-messages', modelId });
-    // pi 1.4.0 目录：opus / sonnet 5.5 的 off、minimal 映射为 null，haiku 5.5 只有 minimal 为 null
+    // pi 1.4.0 目录：opus / sonnet 5.5 的 off、minimal 映射为 null，haiku 5.5 只有 minimal 为 null；都有 max
     expect(anthropic('claude-opus-5-5')).toEqual({
-      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultThinking: 'medium',
     });
     expect(anthropic('claude-sonnet-5-5').thinkingLevels).toEqual([
@@ -164,6 +164,7 @@ describe('createModelRegistry thinking levels', () => {
       'medium',
       'high',
       'xhigh',
+      'max',
     ]);
     expect(anthropic('claude-haiku-5-5').thinkingLevels).toEqual([
       'off',
@@ -171,6 +172,7 @@ describe('createModelRegistry thinking levels', () => {
       'medium',
       'high',
       'xhigh',
+      'max',
     ]);
     expect(anthropic('claude-fable-5-1').thinkingLevels).toEqual([
       'minimal',
@@ -178,8 +180,9 @@ describe('createModelRegistry thinking levels', () => {
       'medium',
       'high',
       'xhigh',
+      'max',
     ]);
-    // 没有 xhigh 映射的老模型：pi 只在显式映射时提供 xhigh
+    // 没有 xhigh / max 映射的老模型：pi 只在显式映射时提供这两档
     expect(anthropic('claude-opus-4-5').thinkingLevels).toEqual([
       'off',
       'minimal',
@@ -201,9 +204,9 @@ describe('createModelRegistry thinking levels', () => {
     const openai = (modelId: string) => levelsOf({ api: 'openai-responses', modelId });
     // cloudflare-ai-gateway 排在 openai 前面，它的 gpt-5.5 没有 off；官方 openai 的 off 映射为 "none"
     expect(openai('gpt-5.5').thinkingLevels).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
-    // pi 另有 max 档位，fynvra 的 ThinkingLevel 没有它
+    // gpt-5.5 的 max 映射为 null；gpt-6.1-sol 显式映射了 max
     expect(openai('gpt-6.1-sol')).toEqual({
-      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultThinking: 'medium',
     });
   });
@@ -231,7 +234,7 @@ describe('createModelRegistry thinking levels', () => {
     expect(
       levelsOf({ api: 'anthropic-messages', modelId: 'claude-opus-5-5', reasoning: false })
         .thinkingLevels
-    ).toEqual(['low', 'medium', 'high', 'xhigh']);
+    ).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('registers the same template it describes, so the levels shown are the levels pi accepts', async () => {
@@ -251,9 +254,7 @@ describe('createModelRegistry thinking levels', () => {
         baseUrl: 'http://127.0.0.1:9/v1',
         apiKey: 'k',
       });
-      const accepted = model.reasoning
-        ? getSupportedThinkingLevels(model).filter((level) => level !== 'max')
-        : [];
+      const accepted = model.reasoning ? getSupportedThinkingLevels(model) : [];
       expect(registry.describe(query).thinkingLevels).toEqual(accepted);
     }
     // 官方 openai 条目的上下文是 272k（网关条目写的是 1M），与设置页模板一致

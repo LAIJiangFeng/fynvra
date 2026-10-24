@@ -102,7 +102,7 @@ describe('parseSessionsFile', () => {
     };
     const unknownLevel = {
       ...session({ id: 'unknown-level' }),
-      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'max' },
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'ultra' },
     };
     const parsed = parseSessionsFile({ sessions: [thinking, extraModelField, unknownLevel] });
     const bare = { providerId: 'openai', modelId: 'gpt-5.5' };

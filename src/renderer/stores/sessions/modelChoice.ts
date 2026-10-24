@@ -16,6 +16,7 @@ export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   medium: '中',
   high: '高',
   xhigh: '最高',
+  max: '最大',
 };
 
 type ModelRef = Pick<SessionModelRef, 'providerId' | 'modelId'>;
