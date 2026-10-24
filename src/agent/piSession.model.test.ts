@@ -23,7 +23,11 @@ describe('createPiSessionFactory switching the model of a live pi session', () =
     await mkdir(join(tmp, 'repo'), { recursive: true });
     faux = fauxProvider({
       provider: 'fynvra-faux',
-      models: [{ id: 'faux-a' }, { id: 'faux-b', reasoning: true }],
+      models: [
+        { id: 'faux-a' },
+        { id: 'faux-b', reasoning: true },
+        { id: 'faux-max', reasoning: true },
+      ],
     });
     runtime = await ModelRuntime.create({
       authPath: join(tmp, 'auth.json'),
@@ -118,5 +122,71 @@ describe('createPiSessionFactory switching the model of a live pi session', () =
     expect(
       entries.filter((entry) => entry.type === 'thinking_level_change').at(-1)?.thinkingLevel
     ).toBe('high');
+  });
+
+  it("switches to pi's max level and pi sends and records max", async () => {
+    const sessionFile = join(tmp, 'agent', 'sessions', 's2.jsonl');
+    // 像 claude-fable-5-1 / gpt-6-sol 那样显式映射了 max 的推理模型（models.ts 照搬目录里的映射）
+    const modelOf = (modelId: string) => {
+      const model = faux.getModel(modelId) as Model<string>;
+      return modelId === 'faux-max' ? { ...model, thinkingLevelMap: { max: 'max' } } : model;
+    };
+    const open = createPiSessionFactory({
+      agentDir: join(tmp, 'agent'),
+      resolveModel: async (spec) => ({
+        runtime,
+        model: modelOf(spec.modelId),
+        ...(spec.thinking ? { thinking: spec.thinking } : {}),
+      }),
+    });
+    const session = await open({
+      identity: { sessionId: 's2', generation: 1 },
+      spec: {
+        role: {
+          id: 'worker',
+          name: 'Worker',
+          skillIds: [],
+          mcpServerIds: [],
+          tools: 'readonly',
+          approvalMode: 'full',
+        },
+        cwd: join(tmp, 'repo'),
+        sessionFile,
+        model: { providerId: 'fynvra-faux', api: faux.api, modelId: 'faux-b', thinking: 'high' },
+        skills: [],
+        mcpServers: [],
+        worker: false,
+        roles: [],
+      },
+      host: null,
+      workerHost: null,
+    });
+    const reasoning: (string | undefined)[] = [];
+    faux.setResponses([
+      (_context, options) => {
+        reasoning.push(options?.reasoning);
+        return fauxAssistantMessage('at max');
+      },
+    ]);
+    try {
+      await session.setModel({
+        providerId: 'fynvra-faux',
+        api: faux.api,
+        modelId: 'faux-max',
+        thinking: 'max',
+      });
+      await session.prompt('think hard');
+    } finally {
+      await session.dispose();
+    }
+
+    expect(reasoning).toEqual(['max']);
+    const levels = (await readFile(sessionFile, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; thinkingLevel?: string })
+      .filter((entry) => entry.type === 'thinking_level_change')
+      .map((entry) => entry.thinkingLevel);
+    expect(levels.at(-1)).toBe('max');
   });
 });

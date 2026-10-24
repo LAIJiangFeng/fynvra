@@ -69,7 +69,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       },
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
-        // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（不支持推理时没有）
+        // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
         options.onModelSelected?.(identity.sessionId, resolved);
