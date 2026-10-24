@@ -7,6 +7,7 @@ import {
   THINKING_LEVEL_HINTS,
   THINKING_LEVEL_LABELS,
 } from '@shared/types/chat';
+import type { ProviderApi } from '@shared/types/llm';
 
 // 新建会话弹层与模型选择器的选择逻辑（纯函数；不碰 store 与 DOM，便于在 node 环境测试）
 
@@ -126,4 +127,24 @@ export function modelLabel(
     model: found?.model.name ?? ref.modelId,
     ...(thinking ? { thinking } : {}),
   };
+}
+
+/**
+ * 拉取面板里一个远程模型的档位（只有 sessions:model-options 已经描述过的才有）：本服务存过的就用它；
+ * 别的同协议服务存过、而且是按目录或按目录推断来的也能借——这两种与设置里的推理标记无关。
+ * 按协议兜底的（fallback）取决于那个服务的推理标记，不借；表单里改了协议时，本服务存的条目也不算。
+ */
+export function describedThinking(
+  providers: readonly ModelProviderOption[],
+  { api, modelId, providerId }: { api: ProviderApi; modelId: string; providerId?: string }
+): ModelOption | undefined {
+  const own = providers.find((provider) => provider.providerId === providerId);
+  const saved = own?.api === api ? own.models.find((model) => model.id === modelId) : undefined;
+  if (saved) return saved;
+  for (const provider of providers) {
+    if (provider.api !== api) continue;
+    const model = provider.models.find((candidate) => candidate.id === modelId);
+    if (model?.source && model.source !== 'fallback') return model;
+  }
+  return undefined;
 }

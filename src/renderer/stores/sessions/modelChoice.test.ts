@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chooseModel,
   defaultModelChoice,
+  describedThinking,
   effectiveThinking,
   filterModelOptions,
   findModel,
@@ -215,5 +216,36 @@ describe('modelLabel / modelKey', () => {
 
   it('keys a model by service and model id', () => {
     expect(modelKey({ providerId: 'local', modelId: 'qwen3:32b' })).toBe('local:qwen3:32b');
+  });
+});
+
+describe('describedThinking', () => {
+  const options = [anthropic, codex, local];
+  const described = (api: ModelProviderOption['api'], modelId: string, providerId?: string) =>
+    describedThinking(options, { api, modelId, ...(providerId ? { providerId } : {}) });
+
+  it("uses the service's own saved entry, whatever its source", () => {
+    expect(described('openai-responses', 'my-reasoner', 'codex')?.source).toBe('fallback');
+  });
+
+  it('borrows catalog and inferred levels from another service of the same api', () => {
+    expect(described('openai-responses', 'gpt-5.6', 'new')?.source).toBe('inferred:gpt-5.6-terra');
+    expect(described('anthropic-messages', 'claude-opus-5-5')?.thinkingLevels).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ]);
+  });
+
+  it('does not borrow fallback levels, levels of another api or levels without a source', () => {
+    // 兜底的档位取决于那个服务里的推理标记
+    expect(described('openai-responses', 'my-reasoner')).toBeUndefined();
+    expect(described('openai-completions', 'gpt-5.5')).toBeUndefined();
+    // 表单里改了协议：已保存的条目是按旧协议算的
+    expect(described('openai-completions', 'gpt-5.5', 'codex')).toBeUndefined();
+    expect(described('openai-completions', 'plain-chat')).toBeUndefined();
+    expect(described('openai-responses', 'unknown')).toBeUndefined();
   });
 });

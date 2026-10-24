@@ -1,3 +1,4 @@
+import { type ModelOption, thinkingSourceNote } from '@shared/types/chat';
 import type { ModelEntry, RemoteModelEntry } from '@shared/types/llm';
 import { Loader2, RefreshCw, Search, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
@@ -7,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
+import { describedThinking } from '@/stores/sessions/modelChoice';
 import { InlineMessage } from './common';
 import {
   filterRemoteModels,
@@ -31,6 +33,8 @@ type Notice = { tone: 'success' | 'muted' | 'error'; text: string };
 /**
  * 服务弹窗里的「拉取模型列表」面板。挂载时按 request 请求一次；「重新拉取 / 重试」交给父组件按表单当前的
  * 协议、地址与 key 重新算 request、换 key 重新挂载。勾选的模型经 onAdd 合并进表单，随「保存」提交。
+ * 「推理」徽标先看 sessions:model-options（worker 按 pi 目录与推断给的档位，弹窗挂载时已读）里描述过的，
+ * 没描述过的模型（还没存进任何可用服务）才退回 Main 按设置页内置目录给的 reasoning。
  */
 export function RemoteModelsPicker({
   request,
@@ -47,6 +51,8 @@ export function RemoteModelsPicker({
   onClose: () => void;
 }) {
   const listRemoteModels = useProvidersStore((state) => state.listRemoteModels);
+  const savedProviders = useProvidersStore((state) => state.providers);
+  const described = useProvidersStore((state) => state.modelOptions?.options ?? null);
   const [load, setLoad] = useState<LoadState>(() =>
     request.ok ? { phase: 'loading' } : { phase: 'failed', error: request.error }
   );
@@ -85,6 +91,15 @@ export function RemoteModelsPicker({
   const picked = pickedModels(models, selected);
   const visibleNew = visible.filter((model) => !model.alreadyAdded);
   const addedCount = models.filter((model) => model.alreadyAdded).length;
+  // 档位按表单当前的协议查；已保存的服务带 id，它自己存过的条目优先
+  const providerId = request.ok ? request.input.providerId : undefined;
+  const api = request.ok
+    ? (request.input.draft?.api ?? savedProviders.find((saved) => saved.id === providerId)?.api)
+    : undefined;
+  const thinkingOf = (modelId: string) =>
+    described && api
+      ? describedThinking(described, { api, modelId, ...(providerId ? { providerId } : {}) })
+      : undefined;
 
   const add = (entries: RemoteModelEntry[]) => {
     const result = onAdd(entries);
@@ -186,6 +201,7 @@ export function RemoteModelsPicker({
               <RemoteModelRow
                 key={model.id}
                 model={model}
+                thinking={thinkingOf(model.id)}
                 checked={checked.has(model.id)}
                 onCheckedChange={(on) => setSelected((ids) => toggleSelected(ids, model.id, on))}
               />
@@ -238,17 +254,37 @@ export function RemoteModelsPicker({
   );
 }
 
+/**
+ * 「推理」徽标的悬停提示；null 表示不显示徽标。describe-models 描述过的以它为准（列出档位与来源），
+ * 没描述过的看 Main 按设置页内置目录给的 reasoning
+ */
+function reasoningBadgeTitle(
+  model: RemoteModelEntry,
+  thinking: ModelOption | undefined
+): string | null {
+  if (thinking) {
+    if (thinking.thinkingLevels.length === 0) return null;
+    const from = thinkingSourceNote(thinking.source) ?? 'pi 目录';
+    return `思考档位（${from}）：${thinking.thinkingLevels.join(' / ')}`;
+  }
+  return model.reasoning ? '内置目录里是推理模型' : null;
+}
+
 function RemoteModelRow({
   model,
+  thinking,
   checked,
   onCheckedChange,
 }: {
   model: RemoteModelEntry;
+  /** sessions:model-options 描述过的档位；没描述过时为 undefined */
+  thinking: ModelOption | undefined;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   const id = useId();
   const named = model.name !== model.id;
+  const reasoningTitle = reasoningBadgeTitle(model, thinking);
   return (
     <li>
       {/* 整行都是标签：点哪里都能勾选；Checkbox 的 onClick 会 preventDefault，不会被标签再触发一次 */}
@@ -270,8 +306,8 @@ function RemoteModelRow({
           <span className="font-mono text-xs">{model.id}</span>
           {named && <span className="ml-2 text-muted-foreground text-xs">{model.name}</span>}
         </span>
-        {model.reasoning && (
-          <Badge variant="outline" title="内置目录里是推理模型">
+        {reasoningTitle && (
+          <Badge variant="outline" title={reasoningTitle}>
             推理
           </Badge>
         )}
