@@ -120,6 +120,44 @@ describe('parsePreferences', () => {
     });
   });
 
+  it('lastModelByWorkspace 只保留合法的 id 引用（服务 id / 模型 id / 思考档位），没有默认值', () => {
+    expect(
+      parsePreferences({
+        lastModelByWorkspace: {
+          'ws-1': { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'high' },
+          'ws-2': { providerId: 'openai', modelId: 'gpt-5.5', apiKey: 'sk-x', baseUrl: 'http://x' },
+        },
+      }).lastModelByWorkspace
+    ).toEqual({
+      'ws-1': { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'high' },
+      'ws-2': { providerId: 'openai', modelId: 'gpt-5.5' },
+    });
+    expect(parsePreferences({})).not.toHaveProperty('lastModelByWorkspace');
+  });
+
+  it('lastModelByWorkspace 逐条丢弃非法项，全部非法时去掉整个字段', () => {
+    const parsed = parsePreferences({
+      lastModelByWorkspace: {
+        'ws-1': { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'max' },
+        'ws-2': { providerId: '', modelId: 'gpt-5.5' },
+        'ws-3': { providerId: 'openai' },
+        '../ws': { providerId: 'openai', modelId: 'gpt-5.5' },
+        'ws-4': 'openai/gpt-5.5',
+        'ws-5': { providerId: 'openai', modelId: 'gpt-5.5' },
+      },
+    });
+    expect(parsed.lastModelByWorkspace).toEqual({
+      'ws-5': { providerId: 'openai', modelId: 'gpt-5.5' },
+    });
+    const polluted = parsePreferences(
+      JSON.parse('{"lastModelByWorkspace": {"__proto__": {"providerId": "p", "modelId": "m"}}}')
+    ).lastModelByWorkspace;
+    expect(polluted && Object.getPrototypeOf(polluted)).toBe(Object.prototype);
+    for (const lastModelByWorkspace of [null, 'x', [], { 'ws-1': null }]) {
+      expect(parsePreferences({ lastModelByWorkspace })).not.toHaveProperty('lastModelByWorkspace');
+    }
+  });
+
   it('worktreesRoot 丢弃相对路径与非字符串（回到默认位置）', () => {
     for (const worktreesRoot of [
       undefined,
@@ -159,6 +197,10 @@ describe('parsePreferencesPatch（IPC 入参收窄）', () => {
     [
       'worktreesRoot（只经 settings:pick-worktrees-root 由 Main 弹框）',
       { worktreesRoot: 'D:\\wt' },
+    ],
+    [
+      'lastModelByWorkspace（Main 在新建会话、切换模型时写入）',
+      { lastModelByWorkspace: { 'ws-1': { providerId: 'openai', modelId: 'gpt-5.5' } } },
     ],
     ['原型污染键', JSON.parse('{"__proto__": {"theme": "dark"}}')],
   ])('拒绝 %s', (_label, raw) => {

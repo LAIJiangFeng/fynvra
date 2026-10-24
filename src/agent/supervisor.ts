@@ -13,10 +13,13 @@ import {
   APPROVAL_TIMEOUT_MS,
   type HostKind,
   type LogLevel,
+  type ModelQuery,
+  type ModelsDescribedResult,
+  type ResolvedModelSpec,
   type SessionIdentity,
   type SpawnSessionSpec,
 } from '@shared/types/agent';
-import type { ApprovalDecision, SessionStatus } from '@shared/types/chat';
+import type { ApprovalDecision, ModelThinkingCapability, SessionStatus } from '@shared/types/chat';
 import { ApprovalBroker } from './approvals';
 import {
   createHostInvoker,
@@ -36,6 +39,8 @@ export interface SupervisedSession {
   /** 空闲时开始新一轮；运行中排到当前回合之后 */
   prompt(text: string): Promise<void>;
   steer(text: string): Promise<void>;
+  /** 换模型 / 思考档位：下一次请求起生效，会话历史保留；失败抛错 */
+  setModel(spec: ResolvedModelSpec): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -66,13 +71,15 @@ export type OpenSession = (input: OpenSessionInput) => Promise<SupervisedSession
 export interface SupervisorOptions {
   post(event: AgentWorkerEvent): void;
   openSession: OpenSession;
+  /** describe-models：按 pi 内置目录算模型的思考档位，结果与 queries 一一对应 */
+  describeModels?: (queries: ModelQuery[]) => Promise<ModelThinkingCapability[]>;
   hostCalls?: HostInvokerOptions;
   approvalTimeoutMs?: number;
 }
 
 interface ManagedSession {
   identity: SessionIdentity;
-  /** 创建完成（失败为 null）；同一会话的命令都排在它之后 */
+  /** 创建完成（失败为 null）；同一会话的命令都排在它之后，换模型也接在它上面 */
   opening: Promise<SupervisedSession | null>;
   events: SessionEvents | null;
   status: SessionStatus;
@@ -88,6 +95,7 @@ interface ManagedSession {
 export class SessionSupervisor {
   readonly #post: (event: AgentWorkerEvent) => void;
   readonly #open: OpenSession;
+  readonly #describeModels: SupervisorOptions['describeModels'];
   readonly #invoker: HostInvoker;
   readonly #approvals = new ApprovalBroker();
   readonly #approvalTimeoutMs: number;
@@ -97,6 +105,7 @@ export class SessionSupervisor {
   constructor(options: SupervisorOptions) {
     this.#post = options.post;
     this.#open = options.openSession;
+    this.#describeModels = options.describeModels;
     this.#invoker = createHostInvoker(options.post, options.hostCalls);
     this.#approvalTimeoutMs = options.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS;
   }
@@ -136,6 +145,12 @@ export class SessionSupervisor {
         if (!this.#invoker.settle(command.identity, command.callId, command.result)) {
           this.#log('info', `dropped host-result ${command.callId}: the call is no longer pending`);
         }
+        return;
+      case 'set-model':
+        this.#setModel(command.identity, command.model);
+        return;
+      case 'describe-models':
+        void this.#describe(command.requestId, command.models);
         return;
       case 'shutdown':
         void this.shutdown();
@@ -310,6 +325,57 @@ export class SessionSupervisor {
     this.#settleIfIdle(managed, session);
   }
 
+  /**
+   * 换模型接在 opening 上：排在这个会话已到达的命令之后，之后到达的 prompt 一定用新模型。
+   * 换不成功时 worker 里的会话与 Main 的记录（已是新模型）对不上：关掉它并报 fatal，
+   * Main 下次使用前按记录重新 spawn。Main 只在空闲时发 set-model；与回合撞上时照样换，记一条日志。
+   */
+  #setModel(identity: SessionIdentity, spec: ResolvedModelSpec): void {
+    const managed = this.#current(identity);
+    if (!managed) {
+      this.#reportMissing(identity, 'set-model');
+      return;
+    }
+    managed.opening = managed.opening.then(async (session) => {
+      if (!session || managed.closed) return session;
+      if (managed.status === 'running' || managed.status === 'waiting-approval') {
+        this.#log(
+          'warn',
+          `session ${identity.sessionId}: the model was switched during a turn; the rest of the turn uses the new model`
+        );
+      }
+      try {
+        await session.setModel(spec);
+      } catch (error) {
+        // 正在关闭：交给 #close 释放
+        if (managed.closed) return session;
+        this.#post({
+          type: 'session-error',
+          identity,
+          error: `failed to switch the model: ${errorMessage(error)}`,
+          fatal: true,
+        });
+        this.#detach(managed);
+        await session.dispose().catch((reason) => this.#log('warn', errorMessage(reason)));
+        return null;
+      }
+      if (managed.status === 'error') this.#setStatus(managed, 'idle');
+      return session;
+    });
+  }
+
+  /** 进程级查询：总是回一条 models-described，失败也回，Main 不必等到超时 */
+  async #describe(requestId: string, models: ModelQuery[]): Promise<void> {
+    let result: ModelsDescribedResult;
+    try {
+      if (!this.#describeModels) throw new Error('this agent worker cannot describe models');
+      result = { ok: true, models: await this.#describeModels(models) };
+    } catch (error) {
+      result = { ok: false, error: errorMessage(error) };
+    }
+    this.#post({ type: 'models-described', requestId, result });
+  }
+
   async #abort(identity: SessionIdentity): Promise<void> {
     const managed = this.#current(identity);
     if (!managed) return;
@@ -333,16 +399,24 @@ export class SessionSupervisor {
 
   async #close(managed: ManagedSession): Promise<void> {
     if (managed.closed) return;
-    managed.closed = true;
-    this.#invoker.cancelSession(managed.identity, 'the session was closed');
-    this.#approvals.cancelSession(managed.identity.sessionId);
-    managed.events?.unsubscribe();
+    this.#detach(managed);
     const session = await managed.opening;
     if (!session) return;
     try {
       await session.dispose();
     } catch (error) {
       this.#log('warn', `dispose ${managed.identity.sessionId}: ${errorMessage(error)}`);
+    }
+  }
+
+  /** 不再托管这个会话：结束它的 host 调用与待审批，停止转发事件；还是当前会话就从表里移除 */
+  #detach(managed: ManagedSession): void {
+    managed.closed = true;
+    this.#invoker.cancelSession(managed.identity, 'the session was closed');
+    this.#approvals.cancelSession(managed.identity.sessionId);
+    managed.events?.unsubscribe();
+    if (this.#sessions.get(managed.identity.sessionId) === managed) {
+      this.#sessions.delete(managed.identity.sessionId);
     }
   }
 

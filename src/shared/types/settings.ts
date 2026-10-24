@@ -1,6 +1,8 @@
-import { asRecord } from '../guards';
+import { isThinkingLevel } from '@fynvra/core';
+import { asRecord, isNonEmptyString } from '../guards';
+import type { SessionModelRef } from './chat';
 import type { IpcResult } from './ipc';
-import { parseWorkspace, type Workspace } from './workspace';
+import { parseWorkspace, parseWorkspaceId, type Workspace } from './workspace';
 
 export const SETTINGS_VERSION = 1;
 
@@ -23,6 +25,11 @@ export interface Preferences {
    * （Main 弹目录框并校验），`settings:update` 不接受这个字段。
    */
   worktreesRoot?: string;
+  /**
+   * 每个工作区上一次用过的模型（新建会话弹层的默认值之一），只存设置里的服务 id、模型 id 与思考档位。
+   * Main 在新建会话、切换模型时写入，`settings:update` 不接受这个字段。
+   */
+  lastModelByWorkspace?: Record<string, SessionModelRef>;
 }
 
 /**
@@ -92,6 +99,29 @@ function looksAbsolute(path: string): boolean {
   return /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path);
 }
 
+function parseModelRef(raw: unknown): SessionModelRef | null {
+  const record = asRecord(raw);
+  if (!record || !isNonEmptyString(record.providerId) || !isNonEmptyString(record.modelId)) {
+    return null;
+  }
+  const { providerId, modelId, thinking } = record;
+  if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
+  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
+}
+
+/** 键须是合法的工作区 id，值只取 id 引用；逐条丢弃非法项，一条不剩时返回 undefined。 */
+function parseLastModels(raw: unknown): Record<string, SessionModelRef> | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const entries: [string, SessionModelRef][] = [];
+  for (const [workspaceId, value] of Object.entries(record)) {
+    const ref = parseModelRef(value);
+    if (parseWorkspaceId(workspaceId) && ref) entries.push([workspaceId, ref]);
+  }
+  // fromEntries 定义自有属性：键是 `__proto__` 也不会改到原型
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 /** 宽松收窄：逐字段取合法值，缺失或非法的字段用默认值。 */
 export function parsePreferences(raw: unknown): Preferences {
   const record = asRecord(raw);
@@ -100,12 +130,14 @@ export function parsePreferences(raw: unknown): Preferences {
   const shellPath = typeof record?.shellPath === 'string' ? record.shellPath.trim() : '';
   const worktreesRoot =
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
+  const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
   return {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
     ...(shellPath ? { shellPath } : {}),
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
+    ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
   };
 }
 

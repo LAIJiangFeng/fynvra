@@ -4,7 +4,9 @@ import type {
   ApprovalRequest,
   ChatMessage,
   ChatToolCall,
+  ModelProviderOption,
   SessionEventEnvelope,
+  SessionModelRef,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
@@ -44,7 +46,41 @@ interface MockSession {
 class Aborted extends Error {}
 
 const STREAM_CHUNK = 4;
-const MOCK_MODEL = { providerId: 'mock', modelId: 'mock-model' };
+const MOCK_MODEL: SessionModelRef = {
+  providerId: 'mock',
+  modelId: 'mock-model',
+  thinking: 'medium',
+};
+/** mock 的可选模型：档位集合各不相同，便于看选择器只渲染模型自己的档位 */
+const MOCK_PROVIDERS: ModelProviderOption[] = [
+  {
+    providerId: 'mock',
+    name: 'Mock',
+    api: 'anthropic-messages',
+    models: [
+      {
+        id: 'mock-model',
+        name: 'Mock Model',
+        thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultThinking: 'medium',
+      },
+      { id: 'mock-fast', name: 'Mock Fast（不推理）', thinkingLevels: [] },
+    ],
+  },
+  {
+    providerId: 'mock-openai',
+    name: 'Mock OpenAI',
+    api: 'openai-responses',
+    models: [
+      {
+        id: 'mock-gpt',
+        name: 'Mock GPT',
+        thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+        defaultThinking: 'medium',
+      },
+    ],
+  },
+];
 
 /**
  * 内存里的假会话后端：prompt 之后按脚本推送流式 `thinking_delta` / `text_delta`、工具调用、
@@ -58,6 +94,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
   const eventListeners = new Set<(envelope: SessionEventEnvelope) => void>();
   const changedListeners = new Set<(workspaceId: string) => void>();
   const approvalListeners = new Set<(request: ApprovalRequest) => void>();
+  const lastModels = new Map<string, SessionModelRef>();
   let counter = 0;
   const nextId = (prefix: string) => `${prefix}-${++counter}`;
 
@@ -418,8 +455,28 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         approvals: new Map(),
       };
       sessions.set(summary.id, session);
+      lastModels.set(input.workspaceId, summary.model ?? MOCK_MODEL);
       changed(session);
       return { ok: true, session: summary };
+    },
+
+    async setModel({ sessionId, model }) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      if (session.run) return { ok: false, error: '会话正在运行，等本轮结束再切换模型' };
+      session.summary = { ...session.summary, model };
+      lastModels.set(session.summary.workspaceId, model);
+      changed(session);
+      return { ok: true, session: session.summary };
+    },
+
+    async modelOptions(input = {}) {
+      const lastUsed = input.workspaceId ? lastModels.get(input.workspaceId) : undefined;
+      return {
+        ok: true,
+        providers: structuredClone(MOCK_PROVIDERS),
+        ...(lastUsed ? { lastUsed } : {}),
+      };
     },
 
     async remove(sessionId) {

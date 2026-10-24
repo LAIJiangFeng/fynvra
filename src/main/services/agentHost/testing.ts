@@ -1,9 +1,10 @@
 import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
-import { parseAgentCommand } from '@shared/types/agent';
+import { parseAgentCommand, type ResolvedModelSpec } from '@shared/types/agent';
 import {
   type OpenSession,
   SessionSupervisor,
   type SupervisedSession,
+  type SupervisorOptions,
 } from '../../../agent/supervisor';
 import type { WorkerProcess } from './workerClient';
 
@@ -18,10 +19,11 @@ export class InMemoryWorker implements WorkerProcess {
   #toMain: ((message: unknown) => void) | undefined;
   #onExit: ((code: number) => void) | undefined;
 
-  constructor(openSession: OpenSession) {
+  constructor(openSession: OpenSession, options: Pick<SupervisorOptions, 'describeModels'> = {}) {
     this.supervisor = new SessionSupervisor({
       post: (event) => queueMicrotask(() => this.#toMain?.(structuredClone(event))),
       openSession,
+      ...options,
     });
     queueMicrotask(() => this.#toMain?.({ type: 'ready' }));
   }
@@ -53,6 +55,8 @@ export type Emit = (event: FynvraSessionEventBody) => void;
 /** 每次 prompt 运行一段脚本（代替模型 + 工具），结束时 settle */
 export class ScriptedSession implements SupervisedSession {
   readonly warnings: string[] = [];
+  /** set-model 交来的模型，按到达顺序 */
+  readonly models: ResolvedModelSpec[] = [];
   #listener: ((event: FynvraSessionEvent) => void) | undefined;
   #seq = 0;
   #idle = true;
@@ -74,6 +78,9 @@ export class ScriptedSession implements SupervisedSession {
     this.#emit({ type: 'agent_settled', aborted: false });
   }
   async steer(): Promise<void> {}
+  async setModel(spec: ResolvedModelSpec): Promise<void> {
+    this.models.push(spec);
+  }
   async abort(): Promise<void> {}
   isIdle(): boolean {
     return this.#idle;

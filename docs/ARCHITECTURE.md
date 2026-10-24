@@ -128,7 +128,8 @@ export interface Message {
     warnings: string[];                 // skill 路径缺失、MCP 服务器名非法等配置问题，供 Main 展示
     dispose(): Promise<void>;           // 先发 session_shutdown（关闭 MCP 连接）再释放；可重复调用
   }
-  // Main 按 role.model 解析；thinking 缺省取 role.model?.thinking
+  // Main 按会话记录（缺省按 role.model）解析；thinking 缺省取 role.model?.thinking，
+  // worker 再按模型的可选档位落定（pickThinkingLevel：不在集合里就回落到模型的默认档位）
   interface ResolvedModel { runtime: ModelRuntime; model: Model<Api>; thinking?: ThinkingLevel }
   // pi 的 McpServerConfig 不带名字；未声明 exposure 时默认 'direct'（pi 默认的 'codemode' 需要额外扩展）
   type McpServerConfig = PiMcpServerConfig & { name: string };
@@ -185,14 +186,16 @@ Wave 2 的卡片并行开发，彼此只能通过本节定义的接口对接。*
 
 ### 9.2 `src/shared/types/chat.ts`（归属：agent-host；chat-ui / orchestration-ui 可逐字复制）
 ```ts
-import type { FynvraSessionEvent } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
+import type { FynvraSessionEvent, ThinkingLevel } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
+/** 设置里的服务 id + 模型 id（只存 id 引用）+ 思考档位（Task 17） */
+export interface SessionModelRef { providerId: string; modelId: string; thinking?: ThinkingLevel; }
 export interface SessionSummary {
   id: string; workspaceId: string; roleId: string; title: string; cwd: string;
   worktreeId?: string; parentSessionId?: string; dispatchId?: string;
   status: SessionStatus; createdAt: number; updatedAt: number;
-  model?: { providerId: string; modelId: string };
+  model?: SessionModelRef;
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {
@@ -211,25 +214,44 @@ export interface ApprovalRequest {
 }
 /** Main → Renderer 推送（通道 `sessions:event`）。 */
 export interface SessionEventEnvelope { sessionId: string; event: FynvraSessionEvent; }
+
+// 模型选择（Task 17）：可选档位由 worker 按 pi 内置目录的 reasoning / thinkingLevelMap 算出，
+// pi 目录外的模型按设置里模型条目的 reasoning 标记；只留 fynvra 有的档位（pi 另有 max）
+export interface ModelThinkingCapability { thinkingLevels: ThinkingLevel[]; defaultThinking?: ThinkingLevel; } // 空数组 = 不支持推理
+/** 请求的档位在集合里就用它，否则回落到模型的默认档位；Renderer 换模型与 worker 落定档位都按这一条 */
+export function pickThinkingLevel(capability: ModelThinkingCapability, requested?: ThinkingLevel): ThinkingLevel | undefined;
+export interface ModelOption extends ModelThinkingCapability { id: string; name: string; }
+export interface ModelProviderOption { providerId: string; name: string; api: ProviderApi; models: ModelOption[]; } // 只列启用且有 key 的服务，不带 key 与地址
+export interface ModelOptions { providers: ModelProviderOption[]; lastUsed?: SessionModelRef; }  // lastUsed：settings.json preferences.lastModelByWorkspace
 ```
 
 ### 9.3 `window.fynvra.sessions`（归属：agent-host；chat-ui 消费）
 ```ts
 export interface SessionsApi {
   list(workspaceId: string): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
-  create(input: { workspaceId: string; roleId: string; model?: { providerId: string; modelId: string } }): Promise<IpcResult<{ session: SessionSummary }>>;
+  create(input: { workspaceId: string; roleId: string; model?: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
   prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: { sessionId: string; requestId: string; decision: ApprovalDecision }): Promise<IpcResult>;
+  /** 换模型 / 思考档位：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
+  setModel(input: { sessionId: string; model: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
+  modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
   onEvent(cb: (envelope: SessionEventEnvelope) => void): Unsubscribe;
   onSessionsChanged(cb: (workspaceId: string) => void): Unsubscribe;
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。
+
+- **换模型**（`sessions:set-model`）：Main 用 `ModelResolver` 解析 → 更新会话记录（sessions.json）→ 会话已在 worker 里时发
+  `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`）→ worker 注册 provider 后调 pi 的 `setModel` / `setThinkingLevel`。
+  换不成功时 worker 关掉该会话并报 fatal `session-error`，Main 下次使用前按记录重新 spawn。
+- **可选档位**（`sessions:model-options`）：Main 不加载 pi，经进程级的 `describe-models` / `models-described` 问 worker，结果按
+  （协议, 模型 id, reasoning 标记）缓存；worker 用的是与注册模型同一份目录模板（同 id 同协议时官方 provider 的条目优先）。
+- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。
 
 ### 9.4 `window.fynvra.orchestration`（归属：orchestration-host；orchestration-ui 消费）
 ```ts
@@ -272,7 +294,10 @@ export function createWorkerHost(deps: { store: OrchestrationStore; inbox: Inbox
 export interface ModelRef { providerId: string; modelId: string; }
 export interface ModelResolver { resolve(ref: ModelRef | undefined): Promise<{ ok: true; model: ResolvedModelSpec; ref: ModelRef } | { ok: false; error: string }>; }
 /** 跨进程可序列化的模型描述；worker 进程内再换成 agent-runtime 的 ResolvedModel */
-export interface ResolvedModelSpec { providerId: string; api: string; baseUrl?: string; apiKey?: string; modelId: string; thinking?: ThinkingLevel; }
+export interface ResolvedModelSpec {
+  providerId: string; api: string; baseUrl?: string; apiKey?: string; modelId: string; thinking?: ThinkingLevel;
+  reasoning?: boolean; // 设置里模型条目的 reasoning 标记：只对 pi 目录里没有的模型生效（Task 17）
+}
 export interface AgentHost {
   implementsLauncher(): WorkerSessionLauncher;      // 供 orchestration-host 使用
   setOrchestrationHostFactory(f: (coordinatorSessionId: string, workspaceId: string) => OrchestrationHost | null): void;

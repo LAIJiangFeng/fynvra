@@ -4,8 +4,14 @@ import type {
   ApprovalKind as RuntimeApprovalKind,
 } from '@fynvra/agent-runtime';
 import type { FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
-import type { AgentWorkerEvent, SessionIdentity, SpawnSessionSpec } from '@shared/types/agent';
-import type { ApprovalDecision, ApprovalKind } from '@shared/types/chat';
+import type {
+  AgentWorkerEvent,
+  ModelQuery,
+  ResolvedModelSpec,
+  SessionIdentity,
+  SpawnSessionSpec,
+} from '@shared/types/agent';
+import type { ApprovalDecision, ApprovalKind, ModelThinkingCapability } from '@shared/types/chat';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   type OpenSession,
@@ -25,8 +31,11 @@ class FakeSession implements SupervisedSession {
   aborts = 0;
   disposals = 0;
   idle = true;
+  models: ResolvedModelSpec[] = [];
   /** 回合开始前的校验（抛错模拟缺 API key 等） */
   promptImpl: (text: string) => Promise<void> = async () => {};
+  /** 换模型（抛错模拟注册 / 鉴权失败，挂起模拟慢的注册） */
+  setModelImpl: (spec: ResolvedModelSpec) => Promise<void> = async () => {};
   #listener: ((event: FynvraSessionEvent) => void) | undefined;
   #seq = 0;
   #settleRun: (() => void) | undefined;
@@ -63,6 +72,11 @@ class FakeSession implements SupervisedSession {
 
   async steer(text: string): Promise<void> {
     this.steers.push(text);
+  }
+
+  async setModel(spec: ResolvedModelSpec): Promise<void> {
+    await this.setModelImpl(spec);
+    this.models.push(spec);
   }
 
   async abort(): Promise<void> {
@@ -108,12 +122,16 @@ const id1: SessionIdentity = { sessionId: 's1', generation: 1 };
 /** 让排队的微任务 / 已 resolve 的 promise 回调跑完 */
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-function setup(open?: OpenSession) {
+function setup(
+  open?: OpenSession,
+  describeModels?: (queries: ModelQuery[]) => Promise<ModelThinkingCapability[]>
+) {
   const posted: AgentWorkerEvent[] = [];
   const sessions: FakeSession[] = [];
   const inputs: OpenSessionInput[] = [];
   const supervisor = new SessionSupervisor({
     post: (event) => posted.push(event),
+    ...(describeModels ? { describeModels } : {}),
     openSession:
       open ??
       (async (input) => {
@@ -574,5 +592,188 @@ describe('SessionSupervisor approvals', () => {
   it('uses the same approval kinds and decisions as the Renderer contract', () => {
     expectTypeOf<RuntimeApprovalKind>().toEqualTypeOf<ApprovalKind>();
     expectTypeOf<RuntimeApprovalDecision>().toEqualTypeOf<ApprovalDecision>();
+  });
+});
+
+describe('SessionSupervisor model switch', () => {
+  const modelB: ResolvedModelSpec = {
+    providerId: 'fynvra-b',
+    api: 'openai-responses',
+    modelId: 'gpt-5.5',
+    apiKey: 'k-b',
+    thinking: 'xhigh',
+  };
+
+  async function idleSession() {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    await settle();
+    return { ...env, session: env.sessions[0] as FakeSession };
+  }
+
+  it('hands set-model to the pi session without touching the status', async () => {
+    const { supervisor, session, of } = await idleSession();
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    await settle();
+    expect(session.models).toEqual([modelB]);
+    expect(of('session-status')).toEqual([]);
+    expect(of('session-error')).toEqual([]);
+  });
+
+  it('switches before a prompt that arrives after set-model, even while the switch is slow', async () => {
+    const { supervisor, session } = await idleSession();
+    let finishSwitch: () => void = () => {};
+    session.setModelImpl = () =>
+      new Promise<void>((resolve) => {
+        finishSwitch = resolve;
+      });
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'use the new model' });
+    await settle();
+    expect(session.prompts).toEqual([]);
+
+    finishSwitch();
+    await settle();
+    expect(session.models).toEqual([modelB]);
+    expect(session.prompts).toEqual(['use the new model']);
+  });
+
+  it('queues set-model behind a slow spawn', async () => {
+    let finishOpen: (session: FakeSession) => void = () => {};
+    const session = new FakeSession();
+    const { supervisor } = setup(
+      () =>
+        new Promise((resolve) => {
+          finishOpen = resolve;
+        })
+    );
+    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    await settle();
+    finishOpen(session);
+    await settle();
+    expect(session.models).toEqual([modelB]);
+  });
+
+  it('clears an error status after a successful switch', async () => {
+    const { supervisor, session, of } = await idleSession();
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'hi' });
+    await settle();
+    session.emit({ type: 'error', source: 'model', message: '401 invalid key' });
+    session.emit({ type: 'agent_settled', aborted: false });
+    await settle();
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    await settle();
+    expect(of('session-status').map((event) => event.status)).toEqual(['running', 'error', 'idle']);
+  });
+
+  it('closes the session and reports it as fatal when the switch fails', async () => {
+    const { supervisor, session, of } = await idleSession();
+    session.setModelImpl = async () => {
+      throw new Error('No API key for fynvra-b/gpt-5.5');
+    };
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'after the failed switch' });
+    await settle();
+    // worker 里的会话与 Main 的记录对不上了：关掉它，Main 下次使用前按记录重新 spawn
+    expect(of('session-error')[0]).toEqual({
+      type: 'session-error',
+      identity: id1,
+      error: 'failed to switch the model: No API key for fynvra-b/gpt-5.5',
+      fatal: true,
+    });
+    expect(session.disposals).toBe(1);
+    expect(session.prompts).toEqual([]);
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'again' });
+    expect(of('session-error').at(-1)).toMatchObject({
+      fatal: true,
+      error: expect.stringMatching(/not running/),
+    });
+  });
+
+  it('applies a switch that races with a running turn and logs it', async () => {
+    const { supervisor, session, of } = await idleSession();
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'long task' });
+    await settle();
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    await settle();
+    expect(session.models).toEqual([modelB]);
+    expect(of('log').map((event) => event.message)).toEqual([
+      expect.stringContaining('during a turn'),
+    ]);
+  });
+
+  it('drops set-model of an older generation and reports one for an unknown session', async () => {
+    const { supervisor, session, of } = await idleSession();
+    supervisor.handle({ type: 'spawn-session', identity: { ...id1, generation: 2 }, spec: spec() });
+    supervisor.handle({ type: 'set-model', identity: id1, model: modelB });
+    supervisor.handle({
+      type: 'set-model',
+      identity: { sessionId: 'ghost', generation: 1 },
+      model: modelB,
+    });
+    await settle();
+    expect(session.models).toEqual([]);
+    expect(of('session-error')).toEqual([
+      {
+        type: 'session-error',
+        identity: { sessionId: 'ghost', generation: 1 },
+        error: 'the session is not running in the agent worker',
+        fatal: true,
+      },
+    ]);
+  });
+});
+
+describe('SessionSupervisor describe-models', () => {
+  const queries: ModelQuery[] = [
+    { api: 'anthropic-messages', modelId: 'claude-opus-5-5' },
+    { api: 'openai-completions', modelId: 'local', reasoning: true },
+  ];
+
+  it('answers with the capabilities of every queried model, in order', async () => {
+    const describeModels = vi.fn(async (models: ModelQuery[]) =>
+      models.map(
+        (query): ModelThinkingCapability =>
+          query.reasoning === undefined
+            ? { thinkingLevels: ['low', 'medium'], defaultThinking: 'medium' }
+            : { thinkingLevels: [] }
+      )
+    );
+    const { supervisor, of } = setup(undefined, describeModels);
+    supervisor.handle({ type: 'describe-models', requestId: 'describe-1', models: queries });
+    await settle();
+    expect(describeModels).toHaveBeenCalledWith(queries);
+    expect(of('models-described')).toEqual([
+      {
+        type: 'models-described',
+        requestId: 'describe-1',
+        result: {
+          ok: true,
+          models: [
+            { thinkingLevels: ['low', 'medium'], defaultThinking: 'medium' },
+            { thinkingLevels: [] },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('answers with an error instead of leaving Main waiting', async () => {
+    const failing = setup(undefined, async () => {
+      throw new Error('the model catalog failed to load');
+    });
+    failing.supervisor.handle({ type: 'describe-models', requestId: 'd-1', models: queries });
+    const missing = setup();
+    missing.supervisor.handle({ type: 'describe-models', requestId: 'd-2', models: queries });
+    await settle();
+    expect(failing.of('models-described')).toEqual([
+      {
+        type: 'models-described',
+        requestId: 'd-1',
+        result: { ok: false, error: 'the model catalog failed to load' },
+      },
+    ]);
+    expect(missing.of('models-described')[0]?.result).toMatchObject({ ok: false });
   });
 });

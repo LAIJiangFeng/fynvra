@@ -7,7 +7,12 @@ import {
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
-import type { ApprovalDecision, ApprovalKind, SessionStatus } from './chat';
+import type {
+  ApprovalDecision,
+  ApprovalKind,
+  ModelThinkingCapability,
+  SessionStatus,
+} from './chat';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -31,7 +36,21 @@ export interface ResolvedModelSpec {
   apiKey?: string;
   modelId: string;
   thinking?: ThinkingLevel;
+  /** 设置里模型条目的 reasoning 标记：只对 pi 内置目录里没有的模型生效，目录里有的以目录为准 */
+  reasoning?: boolean;
 }
+
+/** describe-models 的一项：按协议与模型 id 在 pi 内置目录里找，目录里没有时按 reasoning 标记 */
+export interface ModelQuery {
+  api: string;
+  modelId: string;
+  reasoning?: boolean;
+}
+
+/** models-described 的结果：成功时与 describe-models 的 models 一一对应、顺序相同 */
+export type ModelsDescribedResult =
+  | { ok: true; models: ModelThinkingCapability[] }
+  | { ok: false; error: string };
 
 /** 角色挂载的 MCP 服务器（Main 已解析；env / headers 明文只在 Main → worker 这一跳出现）。 */
 export interface AgentMcpServer {
@@ -123,6 +142,13 @@ export type AgentCommand =
     }
   /** Main 回传 OrchestrationHost / WorkerHost 的调用结果 */
   | { type: 'host-result'; identity: SessionIdentity; callId: string; result: HostCallResult }
+  /**
+   * 换会话的模型 / 思考档位（spec 同 spawn-session）：worker 先注册 provider 再调 pi 的 setModel，
+   * 下一次 prompt 起生效，pi 的会话历史保留
+   */
+  | { type: 'set-model'; identity: SessionIdentity; model: ResolvedModelSpec }
+  /** 查模型的思考档位（进程级，不带 identity）；worker 回同一 requestId 的 models-described */
+  | { type: 'describe-models'; requestId: string; models: ModelQuery[] }
   /** 关闭全部会话后退出进程（进程级，不带 identity） */
   | { type: 'shutdown' };
 
@@ -150,6 +176,8 @@ export type AgentWorkerEvent =
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
+  /** describe-models 的回答（进程级） */
+  | { type: 'models-described'; requestId: string; result: ModelsDescribedResult }
   /** 诊断日志（进程级） */
   | { type: 'log'; level: LogLevel; message: string };
 
@@ -191,12 +219,22 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
   const record = asRecord(raw);
   if (!record) return null;
   if (record.type === 'shutdown') return { type: 'shutdown' };
+  if (record.type === 'describe-models') {
+    const models = parseList(record.models, parseModelQuery);
+    return isNonEmptyString(record.requestId) && models
+      ? { type: 'describe-models', requestId: record.requestId, models }
+      : null;
+  }
   const identity = parseIdentity(record.identity);
   if (!identity) return null;
   switch (record.type) {
     case 'spawn-session': {
       const spec = parseSpawnSessionSpec(record.spec);
       return spec ? { type: 'spawn-session', identity, spec } : null;
+    }
+    case 'set-model': {
+      const model = parseModelSpec(record.model);
+      return model ? { type: 'set-model', identity, model } : null;
     }
     case 'prompt':
       return isNonEmptyString(record.text) ? { type: 'prompt', identity, text: record.text } : null;
@@ -230,6 +268,12 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
     const { level, message } = record;
     return memberOf(LOG_LEVEL_SET, level) && typeof message === 'string'
       ? { type: 'log', level, message }
+      : null;
+  }
+  if (record.type === 'models-described') {
+    const result = parseModelsDescribedResult(record.result);
+    return isNonEmptyString(record.requestId) && result
+      ? { type: 'models-described', requestId: record.requestId, result }
       : null;
   }
   const identity = parseIdentity(record.identity);
@@ -349,15 +393,19 @@ function parseList<T>(raw: unknown, parseItem: (item: unknown) => T | null): T[]
   return items;
 }
 
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}
+
 function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { providerId, api, baseUrl, apiKey, modelId, thinking } = record;
+  const { providerId, api, baseUrl, apiKey, modelId, thinking, reasoning } = record;
   if (!isNonEmptyString(providerId) || !isNonEmptyString(api) || !isNonEmptyString(modelId)) {
     return null;
   }
   if (!isOptional(baseUrl, isNonEmptyString) || !isOptional(apiKey, isNonEmptyString)) return null;
-  if (!isOptional(thinking, isThinkingLevel)) return null;
+  if (!isOptional(thinking, isThinkingLevel) || !isOptional(reasoning, isBoolean)) return null;
   return {
     providerId,
     api,
@@ -365,7 +413,40 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(baseUrl !== undefined ? { baseUrl: baseUrl as string } : {}),
     ...(apiKey !== undefined ? { apiKey: apiKey as string } : {}),
     ...(thinking !== undefined ? { thinking: thinking as ThinkingLevel } : {}),
+    ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
   };
+}
+
+function parseModelQuery(raw: unknown): ModelQuery | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const { api, modelId, reasoning } = record;
+  if (!isNonEmptyString(api) || !isNonEmptyString(modelId)) return null;
+  if (!isOptional(reasoning, isBoolean)) return null;
+  return { api, modelId, ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}) };
+}
+
+/** 档位不重复、都是 fynvra 认识的；默认档位必须在可选集合里 */
+function parseThinkingCapability(raw: unknown): ModelThinkingCapability | null {
+  const record = asRecord(raw);
+  if (!record || !Array.isArray(record.thinkingLevels)) return null;
+  const levels: unknown[] = record.thinkingLevels;
+  if (!levels.every(isThinkingLevel) || new Set(levels).size !== levels.length) return null;
+  const thinkingLevels = [...levels] as ThinkingLevel[];
+  const { defaultThinking } = record;
+  if (defaultThinking === undefined) return { thinkingLevels };
+  if (!isThinkingLevel(defaultThinking) || !thinkingLevels.includes(defaultThinking)) return null;
+  return { thinkingLevels, defaultThinking };
+}
+
+function parseModelsDescribedResult(raw: unknown): ModelsDescribedResult | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  if (record.ok === false)
+    return isString(record.error) ? { ok: false, error: record.error } : null;
+  if (record.ok !== true) return null;
+  const models = parseList(record.models, parseThinkingCapability);
+  return models ? { ok: true, models } : null;
 }
 
 function parseMcpServer(raw: unknown): AgentMcpServer | null {

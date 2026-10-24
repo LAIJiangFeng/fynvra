@@ -2,7 +2,10 @@ import type { FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
   ChatMessage,
+  ModelOptions,
+  ModelProviderOption,
   SessionEventEnvelope,
+  SessionModelRef,
   SessionSummary,
 } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
@@ -12,6 +15,24 @@ import { connectSessionsStore, createSessionsStore } from './createSessionsStore
 import { selectMessagesOf, selectStatusOf } from './selectors';
 
 const WS = 'ws-1';
+
+const PROVIDERS: ModelProviderOption[] = [
+  {
+    providerId: 'anthropic',
+    name: 'Anthropic',
+    api: 'anthropic-messages',
+    models: [
+      {
+        id: 'claude-opus-5-5',
+        name: 'Claude Opus 5.5',
+        thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+        defaultThinking: 'medium',
+      },
+    ],
+  },
+];
+const OPUS: SessionModelRef = { providerId: 'anthropic', modelId: 'claude-opus-5-5' };
+const GPT: SessionModelRef = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' };
 
 function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -75,6 +96,24 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       })
     ),
     respondApproval: vi.fn(async (): Promise<IpcResult> => ({ ok: true })),
+    setModel: vi.fn(
+      async (input: {
+        sessionId: string;
+        model: SessionModelRef;
+      }): Promise<IpcResult<{ session: SessionSummary }>> => {
+        const current = sessions.find((session) => session.id === input.sessionId);
+        if (!current) return { ok: false, error: '会话不存在' };
+        const session = { ...current, model: input.model, updatedAt: 20 };
+        sessions = sessions.map((item) => (item.id === session.id ? session : item));
+        return { ok: true, session };
+      }
+    ),
+    modelOptions: vi.fn(
+      async (_input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>> => ({
+        ok: true,
+        providers: PROVIDERS,
+      })
+    ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),
     onApprovalRequest: on(listeners.approval),
@@ -421,5 +460,116 @@ describe('createSessionsStore · 推送与审批', () => {
     expect(listenerCount()).toBe(3);
     disconnect();
     expect(listenerCount()).toBe(0);
+  });
+});
+
+describe('createSessionsStore · 模型选择', () => {
+  it('setSessionModel 乐观更新：先换上新模型，成功后以 Main 的记录为准', async () => {
+    const { store, api } = await setup([summary('s1', { model: OPUS })]);
+    const answer = deferred<IpcResult<{ session: SessionSummary }>>();
+    api.setModel.mockReturnValueOnce(answer.promise);
+
+    const switching = store.getState().setSessionModel('s1', GPT);
+    expect(api.setModel).toHaveBeenCalledWith({ sessionId: 's1', model: GPT });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(GPT);
+
+    const fromMain = summary('s1', { model: GPT, updatedAt: 30 });
+    answer.resolve({ ok: true, session: fromMain });
+    expect(await switching).toEqual({ ok: true, session: fromMain });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]).toEqual(fromMain);
+    expect(store.getState().lastModelByWorkspace[WS]).toEqual(GPT);
+  });
+
+  it('setSessionModel 失败时回滚到原来的模型、提示原因，并按 Main 重新拉列表', async () => {
+    const { store, api } = await setup([summary('s1', { model: OPUS })]);
+    api.list.mockClear();
+    api.setModel.mockResolvedValueOnce({ ok: false, error: '模型服务「OpenAI」已停用' });
+
+    const result = await store.getState().setSessionModel('s1', GPT);
+    expect(result).toEqual({ ok: false, error: '模型服务「OpenAI」已停用' });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(OPUS);
+    expect(store.getState().notice).toBe('切换模型失败：模型服务「OpenAI」已停用');
+    expect(api.list).toHaveBeenCalledWith(WS);
+    expect(store.getState().lastModelByWorkspace[WS]).toBeUndefined();
+  });
+
+  it('setSessionModel 在会话运行中或消息在途时不发请求', async () => {
+    const { store, api, emitEvent } = await setup([summary('s1', { model: OPUS })]);
+    await store.getState().selectSession('s1');
+    const prompt = deferred<IpcResult>();
+    api.prompt.mockReturnValueOnce(prompt.promise);
+    const sending = store.getState().send('hello');
+
+    const refused = { ok: false, error: expect.stringContaining('等本轮结束') };
+    expect(await store.getState().setSessionModel('s1', GPT)).toEqual(refused);
+    prompt.resolve({ ok: true });
+    await sending;
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'hello' });
+    expect(await store.getState().setSessionModel('s1', GPT)).toEqual(refused);
+
+    expect(api.setModel).not.toHaveBeenCalled();
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(OPUS);
+  });
+
+  it('切换在途时列表刷新不会把模型改回去', async () => {
+    const { store, api, emitChanged } = await setup([summary('s1', { model: OPUS })]);
+    const answer = deferred<IpcResult<{ session: SessionSummary }>>();
+    api.setModel.mockReturnValueOnce(answer.promise);
+    const switching = store.getState().setSessionModel('s1', GPT);
+
+    // Main 还没回包：列表里仍是旧模型
+    emitChanged();
+    await settle();
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(GPT);
+
+    answer.resolve({ ok: true, session: summary('s1', { model: GPT, updatedAt: 30 }) });
+    await switching;
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(GPT);
+  });
+
+  it('loadModelOptions 读可选模型与该工作区上次用过的模型；失败时保留已有列表并记下原因', async () => {
+    const { store, api } = await setup();
+    api.modelOptions.mockResolvedValueOnce({ ok: true, providers: PROVIDERS, lastUsed: OPUS });
+    await store.getState().loadModelOptions();
+    expect(api.modelOptions).toHaveBeenLastCalledWith({ workspaceId: WS });
+    expect(store.getState().modelProviders).toEqual(PROVIDERS);
+    expect(store.getState().lastModelByWorkspace[WS]).toEqual(OPUS);
+
+    api.modelOptions.mockResolvedValueOnce({ ok: false, error: 'agent worker 未就绪' });
+    await store.getState().loadModelOptions();
+    expect(store.getState().modelProviders).toEqual(PROVIDERS);
+    expect(store.getState().modelOptionsError).toBe('agent worker 未就绪');
+  });
+
+  it('loadModelOptions 丢弃晚到的旧回包', async () => {
+    const { store, api } = await setup();
+    const slow = deferred<IpcResult<ModelOptions>>();
+    api.modelOptions.mockReturnValueOnce(slow.promise);
+    const first = store.getState().loadModelOptions();
+    api.modelOptions.mockResolvedValueOnce({ ok: true, providers: [] });
+    await store.getState().loadModelOptions();
+    slow.resolve({ ok: true, providers: PROVIDERS });
+    await first;
+    expect(store.getState().modelProviders).toEqual([]);
+  });
+
+  it('createSession 带上选的模型，并记作该工作区上次用过的模型', async () => {
+    const { store, api } = await setup([]);
+    api.create.mockImplementationOnce(async (input) => ({
+      ok: true as const,
+      session: summary('s9', { ...input, model: GPT }),
+    }));
+    const result = await store.getState().createSession('worker', GPT);
+    expect(api.create).toHaveBeenCalledWith({ workspaceId: WS, roleId: 'worker', model: GPT });
+    expect(result.ok).toBe(true);
+    expect(store.getState().lastModelByWorkspace[WS]).toEqual(GPT);
+  });
+
+  it('输入框胶囊与状态栏共用一个模型选择器', async () => {
+    const { store } = await setup();
+    store.getState().openModelPicker('s1');
+    expect(store.getState().modelPickerFor).toBe('s1');
+    store.getState().closeModelPicker();
+    expect(store.getState().modelPickerFor).toBeNull();
   });
 });

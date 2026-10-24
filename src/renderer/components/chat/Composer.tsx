@@ -3,9 +3,13 @@ import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { isBusy, selectDraftOf, selectStatusOf, useSessionsStore } from '@/stores/sessions';
+import { ModelPicker } from './ModelPicker';
 import { STATUS_LABEL } from './SessionBadges';
 
-/** 输入框：多行，Enter 发送、Shift+Enter 换行；运行中显示「停止」。草稿按会话存在 store。 */
+/**
+ * 输入框：多行，Enter 发送、Shift+Enter 换行；运行中显示「停止」。草稿按会话存在 store。
+ * 左下角是模型胶囊（服务 · 模型 · 思考档位），点开切换。
+ */
 export function Composer({ sessionId }: { sessionId: string }) {
   const draft = useSessionsStore(selectDraftOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
@@ -46,7 +50,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
           }}
         />
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <span className="pl-2 text-muted-foreground text-xs">{busy && STATUS_LABEL[status]}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <ModelPicker sessionId={sessionId} />
+            {busy && (
+              <span className="shrink-0 text-muted-foreground text-xs">{STATUS_LABEL[status]}</span>
+            )}
+          </div>
           {busy ? (
             <Button size="sm" variant="secondary" onClick={() => void abort()}>
               <CircleStop />

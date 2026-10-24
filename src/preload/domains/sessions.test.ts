@@ -26,6 +26,12 @@ describe('createSessionsApi', () => {
     await api.abort('s-1');
     await api.history('s-1');
     await api.respondApproval({ sessionId: 's-1', requestId: 'r-1', decision: 'allow' });
+    await api.setModel({
+      sessionId: 's-1',
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'high' },
+    });
+    await api.modelOptions({ workspaceId: 'ws-1' });
+    await api.modelOptions();
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.SESSIONS_LIST, 'ws-1'],
       [IPC_CHANNELS.SESSIONS_CREATE, { workspaceId: 'ws-1', roleId: 'worker' }],
@@ -37,6 +43,12 @@ describe('createSessionsApi', () => {
         IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL,
         { sessionId: 's-1', requestId: 'r-1', decision: 'allow' },
       ],
+      [
+        IPC_CHANNELS.SESSIONS_SET_MODEL,
+        { sessionId: 's-1', model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'high' } },
+      ],
+      [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: 'ws-1' }],
+      [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, {}],
     ]);
     expect(Object.keys(api)).not.toContain('invoke');
   });

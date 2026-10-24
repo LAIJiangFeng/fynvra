@@ -1,8 +1,9 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
+import type { SessionModelRef } from '@shared/types/chat';
 import { Crown, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,32 +18,47 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
-import { useSessionsStore } from '@/stores/sessions';
+import { selectModelProviders, useSessionsStore } from '@/stores/sessions';
+import { chooseModel, defaultModelChoice, findModel } from '@/stores/sessions/modelChoice';
+import { ModelSelect, ThinkingLevelPicker } from './ModelPicker';
 import { pickRole } from './roleChoices';
 import { isOrchestratorRole, useRoles } from './roles';
 
 /**
- * 「新建会话」：弹层里从角色库（设置 → 角色，含自定义角色）选角色，在当前工作区创建并选中。
- * 每次打开默认选 orchestrator 并重读角色库。`compact` 用于侧栏的小图标按钮。
+ * 「新建会话」：弹层里从角色库（设置 → 角色，含自定义角色）选角色，再选模型与思考档位，在当前工作区创建并选中。
+ * 每次打开默认选 orchestrator 并重读角色库与可选模型。模型默认依次取角色的模型、该工作区上一次用过的、
+ * 列表第一个；档位只列这个模型自己的。`compact` 用于侧栏的小图标按钮。
  */
 export function NewSessionButton({ compact = false }: { compact?: boolean }) {
+  const id = useId();
   const roles = useRoles();
   // 角色库是空的又读取失败时，列表里只有退回的内置角色：告诉用户原因
   const loadError = useRolesStore((state) => (state.roles.length === 0 ? state.error : null));
   const refreshRoles = useRolesStore((state) => state.refresh);
   const createSession = useSessionsStore((state) => state.createSession);
+  const loadModelOptions = useSessionsStore((state) => state.loadModelOptions);
+  const providers = useSessionsStore(selectModelProviders);
+  const optionsLoaded = useSessionsStore((state) => state.modelProviders !== null);
+  const optionsError = useSessionsStore((state) => state.modelOptionsError);
+  const lastUsed = useSessionsStore((state) =>
+    state.workspaceId ? state.lastModelByWorkspace[state.workspaceId] : undefined
+  );
   const [open, setOpen] = useState(false);
   const [roleId, setRoleId] = useState<string>(ORCHESTRATOR_ROLE_ID);
+  // 用户自己选过模型或档位之后就不再跟着角色变
+  const [picked, setPicked] = useState<SessionModelRef | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selected = pickRole(roles, roleId);
+  const model = picked ?? defaultModelChoice({ providers, roleModel: selected?.model, lastUsed });
+  const found = findModel(providers, model);
 
   const submit = async () => {
     if (!selected) return;
     setCreating(true);
     setError(null);
-    const result = await createSession(selected.id);
+    const result = await createSession(selected.id, model);
     setCreating(false);
     if (result.ok) setOpen(false);
     else setError(result.error);
@@ -56,7 +72,9 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
         if (!next) return;
         setError(null);
         setRoleId(ORCHESTRATOR_ROLE_ID);
+        setPicked(null);
         void refreshRoles();
+        void loadModelOptions();
       }}
     >
       <DialogTrigger
@@ -75,7 +93,7 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>
           <DialogDescription>
-            选择会话使用的角色。主 agent 负责拆任务、派 worker、验收合并，自己不改代码。
+            选择会话使用的角色与模型。主 agent 负责拆任务、派 worker、验收合并，自己不改代码。
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-2">
@@ -99,6 +117,39 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
             <p className="text-muted-foreground text-xs">
               角色列表读取失败，先显示内置角色（{loadError}）
             </p>
+          )}
+          <div className="grid gap-1.5 pt-1">
+            <label htmlFor={`${id}-model`} className="font-medium text-sm">
+              模型
+            </label>
+            <ModelSelect
+              id={`${id}-model`}
+              providers={providers}
+              value={model}
+              onChange={(next) => setPicked(chooseModel(next, model?.thinking))}
+            />
+            {optionsError ? (
+              <p className="text-muted-foreground text-xs">
+                读取可选模型失败（{optionsError}），创建时由默认模型服务决定
+              </p>
+            ) : (
+              optionsLoaded &&
+              providers.length === 0 && (
+                <p className="text-muted-foreground text-xs">
+                  还没有可用的模型服务：在「设置 → 模型服务」里启用一个填写了 API Key 的服务
+                </p>
+              )
+            )}
+          </div>
+          {found && found.model.thinkingLevels.length > 0 && (
+            <div className="grid gap-1.5">
+              <span className="font-medium text-sm">思考档位</span>
+              <ThinkingLevelPicker
+                levels={found.model.thinkingLevels}
+                value={model?.thinking}
+                onChange={(level) => setPicked(chooseModel(found, level))}
+              />
+            </div>
           )}
           {error && (
             <p role="alert" className="text-destructive text-sm">

@@ -1,8 +1,13 @@
 import { join } from 'node:path';
-import { isValidRoleId } from '@fynvra/core';
+import { isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { isApprovalDecision } from '@shared/types/agent';
-import type { ChatMessage, SessionSummary } from '@shared/types/chat';
+import type {
+  ChatMessage,
+  ModelOptions,
+  SessionModelRef,
+  SessionSummary,
+} from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
@@ -11,14 +16,18 @@ import {
   type CreateSessionInput,
   createAgentHost,
   type RespondApprovalInput,
+  type SetModelInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
+import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
+import { createLastModelStore } from '../services/sessions/lastModels';
 import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getMcpRegistry } from './mcp';
+import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
 import { getSkillRegistry } from './skills';
@@ -46,6 +55,9 @@ function createAppAgentHost(): AgentHostService {
     workspaces: getWorkspaceService(),
     roles: getRoleStore(),
     models: createModelResolver(),
+    // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
+    providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
+    lastModels: createLastModelStore(getSettingsFile()),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
       mcpServers: getMcpRegistry(),
@@ -98,6 +110,22 @@ export function registerSessionHandlers(host: () => AgentHostService = getAgentH
     const input = parseRespondApprovalInput(raw);
     return input ? guard(() => host().respondApproval(input)) : invalid('无效的审批结果');
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SET_MODEL,
+    (_event, raw: unknown): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const input = parseSetModelInput(raw);
+      return input ? guard(() => host().setModel(input)) : invalid('无效的模型参数');
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_MODEL_OPTIONS,
+    (_event, raw: unknown): Promise<IpcResult<ModelOptions>> => {
+      const input = parseModelOptionsInput(raw);
+      return input ? guard(() => host().modelOptions(input)) : invalid('无效的参数');
+    }
+  );
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */
@@ -108,9 +136,34 @@ export function parseCreateSessionInput(raw: unknown): CreateSessionInput | null
   const { roleId } = record;
   if (!workspaceId || !isValidRoleId(roleId)) return null;
   if (record.model === undefined) return { workspaceId, roleId };
-  const model = strictRecord(record.model, ['providerId', 'modelId']);
+  const model = parseModelRef(record.model);
+  return model ? { workspaceId, roleId, model } : null;
+}
+
+/** `{ sessionId, model: { providerId, modelId, thinking? } }`：只有设置里的 id 引用，不带地址或 key */
+export function parseSetModelInput(raw: unknown): SetModelInput | null {
+  const record = strictRecord(raw, ['sessionId', 'model']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const model = parseModelRef(record?.model);
+  return sessionId && model ? { sessionId, model } : null;
+}
+
+/** 无参或 `{ workspaceId? }` */
+export function parseModelOptionsInput(raw: unknown): { workspaceId?: string } | null {
+  if (raw === undefined) return {};
+  const record = strictRecord(raw, ['workspaceId']);
+  if (!record) return null;
+  if (record.workspaceId === undefined) return {};
+  const workspaceId = parseWorkspaceId(record.workspaceId);
+  return workspaceId ? { workspaceId } : null;
+}
+
+function parseModelRef(raw: unknown): SessionModelRef | null {
+  const model = strictRecord(raw, ['providerId', 'modelId', 'thinking']);
   if (!model || !isRef(model.providerId) || !isRef(model.modelId)) return null;
-  return { workspaceId, roleId, model: { providerId: model.providerId, modelId: model.modelId } };
+  const { providerId, modelId, thinking } = model;
+  if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
+  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
 }
 
 /** `{ sessionId, text }`：文本不能全是空白，长度有上限，原样保留（不 trim） */
@@ -147,7 +200,7 @@ function isRef(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '' && value.length <= MAX_REF_CHARS;
 }
 
-function invalid(error: string): Promise<IpcResult> {
+function invalid<T extends object = object>(error: string): Promise<IpcResult<T>> {
   return Promise.resolve({ ok: false, error });
 }
 

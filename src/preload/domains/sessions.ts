@@ -2,7 +2,9 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ChatMessage,
+  ModelOptions,
   SessionEventEnvelope,
+  SessionModelRef,
   SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
@@ -14,7 +16,7 @@ export interface SessionsApi {
   create(input: {
     workspaceId: string;
     roleId: string;
-    model?: { providerId: string; modelId: string };
+    model?: SessionModelRef;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
   prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
@@ -26,6 +28,13 @@ export interface SessionsApi {
     requestId: string;
     decision: ApprovalDecision;
   }): Promise<IpcResult>;
+  /** 换模型 / 思考档位（只传设置里的 id 引用）：会话运行中返回错误；下一次 prompt 起生效 */
+  setModel(input: {
+    sessionId: string;
+    model: SessionModelRef;
+  }): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 可选的服务与模型（每个模型带它的思考档位）；传 workspaceId 时带该工作区上一次用过的模型 */
+  modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
   onEvent(cb: (envelope: SessionEventEnvelope) => void): Unsubscribe;
   onSessionsChanged(cb: (workspaceId: string) => void): Unsubscribe;
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
@@ -51,6 +60,8 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     abort: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ABORT, sessionId),
     history: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_HISTORY, sessionId),
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),
+    setModel: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, input),
+    modelOptions: (input = {}) => ipc.invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, input),
     onEvent: (cb) =>
       ipc.subscribe(IPC_CHANNELS.SESSIONS_EVENT, (envelope) =>
         cb(envelope as SessionEventEnvelope)

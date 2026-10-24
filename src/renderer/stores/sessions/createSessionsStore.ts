@@ -2,7 +2,9 @@ import { errorMessage } from '@shared/guards';
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ModelProviderOption,
   SessionEventEnvelope,
+  SessionModelRef,
   SessionSummary,
 } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
@@ -20,7 +22,7 @@ import {
   syncSessionStatuses,
   withdrawOptimisticMessage,
 } from './reducer';
-import { isBusy, statusOf } from './selectors';
+import { findSession, isBusy, statusOf } from './selectors';
 
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
@@ -34,14 +36,25 @@ export interface SessionsState extends ChatProjection {
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
   listErrors: Record<string, string>;
-  /** 聊天区要提示的操作失败（读记录、停止、审批答复），用户关掉后清除 */
+  /** 聊天区要提示的操作失败（读记录、停止、审批答复、换模型），用户关掉后清除 */
   notice: string | null;
+  /** sessions:model-options 的服务与模型（每个模型带它可选的思考档位）；null 表示还没读到 */
+  modelProviders: ModelProviderOption[] | null;
+  /** 最近一次读可选模型失败的原因 */
+  modelOptionsError: string | null;
+  /** 各工作区上一次用过的模型（新建会话弹层的默认值之一） */
+  lastModelByWorkspace: Record<string, SessionModelRef>;
+  /** 打开着模型选择器的会话：输入框胶囊与状态栏打开的是同一个 */
+  modelPickerFor: string | null;
 
   /** 切换工作区：拉它的会话列表；选中的会话不属于它时取消选中 */
   setWorkspace(workspaceId: string | null): void;
   loadSessions(workspaceId: string): Promise<void>;
-  /** 在当前工作区用指定角色新建会话并选中它 */
-  createSession(roleId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 在当前工作区用指定角色（和选的模型）新建会话并选中它 */
+  createSession(
+    roleId: string,
+    model?: SessionModelRef
+  ): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 选中会话并拉 history（权威投影）替换本地正文 */
   selectSession(sessionId: string | null): Promise<void>;
   /** 向选中的会话发送；空文本、会话运行中或上一条还在途时返回 false */
@@ -50,6 +63,18 @@ export interface SessionsState extends ChatProjection {
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
   dismissNotice(): void;
+  /** 读可选模型；传工作区时一并读它上一次用过的模型（缺省为当前工作区） */
+  loadModelOptions(workspaceId?: string | null): Promise<void>;
+  /**
+   * 换会话的模型 / 思考档位：先在列表里换上（乐观更新），Main 回包后以它的记录为准；
+   * 失败时换回原来的模型、提示原因并重拉列表。会话运行中或消息在途时直接拒绝。
+   */
+  setSessionModel(
+    sessionId: string,
+    model: SessionModelRef
+  ): Promise<IpcResult<{ session: SessionSummary }>>;
+  openModelPicker(sessionId: string): void;
+  closeModelPicker(): void;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -63,6 +88,7 @@ export interface SessionsStoreOptions {
 }
 
 const EVENT_BATCH_MS = 16;
+const SWITCH_WHILE_BUSY = '会话正在运行，等本轮结束再切换模型';
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -78,6 +104,29 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   if (!(key in record)) return record;
   const { [key]: _omitted, ...rest } = record;
   return rest;
+}
+
+/** 把某个会话（按 id）换成 `update` 的结果；其他会话与列表顺序不变 */
+function mapSession(
+  lists: Record<string, SessionSummary[]>,
+  sessionId: string,
+  update: (session: SessionSummary) => SessionSummary
+): Record<string, SessionSummary[]> {
+  let changed = false;
+  const next: Record<string, SessionSummary[]> = {};
+  for (const [workspaceId, sessions] of Object.entries(lists)) {
+    next[workspaceId] = sessions.map((session) => {
+      if (session.id !== sessionId) return session;
+      changed = true;
+      return update(session);
+    });
+  }
+  return changed ? next : lists;
+}
+
+function withModel(session: SessionSummary, model: SessionModelRef | undefined): SessionSummary {
+  const { model: _previous, ...rest } = session;
+  return model ? { ...rest, model } : rest;
 }
 
 /** 去掉开头的空行与末尾空白，保留首行缩进（可能是代码） */
@@ -104,6 +153,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   /** 每个工作区 / 会话最近一次请求的序号：回包晚于更新的请求时丢弃 */
   const listRequests = new Map<string, number>();
   const historyRequests = new Map<string, number>();
+  /** 在途的换模型：列表刷新时保留乐观的模型；只认每个会话最近一次请求的回包 */
+  const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
+  let modelOptionsRequest = 0;
   let requestSeq = 0;
 
   return create<SessionsState>()((set, get) => {
@@ -136,6 +188,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       loadingHistory: {},
       listErrors: {},
       notice: null,
+      modelProviders: null,
+      modelOptionsError: null,
+      lastModelByWorkspace: {},
+      modelPickerFor: null,
 
       setWorkspace(workspaceId) {
         const state = get();
@@ -158,7 +214,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           set((state) => ({ listErrors: { ...state.listErrors, [workspaceId]: result.error } }));
           return;
         }
-        const sessions = [...result.sessions].sort(byRecent);
+        const sessions = [...result.sessions].sort(byRecent).map((session) => {
+          const pending = modelSwitches.get(session.id);
+          return pending ? withModel(session, pending.model) : session;
+        });
         set((state) => {
           const active = state.activeSessionId;
           const removed =
@@ -176,10 +235,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         });
       },
 
-      async createSession(roleId) {
+      async createSession(roleId, model) {
         const workspaceId = get().workspaceId;
         if (!workspaceId) return { ok: false, error: '请先选择一个工作区' };
-        const result = await safely(() => api.create({ workspaceId, roleId }));
+        const result = await safely(() =>
+          api.create({ workspaceId, roleId, ...(model ? { model } : {}) })
+        );
         if (!result.ok) return result;
         const { session } = result;
         set((state) => {
@@ -189,6 +250,15 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               ...state.sessionsByWorkspace,
               [session.workspaceId]: [session, ...list.filter((item) => item.id !== session.id)],
             },
+            // Main 也记下了：下次新建会话默认用它
+            ...(session.model
+              ? {
+                  lastModelByWorkspace: {
+                    ...state.lastModelByWorkspace,
+                    [session.workspaceId]: session.model,
+                  },
+                }
+              : {}),
           };
         });
         // 比创建更早发出的列表请求可能还没回包：再拉一次，旧回包会被丢弃
@@ -276,6 +346,81 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       dismissNotice() {
         set({ notice: null });
+      },
+
+      async loadModelOptions(workspaceId = get().workspaceId) {
+        const request = ++modelOptionsRequest;
+        const result = await safely(() => api.modelOptions(workspaceId ? { workspaceId } : {}));
+        if (modelOptionsRequest !== request) return;
+        if (!result.ok) {
+          set({ modelOptionsError: result.error });
+          return;
+        }
+        set((state) => {
+          let lastModelByWorkspace = state.lastModelByWorkspace;
+          if (workspaceId) {
+            lastModelByWorkspace = result.lastUsed
+              ? { ...lastModelByWorkspace, [workspaceId]: result.lastUsed }
+              : omitKey(lastModelByWorkspace, workspaceId);
+          }
+          return {
+            modelProviders: result.providers,
+            modelOptionsError: null,
+            lastModelByWorkspace,
+          };
+        });
+      },
+
+      async setSessionModel(sessionId, model) {
+        const session = findSession(get(), sessionId);
+        if (!session) return { ok: false, error: '会话不存在' };
+        if (sending.has(sessionId) || isBusy(statusOf(get(), sessionId))) {
+          return { ok: false, error: SWITCH_WHILE_BUSY };
+        }
+        const request = ++requestSeq;
+        const previous = session.model;
+        modelSwitches.set(sessionId, { request, model });
+        set((state) => ({
+          sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
+            withModel(item, model)
+          ),
+        }));
+        const result = await safely(() => api.setModel({ sessionId, model }));
+        // 用户连着点了几次：只认最近一次的回包，前面的结果由它覆盖
+        if (modelSwitches.get(sessionId)?.request !== request) return result;
+        modelSwitches.delete(sessionId);
+        if (result.ok) {
+          const updated = result.session;
+          set((state) => ({
+            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, () => updated),
+            ...(updated.model && updated.dispatchId === undefined
+              ? {
+                  lastModelByWorkspace: {
+                    ...state.lastModelByWorkspace,
+                    [updated.workspaceId]: updated.model,
+                  },
+                }
+              : {}),
+          }));
+          return result;
+        }
+        set((state) => ({
+          sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
+            withModel(item, previous)
+          ),
+          notice: `切换模型失败：${result.error}`,
+        }));
+        // 换回的是发起前看到的模型；以 Main 的记录为准再拉一次
+        void get().loadSessions(session.workspaceId);
+        return result;
+      },
+
+      openModelPicker(sessionId) {
+        set({ modelPickerFor: sessionId });
+      },
+
+      closeModelPicker() {
+        set({ modelPickerFor: null });
       },
 
       receiveEvent(envelope) {
