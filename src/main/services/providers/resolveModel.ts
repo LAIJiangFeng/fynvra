@@ -3,34 +3,11 @@ import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
 import { getProviderStore } from '../../ipc/providers';
+import type { ModelRef, ModelResolver } from '../agentHost/types';
 import type { ProviderStore, StoredProvider } from './providerStore';
 
-// §9.5 的 ModelResolver / ResolvedModelSpec 归 agent-host（src/main/services/agentHost/types.ts），
-// 本卡不能动 agentHost/**，这里按同一形状声明，结构类型可以直接赋给 agent-host 的接口。
-
-/** 跨进程可序列化的模型描述；worker 进程内再换成 agent-runtime 的 ResolvedModel。 */
-export interface ResolvedModelSpec {
-  /** 运行时 provider 键（见 runtimeProviderId），不是设置里的服务 id */
-  providerId: string;
-  api: string;
-  baseUrl?: string;
-  apiKey?: string;
-  modelId: string;
-  thinking?: ThinkingLevel;
-}
-
-/** 角色或会话的模型引用；`thinking` 可选，Role.model 可以直接传进来。 */
-export interface ModelRef {
-  providerId: string;
-  modelId: string;
-  thinking?: ThinkingLevel;
-}
-
-export interface ModelResolver {
-  resolve(
-    ref: ModelRef | undefined
-  ): Promise<{ ok: true; model: ResolvedModelSpec } | { ok: false; error: string }>;
-}
+/** Role.model 也可以直接当引用传入：带着的 thinking 写进 spec。 */
+type RoleModelRef = ModelRef & { thinking?: ThinkingLevel };
 
 type ResolveResult = Awaited<ReturnType<ModelResolver['resolve']>>;
 
@@ -47,10 +24,11 @@ export function runtimeProviderId(baseUrl: string, apiKey: string): string {
 /**
  * §9.5 ModelResolver：从 providers.json 解析模型引用。每次 resolve 都重新读注册表（内存缓存），
  * 设置页的修改对之后新建的会话立即生效。不指定模型时取第一个启用、有 key、有模型的服务的第一个模型。
+ * 结果里的 `ref` 是解析到的服务 id 与模型 id，`model.providerId` 是运行时 provider 键。
  */
 export function createModelResolver(source?: Pick<ProviderStore, 'list'>): ModelResolver {
   return {
-    async resolve(ref) {
+    async resolve(ref: RoleModelRef | undefined) {
       let providers: StoredProvider[];
       try {
         providers = await (source ?? getProviderStore()).list();
@@ -62,7 +40,7 @@ export function createModelResolver(source?: Pick<ProviderStore, 'list'>): Model
   };
 }
 
-function resolveRef(providers: StoredProvider[], ref: ModelRef): ResolveResult {
+function resolveRef(providers: StoredProvider[], ref: RoleModelRef): ResolveResult {
   const provider = providers.find((candidate) => candidate.id === ref.providerId);
   if (!provider) {
     return { ok: false, error: `模型服务 ${ref.providerId} 不存在，请在「设置 → 模型服务」中添加` };
@@ -99,5 +77,6 @@ function toSpec(provider: StoredProvider, modelId: string, thinking?: unknown): 
       modelId,
       ...(isThinkingLevel(thinking) ? { thinking } : {}),
     },
+    ref: { providerId: provider.id, modelId },
   };
 }

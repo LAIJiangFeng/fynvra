@@ -7,10 +7,11 @@ import type { AgentCommand } from '@shared/types/agent';
 import type { SessionEventEnvelope } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { StoredProvider } from '../providers/providerStore';
+import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
-import { envModelResolver } from './envModelResolver';
 import type { WorkerProcess } from './workerClient';
 
 class FakeProcess implements WorkerProcess {
@@ -46,6 +47,23 @@ const tester: Role = {
   approvalMode: 'auto-edits',
 };
 
+const anthropic: StoredProvider = {
+  id: 'anthropic',
+  name: 'Anthropic',
+  api: 'anthropic-messages',
+  enabled: true,
+  models: [
+    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+  ],
+  apiKey: 'sk-test-secret',
+};
+
+/** 生产用的解析器，读内存里的 providers：会话记的是设置里的服务 id，spec 带的是运行时 provider 键 */
+const modelsOf = (providers: StoredProvider[]) =>
+  createModelResolver({ list: async () => structuredClone(providers) });
+const RUNTIME_PROVIDER = runtimeProviderId('https://api.anthropic.com', 'sk-test-secret');
+
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -79,7 +97,7 @@ function setup(overrides: Partial<AgentHostDeps> = {}) {
       get: async (id) => getBuiltinRole(id) ?? (id === tester.id ? tester : undefined),
       list: async () => [...BUILTIN_ROLES, tester],
     },
-    models: envModelResolver({ FYNVRA_ANTHROPIC_API_KEY: 'sk-test-secret' }),
+    models: modelsOf([anthropic]),
     broadcast: (...args) => broadcasts.push(args),
     now: () => 1_000,
     newId: () => `session-${++ids}`,
@@ -130,8 +148,29 @@ describe('createAgentHost sessions', () => {
     expect(env.sent()).toEqual([]);
   });
 
+  it('keeps the settings model reference on the session and resolves it again on spawn', async () => {
+    const env = setup();
+    const created = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'worker',
+      model: { providerId: 'anthropic', modelId: 'claude-haiku-5-5' },
+    });
+    if (!created.ok) throw new Error(created.error);
+    // 设置里的服务 id，不是运行时 provider 键：Renderer 用它对照模型服务，spawn 时再按它解析
+    expect(created.session.model).toEqual({ providerId: 'anthropic', modelId: 'claude-haiku-5-5' });
+    expect(await env.host.prompt(created.session.id, 'hi')).toEqual({ ok: true });
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec.model).toEqual({
+      providerId: RUNTIME_PROVIDER,
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-secret',
+      modelId: 'claude-haiku-5-5',
+    });
+  });
+
   it('refuses unknown workspaces and roles, and models it cannot resolve', async () => {
-    const env = setup({ models: envModelResolver({}) });
+    const env = setup({ models: modelsOf([]) });
     expect(await env.host.create({ workspaceId: 'nope', roleId: 'worker' })).toMatchObject({
       ok: false,
     });
@@ -141,7 +180,7 @@ describe('createAgentHost sessions', () => {
     });
     expect(await env.host.create({ workspaceId: 'ws-1', roleId: 'worker' })).toMatchObject({
       ok: false,
-      error: expect.stringContaining('FYNVRA_ANTHROPIC_API_KEY'),
+      error: expect.stringContaining('模型服务'),
     });
     expect(env.host.list('ws-1')).toEqual([]);
   });
@@ -161,8 +200,9 @@ describe('createAgentHost sessions', () => {
         cwd: env.workspace.repoPath,
         sessionFile: sessionFilePath(join(env.dir, 'agent'), session.id),
         model: {
-          providerId: 'anthropic',
+          providerId: RUNTIME_PROVIDER,
           api: 'anthropic-messages',
+          baseUrl: 'https://api.anthropic.com',
           apiKey: 'sk-test-secret',
           modelId: 'claude-sonnet-5-5',
         },
@@ -534,6 +574,7 @@ describe('createAgentHost launcher', () => {
       worktreeId: 'wt_1',
       cwd: join(env.dir, 'worktrees', 'ws-1', 'add-tests'),
       status: 'running',
+      model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5' },
     });
     const spawn = env.sent('spawn-session')[0];
     expect(spawn?.type === 'spawn-session' && spawn.spec.worker).toBe(true);

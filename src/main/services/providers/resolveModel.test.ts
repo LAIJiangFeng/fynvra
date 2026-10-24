@@ -1,7 +1,8 @@
 import type { Role, ThinkingLevel } from '@fynvra/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { ModelResolver } from '../agentHost/types';
 import type { StoredProvider } from './providerStore';
-import { createModelResolver, type ModelResolver, runtimeProviderId } from './resolveModel';
+import { createModelResolver, runtimeProviderId } from './resolveModel';
 
 // ARCHITECTURE §9.5 原文（接口归 agent-host），用来钉住结构兼容：createModelResolver() 可直接注入
 interface Spec95ResolvedModelSpec {
@@ -13,9 +14,14 @@ interface Spec95ResolvedModelSpec {
   thinking?: ThinkingLevel;
 }
 interface Spec95ModelResolver {
-  resolve(
-    ref: { providerId: string; modelId: string } | undefined
-  ): Promise<{ ok: true; model: Spec95ResolvedModelSpec } | { ok: false; error: string }>;
+  resolve(ref: { providerId: string; modelId: string } | undefined): Promise<
+    | {
+        ok: true;
+        model: Spec95ResolvedModelSpec;
+        ref: { providerId: string; modelId: string };
+      }
+    | { ok: false; error: string }
+  >;
 }
 
 const anthropic: StoredProvider = {
@@ -40,11 +46,12 @@ describe('createModelResolver', () => {
 
   it('按 providerId / modelId 解析出可跨进程传递的模型描述', async () => {
     const resolver = createModelResolver(source([anthropic]));
-    const result = await resolver.resolve({
+    const roleModel: NonNullable<Role['model']> = {
       providerId: 'anthropic',
       modelId: 'claude-opus-5-5',
       thinking: 'high',
-    });
+    };
+    const result = await resolver.resolve(roleModel);
     expect(result).toEqual({
       ok: true,
       model: {
@@ -55,6 +62,7 @@ describe('createModelResolver', () => {
         modelId: 'claude-opus-5-5',
         thinking: 'high',
       },
+      ref: { providerId: 'anthropic', modelId: 'claude-opus-5-5' },
     });
   });
 
@@ -119,9 +127,11 @@ describe('createModelResolver', () => {
       { ...anthropic, id: 'empty', models: [] },
       { ...anthropic, id: 'usable' },
     ];
+    // ref 写明选中的是哪个服务：会话记下它，之后 spawn 时按同一个服务解析
     expect(await createModelResolver(source(providers)).resolve(undefined)).toMatchObject({
       ok: true,
       model: { modelId: 'claude-opus-5-5', apiKey: 'sk-ant-secret' },
+      ref: { providerId: 'usable', modelId: 'claude-opus-5-5' },
     });
     expect(
       await createModelResolver(source(providers.slice(0, 3))).resolve(undefined)

@@ -28,7 +28,7 @@ import { readHistory, sessionFilePath } from '../sessions/history';
 import { type SessionStore, type StoredSession, toSummary } from '../sessions/sessionStore';
 import { invokeOrchestrationHost, invokeWorkerHost } from './hostDispatch';
 import { Transcript } from './transcript';
-import type { AgentHost, ModelResolver, WorkerSessionLauncher } from './types';
+import type { AgentHost, ModelRef, ModelResolver, WorkerSessionLauncher } from './types';
 import { createWorkerClient, type WorkerClientOptions, type WorkerProcess } from './workerClient';
 
 export interface RoleSource {
@@ -480,7 +480,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: { providerId: resolved.model.providerId, modelId: resolved.model.modelId },
+        model: modelRefFrom(resolved.ref),
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -548,7 +548,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: { providerId: resolved.model.providerId, modelId: resolved.model.modelId },
+        model: modelRefFrom(resolved.ref),
         autoTitle: true,
       };
       deps.store.put(stored);
@@ -603,10 +603,13 @@ function defaultLog(level: LogLevel, message: string): void {
   else console.log(message);
 }
 
-function modelRefOf(role: Role): { providerId: string; modelId: string } | undefined {
-  return role.model
-    ? { providerId: role.model.providerId, modelId: role.model.modelId }
-    : undefined;
+function modelRefOf(role: Role): ModelRef | undefined {
+  return role.model ? modelRefFrom(role.model) : undefined;
+}
+
+/** 会话记录只存设置里的服务 id 与模型 id（不带运行时 provider 键、thinking 等） */
+function modelRefFrom({ providerId, modelId }: ModelRef): ModelRef {
+  return { providerId, modelId };
 }
 
 function roleOptions(roles: readonly Role[]): AgentRoleOption[] {

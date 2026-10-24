@@ -17,9 +17,9 @@ import {
   SessionSupervisor,
   type SupervisedSession,
 } from '../../../agent/supervisor';
+import { createModelResolver } from '../providers/resolveModel';
 import { createSessionStore } from '../sessions/sessionStore';
 import { createAgentHost } from './agentHost';
-import { envModelResolver } from './envModelResolver';
 import type { WorkerProcess } from './workerClient';
 
 /**
@@ -115,7 +115,18 @@ function setup(openSession: OpenSession) {
     store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
     workspaces: { get: (id) => (id === workspace.id ? workspace : undefined) },
     roles: { get: async (id) => getBuiltinRole(id), list: async () => [...BUILTIN_ROLES] },
-    models: envModelResolver({ FYNVRA_ANTHROPIC_API_KEY: 'sk-test' }),
+    models: createModelResolver({
+      list: async () => [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          api: 'anthropic-messages',
+          enabled: true,
+          models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }],
+          apiKey: 'sk-test',
+        },
+      ],
+    }),
     broadcast: (...args) => broadcasts.push(args),
     log: () => {},
   });

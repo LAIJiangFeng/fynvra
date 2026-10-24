@@ -13,8 +13,8 @@ import {
   type RespondApprovalInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
-import { envModelResolver } from '../services/agentHost/envModelResolver';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
+import { createModelResolver } from '../services/providers/resolveModel';
 import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getMcpRegistry } from './mcp';
@@ -43,8 +43,7 @@ function createAppAgentHost(): AgentHostService {
     store: createSessionStore({ filePath: join(userData, 'sessions.json') }),
     workspaces: getWorkspaceService(),
     roles: getRoleStore(),
-    // 临时：settings-ui 合并后换成 providers/resolveModel.ts 的 createModelResolver()
-    models: envModelResolver(),
+    models: createModelResolver(),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
       mcpServers: getMcpRegistry(),
