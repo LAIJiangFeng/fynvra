@@ -1,3 +1,4 @@
+import { registerMcpHandlers } from './mcp';
 import { registerProviderHandlers } from './providers';
 import { registerRoleHandlers } from './roles';
 import { registerSettingsHandlers } from './settings';
@@ -13,4 +14,5 @@ export function registerIpcHandlers(): void {
   registerProviderHandlers();
   registerRoleHandlers();
   registerSkillHandlers();
+  registerMcpHandlers();
 }
