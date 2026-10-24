@@ -18,7 +18,9 @@ ARCHITECTURE §6 / §9.4 / §9.5 在 Main 里的实现：`OrchestrationHost`（�
 | `testing.ts` | 测试用假实现（脚本化 git exec、假 launcher、内存角色仓库），只被 `*.test.ts` 引用 |
 
 持久化：`userData/orchestration/<workspaceId>.json`（`InMemoryOrchestrationStore` 快照，消息也在里面）；
-worktree 建在 `userData/worktrees/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色读 `userData/roles/`。
+worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色读 `userData/roles/`。`<根>` 由 `worktreesRoot.ts`
+在每次建 worktree 时现算：默认是仓库同级的 `<仓库目录名>-worktrees`（与仓库同盘），配置了 `preferences.worktreesRoot`
+（设置 → 通用）时是 `<根目录>/<仓库目录名>`，默认位置用不了时退回 `userData/worktrees`。已有 worktree 的路径记在快照里，改设置不迁移。
 
 ## 与 agent host 的接线
 

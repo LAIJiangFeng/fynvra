@@ -258,7 +258,9 @@ export interface WorkerSessionLauncher {
 export function createOrchestrationHost(deps: {
   workspace: Workspace; coordinatorSessionId: string; coordinatorBranch: string; store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore;
   runChecks: (cwd: string, command: string, signal?: AbortSignal) => Promise<{ exitCode: number; output: string; durationMs: number }>;
-  worktreesRoot: string;              // worktree 托管根目录 userData/worktrees（store 里推导不出来）
+  resolveWorktreesRoot: (workspace: Workspace) => Promise<string>; // worktree 托管根目录，每次建 worktree 时现算（store 里推导不出来）：
+                                      // preferences.worktreesRoot 配置时为 <根目录>/<仓库目录名>，否则仓库同级的 <仓库目录名>-worktrees，
+                                      // 默认位置不可写等情况退回 userData/worktrees（src/main/services/orchestration/worktreesRoot.ts）
   exec: ExecFn;                       // 合并前用 symbolic-ref 确认仓库仍检出在 coordinatorBranch（merge 合进当前检出的分支）；review 取 --stat
   checkPolicy?: CheckCommandPolicy;   // run_checks 白名单，默认 DEFAULT_CHECK_COMMAND_POLICY
   now?: () => number;                 // 时钟，默认 Date.now
