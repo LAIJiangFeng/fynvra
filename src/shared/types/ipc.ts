@@ -7,6 +7,10 @@ export const IPC_CHANNELS = {
   SETTINGS_UPDATE: 'settings:update',
   /** Main → Renderer：偏好已变更，各窗口重读 */
   SETTINGS_CHANGED: 'settings:changed',
+  /** 无参时 Main 弹目录选择框、校验后写入 worktreesRoot；`{ reset: true }` 恢复默认。Renderer 不传路径 */
+  SETTINGS_PICK_WORKTREES_ROOT: 'settings:pick-worktrees-root',
+  /** 生效的 worktree 根目录与各工作区登记的 worktree 占用 */
+  SETTINGS_WORKTREES_ROOT_INFO: 'settings:worktrees-root-info',
 
   WORKSPACES_LIST: 'workspaces:list',
   /** Main 弹目录选择框并校验；Renderer 不传路径 */
