@@ -41,9 +41,21 @@ describe('preload bridge', () => {
     expect(members).not.toContain('send');
   });
 
-  it('方法映射到对应通道；挂入工作区不传参数，移除只传 id', async () => {
+  it('方法映射到对应通道；挂入工作区、选 worktree 根目录都不传路径，移除只传 id', async () => {
     await api.settings.update({ theme: 'dark' });
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_UPDATE, { theme: 'dark' });
+    await api.settings.pickWorktreesRoot();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT);
+    await api.settings.pickWorktreesRoot({ reset: true });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT, {
+      reset: true,
+    });
+    await api.settings.worktreesRootInfo();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO);
+    await api.settings.worktreesRootInfo({ usage: false });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO, {
+      usage: false,
+    });
     await api.workspaces.add();
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_ADD);
     await api.workspaces.remove('ws-1');

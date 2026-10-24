@@ -21,6 +21,14 @@ const api: FynvraApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     update: (patch) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),
+    pickWorktreesRoot: (input) =>
+      input
+        ? ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT, input)
+        : ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT),
+    worktreesRootInfo: (input) =>
+      input
+        ? ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO, input)
+        : ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO),
     onChanged: (callback) => subscribe(IPC_CHANNELS.SETTINGS_CHANGED, () => callback()),
   },
   workspaces: {

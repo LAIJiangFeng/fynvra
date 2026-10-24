@@ -1,5 +1,10 @@
 import type { IpcResult } from '@shared/types/ipc';
-import type { Preferences, PreferencesResult } from '@shared/types/settings';
+import type {
+  PickWorktreesRootResult,
+  Preferences,
+  PreferencesResult,
+  WorktreesRootInfoResult,
+} from '@shared/types/settings';
 import type { WorkspaceAddResult, WorkspaceListResult } from '@shared/types/workspace';
 import type { OrchestrationApi } from './domains/orchestration';
 
@@ -15,6 +20,10 @@ export interface SettingsApi {
   get(): Promise<PreferencesResult>;
   /** 合并更新界面偏好；Main 逐字段校验后防抖写入 settings.json */
   update(patch: Partial<Preferences>): Promise<PreferencesResult>;
+  /** 无参：Main 弹目录选择框、校验后写入 worktree 根目录；`{ reset: true }`：恢复默认。不传路径 */
+  pickWorktreesRoot(input?: { reset: true }): Promise<PickWorktreesRootResult>;
+  /** 生效的 worktree 根目录与各工作区占用；`{ usage: false }` 只取路径，不统计目录大小 */
+  worktreesRootInfo(input?: { usage: boolean }): Promise<WorktreesRootInfoResult>;
   /** 偏好被（任一窗口）修改后触发 */
   onChanged(callback: () => void): Unsubscribe;
 }
