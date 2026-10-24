@@ -82,4 +82,50 @@ describe('createPiSessionFactory approval channel', () => {
     );
     expect(existsSync(join(cwd, 'gated.txt'))).toBe(false);
   });
+
+  it('switches the approval mode of the live session: full lets the write through', async () => {
+    const cwd = join(tmp, 'repo');
+    const request = vi.fn<ApprovalRequestFn>(async () => 'deny');
+    const open = createPiSessionFactory({
+      agentDir: join(tmp, 'agent'),
+      resolveModel: async () => ({ runtime, model: faux.getModel() }),
+    });
+    const session = await open({
+      identity: { sessionId: 's2', generation: 1 },
+      spec: {
+        role: {
+          id: 'careful',
+          name: 'Careful',
+          skillIds: [],
+          mcpServerIds: [],
+          tools: 'all',
+          approvalMode: 'supervised',
+        },
+        cwd,
+        sessionFile: join(tmp, 'agent', 'sessions', 's2.jsonl'),
+        model: { providerId: 'fynvra-faux', api: faux.api, modelId: 'faux-model' },
+        skills: [],
+        mcpServers: [],
+        worker: false,
+        roles: [],
+      },
+      host: null,
+      workerHost: null,
+      approval: { request },
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('write', { path: 'allowed.txt', content: 'x' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('ok'),
+    ]);
+    try {
+      session.setApprovalMode('full');
+      await session.prompt('Write the file.');
+    } finally {
+      await session.dispose();
+    }
+    expect(request).not.toHaveBeenCalled();
+    expect(existsSync(join(cwd, 'allowed.txt'))).toBe(true);
+  });
 });

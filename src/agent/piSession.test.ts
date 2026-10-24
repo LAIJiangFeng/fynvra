@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ResolvedModel } from '@fynvra/agent-runtime';
+import type {
+  ApprovalGate,
+  ApprovalPolicyHooks,
+  ApprovalRequestFn,
+  ResolvedModel,
+} from '@fynvra/agent-runtime';
 import type { SpawnSessionSpec } from '@shared/types/agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPiSessionFactory, toMcpServerConfig } from './piSession';
@@ -166,6 +171,70 @@ describe('createPiSessionFactory model switch', () => {
     resolveModel.mockRejectedValueOnce(new Error('no base URL'));
     await expect(session.setModel(modelB)).rejects.toThrow('no base URL');
     expect(piSession.setModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('createPiSessionFactory approval mode switch', () => {
+  const spec = (dir: string): SpawnSessionSpec => ({
+    role: {
+      id: 'worker',
+      name: 'Worker',
+      skillIds: [],
+      mcpServerIds: [],
+      tools: 'all',
+      approvalMode: 'auto-edits',
+    },
+    cwd: dir,
+    sessionFile: join(dir, 'agent', 'sessions', 'session-1.jsonl'),
+    model: { providerId: 'fynvra-test', api: 'anthropic-messages', modelId: 'claude-sonnet-5-5' },
+    skills: [],
+    mcpServers: [],
+    worker: false,
+    roles: [],
+  });
+
+  async function openWith(approval: ApprovalPolicyHooks | undefined) {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-approval-mode-'));
+    dirs.push(dir);
+    const gate = { setMode: vi.fn() };
+    // 与真实的 createRoleSession 一样：把审批通道交给审批门，审批门建好后经 onGate 交回宿主
+    mocks.createRoleSession.mockImplementation(
+      async (options: { approval?: ApprovalPolicyHooks }) => {
+        options.approval?.onGate?.(gate as unknown as ApprovalGate);
+        return { session: {}, warnings: [], dispose: vi.fn() };
+      }
+    );
+    const open = createPiSessionFactory({
+      agentDir: join(dir, 'agent'),
+      resolveModel: async () => ({}) as ResolvedModel,
+    });
+    const session = await open({
+      identity: { sessionId: 'session-1', generation: 1 },
+      spec: spec(dir),
+      host: null,
+      workerHost: null,
+      ...(approval ? { approval } : {}),
+    });
+    return { session, gate };
+  }
+
+  it('switches the approval gate that createRoleSession built for the session', async () => {
+    const hostOnGate = vi.fn();
+    const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+    const { session, gate } = await openWith({ request, timeoutMs: 1_000, onGate: hostOnGate });
+    session.setApprovalMode('full');
+    session.setApprovalMode('supervised');
+    expect(gate.setMode.mock.calls).toEqual([['full'], ['supervised']]);
+    // 宿主自己的 onGate 也照样收到；审批通道的其余部分原样交给 createRoleSession
+    expect(hostOnGate).toHaveBeenCalledWith(gate);
+    const { approval } = mocks.createRoleSession.mock.calls.at(-1)?.[0] ?? {};
+    expect(approval).toMatchObject({ request, timeoutMs: 1_000 });
+  });
+
+  it('refuses to switch a session that has no approval channel (and so no gate to reach)', async () => {
+    const { session, gate } = await openWith(undefined);
+    expect(() => session.setApprovalMode('full')).toThrow(/no approval gate/);
+    expect(gate.setMode).not.toHaveBeenCalled();
   });
 });
 

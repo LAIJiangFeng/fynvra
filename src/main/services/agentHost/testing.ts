@@ -1,4 +1,4 @@
-import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
+import type { ApprovalMode, FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
 import { parseAgentCommand, type ResolvedModelSpec } from '@shared/types/agent';
 import {
   type OpenSession,
@@ -57,6 +57,8 @@ export class ScriptedSession implements SupervisedSession {
   readonly warnings: string[] = [];
   /** set-model 交来的模型，按到达顺序 */
   readonly models: ResolvedModelSpec[] = [];
+  /** set-approval-mode 交来的档位，按到达顺序 */
+  readonly approvalModes: ApprovalMode[] = [];
   #listener: ((event: FynvraSessionEvent) => void) | undefined;
   #seq = 0;
   #idle = true;
@@ -80,6 +82,9 @@ export class ScriptedSession implements SupervisedSession {
   async steer(): Promise<void> {}
   async setModel(spec: ResolvedModelSpec): Promise<void> {
     this.models.push(spec);
+  }
+  setApprovalMode(mode: ApprovalMode): void {
+    this.approvalModes.push(mode);
   }
   async abort(): Promise<void> {}
   isIdle(): boolean {

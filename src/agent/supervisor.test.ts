@@ -3,7 +3,7 @@ import type {
   ApprovalDecision as RuntimeApprovalDecision,
   ApprovalKind as RuntimeApprovalKind,
 } from '@fynvra/agent-runtime';
-import type { FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
+import type { ApprovalMode, FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
 import type {
   AgentWorkerEvent,
   ModelQuery,
@@ -32,10 +32,13 @@ class FakeSession implements SupervisedSession {
   disposals = 0;
   idle = true;
   models: ResolvedModelSpec[] = [];
+  approvalModes: ApprovalMode[] = [];
   /** 回合开始前的校验（抛错模拟缺 API key 等） */
   promptImpl: (text: string) => Promise<void> = async () => {};
   /** 换模型（抛错模拟注册 / 鉴权失败，挂起模拟慢的注册） */
   setModelImpl: (spec: ResolvedModelSpec) => Promise<void> = async () => {};
+  /** 换审批档位（抛错模拟会话没有审批门） */
+  setApprovalModeImpl: (mode: ApprovalMode) => void = () => {};
   #listener: ((event: FynvraSessionEvent) => void) | undefined;
   #seq = 0;
   #settleRun: (() => void) | undefined;
@@ -77,6 +80,11 @@ class FakeSession implements SupervisedSession {
   async setModel(spec: ResolvedModelSpec): Promise<void> {
     await this.setModelImpl(spec);
     this.models.push(spec);
+  }
+
+  setApprovalMode(mode: ApprovalMode): void {
+    this.setApprovalModeImpl(mode);
+    this.approvalModes.push(mode);
   }
 
   async abort(): Promise<void> {
@@ -714,6 +722,117 @@ describe('SessionSupervisor model switch', () => {
     });
     await settle();
     expect(session.models).toEqual([]);
+    expect(of('session-error')).toEqual([
+      {
+        type: 'session-error',
+        identity: { sessionId: 'ghost', generation: 1 },
+        error: 'the session is not running in the agent worker',
+        fatal: true,
+      },
+    ]);
+  });
+});
+
+describe('SessionSupervisor approval mode switch', () => {
+  async function runningSession() {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    env.supervisor.handle({ type: 'prompt', identity: id1, text: 'long task' });
+    await settle();
+    return { ...env, session: env.sessions[0] as FakeSession };
+  }
+
+  it('switches the gate of a running session right away, without ending the turn', async () => {
+    const { supervisor, session, of } = await runningSession();
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'full' });
+    await settle();
+    expect(session.approvalModes).toEqual(['full']);
+    expect(of('session-status').map((event) => event.status)).toEqual(['running']);
+    expect(of('session-error')).toEqual([]);
+    expect(session.aborts).toBe(0);
+    expect(of('log').map((event) => event.message)).toEqual([
+      expect.stringMatching(/s1: approval mode full/),
+    ]);
+
+    // 这一轮还在跑：后面的事件照常转发，结束后照常 settle
+    session.emit({ type: 'text_delta', delta: 'still going' });
+    session.emit({ type: 'agent_settled', aborted: false });
+    expect(of('session-status').map((event) => event.status)).toEqual(['running', 'idle']);
+  });
+
+  it('queues the switch behind a slow spawn', async () => {
+    let finishOpen: (session: FakeSession) => void = () => {};
+    const session = new FakeSession();
+    const { supervisor } = setup(
+      () =>
+        new Promise((resolve) => {
+          finishOpen = resolve;
+        })
+    );
+    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'supervised' });
+    await settle();
+    expect(session.approvalModes).toEqual([]);
+    finishOpen(session);
+    await settle();
+    expect(session.approvalModes).toEqual(['supervised']);
+  });
+
+  it('applies switches in the order they arrive, after a model switch that came first', async () => {
+    const { supervisor, session } = await runningSession();
+    const order: string[] = [];
+    let finishSwitch: () => void = () => {};
+    session.setModelImpl = () =>
+      new Promise<void>((resolve) => {
+        finishSwitch = resolve;
+      });
+    session.setApprovalModeImpl = (mode) => order.push(mode);
+    supervisor.handle({
+      type: 'set-model',
+      identity: id1,
+      model: { providerId: 'p', api: 'anthropic-messages', modelId: 'm2' },
+    });
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'full' });
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'auto-edits' });
+    await settle();
+    expect(order).toEqual([]);
+    finishSwitch();
+    await settle();
+    expect(order).toEqual(['full', 'auto-edits']);
+  });
+
+  it('closes the session and reports it as fatal when the gate cannot be switched', async () => {
+    const { supervisor, session, of } = await runningSession();
+    session.setApprovalModeImpl = () => {
+      throw new Error('this session has no approval gate to switch');
+    };
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'supervised' });
+    await settle();
+    // 审批门可能还停在更宽松的旧档位：不能留着它继续跑，Main 下次使用前按记录重新 spawn
+    expect(of('session-error')).toEqual([
+      {
+        type: 'session-error',
+        identity: id1,
+        error: 'failed to switch the approval mode: this session has no approval gate to switch',
+        fatal: true,
+      },
+    ]);
+    expect(session.disposals).toBe(1);
+    session.emit({ type: 'text_delta', delta: 'after the failed switch' });
+    expect(of('session-event')).toEqual([]);
+  });
+
+  it('drops a switch of an older generation and reports one for an unknown session', async () => {
+    const { supervisor, session, of } = await runningSession();
+    supervisor.handle({ type: 'spawn-session', identity: { ...id1, generation: 2 }, spec: spec() });
+    supervisor.handle({ type: 'set-approval-mode', identity: id1, mode: 'full' });
+    supervisor.handle({
+      type: 'set-approval-mode',
+      identity: { sessionId: 'ghost', generation: 1 },
+      mode: 'full',
+    });
+    await settle();
+    expect(session.approvalModes).toEqual([]);
     expect(of('session-error')).toEqual([
       {
         type: 'session-error',
