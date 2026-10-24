@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import { MODEL_CATALOG, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelEntry, ProviderApi, RemoteModelEntry } from '@shared/types/llm';
 import type { ListRemoteModelsResult } from '../../../../preload/domains/providers';
+import { MAX_MODEL_ID_LENGTH } from '../parseProviderInput';
 import {
   buildModelsRequest,
   describeHttpError,
@@ -51,8 +52,6 @@ export interface ModelsRequest {
 
 /** 列表最多给 Renderer 这么多条，挡住异常巨大的返回 */
 export const MAX_REMOTE_MODELS = 2000;
-/** 与 parseProviderUpsert 的模型 id 规则一致：列出来的都能保存 */
-const MAX_MODEL_ID_LENGTH = 200;
 const ANTHROPIC_PAGE_LIMIT = 1000;
 const GOOGLE_PAGE_SIZE = 1000;
 /** 与 modelCatalog.resolveBaseUrl 判断 Google 版本段的规则相同 */
@@ -265,6 +264,7 @@ function catalogModels(api: ProviderApi): Map<string, ModelEntry> {
   );
 }
 
+/** 与 parseProviderUpsert 的模型 id 规则一致：列出来的都能随服务保存 */
 function isModelId(id: string): boolean {
   return id !== '' && id.length <= MAX_MODEL_ID_LENGTH && !/\s/.test(id);
 }
