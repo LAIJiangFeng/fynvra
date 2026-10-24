@@ -59,6 +59,15 @@ describe('parseSettings', () => {
     expect(parsed.workspaces).toEqual([workspace, { ...workspace, id: 'ws-6', name: 'kept' }]);
   });
 
+  it('保留 settings.json 里手写的 preferences.shellPath', () => {
+    const shellPath = 'D:\\Software\\Git\\bin\\bash.exe';
+    expect(parseSettings({ preferences: { theme: 'dark', shellPath } }).preferences).toEqual({
+      theme: 'dark',
+      sidePanelOpen: DEFAULT_PREFERENCES.sidePanelOpen,
+      shellPath,
+    });
+  });
+
   it('版本号统一规整为当前版本', () => {
     expect(parseSettings({ version: 99 }).version).toBe(SETTINGS_VERSION);
   });
@@ -80,6 +89,16 @@ describe('parsePreferences', () => {
     });
     expect(parsePreferences({ theme: 1, sidePanelOpen: null })).toEqual(DEFAULT_PREFERENCES);
   });
+
+  it('shellPath 只保留非空字符串（去掉首尾空白），没有默认值', () => {
+    expect(parsePreferences({ shellPath: ' D:\\Software\\Git\\bin\\bash.exe ' })).toEqual({
+      ...DEFAULT_PREFERENCES,
+      shellPath: 'D:\\Software\\Git\\bin\\bash.exe',
+    });
+    for (const shellPath of [undefined, null, 42, '', '   ', ['bash.exe']]) {
+      expect(parsePreferences({ shellPath })).not.toHaveProperty('shellPath');
+    }
+  });
 });
 
 describe('parsePreferencesPatch（IPC 入参收窄）', () => {
@@ -99,6 +118,7 @@ describe('parsePreferencesPatch（IPC 入参收窄）', () => {
     ['未知主题', { theme: 'neon' }],
     ['类型不符', { sidePanelOpen: 'true' }],
     ['未知字段', { theme: 'dark', workspaces: [] }],
+    ['shellPath（只能手改 settings.json，Renderer 不传路径）', { shellPath: 'C:\\x\\bash.exe' }],
     ['原型污染键', JSON.parse('{"__proto__": {"theme": "dark"}}')],
   ])('拒绝 %s', (_label, raw) => {
     expect(parsePreferencesPatch(raw)).toBeNull();
