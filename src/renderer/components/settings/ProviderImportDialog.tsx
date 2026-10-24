@@ -29,6 +29,7 @@ import {
   sourceLabel,
   toggleSource,
 } from './providerImport';
+import { maskSecrets } from './secretMask';
 
 export type ImportStatus = { tone: 'success' | 'error'; text: string };
 
@@ -281,7 +282,9 @@ function CandidateRow({
             {candidate.isCurrent && <Badge>当前使用</Badge>}
           </div>
           <p className="truncate text-muted-foreground text-xs">
-            <span className="font-mono">{resolveBaseUrl(candidate.api, candidate.baseUrl)}</span>
+            <span className="font-mono">
+              {maskSecrets(resolveBaseUrl(candidate.api, candidate.baseUrl))}
+            </span>
             {' · '}
             {candidate.hasApiKey ? (
               <span className="font-mono">••••{candidate.apiKeyHint ?? ''}</span>

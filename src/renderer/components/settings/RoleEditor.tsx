@@ -31,6 +31,7 @@ import { useRolesStore } from '@/stores/roles';
 import { useSkillsStore } from '@/stores/skills';
 import { Field, InlineMessage } from './common';
 import { roleToJson } from './roleTransfer';
+import { maskSecrets } from './secretMask';
 
 const TOOL_POLICY_LABELS: Record<ToolPolicy, string> = {
   all: '全部工具（读写文件、执行命令）',
@@ -488,7 +489,7 @@ function McpToggles(props: {
   const items = servers.map((server) => ({
     id: server.id,
     name: server.name,
-    description: server.url ?? [server.command, ...(server.args ?? [])].join(' '),
+    description: maskSecrets(server.url ?? [server.command, ...(server.args ?? [])].join(' ')),
     inactive: !server.enabled,
   }));
   return (

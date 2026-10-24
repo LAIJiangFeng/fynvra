@@ -29,6 +29,7 @@ import {
   selectAll,
   toggleMcpSource,
 } from './mcpImport';
+import { maskSecrets } from './secretMask';
 
 export type McpImportStatus = { tone: 'success' | 'error'; text: string };
 
@@ -255,7 +256,7 @@ function CandidateRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   const reason = duplicateReason(candidate);
-  const summary = commandSummary(candidate);
+  const summary = maskSecrets(commandSummary(candidate));
   const secretKeys = [...candidate.envKeys, ...candidate.headerKeys];
   const id = useId();
   return (

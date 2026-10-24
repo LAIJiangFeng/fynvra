@@ -9,6 +9,7 @@ import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { McpDialog, type McpEditing, TRANSPORT_LABELS } from './McpDialog';
 import { McpImportDialog } from './McpImportDialog';
 import { draftFromServer, emptyMcpDraft, type McpDraft } from './mcpForm';
+import { maskSecrets } from './secretMask';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -101,7 +102,8 @@ function McpRow({
   const toggle = useMcpStore((state) => state.toggle);
   const remove = useMcpStore((state) => state.remove);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const summary = server.url ?? [server.command, ...(server.args ?? [])].join(' ');
+  // 参数、URL 里的密钥打码显示；编辑弹窗里仍是原值
+  const summary = maskSecrets(server.url ?? [server.command, ...(server.args ?? [])].join(' '));
   const secretKeys = [...server.envKeys, ...server.headerKeys];
 
   return (
