@@ -182,7 +182,8 @@ describe.skipIf(!hasGit)('agent host ⇄ orchestration（真实 git）', () => {
     }
     const attempt = dispatched.dispatch;
     expect(attempt.branch).toBe('fynvra/append-readme-line');
-    const worktreePath = join(userData, 'worktrees', 'ws_1', 'append-readme-line');
+    // 没配置 worktreesRoot：建在仓库同级的 <仓库目录名>-worktrees 下
+    const worktreePath = join(root, 'repo-worktrees', 'ws_1', 'append-readme-line');
     expect(
       host.list('ws_1').find((session) => session.id === attempt.workerSessionId)
     ).toMatchObject({
