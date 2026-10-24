@@ -1,10 +1,11 @@
-import { Boxes, type LucideIcon, Palette, Sparkles, UserCog, X } from 'lucide-react';
+import { Boxes, type LucideIcon, Palette, Plug, Sparkles, UserCog, X } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
+import { McpSettings } from './McpSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
@@ -43,6 +44,13 @@ const SECTIONS: SectionSpec[] = [
     description: '技能目录的引用注册表：扫描本机 Claude Code / Codex / pi 的技能，或手动添加目录。',
     icon: Sparkles,
     Component: SkillsSettings,
+  },
+  {
+    value: 'mcp',
+    label: 'MCP',
+    description: 'MCP 服务器：手动添加，或导入本机 Claude Code 的配置。',
+    icon: Plug,
+    Component: McpSettings,
   },
   {
     value: 'appearance',
