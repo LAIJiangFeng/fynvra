@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
 import { selectModelProviders, useSessionsStore } from '@/stores/sessions';
 import { chooseModel, defaultModelChoice, findModel } from '@/stores/sessions/modelChoice';
-import { ModelSelect, ThinkingLevelPicker } from './ModelPicker';
+import { ModelSelect, ThinkingLevelPicker, ThinkingSourceNote } from './ModelPicker';
 import { pickRole } from './roleChoices';
 import { isOrchestratorRole, useRoles } from './roles';
 
@@ -149,6 +149,7 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
                 value={model?.thinking}
                 onChange={(level) => setPicked(chooseModel(found, level))}
               />
+              <ThinkingSourceNote source={found.model.source} />
             </div>
           )}
           {error && (

@@ -8,7 +8,12 @@ import {
   type Role,
   type ToolPolicy,
 } from '@fynvra/core';
-import type { ModelProviderOption } from '@shared/types/chat';
+import {
+  type ModelProviderOption,
+  THINKING_LEVEL_HINTS,
+  THINKING_LEVEL_LABELS,
+  thinkingSourceNote,
+} from '@shared/types/chat';
 import { Copy, Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +33,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { useMcpStore } from '@/stores/mcp';
 import { useProvidersStore } from '@/stores/providers';
 import { useRolesStore } from '@/stores/roles';
-import { THINKING_LABELS } from '@/stores/sessions/modelChoice';
 import { useSkillsStore } from '@/stores/skills';
 import { Field, InlineMessage } from './common';
 import {
@@ -456,7 +460,10 @@ function ModelField({
   );
 }
 
-/** 思考档位：只列所选模型自己的档位；没选模型时跟随会话模型，读不到档位时只显示不能选 */
+/**
+ * 思考档位：只列所选模型自己的档位（官方等级名，悬停显示中文说明），推断来的在下方注明按哪个模型推断；
+ * 没选模型时跟随会话模型，读不到档位时只显示不能选
+ */
 function ThinkingField({
   id,
   role,
@@ -479,7 +486,7 @@ function ThinkingField({
       state.kind === 'follow-session'
         ? FOLLOW_SESSION
         : current
-          ? THINKING_LABELS[current]
+          ? THINKING_LEVEL_LABELS[current]
           : '默认';
     const hint =
       state.kind === 'follow-session'
@@ -500,7 +507,7 @@ function ThinkingField({
 
   const items = thinkingOptions(state.levels, state.defaultThinking);
   return (
-    <Field label="思考档位" htmlFor={id}>
+    <Field label="思考档位" htmlFor={id} hint={thinkingSourceNote(state.source)}>
       <Select
         items={items}
         value={state.value}
@@ -511,12 +518,12 @@ function ThinkingField({
           }
         }}
       >
-        <SelectTrigger id={id}>
+        <SelectTrigger id={id} title={THINKING_LEVEL_HINTS[state.value]}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
+            <SelectItem key={item.value} value={item.value} title={item.hint}>
               {item.label}
             </SelectItem>
           ))}

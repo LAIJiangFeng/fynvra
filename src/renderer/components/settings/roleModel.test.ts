@@ -1,5 +1,5 @@
 import type { Role, ThinkingLevel } from '@fynvra/core';
-import type { ModelProviderOption } from '@shared/types/chat';
+import { type ModelProviderOption, THINKING_LEVEL_HINTS } from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
 import { normalizeRoleThinking, roleThinking, thinkingOptions, withRoleModel } from './roleModel';
 
@@ -13,14 +13,23 @@ const options: ModelProviderOption[] = [
       {
         id: 'claude-opus-5-5',
         name: 'Claude Opus 5.5',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
         defaultThinking: 'medium',
+        source: 'catalog',
       },
       {
         id: 'claude-haiku-5-5',
         name: 'Claude Haiku 5.5',
-        thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+        thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
         defaultThinking: 'medium',
+        source: 'catalog',
+      },
+      {
+        id: 'claude-opus-4-8[1m]',
+        name: 'Opus 4.8 1M',
+        thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+        defaultThinking: 'medium',
+        source: 'inferred:claude-opus-4-8',
       },
     ],
   },
@@ -66,9 +75,14 @@ describe('roleModel', () => {
   it('只列模型自己的档位；角色的档位不在集合里时显示模型的默认档位', () => {
     expect(roleThinking(withModel('claude-opus-5-5', 'high').model, options, false)).toEqual({
       kind: 'levels',
-      levels: ['low', 'medium', 'high', 'xhigh'],
+      levels: ['low', 'medium', 'high', 'xhigh', 'max'],
       value: 'high',
       defaultThinking: 'medium',
+      source: 'catalog',
+    });
+    expect(roleThinking(withModel('claude-opus-5-5', 'max').model, options, false)).toMatchObject({
+      kind: 'levels',
+      value: 'max',
     });
     expect(roleThinking(withModel('claude-opus-5-5', 'off').model, options, false)).toMatchObject({
       kind: 'levels',
@@ -78,6 +92,16 @@ describe('roleModel', () => {
       kind: 'levels',
       levels: ['off', 'minimal', 'low', 'medium', 'high'],
       value: 'medium',
+    });
+  });
+
+  it('按目录推断出来的档位带上来源，编辑器据此提示「按 <id> 推断」', () => {
+    expect(roleThinking(withModel('claude-opus-4-8[1m]', 'max').model, options, false)).toEqual({
+      kind: 'levels',
+      levels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+      value: 'max',
+      defaultThinking: 'medium',
+      source: 'inferred:claude-opus-4-8',
     });
   });
 
@@ -156,16 +180,17 @@ describe('roleModel', () => {
     expect(normalizeRoleThinking(base, options)).toBe(base);
   });
 
-  it('档位选项：文字与会话里一致，模型的默认档位带「默认」', () => {
-    expect(thinkingOptions(['low', 'medium', 'high', 'xhigh'], 'medium')).toEqual([
-      { value: 'low', label: '低' },
-      { value: 'medium', label: '中（默认）' },
-      { value: 'high', label: '高' },
-      { value: 'xhigh', label: '最高' },
+  it('档位选项：官方等级名（与会话里一致），模型的默认档位带「默认」，悬停是中文说明', () => {
+    expect(thinkingOptions(['low', 'medium', 'high', 'xhigh', 'max'], 'medium')).toEqual([
+      { value: 'low', label: 'low', hint: THINKING_LEVEL_HINTS.low },
+      { value: 'medium', label: 'medium（默认）', hint: THINKING_LEVEL_HINTS.medium },
+      { value: 'high', label: 'high', hint: THINKING_LEVEL_HINTS.high },
+      { value: 'xhigh', label: 'xhigh', hint: THINKING_LEVEL_HINTS.xhigh },
+      { value: 'max', label: 'max', hint: THINKING_LEVEL_HINTS.max },
     ]);
-    expect(thinkingOptions(['off', 'minimal'])).toEqual([
-      { value: 'off', label: '关闭' },
-      { value: 'minimal', label: '最少' },
+    expect(thinkingOptions(['off', 'minimal']).map((option) => option.label)).toEqual([
+      'off · 关闭',
+      'minimal',
     ]);
   });
 });

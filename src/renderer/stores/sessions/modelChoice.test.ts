@@ -1,4 +1,4 @@
-import type { ModelProviderOption } from '@shared/types/chat';
+import { type ModelProviderOption, THINKING_LEVEL_HINTS } from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
 import {
   chooseModel,
@@ -8,9 +8,10 @@ import {
   findModel,
   modelKey,
   modelLabel,
+  thinkingChoices,
 } from './modelChoice';
 
-// 档位取自 pi 1.4.0 内置目录（worker 经 sessions:model-options 交来的形状）
+// 档位取自 pi 1.4.0 内置目录（worker 经 sessions:model-options 交来的形状，含 max 与来源）
 const anthropic: ModelProviderOption = {
   providerId: 'anthropic',
   name: 'Anthropic',
@@ -19,14 +20,44 @@ const anthropic: ModelProviderOption = {
     {
       id: 'claude-opus-5-5',
       name: 'Claude Opus 5.5',
-      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultThinking: 'medium',
+      source: 'catalog',
     },
     {
       id: 'claude-haiku-5-5',
       name: 'Claude Haiku 5.5',
+      thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
+      defaultThinking: 'medium',
+      source: 'catalog',
+    },
+  ],
+};
+const codex: ModelProviderOption = {
+  providerId: 'codex',
+  name: 'Codex',
+  api: 'openai-responses',
+  models: [
+    {
+      id: 'gpt-5.5',
+      name: 'gpt-5.5',
       thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
       defaultThinking: 'medium',
+      source: 'catalog',
+    },
+    {
+      id: 'gpt-5.6',
+      name: 'gpt-5.6',
+      thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
+      defaultThinking: 'medium',
+      source: 'inferred:gpt-5.6-terra',
+    },
+    {
+      id: 'my-reasoner',
+      name: 'my-reasoner',
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+      source: 'fallback',
     },
   ],
 };
@@ -108,6 +139,34 @@ describe('chooseModel', () => {
     expect(chooseModel(haiku, 'off').thinking).toBe('off');
     expect(chooseModel(plain, 'high')).toEqual({ providerId: 'local', modelId: 'plain-chat' });
   });
+
+  it("keeps max on a model that offers it, else falls back to the new model's default", () => {
+    const gpt55 = findModel([codex], { providerId: 'codex', modelId: 'gpt-5.5' });
+    const gpt56 = findModel([codex], { providerId: 'codex', modelId: 'gpt-5.6' });
+    if (!opus || !gpt55 || !gpt56) throw new Error('fixture models are missing');
+    expect(chooseModel(opus, 'max').thinking).toBe('max');
+    expect(chooseModel(gpt56, 'max').thinking).toBe('max');
+    // gpt-5.5 没有 max：回落到它的默认档位，不是就近的 xhigh
+    expect(chooseModel(gpt55, 'max').thinking).toBe('medium');
+  });
+});
+
+describe('thinkingChoices', () => {
+  it('renders exactly the levels it is given, in order, with official names and Chinese hints', () => {
+    expect(thinkingChoices(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])).toEqual([
+      { value: 'minimal', label: 'minimal', hint: THINKING_LEVEL_HINTS.minimal },
+      { value: 'low', label: 'low', hint: THINKING_LEVEL_HINTS.low },
+      { value: 'medium', label: 'medium', hint: THINKING_LEVEL_HINTS.medium },
+      { value: 'high', label: 'high', hint: THINKING_LEVEL_HINTS.high },
+      { value: 'xhigh', label: 'xhigh', hint: THINKING_LEVEL_HINTS.xhigh },
+      { value: 'max', label: 'max', hint: THINKING_LEVEL_HINTS.max },
+    ]);
+    expect(thinkingChoices(['off', 'low']).map((choice) => choice.label)).toEqual([
+      'off · 关闭',
+      'low',
+    ]);
+    expect(thinkingChoices([])).toEqual([]);
+  });
 });
 
 describe('effectiveThinking', () => {
@@ -138,7 +197,15 @@ describe('modelLabel / modelKey', () => {
   it('names the service, the model and the level, falling back to ids', () => {
     expect(
       modelLabel(providers, { providerId: 'anthropic', modelId: 'claude-opus-5-5' }, 'xhigh')
-    ).toEqual({ provider: 'Anthropic', model: 'Claude Opus 5.5', thinking: '最高' });
+    ).toEqual({ provider: 'Anthropic', model: 'Claude Opus 5.5', thinking: 'xhigh' });
+    // 胶囊与状态栏用官方等级名本身（off 也一样短），中文说明放在悬停提示里
+    expect(
+      modelLabel(providers, { providerId: 'anthropic', modelId: 'claude-haiku-5-5' }, 'off')
+    ).toEqual({ provider: 'Anthropic', model: 'Claude Haiku 5.5', thinking: 'off' });
+    expect(
+      modelLabel(providers, { providerId: 'anthropic', modelId: 'claude-opus-5-5' }, 'max')
+        ?.thinking
+    ).toBe('max');
     expect(modelLabel(providers, { providerId: 'gone', modelId: 'gpt-5.5' })).toEqual({
       provider: 'gone',
       model: 'gpt-5.5',
