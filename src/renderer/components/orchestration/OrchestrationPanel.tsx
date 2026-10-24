@@ -41,6 +41,12 @@ export function OrchestrationPanel() {
       <div className="flex min-h-0 flex-1 flex-col">
         <PanelHeaderBar>
           <span className="px-1 font-medium text-muted-foreground text-xs">编排</span>
+          {/* 没有工作区也能进演示数据 */}
+          {import.meta.env.DEV && (
+            <div className="ml-auto">
+              <DemoToggle />
+            </div>
+          )}
         </PanelHeaderBar>
         <PanelMessage icon={Workflow} title="选择一个工作区查看编排" />
       </div>
