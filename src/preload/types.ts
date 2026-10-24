@@ -42,6 +42,10 @@ export interface FynvraApi {
   settings: SettingsApi;
   workspaces: WorkspacesApi;
   window: WindowApi;
+  providers: import('./domains/providers').ProvidersApi;
+  roles: import('./domains/roles').RolesApi;
+  skills: import('./domains/skills').SkillsApi;
+  mcp: import('./domains/mcp').McpApi;
 }
 
 declare global {

@@ -1,5 +1,9 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createMcpApi } from './domains/mcp';
+import { createProvidersApi } from './domains/providers';
+import { createRolesApi } from './domains/roles';
+import { createSkillsApi } from './domains/skills';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -32,6 +36,10 @@ const api: FynvraApi = {
     onMaximizedChange: (callback) =>
       subscribe(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, (maximized) => callback(maximized === true)),
   },
+  providers: createProvidersApi(ipcRenderer, subscribe),
+  roles: createRolesApi(ipcRenderer, subscribe),
+  skills: createSkillsApi(ipcRenderer, subscribe),
+  mcp: createMcpApi(ipcRenderer, subscribe),
 };
 
 contextBridge.exposeInMainWorld('fynvra', api);
