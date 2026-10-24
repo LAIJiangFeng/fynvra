@@ -1,0 +1,18 @@
+{
+  // Renderer：只有 DOM 与 vite/client 类型，不含 Node 全局。
+  // 测试文件排除在外（vitest 类型会把 @types/node 带进来），由 tsconfig.node.json 检查。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "paths": {
+      "@/*": ["./src/renderer/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@fynvra/core": ["./packages/core/src/index.ts"]
+    }
+  },
+  "include": ["src/renderer/**/*", "src/shared/**/*", "src/preload/types.ts"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}
