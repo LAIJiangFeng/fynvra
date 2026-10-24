@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import type { FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
+import type { FynvraSessionEvent, FynvraSessionEventBody, Role, ThinkingLevel } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
   AgentApprovalRequest,
@@ -10,6 +10,9 @@ import type {
   AgentWorkerEvent,
   HostCallResult,
   LogLevel,
+  ModelQuery,
+  ModelsDescribedResult,
+  ResolvedModelSpec,
   SessionIdentity,
   SpawnSessionSpec,
 } from '@shared/types/agent';
@@ -17,13 +20,18 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   ChatMessage,
+  ModelOptions,
+  ModelThinkingCapability,
   SessionEventEnvelope,
+  SessionModelRef,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
 import type { Workspace } from '@shared/types/workspace';
 import { readHistory, sessionFilePath } from '../sessions/history';
+import type { LastModelStore } from '../sessions/lastModels';
 import { type SessionStore, type StoredSession, toSummary } from '../sessions/sessionStore';
 import { invokeOrchestrationHost, invokeWorkerHost } from './hostDispatch';
 import { Transcript } from './transcript';
@@ -50,6 +58,15 @@ export interface AgentHostDeps {
   workspaces: { get(id: string): Workspace | undefined };
   roles: RoleSource;
   models: ModelResolver;
+  /**
+   * 「设置 → 模型服务」的脱敏视图（不带 key）：model-options 的列表，以及 spec 里模型条目的 reasoning 标记
+   * （pi 目录外的模型靠它决定能不能思考）。缺省为空列表
+   */
+  providers?: { list(): Promise<readonly ModelProviderView[]> };
+  /** 每个工作区上一次用过的模型（settings.json）；缺省不记 */
+  lastModels?: LastModelStore;
+  /** 等 worker 回答 describe-models 的上限，默认 15 s */
+  describeTimeoutMs?: number;
   /** Main → Renderer 推送（生产为 sendToAllWindows） */
   broadcast(channel: string, ...args: unknown[]): void;
   /** role.skillIds / mcpServerIds → 路径与服务器配置（生产为 createRoleResourceResolver）；缺省都为空 */
@@ -68,7 +85,12 @@ export interface AgentHostDeps {
 export interface CreateSessionInput {
   workspaceId: string;
   roleId: string;
-  model?: { providerId: string; modelId: string };
+  model?: SessionModelRef;
+}
+
+export interface SetModelInput {
+  sessionId: string;
+  model: SessionModelRef;
 }
 
 export interface RespondApprovalInput {
@@ -94,6 +116,13 @@ export interface AgentHostService extends AgentHost {
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
+  /**
+   * 换会话的模型 / 思考档位：解析成功后更新记录（落 sessions.json），会话在 worker 里时发 set-model，
+   * 下一次 prompt 起生效。运行中拒绝；解析失败返回可读错误，记录不变。
+   */
+  setModel(input: SetModelInput): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 启用且有 key 的服务与模型，每个模型带 worker 按 pi 目录给出的思考档位；传 workspaceId 时带上次用过的模型 */
+  modelOptions(input: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -111,6 +140,8 @@ interface LiveSession {
   /** 推给 Renderer 的会话级 seq：跨 generation 单调递增，Renderer 的「过期 seq 丢弃」在重启后依然成立 */
   sessionSeq: number;
   running: boolean;
+  /** 还在途的 prompt（spawn / 发出之前）：这期间不能换模型，否则 spawn 用的还是旧模型 */
+  prompting: number;
   transcript: Transcript | null;
   /** 进行中的 host 调用：`<generation>:<callId>` → 中止器 */
   calls: Map<string, AbortController>;
@@ -129,7 +160,9 @@ const NO_ORCHESTRATION_HOST =
   'orchestration is not wired yet: this build has no OrchestrationHost for this session, so orchestration tools cannot run';
 const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
+const SWITCH_WHILE_RUNNING = '会话正在运行，等本轮结束再切换模型';
 const TITLE_MAX_CHARS = 60;
+const DESCRIBE_TIMEOUT_MS = 15_000;
 
 /**
  * Main 侧的 agent 会话管理（EnsoCode agentHost 的精简版）：
@@ -148,8 +181,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.resolveResources ??
     (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const resolveShellPath = deps.resolveShellPath ?? (async () => undefined);
+  const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
+  /** 模型的思考档位：pi 目录随 worker 版本固定，同一（协议, 模型, reasoning 标记）的回答不会变 */
+  const capabilities = new Map<string, ModelThinkingCapability>();
+  /** 等 worker 回答的 describe-models：requestId → 结算 */
+  const describing = new Map<string, (result: ModelsDescribedResult) => void>();
+  let describeSeq = 0;
   let orchestrationHostFor: (
     coordinatorSessionId: string,
     workspaceId: string
@@ -177,6 +216,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         workerSeq: 0,
         sessionSeq: 0,
         running: false,
+        prompting: 0,
         transcript: null,
         calls: new Map(),
       };
@@ -246,6 +286,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!role) return fail(`角色不存在：${stored.roleId}`);
       const resolved = await deps.models.resolve(stored.model ?? modelRefOf(role));
       if (!resolved.ok) return resolved;
+      const model = withReasoning(resolved.model, await reasoningOf(resolved.ref));
       const resources = await resolveResources(role);
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
@@ -256,7 +297,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           role,
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
-          model: resolved.model,
+          model,
           skills: resources.skills,
           mcpServers: resources.mcpServers,
           worker: stored.dispatchId !== undefined,
@@ -267,6 +308,83 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     } catch (error) {
       return fail(`无法启动会话：${errorMessage(error)}`);
     }
+  }
+
+  async function providerViews(): Promise<readonly ModelProviderView[]> {
+    return (await deps.providers?.list()) ?? [];
+  }
+
+  /** 设置里模型条目的 reasoning 标记；读不到注册表时不带（worker 按 pi 目录或不推理处理） */
+  async function reasoningOf(ref: { providerId: string; modelId: string }) {
+    try {
+      const provider = (await providerViews()).find((view) => view.id === ref.providerId);
+      return provider?.models.find((model) => model.id === ref.modelId)?.reasoning;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 问 worker（pi 内置目录）每个模型的思考档位；问过的从缓存取，结果与 queries 一一对应 */
+  async function describeModels(
+    queries: ModelQuery[]
+  ): Promise<Result<{ models: ModelThinkingCapability[] }>> {
+    const missing = new Map<string, ModelQuery>();
+    for (const query of queries) {
+      const key = capabilityKey(query);
+      if (!capabilities.has(key)) missing.set(key, query);
+    }
+    if (missing.size > 0) {
+      const asked = [...missing.values()];
+      const answer = await askWorker(asked);
+      if (!answer.ok) return answer;
+      if (answer.models.length !== asked.length) {
+        return fail('agent worker 回答的模型数与查询不一致');
+      }
+      asked.forEach((query, index) => {
+        const capability = answer.models[index];
+        if (capability) capabilities.set(capabilityKey(query), capability);
+      });
+    }
+    return {
+      ok: true,
+      models: queries.map((query) => {
+        const capability = capabilities.get(capabilityKey(query)) ?? { thinkingLevels: [] };
+        return { ...capability, thinkingLevels: [...capability.thinkingLevels] };
+      }),
+    };
+  }
+
+  function askWorker(models: ModelQuery[]): Promise<ModelsDescribedResult> {
+    if (client.state === 'stopped') client.start();
+    const requestId = `describe-${++describeSeq}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => settle(fail('读取模型的思考档位超时：agent worker 没有回答，请稍后重试')),
+        describeTimeoutMs
+      );
+      const settle = (result: ModelsDescribedResult) => {
+        clearTimeout(timer);
+        describing.delete(requestId);
+        resolve(result);
+      };
+      describing.set(requestId, settle);
+      if (!send({ type: 'describe-models', requestId, models })) settle(fail(WORKER_UNAVAILABLE));
+    });
+  }
+
+  function failDescribes(error: string): void {
+    for (const settle of [...describing.values()]) settle(fail(error));
+  }
+
+  /** 正在跑一轮、等审批，或有 prompt 在途：这时换模型，spawn / 当前回合用的就对不上记录了 */
+  function isBusy(stored: StoredSession): boolean {
+    const state = live.get(stored.id);
+    return (
+      stored.status === 'running' ||
+      stored.status === 'waiting-approval' ||
+      state?.running === true ||
+      (state?.prompting ?? 0) > 0
+    );
   }
 
   async function loadTranscript(stored: StoredSession): Promise<Transcript> {
@@ -342,6 +460,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         setStatus(sessionId, 'error');
         return;
       }
+      case 'models-described':
+        describing.get(event.requestId)?.(event.result);
+        return;
       case 'log':
         log(event.level, `[agent] ${event.message}`);
         return;
@@ -401,6 +522,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
+    failDescribes(`agent worker 进程意外退出（code ${code}），没能读到模型的思考档位，请重试`);
     for (const [sessionId, state] of live) {
       if (!state.spawned) continue;
       const wasRunning = state.running;
@@ -431,21 +553,97 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   async function prompt(sessionId: string, text: string): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail('会话不存在');
-    const spawned = await ensureSpawned(stored);
-    if (!spawned.ok) return spawned;
-    const state = liveOf(sessionId);
-    if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
-      return fail(WORKER_UNAVAILABLE);
+    const pending = liveOf(sessionId);
+    pending.prompting += 1;
+    try {
+      const spawned = await ensureSpawned(stored);
+      if (!spawned.ok) return spawned;
+      const state = liveOf(sessionId);
+      if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
+        return fail(WORKER_UNAVAILABLE);
+      }
+      state.running = true;
+      const current = deps.store.get(sessionId) ?? stored;
+      deps.store.update(sessionId, {
+        status: 'running',
+        updatedAt: now(),
+        ...(current.autoTitle ? { title: titleFrom(text) || current.title, autoTitle: false } : {}),
+      });
+      changed(stored.workspaceId);
+      return { ok: true };
+    } finally {
+      pending.prompting -= 1;
     }
-    state.running = true;
-    const current = deps.store.get(sessionId) ?? stored;
-    deps.store.update(sessionId, {
-      status: 'running',
-      updatedAt: now(),
-      ...(current.autoTitle ? { title: titleFrom(text) || current.title, autoTitle: false } : {}),
-    });
-    changed(stored.workspaceId);
-    return { ok: true };
+  }
+
+  /**
+   * 换模型：记录（sessions.json）是权威，会话在 worker 里时再发 set-model；之后崩溃重启按新 spec 重建。
+   * 两段 await（解析、读 reasoning 标记）之后再查一次：这期间会话可能被删了或开始了新一轮。
+   */
+  async function setModel({
+    sessionId,
+    model,
+  }: SetModelInput): Promise<Result<{ session: SessionSummary }>> {
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail('会话不存在');
+    if (isBusy(stored)) return fail(SWITCH_WHILE_RUNNING);
+    const resolved = await deps.models.resolve(bareRef(model));
+    if (!resolved.ok) return resolved;
+    const reasoning = await reasoningOf(resolved.ref);
+    const current = deps.store.get(sessionId);
+    if (!current) return fail('会话不存在');
+    if (isBusy(current)) return fail(SWITCH_WHILE_RUNNING);
+
+    const next = sessionModelOf(resolved.ref, model.thinking);
+    const updated =
+      deps.store.update(sessionId, {
+        model: next,
+        updatedAt: now(),
+        // 换模型常是为了绕开上一轮的错误（如 key 失效）：回到空闲
+        ...(current.status === 'error' ? { status: 'idle' as const } : {}),
+      }) ?? current;
+    const state = live.get(sessionId);
+    if (state?.spawned) {
+      const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
+      if (state.spec) state.spec = { ...state.spec, model: spec };
+      // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
+      if (!send({ type: 'set-model', identity: identityOf(sessionId, state), model: spec })) {
+        detach(sessionId, state);
+      }
+    }
+    if (current.dispatchId === undefined) deps.lastModels?.set(current.workspaceId, next);
+    changed(current.workspaceId);
+    return { ok: true, session: toSummary(updated) };
+  }
+
+  async function modelOptions({
+    workspaceId,
+  }: {
+    workspaceId?: string;
+  }): Promise<Result<ModelOptions>> {
+    let views: readonly ModelProviderView[];
+    try {
+      views = await providerViews();
+    } catch (error) {
+      return fail(`读取模型服务失败：${errorMessage(error)}`);
+    }
+    const usable = views.filter((view) => view.enabled && view.hasApiKey && view.models.length > 0);
+    const queries = usable.flatMap((view) => view.models.map((entry) => queryOf(view, entry)));
+    const described = await describeModels(queries);
+    if (!described.ok) return described;
+    let index = 0;
+    const providers = usable.map((view) => ({
+      providerId: view.id,
+      name: view.name,
+      api: view.api,
+      models: view.models.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        ...(described.models[index++] ?? { thinkingLevels: [] }),
+      })),
+    }));
+    const lastUsed = workspaceId ? deps.lastModels?.get(workspaceId) : undefined;
+    return { ok: true, providers, ...(lastUsed ? { lastUsed } : {}) };
   }
 
   function disposeLive(sessionId: string): void {
@@ -481,9 +679,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         return fail(errorMessage(error));
       }
       if (!role) return fail(`角色不存在：${input.roleId}`);
-      const resolved = await deps.models.resolve(modelRefOf(role));
-      if (!resolved.ok) return resolved;
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
+      // 角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
+      const requested =
+        modelRefOf(role) ?? (parentSessionId ? deps.store.get(parentSessionId)?.model : undefined);
+      const resolved = await deps.models.resolve(requested && bareRef(requested));
+      if (!resolved.ok) return resolved;
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -497,7 +698,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: modelRefFrom(resolved.ref),
+        model: sessionModelOf(resolved.ref, requested?.thinking),
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -542,6 +743,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     async shutdown(timeoutMs) {
       deps.store.flush();
       await client.shutdown(timeoutMs);
+      failDescribes(WORKER_UNAVAILABLE);
       for (const [sessionId, state] of live) detach(sessionId, state);
       deps.store.flush();
     },
@@ -556,8 +758,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         return fail(errorMessage(error));
       }
       if (!role) return fail(`角色不存在：${input.roleId}`);
-      const resolved = await deps.models.resolve(input.model ?? modelRefOf(role));
+      // 没选模型时用角色的模型与思考档位，角色也没配就由解析器取默认模型
+      const requested = input.model ?? modelRefOf(role);
+      const resolved = await deps.models.resolve(requested && bareRef(requested));
       if (!resolved.ok) return resolved;
+      const model = sessionModelOf(resolved.ref, requested?.thinking);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -568,10 +773,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: modelRefFrom(resolved.ref),
+        model,
         autoTitle: true,
       };
       deps.store.put(stored);
+      deps.lastModels?.set(workspace.id, model);
       changed(workspace.id);
       return { ok: true, session: toSummary(stored) };
     },
@@ -610,6 +816,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ? { ok: true }
         : fail(WORKER_UNAVAILABLE);
     },
+    setModel,
+    modelOptions,
   };
 }
 
@@ -623,13 +831,43 @@ function defaultLog(level: LogLevel, message: string): void {
   else console.log(message);
 }
 
-function modelRefOf(role: Role): ModelRef | undefined {
-  return role.model ? modelRefFrom(role.model) : undefined;
+/** 角色配的模型（含思考档位） */
+function modelRefOf(role: Role): SessionModelRef | undefined {
+  return role.model ? sessionModelOf(role.model, role.model.thinking) : undefined;
 }
 
-/** 会话记录只存设置里的服务 id 与模型 id（不带运行时 provider 键、thinking 等） */
-function modelRefFrom({ providerId, modelId }: ModelRef): ModelRef {
+/** 交给解析器的引用：只有服务 id 与模型 id，思考档位由会话记录另外带 */
+function bareRef({ providerId, modelId }: ModelRef): ModelRef {
   return { providerId, modelId };
+}
+
+/** 会话记录只存设置里的服务 id、模型 id 与思考档位（不带运行时 provider 键、key 等） */
+function sessionModelOf(
+  { providerId, modelId }: ModelRef,
+  thinking?: ThinkingLevel
+): SessionModelRef {
+  return { providerId, modelId, ...(thinking ? { thinking } : {}) };
+}
+
+function withThinking(spec: ResolvedModelSpec, thinking?: ThinkingLevel): ResolvedModelSpec {
+  return thinking ? { ...spec, thinking } : spec;
+}
+
+function withReasoning(spec: ResolvedModelSpec, reasoning: boolean | undefined): ResolvedModelSpec {
+  return reasoning === undefined ? spec : { ...spec, reasoning };
+}
+
+function queryOf(view: ModelProviderView, entry: ModelEntry): ModelQuery {
+  return {
+    api: view.api,
+    modelId: entry.id,
+    ...(entry.reasoning !== undefined ? { reasoning: entry.reasoning } : {}),
+  };
+}
+
+/** 缓存键：worker 只按协议、模型 id 与 reasoning 标记作答 */
+function capabilityKey({ api, modelId, reasoning }: ModelQuery): string {
+  return JSON.stringify([api, modelId, reasoning === true]);
 }
 
 function roleOptions(roles: readonly Role[]): AgentRoleOption[] {

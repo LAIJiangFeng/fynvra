@@ -3,10 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApprovalGate, type OrchestrationHost, type WorkerHost } from '@fynvra/agent-runtime';
 import { BUILTIN_ROLES, getBuiltinRole, type Role } from '@fynvra/core';
-import type { ApprovalRequest, SessionEventEnvelope } from '@shared/types/chat';
+import type { ModelQuery } from '@shared/types/agent';
+import type {
+  ApprovalRequest,
+  ModelThinkingCapability,
+  SessionEventEnvelope,
+} from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { OpenSession } from '../../../agent/supervisor';
+import type { OpenSession, SupervisorOptions } from '../../../agent/supervisor';
+import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver } from '../providers/resolveModel';
 import { createSessionStore } from '../sessions/sessionStore';
 import { createAgentHost } from './agentHost';
@@ -17,7 +23,22 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(openSession: OpenSession, extraRoles: Role[] = []) {
+const PROVIDERS: StoredProvider[] = [
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    api: 'anthropic-messages',
+    enabled: true,
+    models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }],
+    apiKey: 'sk-test',
+  },
+];
+
+function setup(
+  openSession: OpenSession,
+  extraRoles: Role[] = [],
+  worker: Pick<SupervisorOptions, 'describeModels'> = {}
+) {
   const dir = mkdtempSync(join(tmpdir(), 'fynvra-round-trip-'));
   dirs.push(dir);
   const broadcasts: unknown[][] = [];
@@ -28,7 +49,7 @@ function setup(openSession: OpenSession, extraRoles: Role[] = []) {
     defaultBranch: 'main',
   };
   const host = createAgentHost({
-    fork: () => new InMemoryWorker(openSession),
+    fork: () => new InMemoryWorker(openSession, worker),
     agentDir: join(dir, 'agent'),
     store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
     workspaces: { get: (id) => (id === workspace.id ? workspace : undefined) },
@@ -36,18 +57,8 @@ function setup(openSession: OpenSession, extraRoles: Role[] = []) {
       get: async (id) => getBuiltinRole(id) ?? extraRoles.find((role) => role.id === id),
       list: async () => [...BUILTIN_ROLES, ...extraRoles],
     },
-    models: createModelResolver({
-      list: async () => [
-        {
-          id: 'anthropic',
-          name: 'Anthropic',
-          api: 'anthropic-messages',
-          enabled: true,
-          models: [{ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' }],
-          apiKey: 'sk-test',
-        },
-      ],
-    }),
+    models: createModelResolver({ list: async () => structuredClone(PROVIDERS) }),
+    providers: { list: async () => PROVIDERS.map(toProviderView) },
     broadcast: (...args) => broadcasts.push(args),
     log: () => {},
   });
@@ -315,6 +326,69 @@ describe('approval round trip through the protocol', () => {
         [false, 'two'],
         [true, expect.stringContaining('protected action (git push)')],
       ]
+    );
+  });
+});
+
+describe('model switch round trip through the protocol', () => {
+  it('answers describe-models from the worker and switches the live session with set-model', async () => {
+    const sessions: ScriptedSession[] = [];
+    const openSession: OpenSession = async () => {
+      const session = new ScriptedSession(async () => {});
+      sessions.push(session);
+      return session;
+    };
+    const describeModels = vi.fn(async (queries: ModelQuery[]) =>
+      queries.map(
+        (): ModelThinkingCapability => ({
+          thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+          defaultThinking: 'medium',
+        })
+      )
+    );
+    const env = setup(openSession, [], { describeModels });
+
+    expect(await env.host.modelOptions({})).toEqual({
+      ok: true,
+      providers: [
+        {
+          providerId: 'anthropic',
+          name: 'Anthropic',
+          api: 'anthropic-messages',
+          models: [
+            {
+              id: 'claude-sonnet-5-5',
+              name: 'Claude Sonnet 5.5',
+              thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+              defaultThinking: 'medium',
+            },
+          ],
+        },
+      ],
+    });
+    expect(describeModels).toHaveBeenCalledWith([
+      { api: 'anthropic-messages', modelId: 'claude-sonnet-5-5' },
+    ]);
+
+    const created = await env.host.create({ workspaceId: 'ws-1', roleId: 'worker' });
+    if (!created.ok) throw new Error(created.error);
+    await env.host.prompt(created.session.id, 'hi');
+    await env.settled(created.session.id);
+    await vi.waitFor(() => expect(env.host.list('ws-1')[0]?.status).toBe('idle'));
+
+    const switched = await env.host.setModel({
+      sessionId: created.session.id,
+      model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5', thinking: 'xhigh' },
+    });
+    expect(switched).toMatchObject({ ok: true, session: { model: { thinking: 'xhigh' } } });
+    await vi.waitFor(() =>
+      expect(sessions[0]?.models).toEqual([
+        expect.objectContaining({
+          modelId: 'claude-sonnet-5-5',
+          apiKey: 'sk-test',
+          thinking: 'xhigh',
+        }),
+      ])
     );
   });
 });

@@ -1,13 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import { BUILTIN_ROLES, getBuiltinRole, type Role } from '@fynvra/core';
-import type { AgentApprovalRequest, AgentCommand } from '@shared/types/agent';
-import type { ApprovalDecision, SessionEventEnvelope } from '@shared/types/chat';
+import type { AgentApprovalRequest, AgentCommand, ModelQuery } from '@shared/types/agent';
+import type {
+  ApprovalDecision,
+  ModelThinkingCapability,
+  SessionEventEnvelope,
+  SessionModelRef,
+} from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { StoredProvider } from '../providers/providerStore';
+import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
@@ -907,6 +912,421 @@ describe('createAgentHost approvals', () => {
     await env.host.implementsLauncher().disposeSession(session.id);
     expect(env.events(session.id)).toEqual([]);
     expect(env.host.list('ws-1')[0]?.status).toBe('idle');
+  });
+});
+
+describe('createAgentHost model choice', () => {
+  const openai: StoredProvider = {
+    id: 'openai',
+    name: 'OpenAI',
+    api: 'openai-responses',
+    enabled: true,
+    models: [{ id: 'gpt-5.5', name: 'GPT-5.5' }],
+    apiKey: 'sk-openai-secret',
+  };
+  const local: StoredProvider = {
+    id: 'local',
+    name: 'Local vLLM',
+    api: 'openai-completions',
+    baseUrl: 'http://127.0.0.1:9/v1',
+    enabled: true,
+    // 自定义 OpenAI 兼容服务：pi 目录里没有这个模型，是否推理看设置里的标记
+    models: [{ id: 'qwen3-coder', name: 'Qwen3 Coder', reasoning: true }],
+    apiKey: 'local-key',
+  };
+  const disabled: StoredProvider = { ...openai, id: 'old-openai', name: 'Old', enabled: false };
+  const keyless: StoredProvider = { ...openai, id: 'keyless', name: 'No key', apiKey: undefined };
+  const catalog = [anthropic, openai, local, disabled, keyless];
+  const OPENAI_RUNTIME = runtimeProviderId('https://api.openai.com/v1', 'sk-openai-secret');
+
+  /** 假 worker 的回答：pi 1.4.0 目录给这些模型的档位 */
+  const CAPABILITIES: Record<string, ModelThinkingCapability> = {
+    'claude-sonnet-5-5': {
+      thinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+    },
+    'claude-haiku-5-5': {
+      thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+    },
+    'gpt-5.5': {
+      thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+      defaultThinking: 'medium',
+    },
+    'qwen3-coder': {
+      thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'],
+      defaultThinking: 'medium',
+    },
+  };
+  const describeLikePi = (query: ModelQuery): ModelThinkingCapability =>
+    CAPABILITIES[query.modelId] ?? { thinkingLevels: [] };
+
+  const architect: Role = {
+    ...tester,
+    id: 'architect',
+    name: 'Architect',
+    model: { providerId: 'anthropic', modelId: 'claude-haiku-5-5', thinking: 'off' },
+  };
+
+  function modelEnv(overrides: Partial<AgentHostDeps> = {}) {
+    const remembered: [string, SessionModelRef][] = [];
+    const env = setup({
+      models: modelsOf(catalog),
+      providers: { list: async () => catalog.map(toProviderView) },
+      lastModels: {
+        get: (workspaceId) => remembered.filter(([id]) => id === workspaceId).at(-1)?.[1],
+        set: (workspaceId, model) => {
+          remembered.push([workspaceId, model]);
+        },
+      },
+      roles: {
+        get: async (id) => getBuiltinRole(id) ?? [tester, architect].find((role) => role.id === id),
+        list: async () => [...BUILTIN_ROLES, tester, architect],
+      },
+      ...overrides,
+    });
+    /** 回答最近一条 describe-models */
+    const answerDescribe = () => {
+      const command = env.sent('describe-models').at(-1);
+      if (command?.type !== 'describe-models') throw new Error('no describe-models was sent');
+      env.worker().emit({
+        type: 'models-described',
+        requestId: command.requestId,
+        result: { ok: true, models: command.models.map(describeLikePi) },
+      });
+    };
+    const modelOptions = async (workspaceId?: string) => {
+      const before = env.sent('describe-models').length;
+      const pending = env.host.modelOptions(workspaceId ? { workspaceId } : {});
+      await flush();
+      if (env.sent('describe-models').length > before) answerDescribe();
+      return pending;
+    };
+    return { ...env, remembered, modelOptions };
+  }
+
+  const specModel = (command: AgentCommand | undefined) =>
+    command?.type === 'spawn-session' ? command.spec.model : undefined;
+
+  it('lists enabled providers with a key, with the thinking levels the worker gives per model', async () => {
+    const env = modelEnv();
+    const options = await env.modelOptions('ws-1');
+    expect(env.sent('describe-models')).toEqual([
+      {
+        type: 'describe-models',
+        requestId: expect.any(String),
+        models: [
+          { api: 'anthropic-messages', modelId: 'claude-sonnet-5-5' },
+          { api: 'anthropic-messages', modelId: 'claude-haiku-5-5' },
+          { api: 'openai-responses', modelId: 'gpt-5.5' },
+          { api: 'openai-completions', modelId: 'qwen3-coder', reasoning: true },
+        ],
+      },
+    ]);
+    expect(options).toEqual({
+      ok: true,
+      providers: [
+        {
+          providerId: 'anthropic',
+          name: 'Anthropic',
+          api: 'anthropic-messages',
+          models: [
+            {
+              id: 'claude-sonnet-5-5',
+              name: 'Claude Sonnet 5.5',
+              ...CAPABILITIES['claude-sonnet-5-5'],
+            },
+            {
+              id: 'claude-haiku-5-5',
+              name: 'Claude Haiku 5.5',
+              ...CAPABILITIES['claude-haiku-5-5'],
+            },
+          ],
+        },
+        {
+          providerId: 'openai',
+          name: 'OpenAI',
+          api: 'openai-responses',
+          models: [{ id: 'gpt-5.5', name: 'GPT-5.5', ...CAPABILITIES['gpt-5.5'] }],
+        },
+        {
+          providerId: 'local',
+          name: 'Local vLLM',
+          api: 'openai-completions',
+          models: [{ id: 'qwen3-coder', name: 'Qwen3 Coder', ...CAPABILITIES['qwen3-coder'] }],
+        },
+      ],
+    });
+    // 不带 key、地址
+    expect(JSON.stringify(options)).not.toMatch(/sk-|local-key|127\.0\.0\.1/);
+
+    // pi 目录随 worker 固定：第二次直接用缓存，不再问 worker
+    expect(await env.host.modelOptions({})).toEqual(options);
+    expect(env.sent('describe-models')).toHaveLength(1);
+  });
+
+  it('returns the model last used in the workspace', async () => {
+    const env = modelEnv();
+    const model: SessionModelRef = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' };
+    await env.host.create({ workspaceId: 'ws-1', roleId: 'worker', model });
+    expect(env.remembered).toEqual([['ws-1', model]]);
+    expect(await env.modelOptions('ws-1')).toMatchObject({ ok: true, lastUsed: model });
+    expect(await env.host.modelOptions({ workspaceId: 'ws-2' })).not.toHaveProperty('lastUsed');
+  });
+
+  it('reports a worker that cannot answer instead of hanging', async () => {
+    const env = modelEnv({ describeTimeoutMs: 20 });
+    expect(await env.host.modelOptions({})).toEqual({
+      ok: false,
+      error: expect.stringContaining('超时'),
+    });
+
+    const failed = env.host.modelOptions({});
+    await flush();
+    const command = env.sent('describe-models').at(-1);
+    if (command?.type !== 'describe-models') throw new Error('no describe-models');
+    env.worker().emit({
+      type: 'models-described',
+      requestId: command.requestId,
+      result: { ok: false, error: 'the model catalog failed to load' },
+    });
+    expect(await failed).toEqual({ ok: false, error: 'the model catalog failed to load' });
+
+    const crashed = env.host.modelOptions({});
+    await flush();
+    env.worker().exit(1);
+    expect(await crashed).toEqual({ ok: false, error: expect.stringContaining('退出') });
+  });
+
+  it('creates a session with the chosen model and thinking level and spawns it with them', async () => {
+    const env = modelEnv();
+    const created = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'worker',
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' },
+    });
+    if (!created.ok) throw new Error(created.error);
+    expect(created.session.model).toEqual({
+      providerId: 'openai',
+      modelId: 'gpt-5.5',
+      thinking: 'xhigh',
+    });
+    await env.host.prompt(created.session.id, 'hi');
+    expect(specModel(env.sent('spawn-session')[0])).toEqual({
+      providerId: OPENAI_RUNTIME,
+      api: 'openai-responses',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-secret',
+      modelId: 'gpt-5.5',
+      thinking: 'xhigh',
+    });
+  });
+
+  it("falls back to the role's model and thinking level when none is chosen", async () => {
+    const env = modelEnv();
+    const created = await env.host.create({ workspaceId: 'ws-1', roleId: 'architect' });
+    expect(created.ok && created.session.model).toEqual({
+      providerId: 'anthropic',
+      modelId: 'claude-haiku-5-5',
+      thinking: 'off',
+    });
+  });
+
+  it('carries the reasoning mark of a custom model into the spawn spec', async () => {
+    const env = modelEnv();
+    const created = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'worker',
+      model: { providerId: 'local', modelId: 'qwen3-coder', thinking: 'high' },
+    });
+    if (!created.ok) throw new Error(created.error);
+    await env.host.prompt(created.session.id, 'hi');
+    expect(specModel(env.sent('spawn-session')[0])).toMatchObject({
+      modelId: 'qwen3-coder',
+      reasoning: true,
+      thinking: 'high',
+    });
+  });
+
+  it('switches a session that is not in the worker yet: the record now, the spawn later', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    env.broadcasts.length = 0;
+    const model: SessionModelRef = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'high' };
+
+    const switched = await env.host.setModel({ sessionId: session.id, model });
+    expect(switched).toEqual({ ok: true, session: { ...session, model } });
+    expect(env.host.list('ws-1')[0]?.model).toEqual(model);
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toEqual([['ws-1']]);
+    expect(env.sent()).toEqual([]);
+    expect(env.remembered.at(-1)).toEqual(['ws-1', model]);
+    // sessions.json 落盘的也是新模型
+    expect(env.store.flush()).toBe(true);
+    const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
+    expect(file.sessions[0].model).toEqual(model);
+
+    await env.host.prompt(session.id, 'hi');
+    expect(specModel(env.sent('spawn-session')[0])).toMatchObject({
+      providerId: OPENAI_RUNTIME,
+      modelId: 'gpt-5.5',
+      thinking: 'high',
+    });
+  });
+
+  it('sends set-model to the worker and keeps the new model for a crash respawn', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'first');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+
+    const model: SessionModelRef = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' };
+    expect(await env.host.setModel({ sessionId: session.id, model })).toMatchObject({ ok: true });
+    const openaiSpec = {
+      providerId: OPENAI_RUNTIME,
+      api: 'openai-responses',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-secret',
+      modelId: 'gpt-5.5',
+      thinking: 'xhigh',
+    };
+    expect(env.sent('set-model')).toEqual([{ type: 'set-model', identity, model: openaiSpec }]);
+
+    env.worker().exit(1);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(specModel(env.sent('spawn-session')[0])).toEqual(openaiSpec);
+  });
+
+  it('refuses to switch while the session is running or a prompt is on its way', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    const model = { providerId: 'openai', modelId: 'gpt-5.5' };
+    const refused = { ok: false, error: expect.stringContaining('等本轮结束') };
+
+    // 换模型还在解析时开始了一轮：解析完再查一次，不能让刚 spawn 的会话与记录对不上
+    const switching = env.host.setModel({ sessionId: session.id, model });
+    const inFlight = env.host.prompt(session.id, 'first');
+    expect(await switching).toEqual(refused);
+    expect(await env.host.setModel({ sessionId: session.id, model })).toEqual(refused);
+    await inFlight;
+    expect(await env.host.setModel({ sessionId: session.id, model })).toEqual(refused);
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'waiting-approval' });
+    expect(await env.host.setModel({ sessionId: session.id, model })).toEqual(refused);
+
+    expect(env.sent('set-model')).toEqual([]);
+    expect(env.host.list('ws-1')[0]?.model).toEqual(session.model);
+  });
+
+  it('returns a readable error and changes nothing when the model cannot be resolved', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    env.broadcasts.length = 0;
+    const attempt = (providerId: string, modelId: string) =>
+      env.host.setModel({ sessionId: session.id, model: { providerId, modelId } });
+
+    expect(await attempt('ghost', 'x')).toEqual({
+      ok: false,
+      error: expect.stringContaining('不存在'),
+    });
+    expect(await attempt('old-openai', 'gpt-5.5')).toEqual({
+      ok: false,
+      error: expect.stringContaining('已停用'),
+    });
+    expect(await attempt('openai', 'gpt-9')).toEqual({
+      ok: false,
+      error: expect.stringContaining('没有模型'),
+    });
+    expect(await attempt('keyless', 'gpt-5.5')).toEqual({
+      ok: false,
+      error: expect.stringContaining('API Key'),
+    });
+    const ghostSession = await env.host.setModel({
+      sessionId: 'ghost',
+      model: { providerId: 'openai', modelId: 'gpt-5.5' },
+    });
+    expect(ghostSession).toEqual({ ok: false, error: '会话不存在' });
+
+    expect(env.host.list('ws-1')[0]).toEqual(session);
+    expect(env.broadcasts).toEqual([]);
+    expect(env.sent()).toEqual([]);
+    expect(env.remembered).toEqual([['ws-1', session.model]]);
+  });
+
+  it('clears an error status when the model is switched', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'error' });
+    expect(env.host.list('ws-1')[0]?.status).toBe('error');
+    await env.host.setModel({
+      sessionId: session.id,
+      model: { providerId: 'openai', modelId: 'gpt-5.5' },
+    });
+    expect(env.host.list('ws-1')[0]?.status).toBe('idle');
+  });
+
+  it("gives a dispatched worker its role's model, or the orchestrator's current model", async () => {
+    const env = modelEnv();
+    const coordinator = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'orchestrator',
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' },
+    });
+    if (!coordinator.ok) throw new Error(coordinator.error);
+    env.host.setCoordinatorLookup(() => coordinator.session.id);
+    const launcher = env.host.implementsLauncher();
+    const dispatch = async (roleId: string) => {
+      const created = await launcher.createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId: `dsp_${roleId}`,
+        roleId,
+        cwd: '/worktrees/ws-1/a',
+        worktreeId: 'wt_1',
+        brief: '# A',
+      });
+      if (!created.ok) throw new Error(created.error);
+      return env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    };
+
+    // 角色没配模型：继承主 agent 当前的模型与档位
+    expect((await dispatch('worker'))?.model).toEqual({
+      providerId: 'openai',
+      modelId: 'gpt-5.5',
+      thinking: 'xhigh',
+    });
+    // 角色配了模型：用角色的
+    expect((await dispatch('architect'))?.model).toEqual(architect.model);
+
+    // 主 agent 换了模型之后派出的 worker 跟着换
+    const sonnet: SessionModelRef = {
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-5-5',
+      thinking: 'high',
+    };
+    expect(
+      await env.host.setModel({ sessionId: coordinator.session.id, model: sonnet })
+    ).toMatchObject({ ok: true });
+    const worker = await dispatch('tester');
+    expect(worker?.model).toEqual(sonnet);
+
+    // 派发出的会话不算「这个工作区上一次用过的模型」
+    const remembered = env.remembered.length;
+    env.worker().emit({
+      type: 'session-status',
+      identity: { sessionId: worker?.id ?? '', generation: 1 },
+      status: 'idle',
+    });
+    expect(
+      await env.host.setModel({
+        sessionId: worker?.id ?? '',
+        model: { providerId: 'openai', modelId: 'gpt-5.5' },
+      })
+    ).toMatchObject({ ok: true });
+    expect(env.remembered).toHaveLength(remembered);
   });
 });
 

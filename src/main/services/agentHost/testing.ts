@@ -4,6 +4,7 @@ import {
   type OpenSession,
   SessionSupervisor,
   type SupervisedSession,
+  type SupervisorOptions,
 } from '../../../agent/supervisor';
 import type { WorkerProcess } from './workerClient';
 
@@ -18,10 +19,11 @@ export class InMemoryWorker implements WorkerProcess {
   #toMain: ((message: unknown) => void) | undefined;
   #onExit: ((code: number) => void) | undefined;
 
-  constructor(openSession: OpenSession) {
+  constructor(openSession: OpenSession, options: Pick<SupervisorOptions, 'describeModels'> = {}) {
     this.supervisor = new SessionSupervisor({
       post: (event) => queueMicrotask(() => this.#toMain?.(structuredClone(event))),
       openSession,
+      ...options,
     });
     queueMicrotask(() => this.#toMain?.({ type: 'ready' }));
   }
