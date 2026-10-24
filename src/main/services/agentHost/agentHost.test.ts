@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import { BUILTIN_ROLES, getBuiltinRole, type Role } from '@fynvra/core';
-import type { AgentCommand } from '@shared/types/agent';
-import type { SessionEventEnvelope } from '@shared/types/chat';
+import type { AgentApprovalRequest, AgentCommand } from '@shared/types/agent';
+import type { ApprovalDecision, SessionEventEnvelope } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StoredProvider } from '../providers/providerStore';
@@ -727,56 +727,186 @@ describe('createAgentHost launcher', () => {
 });
 
 describe('createAgentHost approvals', () => {
-  it('announces approval requests and forwards the decision once', async () => {
-    const env = setup();
+  const request = (patch: Partial<AgentApprovalRequest> = {}): AgentApprovalRequest => ({
+    requestId: 'req-1',
+    toolCallId: 'c1',
+    toolName: 'edit',
+    kind: 'file-edit',
+    title: 'edit',
+    detail: 'src/a.ts',
+    // worker 按自己的时钟算出的到期时间（与 Main 的 now 无关）
+    expiresAt: 900_000,
+    ...patch,
+  });
+
+  /** worker 会话在跑一轮，审批门发出了一个请求（先 approval-request，再 approval_request 事件） */
+  async function pending(patch: Partial<AgentApprovalRequest> = {}, setupOverrides = {}) {
+    const env = setup(setupOverrides);
     const session = await createSession(env);
-    await env.host.prompt(session.id, 'clean up');
+    await env.host.prompt(session.id, 'change it');
     const identity = { sessionId: session.id, generation: 1 };
+    const announced = request(patch);
+    env.worker().emit({ type: 'session-status', identity, status: 'waiting-approval' });
+    env.worker().emit({ type: 'approval-request', identity, request: announced });
     env.worker().emit({
       type: 'session-event',
       identity,
       seq: 1,
       event: {
         type: 'approval_request',
-        requestId: 'req-1',
-        toolCallId: 'c1',
-        toolName: 'bash',
-        args: { command: 'rm -rf build' },
+        requestId: announced.requestId,
+        toolCallId: announced.toolCallId,
+        toolName: announced.toolName,
+        args: { path: 'src/a.ts' },
         seq: 1,
       },
     });
+    const respond = (decision: ApprovalDecision, sessionId = session.id) =>
+      env.host.respondApproval({ sessionId, requestId: announced.requestId, decision });
+    return { ...env, session, identity, respond };
+  }
+
+  it('pushes the request with the fields the gate produced and forwards the decision once', async () => {
+    const env = await pending();
     expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([
       [
         {
           id: 'req-1',
-          sessionId: session.id,
-          kind: 'command',
-          title: 'bash',
-          detail: 'rm -rf build',
-          expiresAt: 1_000 + 10 * 60_000,
+          sessionId: env.session.id,
+          kind: 'file-edit',
+          title: 'edit',
+          detail: 'src/a.ts',
+          expiresAt: 900_000,
         },
       ],
     ]);
+    // 时间线事件照常转发（Renderer 据 toolCallId 在工具结束时出队），但不再重复推送
+    expect(env.events(env.session.id)).toEqual([
+      expect.objectContaining({ type: 'approval_request', requestId: 'req-1', toolCallId: 'c1' }),
+    ]);
+
+    expect(await env.respond('allow', 'other')).toMatchObject({ ok: false });
+    expect(await env.respond('allow')).toEqual({ ok: true });
+    expect(env.sent('respond-approval')).toEqual([
+      { type: 'respond-approval', identity: env.identity, requestId: 'req-1', decision: 'allow' },
+    ]);
+    expect(await env.respond('deny')).toMatchObject({ ok: false });
+  });
+
+  it('marks a protected action in the title of the approval bar', async () => {
+    const env = await pending({
+      toolName: 'bash',
+      kind: 'command',
+      title: 'bash',
+      detail: 'git push origin main',
+      protectedAction: 'git push',
+    });
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)[0]?.[0]).toMatchObject({
+      kind: 'command',
+      title: 'bash（保护底线：git push）',
+      detail: 'git push origin main',
+    });
+  });
+
+  it('does not push anything for an approval_request event alone', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'change it');
+    env.worker().emit({
+      type: 'session-event',
+      identity: { sessionId: session.id, generation: 1 },
+      seq: 1,
+      event: {
+        type: 'approval_request',
+        requestId: 'req-9',
+        toolCallId: 'c9',
+        toolName: 'bash',
+        args: {},
+        seq: 1,
+      },
+    });
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([]);
     expect(
-      await env.host.respondApproval({ sessionId: 'other', requestId: 'req-1', decision: 'allow' })
+      await env.host.respondApproval({
+        sessionId: session.id,
+        requestId: 'req-9',
+        decision: 'allow',
+      })
     ).toMatchObject({ ok: false });
+  });
+
+  it('ignores approval requests of a stale generation', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'change it');
+    env.worker().emit({
+      type: 'approval-request',
+      identity: { sessionId: session.id, generation: 7 },
+      request: request(),
+    });
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([]);
     expect(
       await env.host.respondApproval({
         sessionId: session.id,
         requestId: 'req-1',
         decision: 'allow',
       })
-    ).toEqual({ ok: true });
-    expect(env.sent('respond-approval')).toEqual([
-      { type: 'respond-approval', identity, requestId: 'req-1', decision: 'allow' },
-    ]);
-    expect(
-      await env.host.respondApproval({
-        sessionId: session.id,
-        requestId: 'req-1',
-        decision: 'deny',
-      })
     ).toMatchObject({ ok: false });
+  });
+
+  it('refuses an answer after the expiry the worker enforces', async () => {
+    let time = 1_000;
+    const env = await pending({ expiresAt: 5_000 }, { now: () => time });
+    time = 5_001;
+    expect(await env.respond('allow')).toEqual({ ok: false, error: '审批请求已过期' });
+    expect(env.sent('respond-approval')).toEqual([]);
+  });
+
+  it('forgets pending requests when the turn settles', async () => {
+    const env = await pending();
+    env.worker().emit({
+      type: 'session-event',
+      identity: env.identity,
+      seq: 2,
+      event: { type: 'agent_settled', aborted: false, seq: 2 },
+    });
+    expect(await env.respond('allow')).toMatchObject({ ok: false });
+  });
+
+  it('denies pending requests when the worker crashes', async () => {
+    const env = await pending();
+    env.worker().exit(1);
+    expect(await env.respond('allow')).toMatchObject({ ok: false });
+    // 进行中的回合按中止收尾：Renderer 据 agent_settled 清空审批条
+    expect(env.events(env.session.id).at(-1)).toMatchObject({
+      type: 'agent_settled',
+      aborted: true,
+    });
+  });
+
+  it('ends the turn and clears pending requests when a waiting session is disposed', async () => {
+    const env = await pending();
+    await env.host.implementsLauncher().disposeSession(env.session.id);
+    expect(env.sent('dispose-session')).toEqual([
+      { type: 'dispose-session', identity: env.identity },
+    ]);
+    expect(await env.respond('allow')).toMatchObject({ ok: false });
+    expect(env.events(env.session.id).at(-1)).toMatchObject({
+      type: 'agent_settled',
+      aborted: true,
+    });
+    expect(env.host.list('ws-1')[0]?.status).toBe('idle');
+  });
+
+  it('leaves an idle session quiet when it is disposed', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    await env.host.implementsLauncher().disposeSession(session.id);
+    expect(env.events(session.id)).toEqual([]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('idle');
   });
 });
 

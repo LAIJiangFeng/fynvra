@@ -11,6 +11,7 @@ import {
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import type { Role, ThinkingLevel } from '@fynvra/core';
+import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
 import type { ExecFn } from '../exec';
 import type { OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
@@ -63,7 +64,19 @@ export interface CreateRoleSessionOptions {
   exec?: ExecFn;
   /** 扩展（MCP 等）在事件处理中抛出的错误 */
   onExtensionError?: (error: ExtensionError) => void;
+  /**
+   * 审批通道：按 role.approvalMode 拦截的工具调用经它请求人工审批。
+   * 不提供时需要审批的调用一律拒绝（fail-closed）；不需要审批的照常执行。
+   */
+  approval?: ApprovalPolicyHooks;
 }
+
+/** 没有审批通道：需要审批的调用全部拒绝，拒绝文本说明原因 */
+const NO_APPROVAL_CHANNEL: ApprovalPolicyHooks = {
+  request: async () => {
+    throw new Error('this session has no approval channel');
+  },
+};
 
 export interface RoleSession {
   session: AgentSession;
@@ -79,6 +92,7 @@ export interface RoleSession {
  *   传入 `workerHost` 时再加 worker 工具。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
+ * - role.approvalMode → 审批门（tool_call 拦截），经 `approval` 请求人工审批。
  */
 export async function createRoleSession(options: CreateRoleSessionOptions): Promise<RoleSession> {
   const { role, cwd, agentDir } = options;
@@ -89,7 +103,13 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
   const promptAppend = buildRolePromptAppend(role, { worker: workerToolset !== undefined });
+  const gate = createApprovalGate({
+    mode: role.approvalMode,
+    ...(options.approval ?? NO_APPROVAL_CHANNEL),
+  });
   const extensionFactories: InlineExtension[] = [
+    // 第一个注册：拦截在其他扩展的 tool_call 处理之前
+    gate.extension,
     ...mcp.extensions,
     ...(promptAppend ? [appendSystemPromptExtension('fynvra-role-prompt', promptAppend)] : []),
     ...(workerToolset ? [beforeRunExtension('fynvra-worker-round', workerToolset.startRound)] : []),

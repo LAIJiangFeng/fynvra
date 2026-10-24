@@ -36,6 +36,11 @@ export class ApprovalBroker {
     return [...this.#pending.values()].some((pending) => pending.sessionId === sessionId);
   }
 
+  /** 审批门不再等待（超时、回合中止）：撤下这条请求，按 deny 结束 */
+  cancel(requestId: string): void {
+    this.#finish(requestId, 'deny');
+  }
+
   /** 会话关闭或中止：该会话的待审批请求全部 deny */
   cancelSession(sessionId: string): void {
     for (const [requestId, pending] of [...this.#pending]) {

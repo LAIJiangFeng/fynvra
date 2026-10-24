@@ -7,7 +7,7 @@ import {
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
-import type { ApprovalDecision, SessionStatus } from './chat';
+import type { ApprovalDecision, ApprovalKind, SessionStatus } from './chat';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -88,6 +88,24 @@ export type LogLevel = 'info' | 'warn' | 'error';
 /** 待审批请求的有效期：worker 超时按 deny 处理，Main 据此给出 ApprovalRequest.expiresAt。 */
 export const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * 审批门挂起的一次工具调用（worker 侧 agent-runtime 已分类并生成展示文本）。
+ * Main 不加载 agent-runtime，审批条的 kind / title / detail 一律以这里为准。
+ */
+export interface AgentApprovalRequest {
+  requestId: string;
+  toolCallId: string;
+  toolName: string;
+  kind: ApprovalKind;
+  title: string;
+  /** 命令全文 / 文件路径 / 参数预览 */
+  detail: string;
+  /** 命中的保护底线（如 `git push`）：任何档位都要人确认 */
+  protectedAction?: string;
+  /** epoch ms：worker 到期按 deny 结束 */
+  expiresAt: number;
+}
+
 /** Main → worker。 */
 export type AgentCommand =
   | { type: 'spawn-session'; identity: SessionIdentity; spec: SpawnSessionSpec }
@@ -125,6 +143,11 @@ export type AgentWorkerEvent =
     }
   /** 调用方已放弃（工具被中止或等待超时），Main 应中止对应的 host 调用 */
   | { type: 'host-cancel'; identity: SessionIdentity; callId: string }
+  /**
+   * 审批门在等人确认：Main 记下待审批并推 `sessions:approval-request`。
+   * 紧接着还有同一 requestId 的 approval_request 会话事件，供时间线关联工具调用。
+   */
+  | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
   /** 诊断日志（进程级） */
@@ -141,6 +164,12 @@ const APPROVAL_DECISION_SET: Record<ApprovalDecision, true> = {
   allow: true,
   allowSession: true,
   deny: true,
+};
+const APPROVAL_KIND_SET: Record<ApprovalKind, true> = {
+  command: true,
+  'file-edit': true,
+  'file-write': true,
+  mcp: true,
 };
 const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true };
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };
@@ -232,6 +261,10 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
         ? { type: 'session-error', identity, error, fatal }
         : null;
     }
+    case 'approval-request': {
+      const request = parseApprovalRequest(record.request);
+      return request ? { type: 'approval-request', identity, request } : null;
+    }
     default:
       return null;
   }
@@ -261,6 +294,29 @@ function parseIdentity(raw: unknown): SessionIdentity | null {
   return isNonEmptyString(sessionId) && isPositiveInteger(generation)
     ? { sessionId, generation }
     : null;
+}
+
+function parseApprovalRequest(raw: unknown): AgentApprovalRequest | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const { requestId, toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } =
+    record;
+  if (!isNonEmptyString(requestId) || !isString(toolCallId) || !isNonEmptyString(toolName)) {
+    return null;
+  }
+  if (!memberOf(APPROVAL_KIND_SET, kind) || !isString(title) || !isString(detail)) return null;
+  if (!isOptional(protectedAction, isString)) return null;
+  if (!isFiniteNumber(expiresAt) || expiresAt <= 0) return null;
+  return {
+    requestId,
+    toolCallId,
+    toolName,
+    kind,
+    title,
+    detail,
+    ...(protectedAction !== undefined ? { protectedAction: protectedAction as string } : {}),
+    expiresAt,
+  };
 }
 
 function parseHostCallResult(raw: unknown): HostCallResult | null {

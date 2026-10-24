@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -7,11 +8,14 @@ import {
   fauxProvider,
   fauxToolCall,
   getSystemMessageText,
+  type ToolCall,
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { getBuiltinRole, ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ApprovalGateRequest, ApprovalRequestFn } from '../approval/gate';
+import type { ApprovalDecision } from '../approval/policy';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
 import { ORCHESTRATOR_PROMPT, WORKER_CONTRACT_PROMPT } from '../prompts/orchestratorPrompt';
@@ -308,5 +312,198 @@ describe('createRoleSession resources', () => {
     expect(warnings.join('\n')).toContain('"bad name" skipped');
     await dispose();
     await dispose();
+  });
+});
+
+describe('createRoleSession approval gate', () => {
+  /** 审批通道：按顺序给出决定（缺省 allow），记下每次请求 */
+  function approver(...decisions: ApprovalDecision[]) {
+    const requests: ApprovalGateRequest[] = [];
+    const request = vi.fn<ApprovalRequestFn>(async (req) => {
+      requests.push(req);
+      return decisions.shift() ?? 'allow';
+    });
+    return { requests, request };
+  }
+
+  /** 模型依次发出这些工具调用，每次请求都记下上下文（含上一个工具结果），最后回一句话结束 */
+  function script(...calls: { name: string; args: ToolCall['arguments'] }[]) {
+    const contexts: TranscriptContext[] = [];
+    faux.setResponses([
+      ...calls.map((call, index) => (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage(fauxToolCall(call.name, call.args, { id: `call-${index}` }), {
+          stopReason: 'toolUse',
+        });
+      }),
+      (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage('done');
+      },
+    ]);
+    return contexts;
+  }
+
+  /** 模型在这次请求里看到的最后一个工具结果 */
+  function lastToolResult(context: TranscriptContext | undefined) {
+    const result = context?.messages.filter((message) => message.role === 'toolResult').at(-1);
+    if (result?.role !== 'toolResult') throw new Error('no tool result in the context');
+    const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+    return { isError: result.isError, text };
+  }
+
+  it('asks before a supervised write and runs it once allowed', async () => {
+    const approval = approver('allow');
+    const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
+    const contexts = script({ name: 'write', args: { path: 'allowed.txt', content: 'hello' } });
+
+    await session.prompt('Write the file.');
+
+    expect(approval.requests).toEqual([
+      {
+        toolCallId: 'call-0',
+        toolName: 'write',
+        kind: 'file-write',
+        title: 'write',
+        detail: 'allowed.txt',
+        args: { path: 'allowed.txt', content: 'hello' },
+        expiresAt: expect.any(Number),
+      },
+    ]);
+    expect(await readFile(path.join(workdir, 'allowed.txt'), 'utf8')).toBe('hello');
+    expect(lastToolResult(contexts[1]).isError).toBe(false);
+  });
+
+  it('returns the refusal to the model and skips the tool when denied', async () => {
+    const approval = approver('deny');
+    const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
+    const contexts = script({ name: 'write', args: { path: 'denied.txt', content: 'nope' } });
+    const events: FynvraSessionEvent[] = [];
+    const subscription = subscribeNormalized(session, (event) => events.push(event));
+
+    await session.prompt('Write the file.');
+    subscription.unsubscribe();
+
+    expect(existsSync(path.join(workdir, 'denied.txt'))).toBe(false);
+    const seen = lastToolResult(contexts[1]);
+    expect(seen.isError).toBe(true);
+    expect(seen.text).toContain('The user denied writing denied.txt');
+    expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+      toolName: 'write',
+      isError: true,
+      output: expect.stringContaining('denied'),
+    });
+    // 拒绝不打断回合：模型拿到拒绝文本后继续回答
+    expect(events.at(-1)).toMatchObject({ type: 'agent_settled', aborted: false });
+  });
+
+  it('lets auto-edits write files without asking but still asks about bash', async () => {
+    const approval = approver('deny');
+    const { session } = await open({ role: role({ approvalMode: 'auto-edits' }), approval });
+    const contexts = script(
+      { name: 'write', args: { path: 'auto.txt', content: 'auto' } },
+      { name: 'bash', args: { command: 'echo hi > bash.txt' } }
+    );
+
+    await session.prompt('Write, then run a command.');
+
+    expect(await readFile(path.join(workdir, 'auto.txt'), 'utf8')).toBe('auto');
+    expect(approval.requests.map((request) => [request.kind, request.detail])).toEqual([
+      ['command', 'echo hi > bash.txt'],
+    ]);
+    expect(existsSync(path.join(workdir, 'bash.txt'))).toBe(false);
+    expect(lastToolResult(contexts[2]).text).toContain('The user denied the command `echo hi');
+  });
+
+  it('asks about protected commands in full mode and blocks them when denied', async () => {
+    const approval = approver('deny');
+    const { session } = await open({ role: role({ approvalMode: 'full' }), approval });
+    const contexts = script(
+      { name: 'write', args: { path: 'full.txt', content: 'full' } },
+      { name: 'bash', args: { command: 'git push origin main' } }
+    );
+
+    await session.prompt('Write, then push.');
+
+    expect(await readFile(path.join(workdir, 'full.txt'), 'utf8')).toBe('full');
+    expect(approval.requests).toEqual([
+      expect.objectContaining({ kind: 'command', protectedAction: 'git push' }),
+    ]);
+    expect(lastToolResult(contexts[2]).text).toContain('protected action (git push)');
+  });
+
+  it('remembers allowSession for the same kind and tool', async () => {
+    const approval = approver('allowSession');
+    const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
+    script(
+      { name: 'write', args: { path: 'one.txt', content: '1' } },
+      { name: 'write', args: { path: 'two.txt', content: '2' } }
+    );
+
+    await session.prompt('Write two files.');
+
+    expect(approval.request).toHaveBeenCalledTimes(1);
+    expect(await readFile(path.join(workdir, 'two.txt'), 'utf8')).toBe('2');
+  });
+
+  it('withdraws a pending approval when the run is aborted', async () => {
+    let withdrawn: AbortSignal | undefined;
+    const request = vi.fn<ApprovalRequestFn>(
+      (_req, signal) =>
+        new Promise<ApprovalDecision>(() => {
+          withdrawn = signal;
+        })
+    );
+    const { session } = await open({
+      role: role({ approvalMode: 'supervised' }),
+      approval: { request },
+    });
+    script({ name: 'write', args: { path: 'aborted.txt', content: 'x' } });
+
+    const run = session.prompt('Write the file.');
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    await session.abort();
+    await run;
+
+    expect(withdrawn?.aborted).toBe(true);
+    expect(existsSync(path.join(workdir, 'aborted.txt'))).toBe(false);
+  });
+
+  it('denies calls that need approval when no approval channel is given (fail-closed)', async () => {
+    const { session } = await open({ role: role({ approvalMode: 'auto-edits' }) });
+    const contexts = script(
+      { name: 'bash', args: { command: 'echo hi > unapproved.txt' } },
+      { name: 'write', args: { path: 'unapproved-write.txt', content: 'ok' } }
+    );
+
+    await session.prompt('Run a command, then write.');
+
+    expect(existsSync(path.join(workdir, 'unapproved.txt'))).toBe(false);
+    expect(lastToolResult(contexts[1]).text).toContain('no approval channel');
+    expect(await readFile(path.join(workdir, 'unapproved-write.txt'), 'utf8')).toBe('ok');
+  });
+
+  it('puts run_checks of a full orchestrator through the protected floor', async () => {
+    const approval = approver('deny');
+    const runChecks = vi.fn<OrchestrationHost['runChecks']>(async () => ({
+      ok: true,
+      exitCode: 0,
+      output: 'ok',
+      durationMs: 1,
+    }));
+    const { session } = await open({
+      role: role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' }),
+      host: { ...orchestrationHost(), runChecks },
+      approval,
+    });
+    script(
+      { name: 'run_checks', args: { dispatch_id: 'dsp_1', command: 'pnpm test' } },
+      { name: 'run_checks', args: { dispatch_id: 'dsp_1', command: 'pnpm test && git push' } }
+    );
+
+    await session.prompt('Check the work.');
+
+    expect(approval.requests.map((request) => request.protectedAction)).toEqual(['git push']);
+    expect(runChecks.mock.calls.map(([input]) => input.command)).toEqual(['pnpm test']);
   });
 });

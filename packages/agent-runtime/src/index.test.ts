@@ -4,25 +4,30 @@ import type {
 } from '@fynvra/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
+  approvalKindOf,
   buildRolePromptAppend,
   checkGitArgs,
+  createApprovalGate,
   createEventNormalizer,
   createGitReadonlyTool,
   createOrchestrationTools,
   createReadonlyTools,
   createRoleSession,
   createWorkerTools,
+  describeToolCall,
   type FynvraSessionEvent,
   type FynvraSessionEventBody,
+  modeRequiresApproval,
   nodeExec,
   ORCHESTRATION_TOOL_METHODS,
   ORCHESTRATOR_PROMPT,
+  protectedAction,
   subscribeNormalized,
   WORKER_CONTRACT_PROMPT,
 } from './index';
 
 describe('@fynvra/agent-runtime entry point', () => {
-  it('exposes the session factory, tool factories, prompts and normalizer', () => {
+  it('exposes the session factory, tool factories, approval gate, prompts and normalizer', () => {
     const functions = {
       createRoleSession,
       createOrchestrationTools,
@@ -34,6 +39,11 @@ describe('@fynvra/agent-runtime entry point', () => {
       subscribeNormalized,
       buildRolePromptAppend,
       nodeExec,
+      createApprovalGate,
+      approvalKindOf,
+      modeRequiresApproval,
+      describeToolCall,
+      protectedAction,
     };
     for (const [name, value] of Object.entries(functions)) {
       expect(typeof value, name).toBe('function');
