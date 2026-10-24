@@ -2,6 +2,28 @@
 // §4 领域类型与会话事件类型以 @fynvra/core 为准；事件类型经 events/normalize 继续从这里导出。
 
 export {
+  APPROVAL_TIMEOUT_DEFAULT_MS,
+  type ApprovalGate,
+  type ApprovalGateOptions,
+  type ApprovalGateRequest,
+  type ApprovalPolicyHooks,
+  type ApprovalRequestFn,
+  createApprovalGate,
+  type GatedToolCall,
+  type NamedInlineExtension,
+  type ToolCallBlock,
+} from './approval/gate';
+export {
+  APPROVAL_ARGS_PREVIEW_CHARS,
+  type ApprovalDecision,
+  type ApprovalKind,
+  approvalKindOf,
+  describeToolCall,
+  modeRequiresApproval,
+  type ToolCallDescription,
+} from './approval/policy';
+export { protectedAction } from './approval/protectedCommand';
+export {
   createEventNormalizer,
   type EventNormalizer,
   type FynvraSessionEvent,
