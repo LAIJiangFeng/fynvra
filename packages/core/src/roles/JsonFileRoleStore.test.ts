@@ -145,6 +145,29 @@ describe('JsonFileRoleStore', () => {
     expect(await store.get('broken')).toBeUndefined();
   });
 
+  it('单个文件读不了（非 ENOENT）时跳过并报告，不影响其他角色', async () => {
+    await createStore().save(tester);
+    await createStore().save(reviewer);
+    const lockedFs: CoreFs = {
+      ...realFs,
+      readFile: async (path, encoding) => {
+        if (path.endsWith('reviewer.json')) {
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+        }
+        return realFs.readFile(path, encoding);
+      },
+    };
+    const onInvalidFile = vi.fn();
+    const store = createStore(lockedFs, onInvalidFile);
+    expect((await store.list()).map((role) => role.id)).toEqual([
+      'orchestrator',
+      'worker',
+      'tester',
+    ]);
+    expect(await store.get('reviewer')).toBeUndefined();
+    expect(onInvalidFile).toHaveBeenCalledWith('reviewer.json', expect.stringMatching(/EACCES/));
+  });
+
   it('写入失败时返回错误并清理临时文件', async () => {
     const failingFs: CoreFs = {
       ...realFs,

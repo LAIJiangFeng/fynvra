@@ -27,7 +27,7 @@ export interface JsonFileRoleStoreOptions {
   fs: CoreFs;
   /** 角色目录，如 `userData/roles`；不存在时首次 save 创建。 */
   dir: string;
-  /** 读到无效文件（坏 JSON、校验失败、文件名与 id 不符、占用内置 id）时回调，便于记日志；该文件被跳过。 */
+  /** 读到无效文件（读不了、坏 JSON、校验失败、文件名与 id 不符、占用内置 id）时回调，便于记日志；该文件被跳过。 */
   onInvalidFile?: (file: string, error: string) => void;
 }
 
@@ -37,7 +37,7 @@ const SUFFIX = '.json';
  * 每个自定义角色一个 `<dir>/<id>.json`（原子写）。内置角色不落盘、不可覆盖、不可删除；
  * 目录里占用内置 id 的文件会被忽略。返回的角色都是副本，修改不影响仓库。
  *
- * `list` / `get` 只在意外 IO 错误（非 ENOENT）时 reject；`save` / `remove` 从不 reject。
+ * `list` 只在角色目录本身读不了（非 ENOENT）时 reject；`get` / `save` / `remove` 从不 reject。
  */
 export class JsonFileRoleStore implements RoleStore {
   readonly #fs: CoreFs;
@@ -70,8 +70,9 @@ export class JsonFileRoleStore implements RoleStore {
     const parsed = parseRole(role);
     if (!parsed.ok) return parsed;
     const { id } = parsed.role;
-    if (isBuiltinRoleId(id))
+    if (isBuiltinRoleId(id)) {
       return { ok: false, error: `built-in role "${id}" cannot be overwritten` };
+    }
     const custom = withoutBuiltinFlag(parsed.role);
     try {
       await this.#fs.mkdir(this.#dir, { recursive: true });
@@ -119,15 +120,16 @@ export class JsonFileRoleStore implements RoleStore {
       return undefined;
     };
     if (!isValidRoleId(id)) return invalid('file name is not a valid role id');
-    if (isBuiltinRoleId(id))
+    if (isBuiltinRoleId(id)) {
       return invalid(`"${id}" is a built-in role id and cannot be redefined`);
+    }
 
     let text: string;
     try {
       text = await this.#fs.readFile(this.#pathOf(id), 'utf8');
     } catch (error) {
       if (isNotFoundError(error)) return undefined;
-      throw error;
+      return invalid(`cannot read file: ${errorMessage(error)}`);
     }
     let data: unknown;
     try {
