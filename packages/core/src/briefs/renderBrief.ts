@@ -15,7 +15,7 @@ export interface BriefInput {
   /** 本次尝试的 dispatch id。 */
   dispatchId: string;
   /** 对 `report_done` 内容的额外要求（如要附上哪条检查输出）；可省略。 */
-  reportDoneHint?: string;
+  reportDoneHint?: string | undefined;
 }
 
 // 契约段固定写在最后；多行条目在列表里自动缩进续行

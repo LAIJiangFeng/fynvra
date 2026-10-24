@@ -4,6 +4,9 @@ import { errorMessage, parentDir, writeFileAtomic } from '../internal/files';
 import type { Dispatch, Message, Run, Task, Worktree } from '../types';
 import { canTransitionTask, isDispatchSettled } from './transitions';
 
+/** {@link EntityTable.update} 的补丁：给出的字段覆盖原值，值为 `undefined` 的字段被删除；`id` 不可改。 */
+export type EntityPatch<T> = { [K in Exclude<keyof T, 'id'>]?: T[K] | undefined };
+
 /** 表操作结果。 */
 export type EntityResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -17,7 +20,7 @@ export interface EntityTable<T extends { id: string }> {
   /** 按 id 取；不存在返回 `undefined`。 */
   get(id: string): T | undefined;
   /** 浅合并 `patch`（`id` 不可改，值为 `undefined` 的字段被删除）；不存在返回错误。 */
-  update(id: string, patch: Partial<Omit<T, 'id'>>): EntityResult<T>;
+  update(id: string, patch: EntityPatch<T>): EntityResult<T>;
   /** 删除；返回删除前是否存在。 */
   delete(id: string): boolean;
   /** 按插入顺序列出，可选过滤。 */
@@ -115,7 +118,7 @@ class Table<T extends { id: string }> implements EntityTable<T> {
     return row === undefined ? undefined : structuredClone(row);
   }
 
-  update(id: string, patch: Partial<Omit<T, 'id'>>): EntityResult<T> {
+  update(id: string, patch: EntityPatch<T>): EntityResult<T> {
     const current = this.#rows.get(id);
     if (current === undefined) return { ok: false, error: `${this.#kind} ${id} not found` };
     return this.#commit(copy({ ...current, ...patch, id: current.id }), current);

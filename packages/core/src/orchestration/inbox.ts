@@ -32,9 +32,9 @@ export type InboxResult = { ok: true; message: Message } | { ok: false; error: s
 /** {@link Inbox} 构造参数。 */
 export interface InboxOptions {
   /** 消息表；传 `store.messages` 让消息随编排快照持久化。默认新建内存表。 */
-  messages?: EntityTable<Message>;
+  messages?: EntityTable<Message> | undefined;
   /** 时钟（epoch ms），默认 `Date.now`。 */
-  now?: () => number;
+  now?: (() => number) | undefined;
 }
 
 // setTimeout 的上限（约 24.8 天），更大的值会被 Node 当成 1ms
@@ -84,12 +84,9 @@ export class Inbox {
 
   /** 投递一条消息并唤醒所有匹配的等待者；类型非法时返回错误。 */
   post(message: NewMessage): InboxResult {
-    const result = this.#messages.insert({
-      ...message,
-      id: newId('msg'),
-      createdAt: this.#now(),
-      ackedAt: undefined,
-    });
+    // JS 调用方塞进来的 ackedAt 也丢掉：新消息总是未确认
+    const { ackedAt: _ackedAt, ...fields } = message as NewMessage & { ackedAt?: unknown };
+    const result = this.#messages.insert({ ...fields, id: newId('msg'), createdAt: this.#now() });
     if (!result.ok) return result;
     for (const waiter of [...this.#waiters]) {
       if (waiter.matches(result.value)) waiter.settle(structuredClone(result.value));

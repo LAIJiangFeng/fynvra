@@ -28,7 +28,7 @@ export interface JsonFileRoleStoreOptions {
   /** 角色目录，如 `userData/roles`；不存在时首次 save 创建。 */
   dir: string;
   /** 读到无效文件（读不了、坏 JSON、校验失败、文件名与 id 不符、占用内置 id）时回调，便于记日志；该文件被跳过。 */
-  onInvalidFile?: (file: string, error: string) => void;
+  onInvalidFile?: ((file: string, error: string) => void) | undefined;
 }
 
 const SUFFIX = '.json';
