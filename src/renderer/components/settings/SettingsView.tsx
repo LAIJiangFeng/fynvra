@@ -1,4 +1,4 @@
-import { Boxes, type LucideIcon, Palette, X } from 'lucide-react';
+import { Boxes, type LucideIcon, Palette, UserCog, X } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { ProvidersSettings } from './ProvidersSettings';
+import { RolesSettings } from './RolesSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 
 interface SectionSpec {
@@ -25,6 +26,15 @@ const SECTIONS: SectionSpec[] = [
     description: 'Anthropic、OpenAI、Google 与 OpenAI 兼容服务的地址、API Key 和模型。',
     icon: Boxes,
     Component: ProvidersSettings,
+  },
+  {
+    value: 'roles',
+    label: '角色',
+    description:
+      '系统提示词、模型、工具策略、审批档位、技能与 MCP 的组合；每个角色保存为 roles/<id>.json。',
+    icon: UserCog,
+    Component: RolesSettings,
+    wide: true,
   },
   {
     value: 'appearance',
