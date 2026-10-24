@@ -121,13 +121,16 @@ pnpm build      → exit 0：out/main/index.js、out/preload/index.cjs、out/ren
      git ls-files --eol | grep -c 'w/crlf'   # 应输出 0
      ```
 
-   - 正在跑的 Wave 2 worktree 也是 CRLF 检出。它们合入含本卡的 main 之后，同样需要刷新一次。
-2. **Wave 2 卡片现在的根 `pnpm lint` 是坏的**，要等本卡合并。
-   - 它们基于 `main@ef92bfb`，不含本卡，根 lint 会因为 agent-runtime 的嵌套根配置直接退出。它们的任务书都写了「不要动 `packages/**`」，所以不太会去改包的配置，但总结里可能会报 lint 失败。建议先合本卡，再让它们 `git merge main`。
+   - 写本总结时，`orca worktree list` 里只有 main 和本卡，Wave 2 的 worktree 还没有开。建议合并本卡并刷新 main 之后再开。
+     - 全新检出会按 `.gitattributes` 写出 LF（克隆实测）。
+     - 如果 worktree 照旧停在 `f5c2e91`，再用 `--ff-only` 快进（实测）：快进新写出的文件都是 LF，只有 `f5c2e91` 里已有且内容没变的 `LICENSE`、`README.md` 留在 CRLF。Biome 不检查这两个文件，lint 不受影响；要完全干净，按上面的命令刷新一次即可。
+2. **如果 Wave 2 在本卡合并之前开工**：
+   - 它们基于 `main@ef92bfb`，不含本卡，根 `pnpm lint` 会因为 agent-runtime 的嵌套根配置直接退出（基线实测）。这些卡的任务书都写了「不要动 `packages/**`」，不太会去改包的配置，但总结里会报 lint 失败。
    - **`pnpm-lock.yaml` 大概率冲突**：
      - 在那些 worktree 里跑根 `pnpm install`，会把两个包（连同它们当时的 devDependencies）写进根锁文件的 importers，本卡的基线实测是 +1056 行。本卡也重写了同一段，几张卡还会各自加依赖。
      - 冲突时不要手工合并：先取 main 的版本，在根目录执行 `pnpm install` 重新生成，确认 `pnpm install --frozen-lockfile` 通过后再提交。
      - `package.json` 方面，本卡只改了 `engines` 和 `typecheck` 脚本，和它们改的 dependencies / devDependencies 不在同一段，预计能自动合并。
+   - 它们的工作区同样是 CRLF 检出，合入含本卡的 main 之后要按第 1 条刷新一次。
    - main 在本卡开发期间前进了两个提交：`c1b8362`（ARCHITECTURE §9）和 `ef92bfb`（wave2 任务书）。本分支没有合入它们，模拟合并没有冲突。
 3. **`noExplicitAny` 例外**（根 `biome.json` 最后一条 override，只作用于 `packages/agent-runtime/**`）。
    - 两个包原来的 Biome 配置照搬了 EnsoCode 的宽松规则，根配置则是 recommended。换成根配置后，新出现的诊断只有 agent-runtime 的 4 条 `noExplicitAny` 警告：`readonlyTools.ts:94` 的 `widen` 和 `test-utils/pipeline.ts:13`，两处都是 `ToolDefinition<any, any>`，用来把 pi 的泛型工具类型放宽。
