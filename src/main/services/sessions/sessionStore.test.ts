@@ -91,6 +91,28 @@ describe('parseSessionsFile', () => {
     expect(parsed).toEqual([valid]);
   });
 
+  it('keeps the thinking level of the session model and drops only a level fynvra does not know', () => {
+    const thinking = session({
+      id: 'thinking',
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' },
+    });
+    const extraModelField = {
+      ...session({ id: 'extra' }),
+      model: { providerId: 'openai', modelId: 'gpt-5.5', apiKey: 'sk-x' },
+    };
+    const unknownLevel = {
+      ...session({ id: 'unknown-level' }),
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'max' },
+    };
+    const parsed = parseSessionsFile({ sessions: [thinking, extraModelField, unknownLevel] });
+    const bare = { providerId: 'openai', modelId: 'gpt-5.5' };
+    expect(parsed).toEqual([
+      thinking,
+      { ...extraModelField, model: bare },
+      { ...unknownLevel, model: bare },
+    ]);
+  });
+
   it('resets statuses that cannot outlive the previous app run', () => {
     const parsed = parseSessionsFile({
       sessions: [

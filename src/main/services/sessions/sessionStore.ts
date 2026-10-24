@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isValidRoleId } from '@fynvra/core';
+import { isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '@shared/guards';
 import { isSessionStatus } from '@shared/types/agent';
 import type { SessionStatus, SessionSummary } from '@shared/types/chat';
@@ -166,7 +166,13 @@ function parseStoredSession(raw: unknown): StoredSession | null {
   if (record.model !== undefined) {
     const model = asRecord(record.model);
     if (!isNonEmptyString(model?.providerId) || !isNonEmptyString(model?.modelId)) return null;
-    session.model = { providerId: model.providerId, modelId: model.modelId };
+    // 不认识的档位（如更新版本写的）只丢档位，不丢会话：回到模型的默认档位
+    const { thinking } = model;
+    session.model = {
+      providerId: model.providerId,
+      modelId: model.modelId,
+      ...(isThinkingLevel(thinking) ? { thinking } : {}),
+    };
   }
   if (record.autoTitle === true) session.autoTitle = true;
   return session;
