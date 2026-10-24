@@ -65,6 +65,14 @@ describe('ask_coordinator', () => {
     const run = await runTool(ask, { question: 'q?' });
     expect(run.isError).toBe(false);
     expect(run.text).toContain('## No reply');
+    expect(run.text).toContain('within 10 min');
+
+    host.askCoordinator.mockResolvedValueOnce({ ok: true, answer: null });
+    const quick = toolByName(
+      createWorkerTools(host, { askTimeoutMs: 5_000 }).tools,
+      'ask_coordinator'
+    );
+    expect((await runTool(quick, { question: 'q?' })).text).toContain('within 5 s');
   });
 
   it('rejects blank questions and reports host failures as error text', async () => {

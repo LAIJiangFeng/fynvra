@@ -93,7 +93,7 @@ export function createWorkerTools(
         if (!result.ok) return errorResult('ask_coordinator', result.error);
         if (result.answer === null) {
           return textResult(
-            `## No reply\nYour coordinator did not answer within ${Math.round(askTimeoutMs / 60_000)} min. ` +
+            `## No reply\nYour coordinator did not answer within ${formatDuration(askTimeoutMs)}. ` +
               'Continue with your best judgment and state the assumption in report_done, or ask again if you are truly blocked.',
             result
           );
@@ -176,6 +176,12 @@ export function createWorkerTools(
       if (reportState === 'reported') reportState = 'open';
     },
   };
+}
+
+function formatDuration(ms: number): string {
+  return ms >= 60_000
+    ? `${Math.round(ms / 60_000)} min`
+    : `${Math.max(1, Math.round(ms / 1000))} s`;
 }
 
 function normalizeReportArgs(raw: unknown) {

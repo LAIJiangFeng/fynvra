@@ -1,6 +1,7 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import { truncateHeadChars } from '../tools/result';
 
 /** tool_end 携带的输出预览长度；完整结果以 pi 会话 jsonl 为准 */
 export const TOOL_OUTPUT_PREVIEW_CHARS = 8_000;
@@ -167,15 +168,15 @@ function mapEvent(event: AgentSessionEvent): FynvraSessionEventBody[] | undefine
         },
       ];
     case 'tool_execution_end': {
-      const output = toolOutputText(event.result);
+      const output = truncateHeadChars(toolOutputText(event.result), TOOL_OUTPUT_PREVIEW_CHARS);
       return [
         {
           type: 'tool_end',
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           isError: event.isError,
-          output: output.slice(0, TOOL_OUTPUT_PREVIEW_CHARS),
-          outputTruncated: output.length > TOOL_OUTPUT_PREVIEW_CHARS,
+          output: output.text,
+          outputTruncated: output.truncated,
           ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
           ...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
         },
