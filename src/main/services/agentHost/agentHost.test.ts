@@ -7,10 +7,11 @@ import type { AgentCommand } from '@shared/types/agent';
 import type { SessionEventEnvelope } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { StoredProvider } from '../providers/providerStore';
+import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
-import { envModelResolver } from './envModelResolver';
 import type { WorkerProcess } from './workerClient';
 
 class FakeProcess implements WorkerProcess {
@@ -46,6 +47,23 @@ const tester: Role = {
   approvalMode: 'auto-edits',
 };
 
+const anthropic: StoredProvider = {
+  id: 'anthropic',
+  name: 'Anthropic',
+  api: 'anthropic-messages',
+  enabled: true,
+  models: [
+    { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+    { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+  ],
+  apiKey: 'sk-test-secret',
+};
+
+/** 生产用的解析器，读内存里的 providers：会话记的是设置里的服务 id，spec 带的是运行时 provider 键 */
+const modelsOf = (providers: StoredProvider[]) =>
+  createModelResolver({ list: async () => structuredClone(providers) });
+const RUNTIME_PROVIDER = runtimeProviderId('https://api.anthropic.com', 'sk-test-secret');
+
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -79,7 +97,7 @@ function setup(overrides: Partial<AgentHostDeps> = {}) {
       get: async (id) => getBuiltinRole(id) ?? (id === tester.id ? tester : undefined),
       list: async () => [...BUILTIN_ROLES, tester],
     },
-    models: envModelResolver({ FYNVRA_ANTHROPIC_API_KEY: 'sk-test-secret' }),
+    models: modelsOf([anthropic]),
     broadcast: (...args) => broadcasts.push(args),
     now: () => 1_000,
     newId: () => `session-${++ids}`,
@@ -130,8 +148,29 @@ describe('createAgentHost sessions', () => {
     expect(env.sent()).toEqual([]);
   });
 
+  it('keeps the settings model reference on the session and resolves it again on spawn', async () => {
+    const env = setup();
+    const created = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'worker',
+      model: { providerId: 'anthropic', modelId: 'claude-haiku-5-5' },
+    });
+    if (!created.ok) throw new Error(created.error);
+    // 设置里的服务 id，不是运行时 provider 键：Renderer 用它对照模型服务，spawn 时再按它解析
+    expect(created.session.model).toEqual({ providerId: 'anthropic', modelId: 'claude-haiku-5-5' });
+    expect(await env.host.prompt(created.session.id, 'hi')).toEqual({ ok: true });
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec.model).toEqual({
+      providerId: RUNTIME_PROVIDER,
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-secret',
+      modelId: 'claude-haiku-5-5',
+    });
+  });
+
   it('refuses unknown workspaces and roles, and models it cannot resolve', async () => {
-    const env = setup({ models: envModelResolver({}) });
+    const env = setup({ models: modelsOf([]) });
     expect(await env.host.create({ workspaceId: 'nope', roleId: 'worker' })).toMatchObject({
       ok: false,
     });
@@ -141,7 +180,7 @@ describe('createAgentHost sessions', () => {
     });
     expect(await env.host.create({ workspaceId: 'ws-1', roleId: 'worker' })).toMatchObject({
       ok: false,
-      error: expect.stringContaining('FYNVRA_ANTHROPIC_API_KEY'),
+      error: expect.stringContaining('模型服务'),
     });
     expect(env.host.list('ws-1')).toEqual([]);
   });
@@ -161,8 +200,9 @@ describe('createAgentHost sessions', () => {
         cwd: env.workspace.repoPath,
         sessionFile: sessionFilePath(join(env.dir, 'agent'), session.id),
         model: {
-          providerId: 'anthropic',
+          providerId: RUNTIME_PROVIDER,
           api: 'anthropic-messages',
+          baseUrl: 'https://api.anthropic.com',
           apiKey: 'sk-test-secret',
           modelId: 'claude-sonnet-5-5',
         },
@@ -184,6 +224,33 @@ describe('createAgentHost sessions', () => {
       'prompt',
     ]);
     expect(env.host.list('ws-1')[0]?.title).toBe('Fix the flaky build');
+  });
+
+  it('spawns with the skills and MCP servers resolved for the role and logs their warnings', async () => {
+    const logs: string[] = [];
+    const resolveResources = vi.fn(async () => ({
+      skills: ['/skills/pdf'],
+      mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
+      warnings: ['skill "gone" of role "tester" is no longer registered; skipped'],
+    }));
+    const env = setup({
+      resolveResources,
+      log: (level, message) => logs.push(`${level}: ${message}`),
+    });
+    const session = await createSession(env, 'tester');
+    await env.host.prompt(session.id, 'go');
+
+    expect(resolveResources).toHaveBeenCalledWith(tester);
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec).toMatchObject({
+      skills: ['/skills/pdf'],
+      mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
+    });
+    expect(logs).toContain(
+      `warn: session ${session.id}: skill "gone" of role "tester" is no longer registered; skipped`
+    );
+    // MCP env 明文只走 Main → worker 这一跳
+    expect(JSON.stringify(env.broadcasts)).not.toContain('ghp_secret');
   });
 
   it('gives orchestrator sessions the role list for dispatch_task', async () => {
@@ -507,6 +574,7 @@ describe('createAgentHost launcher', () => {
       worktreeId: 'wt_1',
       cwd: join(env.dir, 'worktrees', 'ws-1', 'add-tests'),
       status: 'running',
+      model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5' },
     });
     const spawn = env.sent('spawn-session')[0];
     expect(spawn?.type === 'spawn-session' && spawn.spec.worker).toBe(true);
@@ -559,6 +627,85 @@ describe('createAgentHost launcher', () => {
       })
     ).toMatchObject({ ok: false });
     expect(env.host.list('ws-1')).toEqual([]);
+  });
+
+  it('makes the coordinator of the run the parent of the worker session', async () => {
+    const env = setup();
+    const lookup = vi.fn((workspaceId: string, runId: string) =>
+      workspaceId === 'ws-1' && runId === 'run_1' ? 'session-coord' : undefined
+    );
+    env.host.setCoordinatorLookup(lookup);
+    const launcher = env.host.implementsLauncher();
+    const input = {
+      workspaceId: 'ws-1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    };
+
+    const child = await launcher.createWorkerSession({ ...input, runId: 'run_1' });
+    const orphan = await launcher.createWorkerSession({ ...input, runId: 'run_gone' });
+    const byId = (result: typeof child) =>
+      env.host.list('ws-1').find((session) => result.ok && session.id === result.sessionId);
+    expect(byId(child)?.parentSessionId).toBe('session-coord');
+    expect(byId(orphan)).not.toHaveProperty('parentSessionId');
+    expect(lookup).toHaveBeenCalledWith('ws-1', 'run_1');
+  });
+
+  it('keeps the launcher contract the orchestration host relies on', async () => {
+    const env = setup();
+    const launcher = env.host.implementsLauncher();
+    // 1. brief 提交即 resolve：不等 worker 这一轮跑完（Host 在 resolve 后同步写入 Dispatch）
+    const created = await launcher.createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const identity = { sessionId: created.sessionId, generation: 1 };
+    expect(env.sent().map((command) => command.type)).toEqual(['spawn-session', 'prompt']);
+    expect(env.events(created.sessionId)).toEqual([]);
+
+    // 2. WorkerHost 工厂在 host 调用到达时才查：Dispatch 写入前没有 Host，之后的调用就能拿到
+    const reportDone = vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true }));
+    const invoke = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: 'done' },
+      });
+    invoke('1');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '1', result: { ok: false } });
+    env.host.setWorkerHostFactory((sessionId) =>
+      sessionId === created.sessionId ? { askCoordinator: vi.fn(), reportDone } : null
+    );
+    invoke('2');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '2', result: { ok: true } });
+    expect(reportDone).toHaveBeenCalledWith('succeeded', 'done', undefined);
+
+    // 3. 会话空闲后 promptSession 作为新的 prompt 发出（新一轮，reject_work 靠它重新开放 report_done）
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    expect(env.host.list('ws-1')[0]?.status).toBe('idle');
+    expect(await launcher.promptSession(created.sessionId, 'Review feedback')).toEqual({
+      ok: true,
+    });
+    expect(env.sent('prompt').at(-1)).toEqual({
+      type: 'prompt',
+      identity,
+      text: 'Review feedback',
+    });
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
   });
 });
 

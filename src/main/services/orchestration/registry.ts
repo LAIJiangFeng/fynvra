@@ -37,6 +37,8 @@ export interface OrchestrationRegistry {
   hostFor(coordinatorSessionId: string, workspaceId: string): OrchestrationHost | null;
   /** 给 `agentHost.setWorkerHostFactory`：在已打开的服务里按 `Dispatch.workerSessionId` 反查。 */
   workerHostFor(sessionId: string): WorkerHost | null;
+  /** 给 `agentHost.setCoordinatorLookup`：worker 会话的 parentSessionId 经 Run 反查主 agent 会话。 */
+  coordinatorOf(workspaceId: string, runId: string): string | undefined;
   /** 持有该 dispatch 的服务（先打开全部工作区）。 */
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
   flushAll(): Promise<void>;
@@ -114,6 +116,7 @@ export function createOrchestrationRegistry(
       }
       return null;
     },
+    coordinatorOf: (workspaceId, runId) => services.get(workspaceId)?.coordinatorOf(runId),
     async serviceForDispatch(dispatchId) {
       await openAll();
       return [...services.values()].find((service) => service.hasDispatch(dispatchId));

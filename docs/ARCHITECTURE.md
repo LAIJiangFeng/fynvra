@@ -13,7 +13,7 @@
 | 状态 | Zustand 5（按字段订阅；会话正文用纯 reducer 归并） |
 | Agent 运行时 | `@earendil-works/pi-coding-agent` 1.4.0 SDK（`createAgentSession`、`SessionManager`、`DefaultResourceLoader`、`InlineExtension`、`createMcpExtension`） |
 | 工具链 | pnpm 10 workspace、Biome 2（2 空格、单引号、分号、宽 100）、Vitest 4、tsc `--noEmit` |
-| 持久化 | `userData/settings.json`（元数据）、`userData/roles/*.json`、`userData/agent/sessions/*.jsonl`（pi 会话，权威源）、`userData/orchestration.json` |
+| 持久化 | `userData/settings.json`（元数据）、`userData/roles/*.json`、`userData/agent/sessions/*.jsonl`（pi 会话，权威源）、`userData/orchestration/<workspaceId>.json`（每个工作区一个编排快照） |
 
 ## 2. 目录布局
 
@@ -173,7 +173,11 @@ Wave 2 的卡片并行开发，彼此只能通过本节定义的接口对接。*
 
 ### 9.1 共享文件的追加约定（避免合并冲突）
 - `src/shared/types/ipc.ts`：每个领域在 `IPC_CHANNELS` 里追加自己的一段，用 `// --- <domain> ---` 注释隔开，放在对象末尾。
-- `src/preload/`：每个领域一个文件 `src/preload/domains/<domain>.ts`，导出 `<domain>Api` 对象和 `<Domain>Api` 类型；`src/preload/index.ts` 与 `src/preload/types.ts` 只各加一行。
+- `src/preload/`：每个领域一个文件 `src/preload/domains/<domain>.ts`，导出 `create<Domain>Api(…)` 工厂和 `<Domain>Api` 类型；`src/preload/index.ts` 与 `src/preload/types.ts` 只各加一行。
+  领域文件**不 import electron**：`index.ts` 把 `ipcRenderer`（或一个 `{ invoke, subscribe }` 桥）传进工厂。
+  理由：`types.ts` 属于 Renderer 的类型程序（`tsconfig.web.json` 包含它），它要引用领域文件的 `<Domain>Api` 类型；
+  领域文件一旦 import electron，`electron.d.ts` 顶部的 `/// <reference types="node" />` 会把 Node 全局类型带进 Renderer，
+  `process` 等不再报 TS2591，护栏悄悄失效。
 - `src/main/ipc/index.ts`：每个领域只加一行 `registerXxxHandlers()`。
 - `src/renderer/App.tsx` / 布局文件只允许加挂载点（一行 import + 一行 JSX）。
 
@@ -249,11 +253,20 @@ export interface WorkerSessionLauncher {
   disposeSession(sessionId: string): Promise<void>;
 }
 // orchestration-host 导出：
-export function createOrchestrationHost(deps: { workspace: Workspace; coordinatorSessionId: string; coordinatorBranch: string; store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore; runChecks: (cwd: string, command: string, signal?: AbortSignal) => Promise<{ exitCode: number; output: string; durationMs: number }> }): OrchestrationHost;
-export function createWorkerHost(deps: { store: OrchestrationStore; inbox: Inbox; runId: string; dispatchId: string }): WorkerHost;
+export function createOrchestrationHost(deps: {
+  workspace: Workspace; coordinatorSessionId: string; coordinatorBranch: string; store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore;
+  runChecks: (cwd: string, command: string, signal?: AbortSignal) => Promise<{ exitCode: number; output: string; durationMs: number }>;
+  worktreesRoot: string;              // worktree 托管根目录 userData/worktrees（store 里推导不出来）
+  exec: ExecFn;                       // 合并前用 symbolic-ref 确认仓库仍检出在 coordinatorBranch（merge 合进当前检出的分支）；review 取 --stat
+  checkPolicy?: CheckCommandPolicy;   // run_checks 白名单，默认 DEFAULT_CHECK_COMMAND_POLICY
+  now?: () => number;                 // 时钟，默认 Date.now
+}): OrchestrationHost;
+export function createWorkerHost(deps: { store: OrchestrationStore; inbox: Inbox; runId: string; dispatchId: string; now?: () => number }): WorkerHost;
 
 // 归属：agent-host，文件 src/main/services/agentHost/types.ts
-export interface ModelResolver { resolve(ref: { providerId: string; modelId: string } | undefined): Promise<{ ok: true; model: ResolvedModelSpec } | { ok: false; error: string }>; }
+/** 设置里的模型引用：providerId 是「设置 → 模型服务」里的服务 id */
+export interface ModelRef { providerId: string; modelId: string; }
+export interface ModelResolver { resolve(ref: ModelRef | undefined): Promise<{ ok: true; model: ResolvedModelSpec; ref: ModelRef } | { ok: false; error: string }>; }
 /** 跨进程可序列化的模型描述；worker 进程内再换成 agent-runtime 的 ResolvedModel */
 export interface ResolvedModelSpec { providerId: string; api: string; baseUrl?: string; apiKey?: string; modelId: string; thinking?: ThinkingLevel; }
 export interface AgentHost {
@@ -262,6 +275,13 @@ export interface AgentHost {
   setWorkerHostFactory(f: (sessionId: string) => WorkerHost | null): void;
 }
 ```
+
+- **模型引用与运行时 provider 键**：`ResolvedModelSpec.providerId` 是运行时 provider 键（`fynvra-` + baseUrl 与 key 的哈希），
+  worker 按它注册 pi provider，不是设置里的服务 id；`ref` 是实际解析的设置引用（ref 缺省时即选中的默认模型），
+  会话记录与 `SessionSummary.model` 存它，每次 spawn 再按它解析。
+- **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
+  host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
+  经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。
 
 ### 9.6 `src/shared/types/llm.ts`（归属：settings-ui；agent-host 可逐字复制）
 ```ts

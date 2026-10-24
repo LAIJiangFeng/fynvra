@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
@@ -9,7 +8,7 @@ type ModelDefinition = NonNullable<
   Parameters<ModelRuntime['registerProvider']>[1]['models']
 >[number];
 
-/** spec 没给 baseUrl、pi 目录里该 provider 也没有同 api 的模型时使用的官方端点 */
+/** spec 没给 baseUrl 时使用的官方端点 */
 const DEFAULT_BASE_URLS: Readonly<Record<string, string>> = {
   'anthropic-messages': 'https://api.anthropic.com',
   'openai-responses': 'https://api.openai.com/v1',
@@ -20,7 +19,8 @@ const DEFAULT_BASE_URLS: Readonly<Record<string, string>> = {
 /** pi 目录里查不到的模型用保守默认值 */
 const FALLBACK_LIMITS = { contextWindow: 128_000, maxTokens: 32_000 } as const;
 
-export const MODEL_PROVIDER_PREFIX = 'fynvra-';
+/** Main 的运行时 provider 键都带这个前缀，与 pi 内置目录的 provider 名分开 */
+const MODEL_PROVIDER_PREFIX = 'fynvra-';
 
 /** 一个 worker 进程共享一个 ModelRuntime；只读 fynvra 的 agentDir，模型目录不联网刷新 */
 export function createWorkerModelRuntime(agentDir: string): Promise<ModelRuntime> {
@@ -37,10 +37,12 @@ export interface ModelRegistry {
 }
 
 /**
- * 每个（api, baseUrl, apiKey）注册成一个独立 provider：同进程的会话共享 ModelRuntime，不同 key 不能互相覆盖。
+ * 按 spec.providerId 注册 pi provider。它是 Main 算好的运行时键（`fynvra-` + baseUrl 与 key 的哈希）：
+ * 端点和 key 都相同的服务共用一个 provider，换了 key 就是新 provider，同进程的会话不会互相覆盖凭证；
+ * 键里没有 key 或端点的明文，日志与用量事件里不会露出来。
  * key 用 setRuntimeApiKey 只放在内存：不写 auth.json，也不经 pi 的配置值解析
  * （registerProvider 的 apiKey 会把 `$VAR` 当环境变量、把 `!cmd` 当 shell 命令执行）。
- * 能力（上下文、thinking、价格）尽量取 pi 目录里同 id 同 api 的模型。
+ * 能力（上下文、thinking、价格）尽量取 pi 目录里同 id 同 api 的模型，查不到就用 spec 的字段加保守默认值。
  */
 export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
   /** registerProvider 整体替换模型列表：同一 provider 的模型要累积 */
@@ -48,29 +50,33 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
 
   return {
     async resolve(spec) {
-      const catalog = runtime
+      const { providerId } = spec;
+      // 不带前缀的名字可能就是 pi 内置的 provider（如 anthropic），注册会替换掉它的整个模型目录
+      if (!providerId.startsWith(MODEL_PROVIDER_PREFIX)) {
+        throw new Error(
+          `model provider "${providerId}" is not a runtime provider key ("${MODEL_PROVIDER_PREFIX}…")`
+        );
+      }
+      const template = runtime
         .getModels()
-        .filter((model) => !model.provider.startsWith(MODEL_PROVIDER_PREFIX));
-      const template =
-        catalog.find((model) => model.provider === spec.providerId && matches(model, spec)) ??
-        catalog.find((model) => matches(model, spec));
-      const baseUrl =
-        spec.baseUrl ??
-        catalog.find((model) => model.provider === spec.providerId && model.api === spec.api)
-          ?.baseUrl ??
-        DEFAULT_BASE_URLS[spec.api];
+        .find(
+          (model) =>
+            !model.provider.startsWith(MODEL_PROVIDER_PREFIX) &&
+            model.id === spec.modelId &&
+            model.api === spec.api
+        );
+      const baseUrl = spec.baseUrl ?? DEFAULT_BASE_URLS[spec.api];
       if (!baseUrl) {
         throw new Error(
-          `no base URL for ${spec.providerId}/${spec.modelId}: api "${spec.api}" has no default endpoint`
+          `no base URL for ${providerId}/${spec.modelId}: api "${spec.api}" has no default endpoint`
         );
       }
 
-      const providerId = providerKey(spec.api, baseUrl, spec.apiKey);
       const models = definitions.get(providerId) ?? new Map<string, ModelDefinition>();
       models.set(spec.modelId, definitionFor(spec, template));
       definitions.set(providerId, models);
       runtime.registerProvider(providerId, {
-        name: spec.providerId,
+        name: providerId,
         api: spec.api as Api,
         baseUrl,
         models: [...models.values()],
@@ -82,17 +88,6 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
       return { runtime, model, ...(spec.thinking ? { thinking: spec.thinking } : {}) };
     },
   };
-}
-
-function matches(model: Model<Api>, spec: ResolvedModelSpec): boolean {
-  return model.id === spec.modelId && model.api === spec.api;
-}
-
-/** provider 键只含哈希：日志与用量事件里不会露出 key 或端点 */
-export function providerKey(api: string, baseUrl: string, apiKey = ''): string {
-  const endpoint = createHash('sha256').update(`${api}\0${baseUrl}`).digest('hex').slice(0, 12);
-  const key = createHash('sha256').update(apiKey).digest('hex').slice(0, 8);
-  return `${MODEL_PROVIDER_PREFIX}${endpoint}-${key}`;
 }
 
 function definitionFor(spec: ResolvedModelSpec, template: Model<Api> | undefined): ModelDefinition {

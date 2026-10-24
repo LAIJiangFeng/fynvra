@@ -28,7 +28,7 @@ import { readHistory, sessionFilePath } from '../sessions/history';
 import { type SessionStore, type StoredSession, toSummary } from '../sessions/sessionStore';
 import { invokeOrchestrationHost, invokeWorkerHost } from './hostDispatch';
 import { Transcript } from './transcript';
-import type { AgentHost, ModelResolver, WorkerSessionLauncher } from './types';
+import type { AgentHost, ModelRef, ModelResolver, WorkerSessionLauncher } from './types';
 import { createWorkerClient, type WorkerClientOptions, type WorkerProcess } from './workerClient';
 
 export interface RoleSource {
@@ -39,6 +39,8 @@ export interface RoleSource {
 export interface RoleResources {
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
+  warnings: string[];
 }
 
 export interface AgentHostDeps {
@@ -51,7 +53,7 @@ export interface AgentHostDeps {
   models: ModelResolver;
   /** Main → Renderer 推送（生产为 sendToAllWindows） */
   broadcast(channel: string, ...args: unknown[]): void;
-  /** role.skillIds / mcpServerIds → 路径与服务器配置；settings-ui 的注册表接入前默认都为空 */
+  /** role.skillIds / mcpServerIds → 路径与服务器配置（生产为 createRoleResourceResolver）；缺省都为空 */
   resolveResources?(role: Role): Promise<RoleResources>;
   workerOptions?: Pick<
     WorkerClientOptions,
@@ -76,6 +78,11 @@ export interface RespondApprovalInput {
 
 /** AgentHost（§9.5）加上 sessions IPC 用到的会话操作 */
 export interface AgentHostService extends AgentHost {
+  /**
+   * 派发出的 worker 会话以 Run 的主 agent 会话为 parentSessionId（launcher 入参只有 runId，
+   * 此时 Dispatch 也还没写入）；由 orchestration 接线时注入，之前不设 parentSessionId。
+   */
+  setCoordinatorLookup(f: (workspaceId: string, runId: string) => string | undefined): void;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -137,7 +144,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const newId = deps.newId ?? randomUUID;
   const log = deps.log ?? defaultLog;
   const resolveResources =
-    deps.resolveResources ?? (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [] }));
+    deps.resolveResources ??
+    (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
   let orchestrationHostFor: (
@@ -145,6 +153,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     workspaceId: string
   ) => OrchestrationHost | null = () => null;
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
+  let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
 
   const client = createWorkerClient({
     fork: deps.fork,
@@ -236,6 +245,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const resolved = await deps.models.resolve(stored.model ?? modelRefOf(role));
       if (!resolved.ok) return resolved;
       const resources = await resolveResources(role);
+      for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       return {
         ok: true,
@@ -464,6 +474,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!role) return fail(`角色不存在：${input.roleId}`);
       const resolved = await deps.models.resolve(modelRefOf(role));
       if (!resolved.ok) return resolved;
+      const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -472,11 +483,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         title: titleFrom(input.brief) || role.name,
         cwd: input.cwd,
         worktreeId: input.worktreeId,
+        ...(parentSessionId ? { parentSessionId } : {}),
         dispatchId: input.dispatchId,
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: { providerId: resolved.model.providerId, modelId: resolved.model.modelId },
+        model: modelRefFrom(resolved.ref),
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -512,6 +524,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setWorkerHostFactory(factory) {
       workerHostFor = factory;
     },
+    setCoordinatorLookup(lookup) {
+      coordinatorOf = lookup;
+    },
     start() {
       client.start();
     },
@@ -544,7 +559,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: { providerId: resolved.model.providerId, modelId: resolved.model.modelId },
+        model: modelRefFrom(resolved.ref),
         autoTitle: true,
       };
       deps.store.put(stored);
@@ -599,10 +614,13 @@ function defaultLog(level: LogLevel, message: string): void {
   else console.log(message);
 }
 
-function modelRefOf(role: Role): { providerId: string; modelId: string } | undefined {
-  return role.model
-    ? { providerId: role.model.providerId, modelId: role.model.modelId }
-    : undefined;
+function modelRefOf(role: Role): ModelRef | undefined {
+  return role.model ? modelRefFrom(role.model) : undefined;
+}
+
+/** 会话记录只存设置里的服务 id 与模型 id（不带运行时 provider 键、thinking 等） */
+function modelRefFrom({ providerId, modelId }: ModelRef): ModelRef {
+  return { providerId, modelId };
 }
 
 function roleOptions(roles: readonly Role[]): AgentRoleOption[] {

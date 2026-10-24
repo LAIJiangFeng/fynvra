@@ -1,6 +1,5 @@
-import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
-import { isValidRoleId, JsonFileRoleStore } from '@fynvra/core';
+import { isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { isApprovalDecision } from '@shared/types/agent';
 import type { ChatMessage, SessionSummary } from '@shared/types/chat';
@@ -14,9 +13,13 @@ import {
   type RespondApprovalInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
-import { envModelResolver } from '../services/agentHost/envModelResolver';
+import { createRoleResourceResolver } from '../services/agentHost/roleResources';
+import { createModelResolver } from '../services/providers/resolveModel';
 import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { getMcpRegistry } from './mcp';
+import { getRoleStore } from './roles';
+import { getSkillRegistry } from './skills';
 import { getWorkspaceService } from './workspaces';
 
 /** 单条 prompt 的上限：挡住异常的超大 IPC 负载 */
@@ -39,13 +42,12 @@ function createAppAgentHost(): AgentHostService {
     agentDir,
     store: createSessionStore({ filePath: join(userData, 'sessions.json') }),
     workspaces: getWorkspaceService(),
-    roles: new JsonFileRoleStore({
-      fs,
-      dir: join(userData, 'roles'),
-      onInvalidFile: (file, error) => console.warn(`[roles] 跳过无效的角色文件 ${file}：${error}`),
+    roles: getRoleStore(),
+    models: createModelResolver(),
+    resolveResources: createRoleResourceResolver({
+      skills: getSkillRegistry(),
+      mcpServers: getMcpRegistry(),
     }),
-    // 临时：settings-ui 合并后换成 providers/resolveModel.ts 的 createModelResolver()
-    models: envModelResolver(),
     broadcast: sendToAllWindows,
   });
 }

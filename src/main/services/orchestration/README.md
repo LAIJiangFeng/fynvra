@@ -20,36 +20,19 @@ ARCHITECTURE §6 / §9.4 / §9.5 在 Main 里的实现：`OrchestrationHost`（�
 持久化：`userData/orchestration/<workspaceId>.json`（`InMemoryOrchestrationStore` 快照，消息也在里面）；
 worktree 建在 `userData/worktrees/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色读 `userData/roles/`。
 
-## 在 `src/main/index.ts` 接线（给接线卡）
+## 与 agent host 的接线
 
 `registerIpcHandlers()` 已经注册了 orchestration IPC；注册表在第一次使用时创建（`getOrchestrationRegistry()`）。
-接线卡只需要把 agent-host 接进来：
+`src/main/index.ts` 在启动窗口前调用 `connectOrchestration(getAgentHost(), getOrchestrationRegistry())`
+（`src/main/services/agentHost/connectOrchestration.ts`）：
 
-```ts
-import { getOrchestrationRegistry } from './ipc/orchestration';
+1. `setLauncher(agentHost.implementsLauncher())`：worker 会话由 agent host 启动；接上之前 dispatch_task 返回「agent host 未接线」；
+2. `setOrchestrationHostFactory → hostFor`：主 agent 会话的编排工具 → 该工作区服务里属于这个会话的 Host（同步返回，调用时再等状态就绪）；
+3. `setWorkerHostFactory → workerHostFor`：worker 会话的 report_done / ask_coordinator → 按 Dispatch.workerSessionId 反查；
+4. `setCoordinatorLookup → coordinatorOf`：worker 会话的 parentSessionId 经 Run 反查主 agent 会话（launcher 被调用时 Run 已落库、Dispatch 还没有）；
+5. `await openAll()`：在恢复或新建任何 agent 会话之前加载全部工作区的编排快照，workerHostFor 只认已加载的状态。
 
-app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.fynvra.app');
-  registerIpcHandlers();
-
-  const agentHost = /* agent-host 卡创建的 AgentHost */;
-  const orchestration = getOrchestrationRegistry();
-  // 1. worker 会话由 agent-host 启动；接上之前 dispatch_task 会返回「agent host 未接线」的错误
-  orchestration.setLauncher(agentHost.implementsLauncher());
-  // 2. 主 agent 会话的编排工具 → 该工作区服务里属于这个会话的 Host（同步返回，调用时再等状态就绪）
-  agentHost.setOrchestrationHostFactory((coordinatorSessionId, workspaceId) =>
-    orchestration.hostFor(coordinatorSessionId, workspaceId)
-  );
-  // 3. worker 会话的 report_done / ask_coordinator → 按 Dispatch.workerSessionId 反查
-  agentHost.setWorkerHostFactory((sessionId) => orchestration.workerHostFor(sessionId));
-  // 4. 在恢复或新建任何 agent 会话之前加载全部工作区的编排快照：workerHostFor 只认已加载的状态
-  await orchestration.openAll();
-
-  showMainWindow();
-});
-```
-
-退出前可以 `await orchestration.flushAll()`；平时每次变更都已在一个微任务里原子写盘。
+退出时 agent host 关闭后再 `flushAll()`；平时每次变更都已在一个微任务里原子写盘。
 
 ## `implementsLauncher()` 需要保证的事
 
