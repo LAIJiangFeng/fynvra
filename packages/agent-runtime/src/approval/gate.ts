@@ -51,6 +51,11 @@ export interface ApprovalPolicyHooks {
   timeoutMs?: number;
   /** 计算 expiresAt 的时钟，默认 Date.now */
   now?: () => number;
+  /**
+   * 审批门建好后交给宿主：会话运行中切换档位用（`gate.setMode`）。
+   * createRoleSession 在内部建审批门，宿主只能经这里拿到它。
+   */
+  onGate?: (gate: ApprovalGate) => void;
 }
 
 export interface ApprovalGateOptions extends ApprovalPolicyHooks {
@@ -78,6 +83,13 @@ export interface ApprovalGate {
   check(call: GatedToolCall, signal?: AbortSignal): Promise<ToolCallBlock | undefined>;
   /** 把 check 挂到 pi 的 tool_call 拦截点；signal 取 pi 当前回合的中止信号 */
   readonly extension: NamedInlineExtension;
+  /** 当前档位 */
+  readonly mode: ApprovalMode;
+  /**
+   * 换档位，从下一次 check 起生效（回合进行中也可以；已在等答复的请求仍以答复为准）。
+   * allowSession 的记忆保留；从 full 切回更严的档位时清空：full 下放行过的，回到要审批的档位要重新问。
+   */
+  setMode(mode: ApprovalMode): void;
 }
 
 type Outcome =
@@ -97,12 +109,14 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
  * - `supervised` 审批命令、文件写 / 改、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行；
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；
+ * - 档位可以随时用 setMode 切换（会话级设置，初始值是角色的档位）；
  * - fail-closed：超时、回合中止、宿主出错一律拒绝。拒绝以 block 返回可读文本，不抛异常。
  */
 export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
   const now = options.now ?? Date.now;
   const timeoutMs = validTimeout(options.timeoutMs);
   const sessionAllowed = new Set<string>();
+  let mode = options.mode;
 
   async function check(
     call: GatedToolCall,
@@ -113,7 +127,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     const command = kind === 'command' ? commandOf(call.input) : undefined;
     const floor = command === undefined ? undefined : protectedAction(command);
     const key = `${kind}:${call.toolName}`;
-    if (!floor && (!modeRequiresApproval(options.mode, kind) || sessionAllowed.has(key))) {
+    if (!floor && (!modeRequiresApproval(mode, kind) || sessionAllowed.has(key))) {
       return undefined;
     }
     const request: ApprovalGateRequest = {
@@ -181,7 +195,19 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     },
   };
 
-  return { check, extension };
+  const gate: ApprovalGate = {
+    check,
+    extension,
+    get mode() {
+      return mode;
+    },
+    setMode(next) {
+      if (mode === 'full' && next !== 'full') sessionAllowed.clear();
+      mode = next;
+    },
+  };
+  options.onGate?.(gate);
+  return gate;
 }
 
 /** pi 的 ctx 在会话替换 / 重载后会失效，读 signal 会抛：当作没有中止信号，照常询问 */

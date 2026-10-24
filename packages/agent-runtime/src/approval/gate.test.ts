@@ -293,6 +293,99 @@ describe('createApprovalGate fail-closed', () => {
   });
 });
 
+describe('createApprovalGate setMode', () => {
+  const push = { toolCallId: 'c-push', toolName: 'bash', input: { command: 'git push' } };
+
+  it('applies the new mode from the next call on', async () => {
+    const env = setup('supervised');
+    await env.gate.check(CALLS['file-write']);
+    env.gate.setMode('auto-edits');
+    expect(env.gate.mode).toBe('auto-edits');
+    await env.gate.check(CALLS['file-write']);
+    await env.gate.check(CALLS.command);
+    env.gate.setMode('full');
+    await env.gate.check(CALLS.command);
+    await env.gate.check(CALLS.mcp);
+    env.gate.setMode('supervised');
+    await env.gate.check(CALLS['file-edit']);
+    expect(env.requests.map((request) => request.toolCallId)).toEqual([
+      'c-write',
+      'c-bash',
+      'c-edit',
+    ]);
+  });
+
+  it('keeps allowSession when switching between modes that ask', async () => {
+    const env = setup('supervised', 'allowSession');
+    await env.gate.check(CALLS.command);
+    env.gate.setMode('auto-edits');
+    await env.gate.check(CALLS.command);
+    env.gate.setMode('supervised');
+    await env.gate.check(CALLS.command);
+    expect(env.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets allowSession when it goes back from full to a stricter mode', async () => {
+    const env = setup('supervised', 'allowSession');
+    await env.gate.check(CALLS.command);
+    env.gate.setMode('full');
+    // full 下照样记着（底线之外本来也不问）；回到更严的档位时清空，重新询问
+    await env.gate.check(CALLS.command);
+    env.gate.setMode('auto-edits');
+    await env.gate.check(CALLS.command);
+    expect(env.requests.map((request) => request.toolCallId)).toEqual(['c-bash', 'c-bash']);
+  });
+
+  it('forgets what was allowed for the session on a protected action asked in full mode', async () => {
+    const env = setup('full', 'allowSession');
+    await env.gate.check(push);
+    env.gate.setMode('full');
+    await env.gate.check(push);
+    env.gate.setMode('supervised');
+    await env.gate.check(CALLS.command);
+    expect(env.requests.map((request) => request.toolCallId)).toEqual([
+      'c-push',
+      'c-push',
+      'c-bash',
+    ]);
+  });
+
+  it('still asks about the protected floor after switching to full', async () => {
+    const env = setup('supervised', 'deny');
+    env.gate.setMode('full');
+    const verdict = await env.gate.check(push);
+    expect(env.requests[0]).toMatchObject({ protectedAction: 'git push' });
+    expect(verdict?.reason).toContain('protected action (git push)');
+  });
+
+  it('leaves a request that is already waiting to the answer', async () => {
+    let answer: (decision: ApprovalDecision) => void = () => {};
+    const env = setup(
+      'supervised',
+      () =>
+        new Promise<ApprovalDecision>((resolve) => {
+          answer = resolve;
+        })
+    );
+    const verdict = env.gate.check(CALLS.command);
+    await vi.waitFor(() => expect(env.request).toHaveBeenCalled());
+    env.gate.setMode('full');
+    answer('deny');
+    expect((await verdict)?.block).toBe(true);
+    // 之后的调用按 full 放行
+    await expect(env.gate.check(CALLS.command)).resolves.toBeUndefined();
+    expect(env.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands itself to the host through onGate so the host can switch it later', () => {
+    const onGate = vi.fn();
+    const gate = createApprovalGate({ mode: 'auto-edits', request: async () => 'allow', onGate });
+    expect(onGate).toHaveBeenCalledTimes(1);
+    expect(onGate).toHaveBeenCalledWith(gate);
+    expect(gate.mode).toBe('auto-edits');
+  });
+});
+
 describe('createApprovalGate pi extension', () => {
   type Handler = (event: unknown, ctx: unknown) => unknown;
 
