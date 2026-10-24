@@ -41,7 +41,7 @@ function makeHost(overrides: Partial<OrchestrationHostDeps> = {}): Orchestration
     launcher,
     roles: createFakeRoles(),
     runChecks,
-    worktreesRoot: ROOT,
+    resolveWorktreesRoot: async () => ROOT,
     exec: fake.exec,
     now: () => 1000,
     ...overrides,

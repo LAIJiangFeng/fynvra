@@ -56,7 +56,7 @@ export type RunChecksFn = (
 
 /**
  * ARCHITECTURE §9.5 `createOrchestrationHost` 的依赖，外加三项补充：
- * `worktreesRoot`（建 worktree 的位置）、`exec`（合并前确认仓库所在分支、review 时取 `--stat`）、
+ * `resolveWorktreesRoot`（建 worktree 的位置）、`exec`（合并前确认仓库所在分支、review 时取 `--stat`）、
  * `checkPolicy` / `now`（可选）。
  */
 export interface OrchestrationHostDeps {
@@ -71,8 +71,11 @@ export interface OrchestrationHostDeps {
   launcher: WorkerSessionLauncher;
   roles: RoleStore;
   runChecks: RunChecksFn;
-  /** worktree 托管根目录（`userData/worktrees`）。 */
-  worktreesRoot: string;
+  /**
+   * worktree 托管根目录（见 `worktreesRoot.ts`），每次建 worktree 时现算：设置改了之后新派的任务就落到新位置；
+   * 已有 worktree 的路径记在 store 里，不受影响。
+   */
+  resolveWorktreesRoot: (workspace: Workspace) => Promise<string>;
   /** 执行 git（与 `git` 使用同一个实现）。 */
   exec: ExecFn;
   /** run_checks 白名单，默认 {@link DEFAULT_CHECK_COMMAND_POLICY}。 */
@@ -203,7 +206,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       workspaceId: workspace.id,
       slug: task.title,
       baseRef: coordinatorBranch,
-      worktreesRoot: deps.worktreesRoot,
+      worktreesRoot: await deps.resolveWorktreesRoot(workspace),
     });
     if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
     const { worktree } = created;

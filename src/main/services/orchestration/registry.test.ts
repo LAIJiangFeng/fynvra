@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DispatchTaskInput } from '@fynvra/agent-runtime';
@@ -12,15 +12,16 @@ import {
 import { createFakeExec, createFakeLauncher, createFakeRoles, type FakeExec } from './testing';
 
 const TASK: DispatchTaskInput = { title: 'Add toggle', spec: 'S', roleId: 'worker', dependsOn: [] };
-const WS1: Workspace = { id: 'ws_1', name: 'one', repoPath: '/repo1', defaultBranch: 'main' };
-const WS2: Workspace = { id: 'ws_2', name: 'two', repoPath: '/repo2', defaultBranch: 'main' };
 
 let dir: string;
 let fake: FakeExec;
+// 仓库放在临时目录里：默认位置是仓库同级目录，resolver 会真的建出它
+let WS1: Workspace;
+let WS2: Workspace;
 
 function make(overrides: Partial<OrchestrationRegistryOptions> = {}) {
   return createOrchestrationRegistry({
-    userDataPath: dir,
+    userDataPath: join(dir, 'userData'),
     listWorkspaces: () => [WS1, WS2],
     roles: createFakeRoles(),
     notifyChanged: vi.fn(),
@@ -34,6 +35,8 @@ function make(overrides: Partial<OrchestrationRegistryOptions> = {}) {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'fynvra-orchestration-registry-'));
   fake = createFakeExec();
+  WS1 = { id: 'ws_1', name: 'one', repoPath: join(dir, 'repos', 'one'), defaultBranch: 'main' };
+  WS2 = { id: 'ws_2', name: 'two', repoPath: join(dir, 'repos', 'two'), defaultBranch: 'main' };
 });
 
 afterEach(() => {
@@ -50,7 +53,7 @@ describe('createOrchestrationRegistry', () => {
     expect(registry.hostFor('session_coord', 'ws_missing')).toBeNull();
   });
 
-  it('launcher 接线前派发失败；setLauncher 后已打开的服务改用它，路径都在 userData 下', async () => {
+  it('launcher 接线前派发失败；setLauncher 后已打开的服务改用它；快照在 userData，worktree 默认在仓库同级', async () => {
     const registry = make();
     const host = registry.hostFor('session_coord', 'ws_1');
     expect(await host?.dispatchTask(TASK)).toMatchObject({
@@ -61,9 +64,47 @@ describe('createOrchestrationRegistry', () => {
     const launcher = createFakeLauncher();
     registry.setLauncher(launcher);
     expect(await host?.dispatchTask(TASK)).toMatchObject({ ok: true });
-    expect(launcher.created()[0]?.cwd).toBe(join(dir, 'worktrees', 'ws_1', 'add-toggle'));
+    expect(launcher.created()[0]?.cwd).toBe(
+      join(dir, 'repos', 'one-worktrees', 'ws_1', 'add-toggle')
+    );
     await registry.flushAll();
-    expect(existsSync(join(dir, 'orchestration', 'ws_1.json'))).toBe(true);
+    expect(existsSync(join(dir, 'userData', 'orchestration', 'ws_1.json'))).toBe(true);
+  });
+
+  it('worktree 根目录每次建 worktree 时现算：改设置后同一会话新派的任务落到新目录，已有的不动', async () => {
+    let worktreesRoot: string | undefined;
+    const launcher = createFakeLauncher();
+    const registry = make({ launcher, worktreesRoot: () => worktreesRoot });
+    const host = registry.hostFor('session_coord', 'ws_1');
+
+    expect(await host?.dispatchTask(TASK)).toMatchObject({ ok: true });
+    worktreesRoot = join(dir, 'custom');
+    expect(await host?.dispatchTask({ ...TASK, title: 'Second task' })).toMatchObject({ ok: true });
+
+    const expected = [
+      join(dir, 'repos', 'one-worktrees', 'ws_1', 'add-toggle'),
+      join(dir, 'custom', 'one', 'ws_1', 'second-task'),
+    ];
+    expect(launcher.created().map((input) => input.cwd)).toEqual(expected);
+    const snapshot = await registry.serviceFor('ws_1')?.snapshot();
+    expect(snapshot?.worktrees.map((worktree) => worktree.path)).toEqual(expected);
+  });
+
+  it('仓库父目录不可写时 worktree 退回 userData/worktrees，并记 warning', async () => {
+    const blocker = join(dir, 'blocker.txt');
+    writeFileSync(blocker, '');
+    WS2 = { ...WS2, repoPath: join(blocker, 'two') };
+    const launcher = createFakeLauncher();
+    const log = vi.fn();
+    const registry = make({ launcher, log });
+
+    expect(await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK)).toMatchObject({
+      ok: true,
+    });
+    expect(launcher.created()[0]?.cwd).toBe(
+      join(dir, 'userData', 'worktrees', 'ws_2', 'add-toggle')
+    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(join(dir, 'userData', 'worktrees')));
   });
 
   it('workerHostFor / serviceForDispatch 跨工作区查找', async () => {

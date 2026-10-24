@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 
-export const SETTINGS_SECTIONS = ['providers', 'roles', 'skills', 'mcp', 'appearance'] as const;
+export const SETTINGS_SECTIONS = [
+  'general',
+  'providers',
+  'roles',
+  'skills',
+  'mcp',
+  'appearance',
+] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export function isSettingsSection(value: unknown): value is SettingsSection {

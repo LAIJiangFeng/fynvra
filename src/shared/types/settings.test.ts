@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   createDefaultSettings,
   DEFAULT_PREFERENCES,
+  parsePickWorktreesRootInput,
   parsePreferences,
   parsePreferencesPatch,
   parseSettings,
+  parseWorktreesRootInfoInput,
   SETTINGS_VERSION,
 } from './settings';
 
@@ -99,6 +101,41 @@ describe('parsePreferences', () => {
       expect(parsePreferences({ shellPath })).not.toHaveProperty('shellPath');
     }
   });
+
+  it('worktreesRoot 保留绝对路径（去掉首尾空白），没有默认值', () => {
+    for (const worktreesRoot of [
+      'D:\\worktrees',
+      'd:/worktrees',
+      '\\\\nas\\share\\wt',
+      '/srv/wt',
+    ]) {
+      expect(parsePreferences({ worktreesRoot: ` ${worktreesRoot} ` })).toEqual({
+        ...DEFAULT_PREFERENCES,
+        worktreesRoot,
+      });
+    }
+    expect(parseSettings({ preferences: { worktreesRoot: 'E:\\wt' } }).preferences).toEqual({
+      ...DEFAULT_PREFERENCES,
+      worktreesRoot: 'E:\\wt',
+    });
+  });
+
+  it('worktreesRoot 丢弃相对路径与非字符串（回到默认位置）', () => {
+    for (const worktreesRoot of [
+      undefined,
+      null,
+      42,
+      '',
+      '   ',
+      'worktrees',
+      './worktrees',
+      '..\\worktrees',
+      'D:worktrees',
+      ['D:\\worktrees'],
+    ]) {
+      expect(parsePreferences({ worktreesRoot })).not.toHaveProperty('worktreesRoot');
+    }
+  });
 });
 
 describe('parsePreferencesPatch（IPC 入参收窄）', () => {
@@ -119,8 +156,48 @@ describe('parsePreferencesPatch（IPC 入参收窄）', () => {
     ['类型不符', { sidePanelOpen: 'true' }],
     ['未知字段', { theme: 'dark', workspaces: [] }],
     ['shellPath（只能手改 settings.json，Renderer 不传路径）', { shellPath: 'C:\\x\\bash.exe' }],
+    [
+      'worktreesRoot（只经 settings:pick-worktrees-root 由 Main 弹框）',
+      { worktreesRoot: 'D:\\wt' },
+    ],
     ['原型污染键', JSON.parse('{"__proto__": {"theme": "dark"}}')],
   ])('拒绝 %s', (_label, raw) => {
     expect(parsePreferencesPatch(raw)).toBeNull();
+  });
+});
+
+describe('parsePickWorktreesRootInput（IPC 入参收窄）', () => {
+  it('无参弹目录框，{ reset: true } 恢复默认', () => {
+    expect(parsePickWorktreesRootInput(undefined)).toEqual({ reset: false });
+    expect(parsePickWorktreesRootInput({ reset: true })).toEqual({ reset: true });
+    expect(parsePickWorktreesRootInput({ reset: false })).toEqual({ reset: false });
+  });
+
+  it.each([
+    ['路径字符串', 'D:\\wt'],
+    ['null', null],
+    ['数组', [{ reset: true }]],
+    ['类型不符', { reset: 'true' }],
+    ['带路径的对象', { reset: false, path: 'D:\\wt' }],
+    ['原型污染键', JSON.parse('{"__proto__": {"reset": true}}')],
+  ])('拒绝 %s', (_label, raw) => {
+    expect(parsePickWorktreesRootInput(raw)).toBeNull();
+  });
+});
+
+describe('parseWorktreesRootInfoInput（IPC 入参收窄）', () => {
+  it('默认统计占用，{ usage: false } 只取路径', () => {
+    expect(parseWorktreesRootInfoInput(undefined)).toEqual({ usage: true });
+    expect(parseWorktreesRootInfoInput({ usage: false })).toEqual({ usage: false });
+    expect(parseWorktreesRootInfoInput({ usage: true })).toEqual({ usage: true });
+  });
+
+  it.each([
+    ['工作区 id', 'ws-1'],
+    ['null', null],
+    ['类型不符', { usage: 1 }],
+    ['未知字段', { usage: true, workspaceId: 'ws-1' }],
+  ])('拒绝 %s', (_label, raw) => {
+    expect(parseWorktreesRootInfoInput(raw)).toBeNull();
   });
 });

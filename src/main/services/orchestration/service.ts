@@ -31,8 +31,8 @@ export interface OrchestrationServiceOptions {
   workspace: Workspace;
   /** 状态快照：`userData/orchestration/<workspaceId>.json`。 */
   statePath: string;
-  /** worktree 托管根目录：`userData/worktrees`。 */
-  worktreesRoot: string;
+  /** worktree 托管根目录，每次建 worktree 时调用（registry 按设置推导，见 `worktreesRoot.ts`）。 */
+  resolveWorktreesRoot: (workspace: Workspace) => Promise<string>;
   launcher: WorkerSessionLauncher;
   roles: RoleStore;
   exec: ExecFn;
@@ -197,7 +197,7 @@ export function createOrchestrationService(
         launcher,
         roles: options.roles,
         runChecks: options.runChecks,
-        worktreesRoot: options.worktreesRoot,
+        resolveWorktreesRoot: options.resolveWorktreesRoot,
         exec: options.exec,
         checkPolicy: options.checkPolicy,
         now,

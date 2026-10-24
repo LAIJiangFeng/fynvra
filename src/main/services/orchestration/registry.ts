@@ -8,12 +8,18 @@ import type { WorkerSessionLauncher } from './launcher';
 import { nodeExec } from './nodeExec';
 import { createOrchestrationService, type OrchestrationService } from './service';
 import { createShellRunner } from './shellRunner';
+import { createWorktreesRootResolver, fallbackWorktreesRoot } from './worktreesRoot';
 
 export interface OrchestrationRegistryOptions {
-  /** `app.getPath('userData')`：快照写到 `orchestration/<workspaceId>.json`，worktree 建在 `worktrees/`。 */
+  /** `app.getPath('userData')`：快照写到 `orchestration/<workspaceId>.json`；worktree 的默认位置用不了时退到 `worktrees/`。 */
   userDataPath: string;
   /** 已挂入的工作区（含 repoPath，只在 Main）。 */
   listWorkspaces: () => readonly Workspace[];
+  /**
+   * `preferences.worktreesRoot`，每次建 worktree 时现读；缺省或返回 undefined 时 worktree 建在仓库同级的
+   * `<仓库目录名>-worktrees`（见 `worktreesRoot.ts`）。
+   */
+  worktreesRoot?: () => string | undefined;
   roles: RoleStore;
   notifyChanged: (workspaceId: string) => void;
   /** 缺省时起 worker 会话一律失败，直到 {@link OrchestrationRegistry.setLauncher}。 */
@@ -68,6 +74,12 @@ export function createOrchestrationRegistry(
   const exec = options.exec ?? nodeExec;
   const runChecks = options.runChecks ?? createShellRunner();
   const fs = options.fs ?? nodeFs;
+  const resolveWorktreesRoot = createWorktreesRootResolver({
+    fallbackRoot: fallbackWorktreesRoot(options.userDataPath),
+    configured: options.worktreesRoot ?? (() => undefined),
+    repoPaths: () => options.listWorkspaces().map((workspace) => workspace.repoPath),
+    log: options.log,
+  });
   const services = new Map<string, OrchestrationService>();
 
   const open = (workspace: Workspace): OrchestrationService => {
@@ -76,7 +88,7 @@ export function createOrchestrationRegistry(
     const service = createOrchestrationService({
       workspace,
       statePath: join(options.userDataPath, 'orchestration', `${workspace.id}.json`),
-      worktreesRoot: join(options.userDataPath, 'worktrees'),
+      resolveWorktreesRoot,
       launcher: delegate,
       roles: options.roles,
       exec,

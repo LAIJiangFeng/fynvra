@@ -1,10 +1,20 @@
-import { Boxes, type LucideIcon, Palette, Plug, Sparkles, UserCog, X } from 'lucide-react';
+import {
+  Boxes,
+  type LucideIcon,
+  Palette,
+  Plug,
+  SlidersHorizontal,
+  Sparkles,
+  UserCog,
+  X,
+} from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
+import { GeneralSettings } from './GeneralSettings';
 import { McpSettings } from './McpSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
@@ -22,6 +32,13 @@ interface SectionSpec {
 }
 
 const SECTIONS: SectionSpec[] = [
+  {
+    value: 'general',
+    label: '通用',
+    description: 'worktree 的存放位置，以及它们占用的磁盘空间。',
+    icon: SlidersHorizontal,
+    Component: GeneralSettings,
+  },
   {
     value: 'providers',
     label: '模型服务',
