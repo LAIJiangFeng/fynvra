@@ -304,7 +304,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         return status === undefined || status === 'abandoned';
       });
       if (blocker !== undefined) {
-        abandonQueued(task, `its dependency ${blocker} was abandoned`);
+        const gone = store.tasks.get(blocker) === undefined;
+        abandonQueued(
+          task,
+          `its dependency ${blocker} ${gone ? 'no longer exists' : 'was abandoned'}`
+        );
         continue;
       }
       const ready = task.dependsOn.every((dependency) => {
