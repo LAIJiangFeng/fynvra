@@ -17,6 +17,7 @@ import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { type ImportStatus, ProviderImportDialog } from './ProviderImportDialog';
 import { draftFromCatalog, draftFromProvider, type ProviderDraft } from './providerForm';
+import { maskSecrets } from './secretMask';
 
 const MAX_MODEL_BADGES = 4;
 
@@ -174,7 +175,7 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
             {!provider.enabled && <Badge>已停用</Badge>}
           </div>
           <p className="mt-1 truncate text-muted-foreground text-xs">
-            {resolveBaseUrl(provider.api, provider.baseUrl)}
+            {maskSecrets(resolveBaseUrl(provider.api, provider.baseUrl))}
             {' · '}
             {provider.hasApiKey ? (
               <span className="font-mono">••••{provider.apiKeyHint ?? ''}</span>
