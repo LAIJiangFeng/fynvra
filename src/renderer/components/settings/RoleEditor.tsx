@@ -6,11 +6,11 @@ import {
   isValidRoleId,
   parseRole,
   type Role,
-  type ThinkingLevel,
   type ToolPolicy,
 } from '@fynvra/core';
+import type { ModelProviderOption } from '@shared/types/chat';
 import { Copy, Download, Save, Trash2 } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,8 +28,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { useMcpStore } from '@/stores/mcp';
 import { useProvidersStore } from '@/stores/providers';
 import { useRolesStore } from '@/stores/roles';
+import { THINKING_LABELS } from '@/stores/sessions/modelChoice';
 import { useSkillsStore } from '@/stores/skills';
 import { Field, InlineMessage } from './common';
+import {
+  normalizeRoleThinking,
+  type RoleThinking,
+  roleThinking,
+  thinkingOptions,
+  withRoleModel,
+} from './roleModel';
 import { roleToJson } from './roleTransfer';
 import { maskSecrets } from './secretMask';
 
@@ -43,19 +51,15 @@ const APPROVAL_LABELS: Record<ApprovalMode, string> = {
   'auto-edits': '自动放行文件编辑',
   full: '全部自动放行',
 };
-const THINKING_LABELS: Record<ThinkingLevel, string> = {
-  off: '关闭',
-  minimal: '最少',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '最高',
-};
 const toItems = <T extends string>(labels: Record<T, string>) =>
   (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
 const TOOL_POLICY_ITEMS = toItems(TOOL_POLICY_LABELS);
 const APPROVAL_ITEMS = toItems(APPROVAL_LABELS);
-const THINKING_ITEMS = [{ value: '', label: '默认' }, ...toItems(THINKING_LABELS)];
+const FOLLOW_SESSION = '跟随会话模型';
+const UNKNOWN_THINKING_HINTS = {
+  loading: '正在读取这个模型的思考档位…',
+  unavailable: '服务已停用、没填 API Key 或模型已删除，读不到这个模型的思考档位',
+} as const;
 
 /** 模型下拉的值：`<服务 id>:<模型 id>`（服务 id 是 slug，不含冒号）；空串表示不固定模型。 */
 const modelValue = (model: Role['model']) => (model ? `${model.providerId}:${model.modelId}` : '');
@@ -80,6 +84,9 @@ export function RoleEditor({
 }) {
   const save = useRolesStore((state) => state.save);
   const remove = useRolesStore((state) => state.remove);
+  const modelOptions = useProvidersStore((state) => state.modelOptions);
+  const modelOptionsError = useProvidersStore((state) => state.modelOptionsError);
+  const loadModelOptions = useProvidersStore((state) => state.loadModelOptions);
   const [draft, setDraft] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -87,6 +94,13 @@ export function RoleEditor({
   const id = useId();
   const readOnly = initial.builtin === true;
   const dirty = isNew || JSON.stringify(draft) !== JSON.stringify(initial);
+  const options = modelOptions?.options ?? null;
+  const thinking = roleThinking(draft.model, options, modelOptionsError !== null);
+
+  // 每个模型可选的思考档位：与新建会话、模型选择器同一份（sessions:model-options）
+  useEffect(() => {
+    void loadModelOptions();
+  }, [loadModelOptions]);
 
   const update = (next: Role) => {
     setDraft(next);
@@ -107,7 +121,7 @@ export function RoleEditor({
       setError(`已经有 id 为 ${draft.id} 的角色`);
       return;
     }
-    const parsed = parseRole(normalize(draft));
+    const parsed = parseRole(normalizeRoleThinking(normalize(draft), options));
     if (!parsed.ok) {
       setError(parsed.error);
       return;
@@ -194,37 +208,24 @@ export function RoleEditor({
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <ModelField id={`${id}-model`} role={draft} disabled={readOnly} onChange={update} />
-        <Field
-          label="思考档位"
-          htmlFor={`${id}-thinking`}
-          hint={draft.model ? undefined : '固定模型后可选'}
-        >
-          <Select
-            items={THINKING_ITEMS}
-            value={draft.model?.thinking ?? ''}
-            disabled={readOnly || !draft.model}
-            onValueChange={(value) => {
-              if (!draft.model) return;
-              const { thinking: _omit, ...model } = draft.model;
-              update({
-                ...draft,
-                model: isThinkingLevel(value) ? { ...model, thinking: value } : model,
-              });
-            }}
-          >
-            <SelectTrigger id={`${id}-thinking`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {THINKING_ITEMS.map((item) => (
-                <SelectItem key={item.value || 'default'} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        <ModelField
+          id={`${id}-model`}
+          role={draft}
+          options={options}
+          unsupported={thinking.kind === 'unsupported'}
+          disabled={readOnly}
+          onChange={update}
+        />
+        {thinking.kind !== 'unsupported' && (
+          <ThinkingField
+            id={`${id}-thinking`}
+            role={draft}
+            state={thinking}
+            error={modelOptionsError}
+            disabled={readOnly}
+            onChange={update}
+          />
+        )}
         <Field label="工具策略" htmlFor={`${id}-tools`}>
           <Select
             items={TOOL_POLICY_ITEMS}
@@ -365,20 +366,30 @@ function downloadRole(role: Role): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/**
+ * 模型下拉：列出全部服务的模型（停用的服务也列，标「已停用」）。换模型时思考档位按新模型落定，
+ * 规则同新建会话（{@link withRoleModel}）。
+ */
 function ModelField({
   id,
   role,
+  options,
+  unsupported,
   disabled,
   onChange,
 }: {
   id: string;
   role: Role;
+  /** sessions:model-options 的服务与模型（每个模型带它的思考档位）；null 表示还没读到 */
+  options: readonly ModelProviderOption[] | null;
+  /** 选中的模型不支持推理 */
+  unsupported: boolean;
   disabled: boolean;
   onChange: (role: Role) => void;
 }) {
   const providers = useProvidersStore((state) => state.providers);
   const current = modelValue(role.model);
-  const options = providers.flatMap((provider) =>
+  const choices = providers.flatMap((provider) =>
     provider.models.map((model) => ({
       value: `${provider.id}:${model.id}`,
       label: `${provider.name} / ${model.name}`,
@@ -386,20 +397,22 @@ function ModelField({
   );
   // 角色引用的服务或模型已被删除：保留为一个「不可用」选项，避免下拉显示成空白
   const missing =
-    role.model && !options.some((option) => option.value === current)
+    role.model && !choices.some((choice) => choice.value === current)
       ? { value: current, label: `${role.model.providerId} / ${role.model.modelId}（不可用）` }
       : null;
-  const items = [
-    { value: '', label: '不固定（由会话决定）' },
-    ...(missing ? [missing] : []),
-    ...options,
-  ];
+  const items = [{ value: '', label: FOLLOW_SESSION }, ...(missing ? [missing] : []), ...choices];
 
   return (
     <Field
       label="模型"
       htmlFor={id}
-      hint={providers.length === 0 ? '先在「模型服务」里添加服务' : undefined}
+      hint={
+        providers.length === 0
+          ? '先在「模型服务」里添加服务'
+          : unsupported
+            ? '这个模型不支持推理，不设思考档位'
+            : undefined
+      }
     >
       <Select
         items={items}
@@ -407,27 +420,22 @@ function ModelField({
         disabled={disabled}
         onValueChange={(value) => {
           if (typeof value !== 'string' || value === '') {
-            const { model: _omit, ...rest } = role;
-            onChange(rest);
+            onChange(withRoleModel(role, undefined, options));
             return;
           }
           const separator = value.indexOf(':');
-          const thinking = role.model?.thinking;
-          onChange({
-            ...role,
-            model: {
-              providerId: value.slice(0, separator),
-              modelId: value.slice(separator + 1),
-              ...(thinking ? { thinking } : {}),
-            },
-          });
+          const ref = {
+            providerId: value.slice(0, separator),
+            modelId: value.slice(separator + 1),
+          };
+          onChange(withRoleModel(role, ref, options));
         }}
       >
         <SelectTrigger id={id}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">不固定（由会话决定）</SelectItem>
+          <SelectItem value="">{FOLLOW_SESSION}</SelectItem>
           {missing && <SelectItem value={missing.value}>{missing.label}</SelectItem>}
           {providers.map((provider) => (
             <SelectGroup key={provider.id}>
@@ -441,6 +449,76 @@ function ModelField({
                 </SelectItem>
               ))}
             </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/** 思考档位：只列所选模型自己的档位；没选模型时跟随会话模型，读不到档位时只显示不能选 */
+function ThinkingField({
+  id,
+  role,
+  state,
+  error,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  role: Role;
+  state: Exclude<RoleThinking, { kind: 'unsupported' }>;
+  /** 最近一次读档位失败的原因 */
+  error: string | null;
+  disabled: boolean;
+  onChange: (role: Role) => void;
+}) {
+  if (state.kind !== 'levels') {
+    const current = role.model?.thinking;
+    const shown =
+      state.kind === 'follow-session'
+        ? FOLLOW_SESSION
+        : current
+          ? THINKING_LABELS[current]
+          : '默认';
+    const hint =
+      state.kind === 'follow-session'
+        ? undefined
+        : state.reason === 'failed'
+          ? `读取思考档位失败：${error ?? ''}`
+          : UNKNOWN_THINKING_HINTS[state.reason];
+    return (
+      <Field label="思考档位" htmlFor={id} hint={hint}>
+        <Select value={null} disabled>
+          <SelectTrigger id={id}>
+            <SelectValue placeholder={shown} />
+          </SelectTrigger>
+        </Select>
+      </Field>
+    );
+  }
+
+  const items = thinkingOptions(state.levels, state.defaultThinking);
+  return (
+    <Field label="思考档位" htmlFor={id}>
+      <Select
+        items={items}
+        value={state.value}
+        disabled={disabled}
+        onValueChange={(value) => {
+          if (role.model && isThinkingLevel(value)) {
+            onChange({ ...role, model: { ...role.model, thinking: value } });
+          }
+        }}
+      >
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>
