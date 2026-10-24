@@ -1,3 +1,4 @@
+import type { ApprovalMode } from '@fynvra/core';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -35,6 +36,11 @@ export interface SessionsApi {
   }): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 可选的服务与模型（每个模型带它的思考档位）；传 workspaceId 时带该工作区上一次用过的模型 */
   modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  /** 换审批档位：运行中也可以，即时生效；会话还没在 worker 里时下次启动用新档位 */
+  setApprovalMode(input: {
+    sessionId: string;
+    mode: ApprovalMode;
+  }): Promise<IpcResult<{ session: SessionSummary }>>;
   onEvent(cb: (envelope: SessionEventEnvelope) => void): Unsubscribe;
   onSessionsChanged(cb: (workspaceId: string) => void): Unsubscribe;
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
@@ -62,6 +68,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),
     setModel: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, input),
     modelOptions: (input = {}) => ipc.invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, input),
+    setApprovalMode: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, input),
     onEvent: (cb) =>
       ipc.subscribe(IPC_CHANNELS.SESSIONS_EVENT, (envelope) =>
         cb(envelope as SessionEventEnvelope)

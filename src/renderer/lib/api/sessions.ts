@@ -285,26 +285,30 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       await tool(ls, 'README.md\ndocs/\npackage.json\npackages/\nsrc/');
       await tool(read, '{\n  "name": "fynvra",\n  "private": true,\n  "type": "module"\n}');
 
-      const requestId = nextId('approval');
-      emit(session, {
-        type: 'approval_request',
-        requestId,
-        toolCallId: bash.id,
-        toolName: 'bash',
-        args: bash.args,
-      });
-      const request: ApprovalRequest = {
-        id: requestId,
-        sessionId,
-        kind: 'command',
-        title: 'bash',
-        detail: 'pnpm test',
-        expiresAt: now() + 10 * 60_000,
-      };
-      for (const listener of approvalListeners) listener(request);
-      changed(session, 'waiting-approval');
-      const decision = await waitForDecision(session, requestId, signal);
-      changed(session, 'running');
+      // 与真实审批门一样看会话当前的档位：完全放行时命令不再询问
+      let decision: ApprovalDecision = 'allow';
+      if (session.summary.approvalMode !== 'full') {
+        const requestId = nextId('approval');
+        emit(session, {
+          type: 'approval_request',
+          requestId,
+          toolCallId: bash.id,
+          toolName: 'bash',
+          args: bash.args,
+        });
+        const request: ApprovalRequest = {
+          id: requestId,
+          sessionId,
+          kind: 'command',
+          title: 'bash',
+          detail: 'pnpm test',
+          expiresAt: now() + 10 * 60_000,
+        };
+        for (const listener of approvalListeners) listener(request);
+        changed(session, 'waiting-approval');
+        decision = await waitForDecision(session, requestId, signal);
+        changed(session, 'running');
+      }
       const approved = decision !== 'deny';
       if (approved) {
         await tool(
@@ -448,6 +452,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         model: input.model ?? MOCK_MODEL,
         // 与 Main 相同：取角色的档位（mock 只认内置角色，其余按全程审批）
         approvalMode: getBuiltinRole(input.roleId)?.approvalMode ?? 'supervised',
+        branch: 'main',
       };
       const session: MockSession = {
         summary,
@@ -468,6 +473,15 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       if (session.run) return { ok: false, error: '会话正在运行，等本轮结束再切换模型' };
       session.summary = { ...session.summary, model };
       lastModels.set(session.summary.workspaceId, model);
+      changed(session);
+      return { ok: true, session: session.summary };
+    },
+
+    async setApprovalMode({ sessionId, mode }) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      // 与 Main 相同：运行中也可以切，下一次需要审批的调用起生效
+      session.summary = { ...session.summary, approvalMode: mode };
       changed(session);
       return { ok: true, session: session.summary };
     },

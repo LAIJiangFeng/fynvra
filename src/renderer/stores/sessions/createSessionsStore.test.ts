@@ -1,4 +1,4 @@
-import type { FynvraSessionEventBody } from '@fynvra/core';
+import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
   ChatMessage,
@@ -114,6 +114,18 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         ok: true,
         providers: PROVIDERS,
       })
+    ),
+    setApprovalMode: vi.fn(
+      async (input: {
+        sessionId: string;
+        mode: ApprovalMode;
+      }): Promise<IpcResult<{ session: SessionSummary }>> => {
+        const current = sessions.find((session) => session.id === input.sessionId);
+        if (!current) return { ok: false, error: '会话不存在' };
+        const session = { ...current, approvalMode: input.mode, updatedAt: 20 };
+        sessions = sessions.map((item) => (item.id === session.id ? session : item));
+        return { ok: true, session };
+      }
     ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),

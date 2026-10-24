@@ -86,9 +86,32 @@ describe('mock SessionsApi + store', () => {
     expect(shape(selectMessagesOf(sessionId)(state()))).toEqual(shape(live));
   });
 
-  it('orchestrator：拒绝审批后命令记为失败，继续演示 dispatch_task / wait_for_workers', async () => {
+  it('orchestrator 默认完全放行：bash 不询问，直接执行', async () => {
     const { store, sessionId } = await setup('orchestrator');
     const state = () => store.getState();
+    expect(state().sessionsByWorkspace['ws-1']?.[0]?.approvalMode).toBe('full');
+
+    expect(await state().send('拆一下任务')).toBe(true);
+    await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
+
+    expect(selectApprovalsOf(sessionId)(state())).toEqual([]);
+    const calls = selectMessagesOf(sessionId)(state()).flatMap((message) => message.toolCalls);
+    expect(calls.map((call) => [call.name, call.status])).toEqual([
+      ['ls', 'done'],
+      ['read', 'done'],
+      ['bash', 'done'],
+      ['dispatch_task', 'done'],
+      ['wait_for_workers', 'done'],
+    ]);
+  });
+
+  it('orchestrator 切到全程审批后：拒绝审批，命令记为失败，继续演示 dispatch_task / wait_for_workers', async () => {
+    const { store, api, sessionId } = await setup('orchestrator');
+    const state = () => store.getState();
+    expect(await api.setApprovalMode({ sessionId, mode: 'supervised' })).toMatchObject({
+      ok: true,
+      session: { approvalMode: 'supervised' },
+    });
 
     await state().send('拆一下任务');
     await advanceUntil(() => selectApprovalsOf(sessionId)(state()).length > 0);
