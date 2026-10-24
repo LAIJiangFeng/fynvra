@@ -24,6 +24,7 @@ import { createRoleResourceResolver } from '../services/agentHost/roleResources'
 import { createShellPathResolver } from '../services/agentHost/shell';
 import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
+import { createBranchTracker, readGitBranch } from '../services/sessions/branches';
 import { createLastModelStore } from '../services/sessions/lastModels';
 import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
@@ -59,6 +60,7 @@ function createAppAgentHost(): AgentHostService {
     // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
     providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
     lastModels: createLastModelStore(getSettingsFile()),
+    branches: createBranchTracker({ read: (cwd) => readGitBranch(cwd) }),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
       mcpServers: getMcpRegistry(),
@@ -135,6 +137,15 @@ export function registerSessionHandlers(host: () => AgentHostService = getAgentH
       return input ? guard(() => host().setApprovalMode(input)) : invalid('无效的审批档位');
     }
   );
+
+  // 用户可能在外部终端里切过分支：窗口重新获得焦点时重读（按目录节流，有变化才广播 sessions:changed）
+  app.on('browser-window-focus', () => {
+    try {
+      host().refreshBranches();
+    } catch (error) {
+      console.warn('[sessions] 重读会话分支失败', error);
+    }
+  });
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */

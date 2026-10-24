@@ -4,10 +4,15 @@ import type { AgentHostService } from '../services/agentHost/agentHost';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  appListeners: new Map<string, (...args: unknown[]) => unknown>(),
 }));
 
 vi.mock('electron', () => ({
-  app: { getPath: () => '/tmp/fynvra-test/userData', on: () => {} },
+  app: {
+    getPath: () => '/tmp/fynvra-test/userData',
+    on: (event: string, listener: (...args: unknown[]) => unknown) =>
+      mocks.appListeners.set(event, listener),
+  },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
       mocks.handlers.set(channel, handler),
@@ -30,6 +35,7 @@ const host = {
   setModel: vi.fn(async () => ({ ok: true })),
   modelOptions: vi.fn(async () => ({ ok: true, providers: [] })),
   setApprovalMode: vi.fn(async () => ({ ok: true })),
+  refreshBranches: vi.fn(),
 };
 
 const invoke = (channel: string, ...args: unknown[]) =>
@@ -64,6 +70,13 @@ describe('sessions IPC', () => {
         'sessions:set-approval-mode',
       ].sort()
     );
+  });
+
+  it('re-reads the session branches when a window gets the focus (the user may have checked out outside)', () => {
+    const onFocus = mocks.appListeners.get('browser-window-focus');
+    expect(onFocus).toBeTypeOf('function');
+    onFocus?.({}, {});
+    expect(host.refreshBranches).toHaveBeenCalledTimes(1);
   });
 
   it('forwards an approval mode switch with only the session id and the mode', async () => {
