@@ -1,4 +1,4 @@
-import { Boxes, type LucideIcon, Palette, UserCog, X } from 'lucide-react';
+import { Boxes, type LucideIcon, Palette, Sparkles, UserCog, X } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
+import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 
 interface SectionSpec {
@@ -35,6 +36,13 @@ const SECTIONS: SectionSpec[] = [
     icon: UserCog,
     Component: RolesSettings,
     wide: true,
+  },
+  {
+    value: 'skills',
+    label: '技能',
+    description: '技能目录的引用注册表：扫描本机 Claude Code / Codex / pi 的技能，或手动添加目录。',
+    icon: Sparkles,
+    Component: SkillsSettings,
   },
   {
     value: 'appearance',
