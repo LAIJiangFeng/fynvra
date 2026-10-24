@@ -13,7 +13,7 @@ const input: BriefInput = {
 };
 
 describe('renderBrief', () => {
-  it('五段任务书 + 末尾固定的 worker 契约', () => {
+  it('五段任务书 + 末尾一句话引用系统提示词里的 worker 契约', () => {
     expect(renderBrief(input)).toBe(
       [
         '# Add JSON parser',
@@ -44,19 +44,15 @@ describe('renderBrief', () => {
         '',
         '## Worker contract',
         '',
-        "- Commit your changes on this worktree's branch: only committed work is reviewed and merged.",
-        '- When you are done, or cannot finish, call `report_done` exactly once with `outcome`',
-        '  (`succeeded` or `failed`), a short `summary`, and `files_modified` listing the files you',
-        '  changed. Do not end your turn without it, and do not call it again afterwards.',
-        '- Paste the `pnpm test` summary line into `summary`.',
-        '- If you are blocked or need a decision, call `ask_coordinator` with one concrete question and',
-        '  wait for the reply instead of guessing.',
+        'When you finish, or cannot finish, you must call `report_done`; see the Fynvra worker contract in your system prompt.',
+        '',
+        'Paste the `pnpm test` summary line into `summary`.',
         '',
       ].join('\n')
     );
   });
 
-  it('worker 契约永远是最后一节，且点名 report_done（一次）与 ask_coordinator', () => {
+  it('worker 契约永远是最后一节，只引用系统提示词，不重复契约正文', () => {
     const brief = renderBrief({ ...input, reportDoneHint: undefined });
     const sections = [...brief.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
     expect(sections).toEqual([
@@ -68,9 +64,20 @@ describe('renderBrief', () => {
       'Worker contract',
     ]);
     const contract = brief.slice(brief.indexOf('## Worker contract'));
-    expect(contract).toContain('`report_done` exactly once');
-    expect(contract).toContain('`ask_coordinator`');
-    expect(contract).not.toContain('Paste the');
+    expect(contract).toContain('you must call `report_done`');
+    expect(contract).toContain('worker contract in your system prompt');
+    // 契约正文（只调一次、提交、ask_coordinator、files_modified）只在 agent-runtime 的 WORKER_CONTRACT_PROMPT 里
+    for (const rule of ['exactly once', 'ommit', 'ask_coordinator', 'files_modified']) {
+      expect(contract).not.toContain(rule);
+    }
+    expect(contract.trimEnd().split('\n')).toHaveLength(3);
+  });
+
+  it('reportDoneHint 规范化后另起一段；空白的提示被忽略', () => {
+    expect(renderBrief({ ...input, reportDoneHint: '  Attach the\r\nlint output.  ' })).toMatch(
+      /in your system prompt\.\n\nAttach the\nlint output\.\n$/
+    );
+    expect(renderBrief({ ...input, reportDoneHint: ' \n ' })).toMatch(/in your system prompt\.\n$/);
   });
 
   it('多行列表项缩进续行；空白项被忽略；空列表写 _None._', () => {
