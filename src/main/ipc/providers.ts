@@ -3,6 +3,7 @@ import { errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { app, ipcMain, net } from 'electron';
 import type {
+  ListRemoteModelsResult,
   ProviderImportResult,
   ProviderListResult,
   ProviderSaveResult,
@@ -20,6 +21,11 @@ import {
   type ProviderStore,
   toProviderView,
 } from '../services/providers/providerStore';
+import {
+  parseListRemoteModelsInput,
+  remoteModelsTarget,
+} from '../services/providers/remoteModels/input';
+import { listRemoteModels } from '../services/providers/remoteModels/listRemoteModels';
 import { testProvider } from '../services/providers/testProvider';
 import { sendToAllWindows } from '../windows/createAppWindow';
 
@@ -113,6 +119,28 @@ export function registerProviderHandlers(): void {
         sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
       }
       return result;
+    }
+  );
+
+  // 已保存的服务只传 id，key 从 providers.json 取；表单里新填的 key 只在这一跳进入 Main。
+  // 与 providers:test 走同一条网络路径（net.fetch：Chromium 网络栈与系统代理），返回的模型视图里没有 key
+  ipcMain.handle(
+    IPC_CHANNELS.PROVIDERS_LIST_REMOTE_MODELS,
+    async (_event, raw: unknown): Promise<ListRemoteModelsResult> => {
+      const parsed = parseListRemoteModelsInput(raw);
+      if (!parsed.ok) return parsed;
+      try {
+        const { providerId } = parsed.input;
+        const stored =
+          providerId === undefined ? undefined : await getProviderStore().get(providerId);
+        const target = remoteModelsTarget(parsed.input, stored);
+        if (!target.ok) return target;
+        return await listRemoteModels(target.target, {
+          fetch: (url, init) => net.fetch(url, init),
+        });
+      } catch (error) {
+        return { ok: false, error: `拉取模型列表失败：${errorMessage(error)}` };
+      }
     }
   );
 }
