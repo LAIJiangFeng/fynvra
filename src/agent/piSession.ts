@@ -7,6 +7,7 @@ import {
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
+import { createSessionSettings } from './shell';
 import type { OpenSession } from './supervisor';
 
 /** dispose 前先中止进行中的回合（pi 的 bash 是独立进程组，只在中止时整树结束），最多等这么久 */
@@ -42,6 +43,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       resourcePaths: { skills: spec.skills, mcpServers: spec.mcpServers.map(toMcpServerConfig) },
       agentDir: options.agentDir,
       roles: spec.roles,
+      settingsManager: createSessionSettings(spec.shellPath),
     });
     const { session } = created;
     return {
