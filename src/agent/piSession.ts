@@ -68,16 +68,22 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
   };
 }
 
-function toMcpServerConfig(server: AgentMcpServer): McpServerConfig {
+/**
+ * Main 解析好的服务器 → pi 的 McpServerConfig。设置里的 http / sse 都映射为 pi 的 `http`（pi 没有单独的 sse 类型）。
+ * 协议消息不带传输方式，按有无 url 区分；这里显式写上 `type`，不依赖 pi 的推断。
+ */
+export function toMcpServerConfig(server: AgentMcpServer): McpServerConfig {
   if (server.url) {
     return {
       name: server.name,
+      type: 'http',
       url: server.url,
       ...(server.headers ? { headers: server.headers } : {}),
     };
   }
   return {
     name: server.name,
+    type: 'stdio',
     command: server.command ?? '',
     ...(server.args ? { args: server.args } : {}),
     ...(server.env ? { env: server.env } : {}),
