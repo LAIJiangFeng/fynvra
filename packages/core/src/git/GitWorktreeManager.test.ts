@@ -37,7 +37,7 @@ const listBranches = (...branches: string[]): Step => ({
   stdout: branches.map((branch) => `refs/heads/${branch}\n`).join(''),
 });
 const addWorktree = (branch: string, path: string, extra: Partial<Step> = {}): Step => ({
-  args: ['worktree', 'add', '-b', branch, '--', path, BASE],
+  args: ['worktree', 'add', '--quiet', '-b', branch, '--', path, BASE],
   cwd: REPO,
   ...extra,
 });

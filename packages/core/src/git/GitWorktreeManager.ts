@@ -288,7 +288,7 @@ export class GitWorktreeManager {
 
     const branch = `${BRANCH_PREFIX}${candidate}`;
     const path = joinPath(worktreesRoot, workspaceId, candidate);
-    const addArgs = ['worktree', 'add', '-b', branch, '--', path, baseCommit];
+    const addArgs = ['worktree', 'add', '--quiet', '-b', branch, '--', path, baseCommit];
     const added = await this.#git(addArgs, repoPath);
     if (added.code !== 0) {
       await this.#dropBranchCreatedAt(repoPath, branch, baseCommit);
