@@ -32,7 +32,7 @@ read, grep, find, ls and git_readonly give you read-only access to the repositor
   - worker_done: the worker's report, with outcome succeeded or failed.
 - list_workers shows every task of this run with its status, role, dispatch_id, branch and reported outcome.
 - read_worker_output { dispatch_id, cursor? } pages through a worker's live output; continue from the cursor given in the result.
-- send_to_worker { dispatch_id, body } answers the worker's pending question if it has one; otherwise it reaches the worker as an instruction, which also restarts a worker that stopped without reporting. It steers work in progress; to send reported work back, use reject_work.
+- send_to_worker { dispatch_id, body } answers the worker's pending question if it has one; otherwise it reaches the worker as an instruction, and it also wakes up a worker that stopped without calling report_done. It steers work in progress; to send reported work back, use reject_work.
 
 ## Reviewing, merging and sending back
 - review_diff { dispatch_id } shows what the worker committed since its base commit: changed files, diffstat and the diff (truncated when long; read single files with git_readonly). Only committed work is reviewed and merged, so an empty diff usually means the worker did not commit.
