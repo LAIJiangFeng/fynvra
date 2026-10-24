@@ -1,0 +1,8 @@
+packages:
+  - 'packages/*'
+
+# 依赖安装脚本白名单（pnpm 10.26+ / 11 的 allowBuilds）。
+# electron 45 首次运行时按需下载二进制，无需安装脚本；
+# electron-winstaller 只服务 Squirrel.Windows 目标，本项目用 NSIS。
+allowBuilds:
+  electron-winstaller: false

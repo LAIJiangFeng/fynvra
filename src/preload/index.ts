@@ -1,0 +1,37 @@
+import { IPC_CHANNELS } from '@shared/types/ipc';
+import { contextBridge, ipcRenderer } from 'electron';
+import type { FynvraApi, Unsubscribe } from './types';
+
+/** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
+function subscribe(channel: string, listener: (...args: unknown[]) => void): Unsubscribe {
+  const handler = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => listener(...args);
+  ipcRenderer.on(channel, handler);
+  return () => {
+    ipcRenderer.removeListener(channel, handler);
+  };
+}
+
+const api: FynvraApi = {
+  settings: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
+    update: (patch) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),
+    onChanged: (callback) => subscribe(IPC_CHANNELS.SETTINGS_CHANGED, () => callback()),
+  },
+  workspaces: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_LIST),
+    add: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_ADD),
+    remove: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_REMOVE, id),
+    onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, () => callback()),
+  },
+  window: {
+    platform: process.platform,
+    minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),
+    toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TOGGLE_MAXIMIZE),
+    close: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE),
+    isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED),
+    onMaximizedChange: (callback) =>
+      subscribe(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, (maximized) => callback(maximized === true)),
+  },
+};
+
+contextBridge.exposeInMainWorld('fynvra', api);

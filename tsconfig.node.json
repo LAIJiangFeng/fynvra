@@ -1,0 +1,21 @@
+{
+  // Main / preload / shared 与全部测试（vitest 跑在 node 环境）。没有 DOM 类型。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@fynvra/core": ["./packages/core/src/index.ts"],
+      "@fynvra/agent-runtime": ["./packages/agent-runtime/src/index.ts"]
+    }
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "vitest.config.ts",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "src/renderer/**/*.test.ts",
+    "test/**/*"
+  ]
+}
