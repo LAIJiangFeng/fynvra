@@ -1,5 +1,7 @@
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import { Ellipsis, FolderGit2, Plus, Trash2 } from 'lucide-react';
+import { Fragment } from 'react';
+import { SessionList } from '@/components/chat/SessionList';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -9,11 +11,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
-/** 左栏：工作区列表 + 选中工作区的会话（会话在 Wave 2 接入）。 */
+/** 左栏：工作区列表；选中的工作区下面列出它的会话。 */
 export function Sidebar() {
+  useSessionsWorkspaceSync();
   const workspaces = useWorkspacesStore((state) => state.workspaces);
   const selectedId = useWorkspacesStore((state) => state.selectedId);
   const adding = useWorkspacesStore((state) => state.adding);
@@ -50,22 +54,17 @@ export function Sidebar() {
         ) : (
           <ul className="flex flex-col gap-0.5 px-2 pb-2">
             {workspaces.map((workspace) => (
-              <WorkspaceItem
-                key={workspace.id}
-                workspace={workspace}
-                selected={workspace.id === selectedId}
-                onSelect={() => select(workspace.id)}
-                onRemove={() => void remove(workspace.id)}
-              />
+              <Fragment key={workspace.id}>
+                <WorkspaceItem
+                  workspace={workspace}
+                  selected={workspace.id === selectedId}
+                  onSelect={() => select(workspace.id)}
+                  onRemove={() => void remove(workspace.id)}
+                />
+                {workspace.id === selectedId && <SessionList workspaceId={workspace.id} />}
+              </Fragment>
             ))}
           </ul>
-        )}
-
-        {selectedId && (
-          <section className="border-t px-4 py-3">
-            <h2 className="mb-2 font-medium text-muted-foreground text-xs">会话</h2>
-            <p className="text-muted-foreground text-xs">暂无会话</p>
-          </section>
         )}
       </ScrollArea>
     </aside>
