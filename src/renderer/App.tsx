@@ -3,6 +3,7 @@ import { NoticeDialog } from '@/components/layout/NoticeDialog';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { SidePanel } from '@/components/layout/SidePanel';
 import { TitleBar } from '@/components/layout/TitleBar';
+import { SettingsView } from '@/components/settings/SettingsView';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -21,6 +22,7 @@ export function App() {
         </div>
       </div>
       <NoticeDialog />
+      <SettingsView />
     </TooltipProvider>
   );
 }

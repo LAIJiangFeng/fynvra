@@ -1,4 +1,5 @@
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { SettingsButton } from '@/components/settings/SettingsButton';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -37,6 +38,7 @@ export function TitleBar() {
       </div>
 
       <div className="no-drag ml-auto flex items-center gap-1 px-2">
+        <SettingsButton />
         <ThemeMenu />
         <Tooltip>
           <TooltipTrigger
