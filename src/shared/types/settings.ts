@@ -12,6 +12,11 @@ export interface Preferences {
   theme: ThemeMode;
   /** 右侧面板是否展开 */
   sidePanelOpen: boolean;
+  /**
+   * worker 会话 bash 工具用的 shell，覆盖 Main 的自动探测（Windows 上找 Git Bash）。
+   * 只能手改 settings.json：`settings:update` 不接受这个字段（Renderer 不传路径）。
+   */
+  shellPath?: string;
 }
 
 /**
@@ -44,10 +49,12 @@ export function parsePreferences(raw: unknown): Preferences {
   const record = asRecord(raw);
   const theme = record?.theme;
   const sidePanelOpen = record?.sidePanelOpen;
+  const shellPath = typeof record?.shellPath === 'string' ? record.shellPath.trim() : '';
   return {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
+    ...(shellPath ? { shellPath } : {}),
   };
 }
 

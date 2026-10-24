@@ -14,11 +14,13 @@ import {
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
+import { createShellPathResolver } from '../services/agentHost/shell';
 import { createModelResolver } from '../services/providers/resolveModel';
 import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getMcpRegistry } from './mcp';
 import { getRoleStore } from './roles';
+import { getSettingsFile } from './settings';
 import { getSkillRegistry } from './skills';
 import { getWorkspaceService } from './workspaces';
 
@@ -48,6 +50,7 @@ function createAppAgentHost(): AgentHostService {
       skills: getSkillRegistry(),
       mcpServers: getMcpRegistry(),
     }),
+    resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
     broadcast: sendToAllWindows,
   });
 }

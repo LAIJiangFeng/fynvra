@@ -68,6 +68,11 @@ export interface SpawnSessionSpec {
   worker: boolean;
   /** dispatch_task 的角色枚举（orchestrator 策略的会话用） */
   roles: AgentRoleOption[];
+  /**
+   * bash 工具用的 shell（Main 解析：settings.json 的 `preferences.shellPath`，或 Windows 上探测到的 Git Bash）；
+   * 缺省时由 pi 自己找，Windows 上可能取到 PATH 上的 WSL bash.exe
+   */
+  shellPath?: string;
 }
 
 /** host-invoke 的目标：编排工具背后的 OrchestrationHost，或 worker 工具背后的 WorkerHost。 */
@@ -350,12 +355,23 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const skills = parseStringList(record.skills);
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
-  const { cwd, sessionFile, worker } = record;
+  const { cwd, sessionFile, worker, shellPath } = record;
   if (!role.ok || !model || !skills || !mcpServers || !roles) return null;
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
   }
-  return { role: role.role, cwd, sessionFile, model, skills, mcpServers, worker, roles };
+  if (!isOptional(shellPath, isNonEmptyString)) return null;
+  return {
+    role: role.role,
+    cwd,
+    sessionFile,
+    model,
+    skills,
+    mcpServers,
+    worker,
+    roles,
+    ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
+  };
 }
 
 type EventBodyParsers = {
