@@ -26,17 +26,20 @@ const log = (level: 'info' | 'warn' | 'error', message: string) =>
   post({ type: 'log', level, message });
 
 let models: Promise<ModelRegistry> | undefined;
+const modelRegistry = (): Promise<ModelRegistry> =>
+  (models ??= createWorkerModelRuntime(agentDir).then(createModelRegistry));
 const supervisor = new SessionSupervisor({
   post,
   openSession: createPiSessionFactory({
     agentDir,
-    resolveModel: async (spec) => {
-      models ??= createWorkerModelRuntime(agentDir).then(createModelRegistry);
-      return (await models).resolve(spec);
-    },
+    resolveModel: async (spec) => (await modelRegistry()).resolve(spec),
     onListenerError: (error) =>
       log('error', `session event listener failed: ${errorMessage(error)}`),
   }),
+  describeModels: async (queries) => {
+    const registry = await modelRegistry();
+    return queries.map((query) => registry.describe(query));
+  },
 });
 
 let exiting = false;

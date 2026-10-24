@@ -6,6 +6,7 @@ import {
   type ResolvedModel,
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
+import type { Role } from '@fynvra/core';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import { createSessionSettings } from './shell';
 import type { OpenSession } from './supervisor';
@@ -16,6 +17,7 @@ const ABORT_BEFORE_DISPOSE_MS = 5_000;
 export interface PiSessionFactoryOptions {
   /** fynvra 的 pi agentDir（userData/agent），与 PI_CODING_AGENT_DIR 相同 */
   agentDir: string;
+  /** 注册 provider 并取 pi 的模型；思考档位按模型的可选集合落定（见 models.ts） */
   resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
   /** 事件 listener 抛出的异常（被 subscribeNormalized 兜住，不打断 pi 的 jsonl 持久化） */
   onListenerError?: (error: unknown) => void;
@@ -24,10 +26,11 @@ export interface PiSessionFactoryOptions {
 /**
  * 生产用的会话工厂：在 Main 指定的 jsonl 上打开 pi 会话（文件不存在时新建，存在时续写），
  * 按角色经 createRoleSession 组装工具 / 提示词 / skills / MCP，事件统一走 subscribeNormalized。
+ * 换模型直接调 pi 的 setModel / setThinkingLevel：pi 在 jsonl 里记一条模型切换，历史照常保留。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
   return async ({ spec, host, workerHost, approval }) => {
-    const model = await options.resolveModel(spec.model);
+    const model = await options.resolveModel(withRoleThinking(spec.model, spec.role));
     const sessionManager = SessionManager.open(
       spec.sessionFile,
       dirname(spec.sessionFile),
@@ -61,6 +64,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       steer: async (text) => {
         await session.steer(text);
       },
+      setModel: async (next) => {
+        const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
+        // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（不支持推理时没有）
+        await session.setModel(resolved.model);
+        if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
+      },
       abort: () => session.abort(),
       isIdle: () => session.isIdle,
       dispose: async () => {
@@ -69,6 +78,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       },
     };
   };
+}
+
+/** 会话没定思考档位时取角色的 model.thinking（与 createRoleSession 的回落顺序相同），再缺省才是模型的默认档位 */
+function withRoleThinking(model: ResolvedModelSpec, role: Role): ResolvedModelSpec {
+  const thinking = model.thinking ?? role.model?.thinking;
+  return thinking ? { ...model, thinking } : model;
 }
 
 /**
