@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createOrchestrationApi } from './domains/orchestration';
+import { createSessionsApi } from './domains/sessions';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -34,6 +35,10 @@ const api: FynvraApi = {
     onMaximizedChange: (callback) =>
       subscribe(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, (maximized) => callback(maximized === true)),
   },
+  sessions: createSessionsApi({
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    subscribe,
+  }),
 };
 
 contextBridge.exposeInMainWorld('fynvra', api);

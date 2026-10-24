@@ -31,6 +31,22 @@ export const IPC_CHANNELS = {
   ORCHESTRATION_REVIEW_DIFF: 'orchestration:review-diff',
   /** Main → Renderer：某工作区的编排状态已变更（参数：workspaceId） */
   ORCHESTRATION_CHANGED: 'orchestration:changed',
+  // --- sessions ---
+  SESSIONS_LIST: 'sessions:list',
+  /** Renderer 只传 workspaceId / roleId（/ 模型引用）；cwd 由 Main 从工作区记录推导 */
+  SESSIONS_CREATE: 'sessions:create',
+  SESSIONS_REMOVE: 'sessions:remove',
+  SESSIONS_PROMPT: 'sessions:prompt',
+  SESSIONS_ABORT: 'sessions:abort',
+  /** 从 pi jsonl 重建的消息投影 */
+  SESSIONS_HISTORY: 'sessions:history',
+  SESSIONS_RESPOND_APPROVAL: 'sessions:respond-approval',
+  /** Main → Renderer：会话事件（SessionEventEnvelope） */
+  SESSIONS_EVENT: 'sessions:event',
+  /** Main → Renderer：某工作区的会话列表已变更（参数为 workspaceId） */
+  SESSIONS_CHANGED: 'sessions:changed',
+  /** Main → Renderer：待审批请求（ApprovalRequest） */
+  SESSIONS_APPROVAL_REQUEST: 'sessions:approval-request',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

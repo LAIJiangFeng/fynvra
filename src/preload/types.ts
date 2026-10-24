@@ -44,6 +44,7 @@ export interface FynvraApi {
   workspaces: WorkspacesApi;
   orchestration: OrchestrationApi;
   window: WindowApi;
+  sessions: import('./domains/sessions').SessionsApi;
 }
 
 declare global {
