@@ -1,6 +1,7 @@
 import type { IpcResult } from '@shared/types/ipc';
 import type { Preferences, PreferencesResult } from '@shared/types/settings';
 import type { WorkspaceAddResult, WorkspaceListResult } from '@shared/types/workspace';
+import type { OrchestrationApi } from './domains/orchestration';
 
 /**
  * preload 暴露给 Renderer 的 API 形状。本文件只有类型、不 import electron，
@@ -41,6 +42,7 @@ export interface WindowApi {
 export interface FynvraApi {
   settings: SettingsApi;
   workspaces: WorkspacesApi;
+  orchestration: OrchestrationApi;
   window: WindowApi;
 }
 
