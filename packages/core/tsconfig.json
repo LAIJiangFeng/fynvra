@@ -1,16 +1,8 @@
 {
+  // 编译选项与 @fynvra/* paths 来自根 tsconfig.json；根配置 files 为空，这里必须显式 include。
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "lib": ["ESNext"],
-    "types": ["node"]
+    "noEmit": true
   },
-  "include": ["src/**/*", "vitest.config.ts"]
+  "include": ["src"]
 }
