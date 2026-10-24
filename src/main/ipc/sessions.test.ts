@@ -27,6 +27,8 @@ const host = {
   abort: vi.fn(async () => ({ ok: true })),
   history: vi.fn(async () => ({ ok: true, messages: [] })),
   respondApproval: vi.fn(async () => ({ ok: true })),
+  setModel: vi.fn(async () => ({ ok: true })),
+  modelOptions: vi.fn(async () => ({ ok: true, providers: [] })),
 };
 
 const invoke = (channel: string, ...args: unknown[]) =>
@@ -53,9 +55,11 @@ describe('sessions IPC', () => {
         'sessions:create',
         'sessions:history',
         'sessions:list',
+        'sessions:model-options',
         'sessions:prompt',
         'sessions:remove',
         'sessions:respond-approval',
+        'sessions:set-model',
       ].sort()
     );
   });
@@ -95,6 +99,30 @@ describe('sessions IPC', () => {
     });
   });
 
+  it('forwards model choices: create with a thinking level, set-model and model-options', async () => {
+    const model = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' };
+    await invoke(IPC_CHANNELS.SESSIONS_CREATE, { workspaceId: 'ws-1', roleId: 'worker', model });
+    expect(host.create).toHaveBeenCalledWith({ workspaceId: 'ws-1', roleId: 'worker', model });
+
+    await invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, { sessionId: 's-1', model });
+    await invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, {
+      sessionId: 's-1',
+      model: { providerId: 'local', modelId: 'qwen3:32b' },
+    });
+    expect(host.setModel.mock.calls).toEqual([
+      [{ sessionId: 's-1', model }],
+      [{ sessionId: 's-1', model: { providerId: 'local', modelId: 'qwen3:32b' } }],
+    ]);
+
+    expect(await invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: 'ws-1' })).toEqual({
+      ok: true,
+      providers: [],
+    });
+    await invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, {});
+    await invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS);
+    expect(host.modelOptions.mock.calls).toEqual([[{ workspaceId: 'ws-1' }], [{}], [{}]]);
+  });
+
   it.each([
     [IPC_CHANNELS.SESSIONS_LIST, '../ws'],
     [IPC_CHANNELS.SESSIONS_LIST, { id: 'ws-1' }],
@@ -125,6 +153,40 @@ describe('sessions IPC', () => {
       { sessionId: 's-1', requestId: 'r', decision: 'always' },
     ],
     [IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, { sessionId: 's-1', decision: 'allow' }],
+    [
+      IPC_CHANNELS.SESSIONS_CREATE,
+      {
+        workspaceId: 'ws-1',
+        roleId: 'worker',
+        model: { providerId: 'a', modelId: 'b', thinking: 'max' },
+      },
+    ],
+    [IPC_CHANNELS.SESSIONS_SET_MODEL, null],
+    [IPC_CHANNELS.SESSIONS_SET_MODEL, { sessionId: 's-1' }],
+    [
+      IPC_CHANNELS.SESSIONS_SET_MODEL,
+      { sessionId: '../s', model: { providerId: 'a', modelId: 'b' } },
+    ],
+    [IPC_CHANNELS.SESSIONS_SET_MODEL, { sessionId: 's-1', model: 'openai/gpt-5.5' }],
+    [
+      IPC_CHANNELS.SESSIONS_SET_MODEL,
+      { sessionId: 's-1', model: { providerId: 'a', modelId: '' } },
+    ],
+    [
+      IPC_CHANNELS.SESSIONS_SET_MODEL,
+      { sessionId: 's-1', model: { providerId: 'a', modelId: 'b', thinking: 'turbo' } },
+    ],
+    [
+      IPC_CHANNELS.SESSIONS_SET_MODEL,
+      { sessionId: 's-1', model: { providerId: 'a', modelId: 'b', baseUrl: 'http://evil' } },
+    ],
+    [
+      IPC_CHANNELS.SESSIONS_SET_MODEL,
+      { sessionId: 's-1', model: { providerId: 'a', modelId: 'b' }, apiKey: 'k' },
+    ],
+    [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, 'ws-1'],
+    [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: '../ws' }],
+    [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: 'ws-1', withKeys: true }],
   ])('%s rejects %j without calling the host', async (channel, raw) => {
     expect(await invoke(channel, raw)).toMatchObject({ ok: false });
     for (const fn of Object.values(host)) expect(fn).not.toHaveBeenCalled();

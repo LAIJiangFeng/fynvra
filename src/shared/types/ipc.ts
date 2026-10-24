@@ -45,6 +45,10 @@ export const IPC_CHANNELS = {
   /** 从 pi jsonl 重建的消息投影 */
   SESSIONS_HISTORY: 'sessions:history',
   SESSIONS_RESPOND_APPROVAL: 'sessions:respond-approval',
+  /** 换会话的模型 / 思考档位：Renderer 只传会话 id 与设置里的模型引用；会话运行中拒绝 */
+  SESSIONS_SET_MODEL: 'sessions:set-model',
+  /** 新建会话 / 换模型的可选项：启用且有 key 的服务，每个模型带可选的思考档位；传 workspaceId 时带上次用过的模型 */
+  SESSIONS_MODEL_OPTIONS: 'sessions:model-options',
   /** Main → Renderer：会话事件（SessionEventEnvelope） */
   SESSIONS_EVENT: 'sessions:event',
   /** Main → Renderer：某工作区的会话列表已变更（参数为 workspaceId） */
