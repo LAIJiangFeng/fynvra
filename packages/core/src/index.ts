@@ -1,4 +1,5 @@
 export * from './fs';
+export * from './git/GitWorktreeManager';
 export * from './guards';
 export * from './orchestration/ids';
 export * from './orchestration/inbox';
