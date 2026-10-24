@@ -1,4 +1,5 @@
-import { MessagesSquare, X } from 'lucide-react';
+import { GitBranch, MessagesSquare, X } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   selectNotice,
@@ -25,6 +26,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <StatusDot status={status} />
         <h1 className="min-w-0 truncate font-medium">{session?.title ?? '会话'}</h1>
         {session && <RoleBadge roleId={session.roleId} />}
+        {session?.branch && <BranchBadge branch={session.branch} cwd={session.cwd} />}
         <span className="ml-auto shrink-0 text-muted-foreground text-xs">
           {STATUS_LABEL[status]}
         </span>
@@ -35,6 +37,19 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       <Composer sessionId={sessionId} />
       <StatusBar sessionId={sessionId} />
     </main>
+  );
+}
+
+/**
+ * 分支徽标：会话 cwd 当前检出的分支（worker 会话是它 worktree 的分支，detached 时是短 sha），悬停显示 cwd。
+ * 用户在外部 checkout 后，Main 重读到变化会推 sessions:changed，这里随列表刷新。
+ */
+function BranchBadge({ branch, cwd }: { branch: string; cwd: string }) {
+  return (
+    <Badge variant="outline" title={cwd} className="max-w-56 font-mono">
+      <GitBranch aria-hidden />
+      <span className="truncate">{branch}</span>
+    </Badge>
   );
 }
 
