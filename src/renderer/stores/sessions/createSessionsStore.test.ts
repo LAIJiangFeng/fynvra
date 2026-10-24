@@ -1,4 +1,4 @@
-import type { FynvraSessionEventBody } from '@fynvra/core';
+import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
   ChatMessage,
@@ -44,6 +44,7 @@ function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummar
     status: 'idle',
     createdAt: 1,
     updatedAt: 1,
+    approvalMode: 'auto-edits',
     ...patch,
   };
 }
@@ -113,6 +114,18 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         ok: true,
         providers: PROVIDERS,
       })
+    ),
+    setApprovalMode: vi.fn(
+      async (input: {
+        sessionId: string;
+        mode: ApprovalMode;
+      }): Promise<IpcResult<{ session: SessionSummary }>> => {
+        const current = sessions.find((session) => session.id === input.sessionId);
+        if (!current) return { ok: false, error: '会话不存在' };
+        const session = { ...current, approvalMode: input.mode, updatedAt: 20 };
+        sessions = sessions.map((item) => (item.id === session.id ? session : item));
+        return { ok: true, session };
+      }
     ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),
@@ -563,6 +576,100 @@ describe('createSessionsStore · 模型选择', () => {
     expect(api.create).toHaveBeenCalledWith({ workspaceId: WS, roleId: 'worker', model: GPT });
     expect(result.ok).toBe(true);
     expect(store.getState().lastModelByWorkspace[WS]).toEqual(GPT);
+  });
+
+  it('setApprovalMode 乐观更新：先换上新档位，成功后以 Main 的记录为准', async () => {
+    const { store, api } = await setup();
+    const answer = deferred<IpcResult<{ session: SessionSummary }>>();
+    api.setApprovalMode.mockReturnValueOnce(answer.promise);
+
+    const switching = store.getState().setApprovalMode('s1', 'full');
+    expect(api.setApprovalMode).toHaveBeenCalledWith({ sessionId: 's1', mode: 'full' });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('full');
+
+    answer.resolve({ ok: true, session: summary('s1', { approvalMode: 'full', updatedAt: 30 }) });
+    expect(await switching).toMatchObject({ ok: true });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]).toMatchObject({
+      approvalMode: 'full',
+      updatedAt: 30,
+    });
+    expect(store.getState().notice).toBeNull();
+  });
+
+  it('setApprovalMode 失败时回滚到原来的档位、提示原因，并按 Main 重新拉列表', async () => {
+    const { store, api } = await setup([summary('s1', { approvalMode: 'supervised' })]);
+    api.list.mockClear();
+    api.setApprovalMode.mockResolvedValueOnce({ ok: false, error: '会话不存在' });
+
+    const result = await store.getState().setApprovalMode('s1', 'full');
+    expect(result).toEqual({ ok: false, error: '会话不存在' });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('supervised');
+    expect(store.getState().notice).toBe('切换审批档位失败：会话不存在');
+    expect(api.list).toHaveBeenCalledWith(WS);
+
+    api.setApprovalMode.mockRejectedValueOnce(new Error('IPC 断开'));
+    expect(await store.getState().setApprovalMode('s1', 'auto-edits')).toEqual({
+      ok: false,
+      error: 'IPC 断开',
+    });
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('supervised');
+  });
+
+  it('setApprovalMode 运行中、等审批时也照样切（与换模型不同）', async () => {
+    const { store, api, emitEvent, emitApproval } = await setup();
+    await store.getState().selectSession('s1');
+    await store.getState().send('long task');
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'long task' });
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    expect(await store.getState().setApprovalMode('s1', 'full')).toMatchObject({ ok: true });
+
+    emitApproval({
+      id: 'req-1',
+      sessionId: 's1',
+      kind: 'command',
+      title: 'bash',
+      detail: 'git push',
+      expiresAt: 0,
+    });
+    expect(selectStatusOf('s1')(store.getState())).toBe('waiting-approval');
+    expect(await store.getState().setApprovalMode('s1', 'supervised')).toMatchObject({ ok: true });
+    expect(api.setApprovalMode.mock.calls).toEqual([
+      [{ sessionId: 's1', mode: 'full' }],
+      [{ sessionId: 's1', mode: 'supervised' }],
+    ]);
+  });
+
+  it('切换审批档位在途时列表刷新不会把档位改回去；连着切只认最后一次回包', async () => {
+    const { store, api, emitChanged } = await setup([
+      summary('s1', { approvalMode: 'supervised' }),
+    ]);
+    const first = deferred<IpcResult<{ session: SessionSummary }>>();
+    const second = deferred<IpcResult<{ session: SessionSummary }>>();
+    api.setApprovalMode.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    const toAutoEdits = store.getState().setApprovalMode('s1', 'auto-edits');
+    const toFull = store.getState().setApprovalMode('s1', 'full');
+    // Main 还没回包：列表里仍是旧档位
+    emitChanged();
+    await settle();
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('full');
+
+    second.resolve({ ok: true, session: summary('s1', { approvalMode: 'full' }) });
+    await toFull;
+    // 先发的那次晚到且失败：不回滚、不提示，以最后一次为准
+    first.resolve({ ok: false, error: '迟到的失败' });
+    await toAutoEdits;
+    expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('full');
+    expect(store.getState().notice).toBeNull();
+  });
+
+  it('setApprovalMode 找不到会话时不发请求', async () => {
+    const { store, api } = await setup();
+    expect(await store.getState().setApprovalMode('ghost', 'full')).toEqual({
+      ok: false,
+      error: '会话不存在',
+    });
+    expect(api.setApprovalMode).not.toHaveBeenCalled();
   });
 
   it('输入框胶囊与状态栏共用一个模型选择器', async () => {

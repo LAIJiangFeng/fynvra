@@ -14,6 +14,7 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
+import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/branches';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
@@ -147,10 +148,51 @@ describe('createAgentHost sessions', () => {
       createdAt: 1_000,
       updatedAt: 1_000,
       model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5' },
+      approvalMode: 'auto-edits',
     });
     expect(env.host.list('ws-1')).toEqual([session]);
     expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toEqual([['ws-1']]);
     expect(env.sent()).toEqual([]);
+  });
+
+  it("records the role's approval mode; a dispatched worker takes its own role's, not the orchestrator's", async () => {
+    const careful: Role = { ...tester, id: 'careful', name: 'Careful', approvalMode: 'supervised' };
+    const env = setup({
+      roles: {
+        get: async (id) => getBuiltinRole(id) ?? [tester, careful].find((role) => role.id === id),
+        list: async () => [...BUILTIN_ROLES, tester, careful],
+      },
+    });
+    const coordinator = await createSession(env, 'orchestrator');
+    expect(coordinator.approvalMode).toBe('full');
+    expect((await createSession(env, 'careful')).approvalMode).toBe('supervised');
+
+    env.host.setCoordinatorLookup(() => coordinator.id);
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'tester',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const worker = env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    expect(worker).toMatchObject({ parentSessionId: coordinator.id, approvalMode: 'auto-edits' });
+    // 落盘的也是它
+    expect(env.store.flush()).toBe(true);
+    const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
+    expect(
+      file.sessions.map((session: { roleId: string; approvalMode: string }) => [
+        session.roleId,
+        session.approvalMode,
+      ])
+    ).toEqual([
+      ['orchestrator', 'full'],
+      ['careful', 'supervised'],
+      ['tester', 'auto-edits'],
+    ]);
   });
 
   it('keeps the settings model reference on the session and resolves it again on spawn', async () => {
@@ -1327,6 +1369,224 @@ describe('createAgentHost model choice', () => {
       })
     ).toMatchObject({ ok: true });
     expect(env.remembered).toHaveLength(remembered);
+  });
+});
+
+describe('createAgentHost approval mode', () => {
+  const spawnRole = (command: AgentCommand | undefined) =>
+    command?.type === 'spawn-session' ? command.spec.role : undefined;
+
+  it('switches a session that is not in the worker yet: the record now, the spawn later', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    env.broadcasts.length = 0;
+
+    const switched = await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' });
+    expect(switched).toEqual({ ok: true, session: { ...session, approvalMode: 'supervised' } });
+    expect(env.host.list('ws-1')[0]?.approvalMode).toBe('supervised');
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toEqual([['ws-1']]);
+    expect(env.sent()).toEqual([]);
+    expect(env.store.flush()).toBe(true);
+    const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
+    expect(file.sessions[0].approvalMode).toBe('supervised');
+
+    // spawn 时审批门按会话的档位建（角色的其余设置不变）
+    await env.host.prompt(session.id, 'hi');
+    expect(spawnRole(env.sent('spawn-session')[0])).toEqual({
+      ...getBuiltinRole('worker'),
+      approvalMode: 'supervised',
+    });
+  });
+
+  it('switches a running session at once and keeps the mode for a crash respawn', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    await env.host.prompt(session.id, 'long task');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'running' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('full');
+
+    // 与换模型不同：运行中也可以切，即时生效
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'supervised', status: 'running' }),
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'waiting-approval' });
+    expect(
+      await env.host.setApprovalMode({ sessionId: session.id, mode: 'auto-edits' })
+    ).toMatchObject({ ok: true });
+    expect(env.sent('set-approval-mode')).toEqual([
+      { type: 'set-approval-mode', identity, mode: 'supervised' },
+      { type: 'set-approval-mode', identity, mode: 'auto-edits' },
+    ]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('waiting-approval');
+
+    env.worker().exit(1);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('auto-edits');
+  });
+
+  it('rebuilds a session that crashed with the mode chosen while the worker restarted', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    await env.host.prompt(session.id, 'long task');
+    env.worker().exit(1);
+    // worker 还没起来：会话不在 worker 里，只改记录；但重建不能沿用崩溃前缓存的 full
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'supervised' }),
+    });
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('supervised');
+    expect(env.sent('set-approval-mode')).toEqual([]);
+  });
+
+  it('leaves everything alone when the mode does not change', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    env.broadcasts.length = 0;
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'auto-edits' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'auto-edits' }),
+    });
+    expect(env.sent('set-approval-mode')).toEqual([]);
+    expect(env.broadcasts).toEqual([]);
+  });
+
+  it('refuses an unknown session', async () => {
+    const env = setup();
+    expect(await env.host.setApprovalMode({ sessionId: 'ghost', mode: 'full' })).toEqual({
+      ok: false,
+      error: '会话不存在',
+    });
+  });
+});
+
+describe('createAgentHost branches', () => {
+  /** 注入真实的分支缓存，读分支换成假的（目录 → 分支），时钟可拨 */
+  function branchEnv() {
+    const checkedOut: Record<string, string | undefined> = {};
+    let time = 50_000;
+    const read = vi.fn(async (cwd: string) => checkedOut[cwd]);
+    const env = setup({ branches: createBranchTracker({ read, now: () => time }) });
+    checkedOut[env.workspace.repoPath] = 'main';
+    const changes = () => env.pushed(IPC_CHANNELS.SESSIONS_CHANGED).length;
+    return {
+      ...env,
+      checkedOut,
+      read,
+      changes,
+      advance: (ms: number) => {
+        time += ms;
+      },
+    };
+  }
+
+  it('lists sessions with the branch of their cwd, read in the background and announced once', async () => {
+    const env = branchEnv();
+    const session = await createSession(env);
+    const before = env.changes();
+
+    // 第一次列表时还没读过：先不带分支，后台读到后广播 sessions:changed，Renderer 重拉
+    expect(env.host.list('ws-1')[0]).not.toHaveProperty('branch');
+    expect(env.read).toHaveBeenCalledWith(env.workspace.repoPath);
+    await flush();
+    expect(env.changes()).toBe(before + 1);
+    expect(env.host.list('ws-1')[0]).toEqual({ ...session, branch: 'main' });
+    // 重拉落在节流窗口里，读到的也没变：不再广播，不会循环
+    await flush();
+    expect(env.changes()).toBe(before + 1);
+    expect(env.read).toHaveBeenCalledTimes(1);
+
+    // 之后各操作回给 Renderer 的会话也带上分支
+    const switched = await env.host.setApprovalMode({ sessionId: session.id, mode: 'full' });
+    expect(switched).toMatchObject({ ok: true, session: { branch: 'main', approvalMode: 'full' } });
+    expect(await createSession(env, 'tester')).toMatchObject({ branch: 'main' });
+  });
+
+  it('sees a checkout made outside on the next list after the throttle window', async () => {
+    const env = branchEnv();
+    await createSession(env);
+    env.host.list('ws-1');
+    await flush();
+    const before = env.changes();
+
+    env.checkedOut[env.workspace.repoPath] = 'test';
+    env.advance(BRANCH_REFRESH_THROTTLE_MS - 1);
+    expect(env.host.list('ws-1')[0]?.branch).toBe('main');
+    await flush();
+    expect(env.changes()).toBe(before);
+
+    env.advance(1);
+    env.host.list('ws-1');
+    await flush();
+    expect(env.changes()).toBe(before + 1);
+    expect(env.host.list('ws-1')[0]?.branch).toBe('test');
+  });
+
+  it('re-reads when history is loaded and when the window gets the focus again', async () => {
+    const env = branchEnv();
+    const session = await createSession(env);
+    await env.host.history(session.id);
+    expect(env.read).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(env.host.list('ws-1')[0]?.branch).toBe('main');
+
+    // 用户在外面切到了 detached HEAD；窗口重新获得焦点时重读读过的目录（同样节流）
+    env.checkedOut[env.workspace.repoPath] = 'a1b2c3d';
+    env.host.refreshBranches();
+    expect(env.read).toHaveBeenCalledTimes(1);
+    env.advance(BRANCH_REFRESH_THROTTLE_MS);
+    const before = env.changes();
+    env.host.refreshBranches();
+    await flush();
+    expect(env.changes()).toBe(before + 1);
+    expect(env.host.list('ws-1')[0]?.branch).toBe('a1b2c3d');
+  });
+
+  it('re-reads once the turn settles, even inside the throttle window (the agent may have checked out)', async () => {
+    const env = branchEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'switch to a new branch');
+    env.host.list('ws-1');
+    await flush();
+    const before = env.changes();
+
+    env.checkedOut[env.workspace.repoPath] = 'feature/new';
+    env.worker().emit({
+      type: 'session-event',
+      identity: { sessionId: session.id, generation: 1 },
+      seq: 1,
+      event: { type: 'agent_settled', aborted: false, seq: 1 },
+    });
+    await flush();
+    expect(env.changes()).toBe(before + 1);
+    expect(env.host.list('ws-1')[0]?.branch).toBe('feature/new');
+  });
+
+  it('gives a dispatched worker session the branch of its own worktree', async () => {
+    const env = branchEnv();
+    const coordinator = await createSession(env, 'orchestrator');
+    env.checkedOut['/worktrees/ws-1/add-tests'] = 'fynvra/add-tests';
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/add-tests',
+      worktreeId: 'wt_1',
+      brief: '# Add tests',
+    });
+    if (!created.ok) throw new Error(created.error);
+    env.host.list('ws-1');
+    await flush();
+    const branchOf = (id: string) =>
+      env.host.list('ws-1').find((session) => session.id === id)?.branch;
+    expect(branchOf(created.sessionId)).toBe('fynvra/add-tests');
+    expect(branchOf(coordinator.id)).toBe('main');
   });
 });
 

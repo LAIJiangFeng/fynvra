@@ -1,6 +1,7 @@
 import { dirname } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import {
+  type ApprovalGate,
   createRoleSession,
   type McpServerConfig,
   type ResolvedModel,
@@ -29,6 +30,7 @@ export interface PiSessionFactoryOptions {
  * 生产用的会话工厂：在 Main 指定的 jsonl 上打开 pi 会话（文件不存在时新建，存在时续写），
  * 按角色经 createRoleSession 组装工具 / 提示词 / skills / MCP，事件统一走 subscribeNormalized。
  * 换模型直接调 pi 的 setModel / setThinkingLevel：pi 在 jsonl 里记一条模型切换，历史照常保留。
+ * 审批门由 createRoleSession 按 spec.role.approvalMode（Main 给的会话档位）建好，经 onGate 交回这里，换档位调它的 setMode。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
   return async ({ identity, spec, host, workerHost, approval }) => {
@@ -38,6 +40,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       dirname(spec.sessionFile),
       spec.cwd
     );
+    let gate: ApprovalGate | undefined;
     const created = await createRoleSession({
       role: spec.role,
       cwd: spec.cwd,
@@ -45,7 +48,18 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       sessionManager,
       host,
       workerHost,
-      approval,
+      // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
+      ...(approval
+        ? {
+            approval: {
+              ...approval,
+              onGate: (built: ApprovalGate) => {
+                gate = built;
+                approval.onGate?.(built);
+              },
+            },
+          }
+        : {}),
       resourcePaths: { skills: spec.skills, mcpServers: spec.mcpServers.map(toMcpServerConfig) },
       agentDir: options.agentDir,
       roles: spec.roles,
@@ -73,6 +87,10 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
         options.onModelSelected?.(identity.sessionId, resolved);
+      },
+      setApprovalMode: (mode) => {
+        if (!gate) throw new Error('this session has no approval gate to switch');
+        gate.setMode(mode);
       },
       abort: () => session.abort(),
       isIdle: () => session.isIdle,

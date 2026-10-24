@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import type { FynvraSessionEvent, FynvraSessionEventBody, Role, ThinkingLevel } from '@fynvra/core';
+import type {
+  ApprovalMode,
+  FynvraSessionEvent,
+  FynvraSessionEventBody,
+  Role,
+  ThinkingLevel,
+} from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
   AgentApprovalRequest,
@@ -30,6 +36,7 @@ import type {
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
 import type { Workspace } from '@shared/types/workspace';
+import type { BranchTracker } from '../sessions/branches';
 import { readHistory, sessionFilePath } from '../sessions/history';
 import type { LastModelStore } from '../sessions/lastModels';
 import { type SessionStore, type StoredSession, toSummary } from '../sessions/sessionStore';
@@ -65,6 +72,8 @@ export interface AgentHostDeps {
   providers?: { list(): Promise<readonly ModelProviderView[]> };
   /** 每个工作区上一次用过的模型（settings.json）；缺省不记 */
   lastModels?: LastModelStore;
+  /** 会话 cwd 当前检出的分支（生产为 readGitBranch 加缓存与节流）；缺省时会话不带分支 */
+  branches?: BranchTracker;
   /** 等 worker 回答 describe-models 的上限，默认 15 s */
   describeTimeoutMs?: number;
   /** Main → Renderer 推送（生产为 sendToAllWindows） */
@@ -91,6 +100,11 @@ export interface CreateSessionInput {
 export interface SetModelInput {
   sessionId: string;
   model: SessionModelRef;
+}
+
+export interface SetApprovalModeInput {
+  sessionId: string;
+  mode: ApprovalMode;
 }
 
 export interface RespondApprovalInput {
@@ -123,6 +137,13 @@ export interface AgentHostService extends AgentHost {
   setModel(input: SetModelInput): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 启用且有 key 的服务与模型，每个模型带 worker 按 pi 目录给出的思考档位；传 workspaceId 时带上次用过的模型 */
   modelOptions(input: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  /**
+   * 换会话的审批档位：更新记录（落 sessions.json），会话在 worker 里时发 set-approval-mode。
+   * 运行中也可以切（即时生效，这是与换模型的区别）；会话还没在 worker 里时只改记录，下次 spawn 用新值。
+   */
+  setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 窗口重新获得焦点：重读读过的会话目录的分支（节流），有变化的工作区广播 sessions:changed */
+  refreshBranches(): void;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -239,6 +260,40 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.broadcast(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId);
   }
 
+  /** 带上缓存里 cwd 的分支（没读过或不是 git 目录时不带） */
+  function withBranch(summary: SessionSummary): SessionSummary {
+    const branch = deps.branches?.get(summary.cwd);
+    return branch ? { ...summary, branch } : summary;
+  }
+
+  /** IPC 视图：去掉内部字段，带上分支 */
+  function summaryOf(stored: StoredSession): SessionSummary {
+    return withBranch(toSummary(stored));
+  }
+
+  /**
+   * 在后台重读这些目录的分支；分支有变化的目录所属的工作区各广播一次 sessions:changed，Renderer 重拉列表拿到新分支。
+   * 读到的与缓存相同就不广播，重拉列表时的重读又落在节流窗口里，所以不会循环。
+   */
+  function rereadBranches(cwds: Iterable<string>, force = false): void {
+    const branches = deps.branches;
+    if (!branches) return;
+    void branches
+      .refresh(cwds, { force })
+      .then((moved) => {
+        if (moved.length === 0) return;
+        const cwdsMoved = new Set(moved);
+        const workspaceIds = new Set(
+          deps.store
+            .all()
+            .filter((session) => cwdsMoved.has(session.cwd))
+            .map((session) => session.workspaceId)
+        );
+        for (const workspaceId of workspaceIds) changed(workspaceId);
+      })
+      .catch((error: unknown) => log('warn', `读取会话分支失败：${errorMessage(error)}`));
+  }
+
   function setStatus(sessionId: string, status: SessionStatus): void {
     const stored = deps.store.get(sessionId);
     if (!stored || stored.status === status) return;
@@ -294,7 +349,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return {
         ok: true,
         spec: {
-          role,
+          // 审批门按会话自己的档位建（创建时取自角色，之后可能被用户切过）
+          role: { ...role, approvalMode: stored.approvalMode },
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
           model,
@@ -428,6 +484,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           for (const [requestId, pending] of approvals) {
             if (pending.sessionId === sessionId) approvals.delete(requestId);
           }
+          // 这一轮里 agent 可能切过分支：不等节流，重读一次
+          const stored = deps.store.get(sessionId);
+          if (stored) rereadBranches([stored.cwd], true);
         }
         return;
       }
@@ -613,7 +672,33 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
     if (current.dispatchId === undefined) deps.lastModels?.set(current.workspaceId, next);
     changed(current.workspaceId);
-    return { ok: true, session: toSummary(updated) };
+    return { ok: true, session: summaryOf(updated) };
+  }
+
+  /**
+   * 换审批档位：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
+   * 重建时不会退回旧档位；会话在 worker 里时再发 set-approval-mode，不论是否在跑。
+   */
+  async function setApprovalMode({
+    sessionId,
+    mode,
+  }: SetApprovalModeInput): Promise<Result<{ session: SessionSummary }>> {
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail('会话不存在');
+    if (stored.approvalMode === mode) return { ok: true, session: summaryOf(stored) };
+    const updated =
+      deps.store.update(sessionId, { approvalMode: mode, updatedAt: now() }) ?? stored;
+    const state = live.get(sessionId);
+    if (state?.spec) {
+      state.spec = { ...state.spec, role: { ...state.spec.role, approvalMode: mode } };
+    }
+    if (state?.spawned) {
+      const identity = identityOf(sessionId, state);
+      // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
+      if (!send({ type: 'set-approval-mode', identity, mode })) detach(sessionId, state);
+    }
+    changed(stored.workspaceId);
+    return { ok: true, session: summaryOf(updated) };
   }
 
   async function modelOptions({
@@ -699,6 +784,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model: sessionModelOf(resolved.ref, requested?.thinking),
+        // 按派出的角色自己的档位，不继承主 agent 会话的
+        approvalMode: role.approvalMode,
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -747,7 +834,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       for (const [sessionId, state] of live) detach(sessionId, state);
       deps.store.flush();
     },
-    list: (workspaceId) => deps.store.list(workspaceId),
+    list(workspaceId) {
+      const sessions = deps.store.list(workspaceId);
+      // 列表马上返回缓存里的分支；分支在后台重读，变了再广播 sessions:changed
+      rereadBranches(sessions.map((session) => session.cwd));
+      return sessions.map(withBranch);
+    },
     async create(input) {
       const workspace = deps.workspaces.get(input.workspaceId);
       if (!workspace) return fail('工作区不存在');
@@ -774,12 +866,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model,
+        approvalMode: role.approvalMode,
         autoTitle: true,
       };
       deps.store.put(stored);
       deps.lastModels?.set(workspace.id, model);
       changed(workspace.id);
-      return { ok: true, session: toSummary(stored) };
+      return { ok: true, session: summaryOf(stored) };
     },
     remove,
     prompt,
@@ -792,7 +885,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         : fail(WORKER_UNAVAILABLE);
     },
     async history(sessionId) {
-      if (!deps.store.get(sessionId)) return fail('会话不存在');
+      const stored = deps.store.get(sessionId);
+      if (!stored) return fail('会话不存在');
+      rereadBranches([stored.cwd]);
       try {
         const messages = await readHistory(sessionFilePath(deps.agentDir, sessionId), sessionId, {
           running: live.get(sessionId)?.running ?? false,
@@ -818,6 +913,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setModel,
     modelOptions,
+    setApprovalMode,
+    refreshBranches() {
+      if (deps.branches) rereadBranches(deps.branches.known());
+    },
   };
 }
 

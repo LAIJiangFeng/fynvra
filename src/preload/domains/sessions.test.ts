@@ -32,6 +32,7 @@ describe('createSessionsApi', () => {
     });
     await api.modelOptions({ workspaceId: 'ws-1' });
     await api.modelOptions();
+    await api.setApprovalMode({ sessionId: 's-1', mode: 'full' });
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.SESSIONS_LIST, 'ws-1'],
       [IPC_CHANNELS.SESSIONS_CREATE, { workspaceId: 'ws-1', roleId: 'worker' }],
@@ -49,6 +50,7 @@ describe('createSessionsApi', () => {
       ],
       [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: 'ws-1' }],
       [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, {}],
+      [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'full' }],
     ]);
     expect(Object.keys(api)).not.toContain('invoke');
   });

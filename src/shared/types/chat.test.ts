@@ -1,8 +1,11 @@
-import { THINKING_LEVELS } from '@fynvra/core';
+import { APPROVAL_MODES, THINKING_LEVELS } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import {
+  APPROVAL_MODE_HINTS,
+  APPROVAL_MODE_LABELS,
   isThinkingSource,
   type ModelThinkingCapability,
+  nextApprovalMode,
   pickThinkingLevel,
   THINKING_LEVEL_HINTS,
   THINKING_LEVEL_LABELS,
@@ -97,6 +100,31 @@ describe('thinking level labels', () => {
     expect(new Set(THINKING_LEVELS.map((level) => THINKING_LEVEL_HINTS[level])).size).toBe(
       THINKING_LEVELS.length
     );
+  });
+});
+
+describe('approval modes', () => {
+  it('cycles supervised → auto-edits → full → supervised (Shift+Tab in the composer)', () => {
+    expect(nextApprovalMode('supervised')).toBe('auto-edits');
+    expect(nextApprovalMode('auto-edits')).toBe('full');
+    expect(nextApprovalMode('full')).toBe('supervised');
+  });
+
+  it('names the three modes for the capsule and the status bar', () => {
+    expect(APPROVAL_MODES.map((mode) => APPROVAL_MODE_LABELS[mode])).toEqual([
+      '全程审批',
+      '自动接受编辑',
+      '完全放行',
+    ]);
+  });
+
+  it('explains what each mode asks about, and that full still asks about the protected floor', () => {
+    expect(APPROVAL_MODE_HINTS.supervised).toContain('命令');
+    expect(APPROVAL_MODE_HINTS.supervised).toContain('文件');
+    expect(APPROVAL_MODE_HINTS['auto-edits']).toContain('命令');
+    expect(APPROVAL_MODE_HINTS.full).toContain('保护底线');
+    expect(APPROVAL_MODE_HINTS.full).toContain('git push');
+    expect(new Set(APPROVAL_MODES.map((mode) => APPROVAL_MODE_HINTS[mode])).size).toBe(3);
   });
 });
 

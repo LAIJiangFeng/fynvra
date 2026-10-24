@@ -5,7 +5,7 @@ import type {
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
-import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
+import type { ApprovalMode, FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import {
   type AgentCommand,
@@ -41,6 +41,8 @@ export interface SupervisedSession {
   steer(text: string): Promise<void>;
   /** 换模型 / 思考档位：下一次请求起生效，会话历史保留；失败抛错 */
   setModel(spec: ResolvedModelSpec): Promise<void>;
+  /** 换审批档位：从下一次需要审批的工具调用起生效，回合进行中也可以；失败抛错 */
+  setApprovalMode(mode: ApprovalMode): void;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -148,6 +150,9 @@ export class SessionSupervisor {
         return;
       case 'set-model':
         this.#setModel(command.identity, command.model);
+        return;
+      case 'set-approval-mode':
+        this.#setApprovalMode(command.identity, command.mode);
         return;
       case 'describe-models':
         void this.#describe(command.requestId, command.models);
@@ -349,19 +354,50 @@ export class SessionSupervisor {
       } catch (error) {
         // 正在关闭：交给 #close 释放
         if (managed.closed) return session;
-        this.#post({
-          type: 'session-error',
-          identity,
-          error: `failed to switch the model: ${errorMessage(error)}`,
-          fatal: true,
-        });
-        this.#detach(managed);
-        await session.dispose().catch((reason) => this.#log('warn', errorMessage(reason)));
+        await this.#abandon(managed, session, `failed to switch the model: ${errorMessage(error)}`);
         return null;
       }
       if (managed.status === 'error') this.#setStatus(managed, 'idle');
       return session;
     });
+  }
+
+  /**
+   * 换审批档位同样接在 opening 上（排在已到达的命令之后），但不看回合：运行中也立即生效。
+   * 换不成功时审批门可能还停在比记录宽松的旧档位：关掉会话并报 fatal，Main 下次使用前按记录重新 spawn。
+   */
+  #setApprovalMode(identity: SessionIdentity, mode: ApprovalMode): void {
+    const managed = this.#current(identity);
+    if (!managed) {
+      this.#reportMissing(identity, 'set-approval-mode');
+      return;
+    }
+    managed.opening = managed.opening.then(async (session) => {
+      if (!session || managed.closed) return session;
+      try {
+        session.setApprovalMode(mode);
+      } catch (error) {
+        await this.#abandon(
+          managed,
+          session,
+          `failed to switch the approval mode: ${errorMessage(error)}`
+        );
+        return null;
+      }
+      this.#log('info', `session ${identity.sessionId}: approval mode ${mode}`);
+      return session;
+    });
+  }
+
+  /** worker 里的会话已与 Main 的记录对不上：报 fatal、不再托管并释放它 */
+  async #abandon(
+    managed: ManagedSession,
+    session: SupervisedSession,
+    error: string
+  ): Promise<void> {
+    this.#post({ type: 'session-error', identity: managed.identity, error, fatal: true });
+    this.#detach(managed);
+    await session.dispose().catch((reason) => this.#log('warn', errorMessage(reason)));
   }
 
   /** 进程级查询：总是回一条 models-described，失败也回，Main 不必等到超时 */

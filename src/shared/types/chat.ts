@@ -1,4 +1,9 @@
-import type { FynvraSessionEvent, ThinkingLevel } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  type FynvraSessionEvent,
+  type ThinkingLevel,
+} from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
 import type { ProviderApi } from './llm';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
@@ -24,6 +29,10 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;
+  /** 审批档位：创建时取角色的值，之后是会话自己的设置（`sessions:set-approval-mode`，运行中也能切） */
+  approvalMode: ApprovalMode;
+  /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
+  branch?: string;
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {
@@ -59,6 +68,26 @@ export interface ApprovalRequest {
 export interface SessionEventEnvelope {
   sessionId: string;
   event: FynvraSessionEvent;
+}
+
+/** 审批档位的显示名：输入框胶囊、档位列表与状态栏共用 */
+export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
+  supervised: '全程审批',
+  'auto-edits': '自动接受编辑',
+  full: '完全放行',
+};
+
+/** 审批档位的说明：档位列表里每项的第二行（规则同 agent-runtime 的审批门） */
+export const APPROVAL_MODE_HINTS: Readonly<Record<ApprovalMode, string>> = {
+  supervised: '执行命令、写入 / 编辑文件、调用 MCP 工具前都先问你',
+  'auto-edits': '写入 / 编辑文件直接放行；执行命令、调用 MCP 工具前仍先问你',
+  full: '不再询问；rm -rf、git push、git reset --hard、publish 等保护底线仍要你确认',
+};
+
+/** 输入框里 Shift+Tab 的下一档：supervised → auto-edits → full → supervised */
+export function nextApprovalMode(mode: ApprovalMode): ApprovalMode {
+  const index = APPROVAL_MODES.indexOf(mode);
+  return APPROVAL_MODES[(index + 1) % APPROVAL_MODES.length] ?? 'supervised';
 }
 
 /**

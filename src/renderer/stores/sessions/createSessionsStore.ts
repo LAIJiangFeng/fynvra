@@ -1,3 +1,4 @@
+import type { ApprovalMode } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
   ApprovalDecision,
@@ -75,6 +76,14 @@ export interface SessionsState extends ChatProjection {
   ): Promise<IpcResult<{ session: SessionSummary }>>;
   openModelPicker(sessionId: string): void;
   closeModelPicker(): void;
+  /**
+   * 换会话的审批档位：先在列表里换上（乐观更新），Main 回包后以它的记录为准；
+   * 失败时换回原来的档位、提示原因并重拉列表。与换模型不同，运行中、等审批时也可以切。
+   */
+  setApprovalMode(
+    sessionId: string,
+    mode: ApprovalMode
+  ): Promise<IpcResult<{ session: SessionSummary }>>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -155,6 +164,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const historyRequests = new Map<string, number>();
   /** 在途的换模型：列表刷新时保留乐观的模型；只认每个会话最近一次请求的回包 */
   const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
+  /** 在途的换审批档位：同上 */
+  const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
   let modelOptionsRequest = 0;
   let requestSeq = 0;
 
@@ -216,7 +227,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }
         const sessions = [...result.sessions].sort(byRecent).map((session) => {
           const pending = modelSwitches.get(session.id);
-          return pending ? withModel(session, pending.model) : session;
+          const switching = approvalSwitches.get(session.id);
+          const withPendingModel = pending ? withModel(session, pending.model) : session;
+          return switching
+            ? { ...withPendingModel, approvalMode: switching.mode }
+            : withPendingModel;
         });
         set((state) => {
           const active = state.activeSessionId;
@@ -411,6 +426,41 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           notice: `切换模型失败：${result.error}`,
         }));
         // 换回的是发起前看到的模型；以 Main 的记录为准再拉一次
+        void get().loadSessions(session.workspaceId);
+        return result;
+      },
+
+      async setApprovalMode(sessionId, mode) {
+        const session = findSession(get(), sessionId);
+        if (!session) return { ok: false, error: '会话不存在' };
+        const request = ++requestSeq;
+        const previous = session.approvalMode;
+        approvalSwitches.set(sessionId, { request, mode });
+        const switchTo = (approvalMode: ApprovalMode) =>
+          set((state) => ({
+            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
+              item.approvalMode === approvalMode ? item : { ...item, approvalMode }
+            ),
+          }));
+        switchTo(mode);
+        const result = await safely(() => api.setApprovalMode({ sessionId, mode }));
+        // Shift+Tab 连着按了几下：只认最近一次的回包，前面的结果由它覆盖
+        if (approvalSwitches.get(sessionId)?.request !== request) return result;
+        approvalSwitches.delete(sessionId);
+        if (result.ok) {
+          const { approvalMode, updatedAt } = result.session;
+          set((state) => ({
+            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) => ({
+              ...item,
+              approvalMode,
+              updatedAt,
+            })),
+          }));
+          return result;
+        }
+        switchTo(previous);
+        set({ notice: `切换审批档位失败：${result.error}` });
+        // 换回的是发起前看到的档位；以 Main 的记录为准再拉一次
         void get().loadSessions(session.workspaceId);
         return result;
       },

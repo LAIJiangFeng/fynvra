@@ -196,7 +196,7 @@ describe('approval round trip through the protocol', () => {
       if (!approval) throw new Error('the supervisor gave the session no approval channel');
       const gate = createApprovalGate({ mode: spec.role.approvalMode, ...approval });
       let calls = 0;
-      return new ScriptedSession(async (_text, emit) => {
+      const session = new ScriptedSession(async (_text, emit) => {
         for (const command of commands) {
           const toolCallId = `call-${++calls}`;
           const args = { command };
@@ -212,6 +212,9 @@ describe('approval round trip through the protocol', () => {
           });
         }
       });
+      // 换档位切的就是这个审批门（生产里 piSession 经 onGate 拿到 createRoleSession 建的那个）
+      session.setApprovalMode = (mode) => gate.setMode(mode);
+      return session;
     };
 
   async function started(env: ReturnType<typeof setup>, roleId: string, text: string) {
@@ -320,6 +323,44 @@ describe('approval round trip through the protocol', () => {
     await env.settled(created.sessionId);
 
     const ends = env.events(created.sessionId).filter((event) => event.type === 'tool_end');
+    expect(ends.map((event) => event.type === 'tool_end' && [event.isError, event.output])).toEqual(
+      [
+        [false, 'one'],
+        [false, 'two'],
+        [true, expect.stringContaining('protected action (git push)')],
+      ]
+    );
+  });
+
+  it('switches a running supervised session to full: the next bash runs at once, git push still asks', async () => {
+    const env = setup(bashSession('echo one', 'echo two', 'git push'), [careful]);
+    const sessionId = await started(env, 'careful', 'Run them');
+    await waitForApprovals(env, 1);
+    expect(env.host.list('ws-1')[0]?.approvalMode).toBe('supervised');
+
+    // 第一条还在等审批时切到 full：这一条仍以答复为准，之后的普通命令不再询问
+    expect(await env.host.setApprovalMode({ sessionId, mode: 'full' })).toMatchObject({
+      ok: true,
+      session: { approvalMode: 'full', status: 'waiting-approval' },
+    });
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'allow',
+    });
+    await waitForApprovals(env, 2);
+    expect(env.approvals()[1]).toMatchObject({
+      title: 'bash（保护底线：git push）',
+      detail: 'git push',
+    });
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[1]?.id ?? '',
+      decision: 'deny',
+    });
+    await env.settled(sessionId);
+
+    const ends = env.events(sessionId).filter((event) => event.type === 'tool_end');
     expect(ends.map((event) => event.type === 'tool_end' && [event.isError, event.output])).toEqual(
       [
         [false, 'one'],

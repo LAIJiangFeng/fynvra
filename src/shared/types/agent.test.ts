@@ -112,6 +112,9 @@ describe('parseAgentCommand', () => {
       ],
     },
     { type: 'describe-models', requestId: 'describe-2', models: [] },
+    { type: 'set-approval-mode', identity, mode: 'supervised' },
+    { type: 'set-approval-mode', identity, mode: 'auto-edits' },
+    { type: 'set-approval-mode', identity, mode: 'full' },
   ];
 
   it.each(valid)('accepts a well-formed $type command', (command) => {
@@ -148,6 +151,9 @@ describe('parseAgentCommand', () => {
       requestId: 'describe-1',
       models: [{ api: 'anthropic-messages', modelId: 'claude-opus-5-5' }],
     });
+    expect(
+      parseAgentCommand({ type: 'set-approval-mode', identity, mode: 'full', role: 'orchestrator' })
+    ).toEqual({ type: 'set-approval-mode', identity, mode: 'full' });
   });
 
   it('normalizes the none alias of off in a model spec', () => {
@@ -240,6 +246,25 @@ describe('parseAgentCommand', () => {
         requestId: 'd',
         models: [{ api: 'a', modelId: 'm', reasoning: 1 }],
       },
+    ],
+    ['a set-approval-mode without identity', { type: 'set-approval-mode', mode: 'full' }],
+    [
+      'a set-approval-mode with a stale-looking identity',
+      { type: 'set-approval-mode', identity: { sessionId: 's', generation: 0 }, mode: 'full' },
+    ],
+    ['a set-approval-mode without mode', { type: 'set-approval-mode', identity }],
+    [
+      'a set-approval-mode with an unknown mode',
+      { type: 'set-approval-mode', identity, mode: 'yolo' },
+    ],
+    [
+      'a set-approval-mode with a differently cased mode',
+      { type: 'set-approval-mode', identity, mode: 'Full' },
+    ],
+    ['a set-approval-mode with a null mode', { type: 'set-approval-mode', identity, mode: null }],
+    [
+      'a set-approval-mode with a mode list',
+      { type: 'set-approval-mode', identity, mode: ['full'] },
     ],
   ])('rejects %s', (_label, raw) => {
     expect(parseAgentCommand(raw)).toBeNull();
