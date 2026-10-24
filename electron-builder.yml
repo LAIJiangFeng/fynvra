@@ -1,0 +1,20 @@
+appId: com.fynvra.app
+productName: Fynvra
+directories:
+  # 图标等打包资源；resources/icon.png 为 512x512 占位图
+  buildResources: resources
+  output: dist
+files:
+  - out/**
+  - '!**/*.map'
+win:
+  target: nsis
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+mac:
+  target: dmg
+  category: public.app-category.developer-tools
+linux:
+  target: AppImage
+  category: Development
+npmRebuild: false
