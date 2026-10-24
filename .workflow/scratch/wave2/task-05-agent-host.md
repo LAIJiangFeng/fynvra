@@ -39,3 +39,8 @@
 
 ## 完成动作
 写 `.workflow/scratch/wave2/summary-agent-host.md` 并提交；`orca worktree set --worktree current --workspace-status in-review --comment "..." --json`。
+
+## 补充（验收人，Task 04/10 合并后）
+- `FynvraSessionEvent` 已由 `@fynvra/core` 导出（agent-runtime 仍 re-export）。`src/shared/**` 只能从 `@fynvra/core` 导入它，不能 import `@fynvra/agent-runtime`（web tsconfig 没有映射，这是刻意的护栏）。
+- 仓库已统一 LF（根 `.gitattributes`）；若你的 worktree 里 `pnpm lint` 报大量格式错误，先在干净状态下执行 `git rm -r --cached -q . && git reset --hard -q`。
+- 根 `pnpm-lock.yaml` 若与 main 冲突，取 main 版本后在根目录 `pnpm install` 重新生成，不要手工合并。

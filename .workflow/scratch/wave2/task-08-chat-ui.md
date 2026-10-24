@@ -38,3 +38,8 @@
 
 ## 完成动作
 写 `.workflow/scratch/wave2/summary-chat-ui.md` 并提交；`orca worktree set --worktree current --workspace-status in-review --comment "..." --json`。
+
+## 补充（验收人，Task 04/10 合并后）
+- `FynvraSessionEvent` 从 `@fynvra/core` 导入（web tsconfig 已映射）；renderer / shared 不能 import `@fynvra/agent-runtime`。
+- 仓库已统一 LF；若 `pnpm lint` 报大量格式错误，先在干净状态下执行 `git rm -r --cached -q . && git reset --hard -q`。
+- 根 `pnpm-lock.yaml` 若与 main 冲突，取 main 版本后 `pnpm install` 重新生成。

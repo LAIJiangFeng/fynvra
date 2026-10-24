@@ -179,7 +179,7 @@ Wave 2 的卡片并行开发，彼此只能通过本节定义的接口对接。*
 
 ### 9.2 `src/shared/types/chat.ts`（归属：agent-host；chat-ui / orchestration-ui 可逐字复制）
 ```ts
-import type { FynvraSessionEvent } from '@fynvra/agent-runtime';
+import type { FynvraSessionEvent } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
 export interface SessionSummary {
