@@ -4,7 +4,8 @@ import {
   PROVIDER_APIS,
   providerApiLabel,
 } from '@shared/modelCatalog';
-import { Plus, X } from 'lucide-react';
+import type { RemoteModelEntry } from '@shared/types/llm';
+import { CloudDownload, Plus, X } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,13 @@ import {
   reasoningControl,
   setModelReasoning,
 } from './providerForm';
+import { RemoteModelsPicker } from './RemoteModelsPicker';
+import {
+  canListRemoteModels,
+  mergeRemoteModels,
+  type RemoteModelsRequest,
+  remoteModelsRequest,
+} from './remoteModels';
 
 const API_ITEMS = PROVIDER_APIS.map((api) => ({ value: api, label: providerApiLabel(api) }));
 
@@ -63,7 +71,8 @@ export function ProviderDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-xl">
+      {/* 展开「拉取模型列表」后内容变高：限高滚动，矮窗口里也够得着保存按钮 */}
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
         {shown && <ProviderForm key={shown.key} initial={shown.draft} onDone={onClose} />}
       </DialogContent>
     </Dialog>
@@ -78,9 +87,21 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
   const [modelInput, setModelInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [remote, setRemote] = useState<{ key: number; request: RemoteModelsRequest } | null>(null);
   const id = useId();
   const update = (patch: Partial<ProviderDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
+
+  // 每次点击都按表单当前的协议、地址与 key 重新拉取：换 key 让面板重新挂载
+  const openRemote = () =>
+    setRemote((current) => ({ key: (current?.key ?? 0) + 1, request: remoteModelsRequest(draft) }));
+
+  const addRemote = (picked: RemoteModelEntry[]) => {
+    const result = mergeRemoteModels(draft.models, picked);
+    update({ models: result.models });
+    setError(null);
+    return result;
+  };
 
   // 已保存模型的档位：判断「推理」由内置目录决定还是由开关决定
   useEffect(() => {
@@ -204,10 +225,32 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       </Field>
 
       <div className="grid min-w-0 gap-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-sm">模型</span>
-          <span className="text-muted-foreground text-xs">{draft.models.length} 个</span>
+          <span className="flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">{draft.models.length} 个</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!canListRemoteModels(draft)}
+              onClick={openRemote}
+            >
+              <CloudDownload />
+              拉取模型列表
+            </Button>
+          </span>
         </div>
+        {remote && (
+          <RemoteModelsPicker
+            key={remote.key}
+            request={remote.request}
+            current={draft.models}
+            onAdd={addRemote}
+            onReload={openRemote}
+            onClose={() => setRemote(null)}
+          />
+        )}
         <ul className="max-h-44 divide-y overflow-y-auto rounded-md border">
           {draft.models.map((model) => {
             const control = reasoningControl(draft.api, model.id, described, initial.id);

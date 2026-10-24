@@ -45,6 +45,20 @@ export interface ProviderImportCandidate {
   /** 重复的对象：已有服务的名称，或前面那个候选的 sourceLabel */
   duplicateOf?: string;
 }
+/**
+ * providers:list-remote-models 从服务端「列模型」接口拉到的一个模型。上下文窗口 / 最大输出取服务端给的
+ * （Google 的 token 上限），没有时取内置目录；reasoning 只来自内置目录，目录里没有这个模型就不带。
+ */
+export interface RemoteModelEntry {
+  id: string;
+  /** 服务端的显示名；没有时用内置目录里的名称，再没有就是 id */
+  name: string;
+  contextWindow?: number;
+  maxOutput?: number;
+  reasoning?: boolean;
+  /** 已在所请求服务（providerId）保存的模型列表里；没传 providerId 时恒为 false */
+  alreadyAdded: boolean;
+}
 export interface SkillEntry {
   id: string;
   name: string;

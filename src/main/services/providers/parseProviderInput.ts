@@ -9,10 +9,10 @@ export type ParseInputResult<T> = { ok: true; input: T } | { ok: false; error: s
 const UPSERT_KEYS = new Set(['id', 'name', 'api', 'baseUrl', 'enabled', 'models', 'apiKey']);
 const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'maxOutput', 'reasoning']);
 export const MAX_NAME_LENGTH = 80;
-const MAX_URL_LENGTH = 2048;
+export const MAX_URL_LENGTH = 2048;
 const MAX_MODELS = 500;
-const MAX_MODEL_ID_LENGTH = 200;
-const MAX_KEY_LENGTH = 4096;
+export const MAX_MODEL_ID_LENGTH = 200;
+export const MAX_KEY_LENGTH = 4096;
 
 class InputError extends Error {}
 
@@ -68,7 +68,7 @@ function readBaseUrl(value: unknown): string | undefined {
   return url;
 }
 
-function isHttpUrl(value: string): boolean {
+export function isHttpUrl(value: string): boolean {
   try {
     const { protocol } = new URL(value);
     return protocol === 'https:' || protocol === 'http:';

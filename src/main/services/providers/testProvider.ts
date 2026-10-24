@@ -92,7 +92,8 @@ export async function testProvider(
   }
 }
 
-function describeHttpError(status: number, body: string): string {
+/** 非 2xx 的可读错误：状态提示 + 状态码 + 服务端说明（拉取模型列表也用它）。 */
+export function describeHttpError(status: number, body: string): string {
   const detail = serverMessage(body);
   const suffix = detail ? `：${detail}` : '';
   return `${statusHint(status)}（HTTP ${status}）${suffix}`;
@@ -108,7 +109,7 @@ function statusHint(status: number): string {
 }
 
 /** 取服务端错误说明：JSON 的 error.message / error / message，或纯文本；HTML 错误页不回显。 */
-function serverMessage(body: string): string {
+export function serverMessage(body: string): string {
   const data = asRecord(parseJson(body));
   const error = data?.error;
   const message =
@@ -119,7 +120,7 @@ function serverMessage(body: string): string {
   return line.length > MAX_DETAIL_LENGTH ? `${line.slice(0, MAX_DETAIL_LENGTH)}…` : line;
 }
 
-function parseJson(text: string): unknown {
+export function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -127,7 +128,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {

@@ -5,6 +5,8 @@ import type { ModelProviderView, ProviderImportSource } from '@shared/types/llm'
 import { create } from 'zustand';
 import { getSessionsApi } from '@/lib/api/sessions';
 import type {
+  ListRemoteModelsInput,
+  ListRemoteModelsResult,
   ProviderImportResult,
   ProviderSaveResult,
   ProviderScanImportsResult,
@@ -26,6 +28,8 @@ export interface ProvidersState {
   scanImports(sources: ProviderImportSource[]): Promise<ProviderScanImportsResult>;
   /** 导入最近一次扫描里的候选，成功后重读列表 */
   importCandidates(candidateIds: string[]): Promise<ProviderImportResult>;
+  /** 拉取服务端的模型列表（不写盘，不进 store）：已保存的服务带 id，表单里的协议 / 地址 / 新 key 放在 draft */
+  listRemoteModels(input: ListRemoteModelsInput): Promise<ListRemoteModelsResult>;
   /**
    * 可用服务（启用、填了 key）里每个模型的思考档位：sessions:model-options 经 worker 按 pi 内置目录算出，
    * 目录外的模型按 reasoning 标记。`providers` 是发请求时的服务列表，判断推理由不由目录决定要用算档位时的标记。
@@ -90,6 +94,8 @@ export const useProvidersStore = create<ProvidersState>()((set, get) => ({
     if (result.ok) await get().refresh();
     return result;
   },
+
+  listRemoteModels: (input) => safely(() => api.listRemoteModels(input)),
 
   async loadModelOptions() {
     // 只认最后一次的回答；Main 按协议、模型 id 与 reasoning 标记缓存，重读很便宜

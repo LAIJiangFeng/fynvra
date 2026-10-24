@@ -66,6 +66,11 @@ export const IPC_CHANNELS = {
   PROVIDERS_SCAN_IMPORTS: 'providers:scan-imports',
   /** 按候选 id 导入最近一次扫描的结果；key 从 Main 的缓存取，不经过 Renderer */
   PROVIDERS_IMPORT: 'providers:import',
+  /**
+   * 按协议请求服务端的模型列表（不写盘）：已保存的服务传 providerId，key 从 providers.json 取；
+   * 表单里未保存的协议 / 地址 / 新 key 放在 draft，key 明文只在这一跳。返回的模型视图不含 key
+   */
+  PROVIDERS_LIST_REMOTE_MODELS: 'providers:list-remote-models',
   /** Main → Renderer：模型服务列表已变更 */
   PROVIDERS_CHANGED: 'providers:changed',
 
