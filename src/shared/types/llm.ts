@@ -66,3 +66,34 @@ export interface McpServerEntryView extends McpServerEntry {
   envKeys: string[];
   headerKeys: string[];
 }
+/** MCP「从本机导入」的来源；顺序就是去重的优先级 */
+export type McpImportSource =
+  | 'claude-code'
+  | 'codex'
+  | 'grok'
+  | 'gemini'
+  | 'cursor'
+  | 'vscode'
+  | 'opencode'
+  | 'cc-switch';
+/** mcp:scan-imports 扫到的候选（脱敏形态）；env / headers 明文留在 Main 的扫描缓存里 */
+export interface McpImportCandidate {
+  /** 只在这一次扫描内有效，回传给 mcp:import */
+  id: string;
+  source: McpImportSource;
+  /** 如「Claude Code」「Claude Code · fynvra」（项目级）「CC Switch · Claude、Codex」（已启用的应用） */
+  sourceLabel: string;
+  name: string;
+  transport: McpServerEntry['transport'];
+  command?: string;
+  args?: string[];
+  url?: string;
+  envKeys: string[];
+  headerKeys: string[];
+  /** 来源里是否启用：Codex / Grok / OpenCode 的 enabled、Gemini 的 mcp.excluded、CC Switch 任一应用已启用 */
+  enabledInSource: boolean;
+  /** 与已有服务器（existing）或排在前面的候选（candidate）的命令 + 参数 / URL 相同 */
+  duplicate?: 'existing' | 'candidate';
+  /** 重复的对象：已有服务器的名称，或前面那个候选的「来源 · 名称」 */
+  duplicateOf?: string;
+}
