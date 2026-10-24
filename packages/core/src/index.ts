@@ -1,3 +1,4 @@
+export * from './briefs/renderBrief';
 export * from './fs';
 export * from './git/GitWorktreeManager';
 export * from './guards';
