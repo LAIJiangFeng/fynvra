@@ -239,8 +239,9 @@ export class InMemoryOrchestrationStore implements OrchestrationStore {
 
   activeDispatch(taskId: string): Dispatch | undefined {
     for (const dispatch of this.#tables.dispatches.values()) {
-      if (dispatch.taskId === taskId && !isDispatchSettled(dispatch))
+      if (dispatch.taskId === taskId && !isDispatchSettled(dispatch)) {
         return structuredClone(dispatch);
+      }
     }
     return undefined;
   }
@@ -250,8 +251,8 @@ export class InMemoryOrchestrationStore implements OrchestrationStore {
     const latestByWorktree = new Map<string, Dispatch>();
     const busyWorktrees = new Set<string>();
     for (const dispatch of this.#tables.dispatches.values()) {
-      if (!taskIds.has(dispatch.taskId) || !this.#tables.worktrees.has(dispatch.worktreeId))
-        continue;
+      const inRun = taskIds.has(dispatch.taskId);
+      if (!inRun || !this.#tables.worktrees.has(dispatch.worktreeId)) continue;
       if (!isDispatchSettled(dispatch)) {
         busyWorktrees.add(dispatch.worktreeId);
         continue;
@@ -373,6 +374,7 @@ const MESSAGE_SCHEMA: Schema<Message> = {
   createdAt: isNumber,
   ackedAt: { optional: isNumber },
 };
+
 class SnapshotError extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
