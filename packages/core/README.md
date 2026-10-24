@@ -77,16 +77,15 @@ const worktrees = new GitWorktreeManager({ exec });
 
 ## 开发
 
+本包是根 pnpm workspace 的成员，配置全部来自仓库根目录：依赖装在根锁文件里，TypeScript / Biome / Vitest 由根 `package.json` 提供；`tsconfig.json` 继承根配置，只多了 `include: ["src"]`；lint 和测试直接使用根目录的 `biome.json` 与 `vitest.config.ts`；行尾由根 `.gitattributes` 统一为 LF。
+
 ```bash
+# 仓库根目录：安装依赖，并检查全部代码（包括本包）
 pnpm install
 pnpm typecheck && pnpm lint && pnpm test
+
+# 只检查本包
+pnpm -F @fynvra/core typecheck   # 也可以换成 lint / test
 ```
 
 测试与源码同目录（`*.test.ts`）。文件读写测试用临时目录；`git/GitWorktreeManager.integration.test.ts` 用真实 git（没有 git 时跳过）。
-
-### 根目录接线前的临时配置（验收合并时可收敛）
-
-- `tsconfig.json` 是独立的（还没有根 `tsconfig.json` 可继承），选项与 EnsoCode 根配置一致；根配置落地后可改为 `extends`。
-- `biome.json` 是 `"root": false` 的嵌套配置，`lint` 脚本用 `--config-path=biome.json` 显式加载（没有根配置时 Biome 不会自动采用嵌套配置）；根 `biome.json` 落地后可改为 `{ "root": false, "extends": "//" }` 并去掉 `--config-path`。
-- `pnpm-lock.yaml` 是本包单独安装产生的；进入 pnpm workspace 后以根 lockfile 为准。
-- `.gitattributes` 把本包文件固定为 LF：Biome 按 LF 检查，Windows 默认 `core.autocrlf=true` 检出的 CRLF 会让 `lint` 失败。
