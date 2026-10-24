@@ -62,6 +62,11 @@ describe('parseAgentCommand', () => {
         roles: [],
       },
     },
+    {
+      type: 'spawn-session',
+      identity,
+      spec: { ...spec, shellPath: 'D:\\Software\\Git\\bin\\bash.exe' },
+    },
     { type: 'prompt', identity, text: 'Fix the build' },
     { type: 'steer', identity, text: 'Also update the docs' },
     { type: 'abort', identity },
@@ -126,6 +131,8 @@ describe('parseAgentCommand', () => {
       withSpec({ mcpServers: [{ name: 'x', command: 'c', args: '-y' }] }),
     ],
     ['a non-boolean worker flag', withSpec({ worker: 'yes' })],
+    ['an empty shell path', withSpec({ shellPath: '' })],
+    ['a shell path that is not a string', withSpec({ shellPath: ['bash.exe'] })],
     ['a role option without a name', withSpec({ roles: [{ id: 'worker' }] })],
     [
       'an unknown approval decision',
