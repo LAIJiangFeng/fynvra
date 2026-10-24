@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import type { FynvraSessionEvent, FynvraSessionEventBody, Role, ThinkingLevel } from '@fynvra/core';
+import type {
+  ApprovalMode,
+  FynvraSessionEvent,
+  FynvraSessionEventBody,
+  Role,
+  ThinkingLevel,
+} from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
   AgentApprovalRequest,
@@ -93,6 +99,11 @@ export interface SetModelInput {
   model: SessionModelRef;
 }
 
+export interface SetApprovalModeInput {
+  sessionId: string;
+  mode: ApprovalMode;
+}
+
 export interface RespondApprovalInput {
   sessionId: string;
   requestId: string;
@@ -123,6 +134,11 @@ export interface AgentHostService extends AgentHost {
   setModel(input: SetModelInput): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 启用且有 key 的服务与模型，每个模型带 worker 按 pi 目录给出的思考档位；传 workspaceId 时带上次用过的模型 */
   modelOptions(input: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  /**
+   * 换会话的审批档位：更新记录（落 sessions.json），会话在 worker 里时发 set-approval-mode。
+   * 运行中也可以切（即时生效，这是与换模型的区别）；会话还没在 worker 里时只改记录，下次 spawn 用新值。
+   */
+  setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -294,7 +310,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return {
         ok: true,
         spec: {
-          role,
+          // 审批门按会话自己的档位建（创建时取自角色，之后可能被用户切过）
+          role: { ...role, approvalMode: stored.approvalMode },
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
           model,
@@ -616,6 +633,32 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return { ok: true, session: toSummary(updated) };
   }
 
+  /**
+   * 换审批档位：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
+   * 重建时不会退回旧档位；会话在 worker 里时再发 set-approval-mode，不论是否在跑。
+   */
+  async function setApprovalMode({
+    sessionId,
+    mode,
+  }: SetApprovalModeInput): Promise<Result<{ session: SessionSummary }>> {
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail('会话不存在');
+    if (stored.approvalMode === mode) return { ok: true, session: toSummary(stored) };
+    const updated =
+      deps.store.update(sessionId, { approvalMode: mode, updatedAt: now() }) ?? stored;
+    const state = live.get(sessionId);
+    if (state?.spec) {
+      state.spec = { ...state.spec, role: { ...state.spec.role, approvalMode: mode } };
+    }
+    if (state?.spawned) {
+      const identity = identityOf(sessionId, state);
+      // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
+      if (!send({ type: 'set-approval-mode', identity, mode })) detach(sessionId, state);
+    }
+    changed(stored.workspaceId);
+    return { ok: true, session: toSummary(updated) };
+  }
+
   async function modelOptions({
     workspaceId,
   }: {
@@ -821,6 +864,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setModel,
     modelOptions,
+    setApprovalMode,
   };
 }
 

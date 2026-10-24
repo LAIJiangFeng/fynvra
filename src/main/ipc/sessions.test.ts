@@ -29,6 +29,7 @@ const host = {
   respondApproval: vi.fn(async () => ({ ok: true })),
   setModel: vi.fn(async () => ({ ok: true })),
   modelOptions: vi.fn(async () => ({ ok: true, providers: [] })),
+  setApprovalMode: vi.fn(async () => ({ ok: true })),
 };
 
 const invoke = (channel: string, ...args: unknown[]) =>
@@ -60,8 +61,20 @@ describe('sessions IPC', () => {
         'sessions:remove',
         'sessions:respond-approval',
         'sessions:set-model',
+        'sessions:set-approval-mode',
       ].sort()
     );
+  });
+
+  it('forwards an approval mode switch with only the session id and the mode', async () => {
+    for (const mode of ['supervised', 'auto-edits', 'full']) {
+      await invoke(IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode });
+    }
+    expect(host.setApprovalMode.mock.calls).toEqual([
+      [{ sessionId: 's-1', mode: 'supervised' }],
+      [{ sessionId: 's-1', mode: 'auto-edits' }],
+      [{ sessionId: 's-1', mode: 'full' }],
+    ]);
   });
 
   it('forwards narrowed inputs to the agent host', async () => {
@@ -187,6 +200,14 @@ describe('sessions IPC', () => {
     [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, 'ws-1'],
     [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: '../ws' }],
     [IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, { workspaceId: 'ws-1', withKeys: true }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, null],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, 'full'],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1' }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { mode: 'full' }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: '../s', mode: 'full' }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'yolo' }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'FULL' }],
+    [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'full', roleId: 'x' }],
   ])('%s rejects %j without calling the host', async (channel, raw) => {
     expect(await invoke(channel, raw)).toMatchObject({ ok: false });
     for (const fn of Object.values(host)) expect(fn).not.toHaveBeenCalled();

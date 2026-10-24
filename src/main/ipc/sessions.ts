@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { isThinkingLevel, isValidRoleId } from '@fynvra/core';
+import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { isApprovalDecision } from '@shared/types/agent';
 import type {
@@ -16,6 +16,7 @@ import {
   type CreateSessionInput,
   createAgentHost,
   type RespondApprovalInput,
+  type SetApprovalModeInput,
   type SetModelInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
@@ -126,6 +127,14 @@ export function registerSessionHandlers(host: () => AgentHostService = getAgentH
       return input ? guard(() => host().modelOptions(input)) : invalid('无效的参数');
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE,
+    (_event, raw: unknown): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const input = parseSetApprovalModeInput(raw);
+      return input ? guard(() => host().setApprovalMode(input)) : invalid('无效的审批档位');
+    }
+  );
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */
@@ -146,6 +155,14 @@ export function parseSetModelInput(raw: unknown): SetModelInput | null {
   const sessionId = parseSessionId(record?.sessionId);
   const model = parseModelRef(record?.model);
   return sessionId && model ? { sessionId, model } : null;
+}
+
+/** `{ sessionId, mode }`：mode 只能是三档之一（大小写敏感） */
+export function parseSetApprovalModeInput(raw: unknown): SetApprovalModeInput | null {
+  const record = strictRecord(raw, ['sessionId', 'mode']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const mode = record?.mode;
+  return sessionId && isApprovalMode(mode) ? { sessionId, mode } : null;
 }
 
 /** 无参或 `{ workspaceId? }` */

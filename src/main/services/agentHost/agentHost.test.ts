@@ -1371,6 +1371,99 @@ describe('createAgentHost model choice', () => {
   });
 });
 
+describe('createAgentHost approval mode', () => {
+  const spawnRole = (command: AgentCommand | undefined) =>
+    command?.type === 'spawn-session' ? command.spec.role : undefined;
+
+  it('switches a session that is not in the worker yet: the record now, the spawn later', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    env.broadcasts.length = 0;
+
+    const switched = await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' });
+    expect(switched).toEqual({ ok: true, session: { ...session, approvalMode: 'supervised' } });
+    expect(env.host.list('ws-1')[0]?.approvalMode).toBe('supervised');
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toEqual([['ws-1']]);
+    expect(env.sent()).toEqual([]);
+    expect(env.store.flush()).toBe(true);
+    const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
+    expect(file.sessions[0].approvalMode).toBe('supervised');
+
+    // spawn 时审批门按会话的档位建（角色的其余设置不变）
+    await env.host.prompt(session.id, 'hi');
+    expect(spawnRole(env.sent('spawn-session')[0])).toEqual({
+      ...getBuiltinRole('worker'),
+      approvalMode: 'supervised',
+    });
+  });
+
+  it('switches a running session at once and keeps the mode for a crash respawn', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    await env.host.prompt(session.id, 'long task');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'running' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('full');
+
+    // 与换模型不同：运行中也可以切，即时生效
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'supervised', status: 'running' }),
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'waiting-approval' });
+    expect(
+      await env.host.setApprovalMode({ sessionId: session.id, mode: 'auto-edits' })
+    ).toMatchObject({ ok: true });
+    expect(env.sent('set-approval-mode')).toEqual([
+      { type: 'set-approval-mode', identity, mode: 'supervised' },
+      { type: 'set-approval-mode', identity, mode: 'auto-edits' },
+    ]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('waiting-approval');
+
+    env.worker().exit(1);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('auto-edits');
+  });
+
+  it('rebuilds a session that crashed with the mode chosen while the worker restarted', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    await env.host.prompt(session.id, 'long task');
+    env.worker().exit(1);
+    // worker 还没起来：会话不在 worker 里，只改记录；但重建不能沿用崩溃前缓存的 full
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'supervised' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'supervised' }),
+    });
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(spawnRole(env.sent('spawn-session')[0])?.approvalMode).toBe('supervised');
+    expect(env.sent('set-approval-mode')).toEqual([]);
+  });
+
+  it('leaves everything alone when the mode does not change', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    env.broadcasts.length = 0;
+    expect(await env.host.setApprovalMode({ sessionId: session.id, mode: 'auto-edits' })).toEqual({
+      ok: true,
+      session: expect.objectContaining({ approvalMode: 'auto-edits' }),
+    });
+    expect(env.sent('set-approval-mode')).toEqual([]);
+    expect(env.broadcasts).toEqual([]);
+  });
+
+  it('refuses an unknown session', async () => {
+    const env = setup();
+    expect(await env.host.setApprovalMode({ sessionId: 'ghost', mode: 'full' })).toEqual({
+      ok: false,
+      error: '会话不存在',
+    });
+  });
+});
+
 describe('titleFrom', () => {
   it.each([
     ['## Fix the build\nmore', 'Fix the build'],

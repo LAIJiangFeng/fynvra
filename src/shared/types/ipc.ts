@@ -49,6 +49,8 @@ export const IPC_CHANNELS = {
   SESSIONS_SET_MODEL: 'sessions:set-model',
   /** 新建会话 / 换模型的可选项：启用且有 key 的服务，每个模型带可选的思考档位；传 workspaceId 时带上次用过的模型 */
   SESSIONS_MODEL_OPTIONS: 'sessions:model-options',
+  /** 换会话的审批档位：Renderer 只传会话 id 与档位；运行中也可以切，即时生效 */
+  SESSIONS_SET_APPROVAL_MODE: 'sessions:set-approval-mode',
   /** Main → Renderer：会话事件（SessionEventEnvelope） */
   SESSIONS_EVENT: 'sessions:event',
   /** Main → Renderer：某工作区的会话列表已变更（参数为 workspaceId） */
