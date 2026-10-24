@@ -1,8 +1,14 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
-import type { McpServerEntryView } from '@shared/types/llm';
+import type { McpImportSource, McpServerEntryView } from '@shared/types/llm';
 import { create } from 'zustand';
-import type { McpImportResult, McpSaveResult, McpUpsertInput } from '../../preload/domains/mcp';
+import type {
+  McpImportCandidatesResult,
+  McpImportResult,
+  McpSaveResult,
+  McpScanImportsResult,
+  McpUpsertInput,
+} from '../../preload/domains/mcp';
 
 export interface McpState {
   /** env / headers 只有键名 */
@@ -14,6 +20,10 @@ export interface McpState {
   remove(id: string): Promise<IpcResult>;
   toggle(id: string, enabled: boolean): Promise<McpSaveResult>;
   importClaude(): Promise<McpImportResult>;
+  /** 扫描本机各工具的 MCP 配置（只读，候选只有 env / header 的键名） */
+  scanImports(sources: McpImportSource[]): Promise<McpScanImportsResult>;
+  /** 导入最近一次扫描里的候选，成功后重读列表 */
+  importCandidates(candidateIds: string[]): Promise<McpImportCandidatesResult>;
 }
 
 const api = window.fynvra.mcp;
@@ -60,6 +70,14 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
   async importClaude() {
     const result = await safely(() => api.importClaude());
+    if (result.ok) await get().refresh();
+    return result;
+  },
+
+  scanImports: (sources) => safely(() => api.scanImports({ sources })),
+
+  async importCandidates(candidateIds) {
+    const result = await safely(() => api.importCandidates({ candidateIds }));
     if (result.ok) await get().refresh();
     return result;
   },
