@@ -34,7 +34,7 @@ function make(overrides: Partial<OrchestrationServiceOptions> = {}) {
   return createOrchestrationService({
     workspace: WORKSPACE,
     statePath,
-    worktreesRoot: join(dir, 'worktrees'),
+    resolveWorktreesRoot: async () => join(dir, 'worktrees'),
     launcher,
     roles: createFakeRoles(),
     exec: fake.exec,

@@ -18,6 +18,7 @@ import { nodeExec } from './nodeExec';
 import { createOrchestrationService, type OrchestrationService } from './service';
 import { createShellRunner } from './shellRunner';
 import { createFakeLauncher, createFakeRoles, type FakeLauncher } from './testing';
+import { createWorktreesRootResolver } from './worktreesRoot';
 
 const hasGit = spawnSync('git', ['--version']).status === 0;
 
@@ -58,7 +59,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     service = createOrchestrationService({
       workspace: { id: 'ws_1', name: 'repo', repoPath: repo, defaultBranch: 'main' },
       statePath,
-      worktreesRoot: join(root, 'userData', 'worktrees'),
+      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
       launcher,
       roles: createFakeRoles(),
       exec: nodeExec,
@@ -260,5 +261,44 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('doomed');
     expect(git(repo, 'branch', '--list', 'fynvra/*')).toBe('');
     expect(existsSync(join(root, 'userData', 'worktrees', 'ws_1', 'doomed'))).toBe(false);
+  });
+
+  it('默认位置：worktree 建在仓库同级的 <仓库目录名>-worktrees 下，cleanup 照记录的路径删除', async () => {
+    const sibling = createOrchestrationService({
+      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, defaultBranch: 'main' },
+      statePath: join(root, 'userData', 'orchestration', 'sibling.json'),
+      resolveWorktreesRoot: createWorktreesRootResolver({
+        fallbackRoot: join(root, 'userData', 'worktrees'),
+        configured: () => undefined,
+        repoPaths: () => [repo],
+        log: () => {},
+      }),
+      launcher,
+      roles: createFakeRoles(),
+      exec: nodeExec,
+      runChecks: createShellRunner(),
+      fs,
+      notifyChanged: () => {},
+      log: () => {},
+    });
+    const coordinator = sibling.hostFor('session_sibling');
+    const result = await coordinator.dispatchTask({
+      title: 'Next to repo',
+      spec: 'S',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!result.ok || result.dispatch === undefined) throw new Error(JSON.stringify(result));
+
+    const path = join(root, 'repo-worktrees', 'ws_1', 'next-to-repo');
+    expect((await sibling.snapshot()).worktrees.map((worktree) => worktree.path)).toEqual([path]);
+    expect(git(path, 'branch', '--show-current')).toBe('fynvra/next-to-repo');
+    expect(existsSync(join(root, 'userData', 'worktrees'))).toBe(false);
+
+    expect(await coordinator.cleanupWorktree({ dispatchId: result.dispatch.id })).toMatchObject({
+      ok: true,
+      removedWorktree: true,
+    });
+    expect(existsSync(path)).toBe(false);
   });
 });
