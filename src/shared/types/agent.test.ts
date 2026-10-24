@@ -1,6 +1,7 @@
 import type { FynvraSessionEvent } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import {
+  type AgentApprovalRequest,
   type AgentCommand,
   type AgentWorkerEvent,
   parseAgentCommand,
@@ -9,6 +10,16 @@ import {
 } from './agent';
 
 const identity = { sessionId: 'session-1', generation: 2 };
+
+const approvalRequest: AgentApprovalRequest = {
+  requestId: 'req-1',
+  toolCallId: 'call-1',
+  toolName: 'bash',
+  kind: 'command',
+  title: 'bash',
+  detail: 'pnpm test',
+  expiresAt: 1_700_000_600_000,
+};
 
 const spec: SpawnSessionSpec = {
   role: {
@@ -237,10 +248,26 @@ describe('parseAgentWorkerEvent', () => {
     },
     { type: 'host-cancel', identity, callId: '3' },
     { type: 'session-error', identity, error: 'no API key', fatal: true },
+    { type: 'approval-request', identity, request: approvalRequest },
+    {
+      type: 'approval-request',
+      identity,
+      request: { ...approvalRequest, protectedAction: 'git push', detail: '' },
+    },
   ];
 
   it.each(valid)('accepts a well-formed $type event', (event) => {
     expect(parseAgentWorkerEvent(event)).toEqual(event);
+  });
+
+  it('drops unknown fields of an approval request', () => {
+    expect(
+      parseAgentWorkerEvent({
+        type: 'approval-request',
+        identity,
+        request: { ...approvalRequest, args: { command: 'echo hi' }, extra: 1 },
+      })
+    ).toEqual({ type: 'approval-request', identity, request: approvalRequest });
   });
 
   it('drops unknown fields of the envelope and of the session event', () => {
@@ -357,6 +384,29 @@ describe('parseAgentWorkerEvent', () => {
     ],
     ['a host cancel without callId', { type: 'host-cancel', identity }],
     ['a session error without the fatal flag', { type: 'session-error', identity, error: 'x' }],
+    [
+      'an approval request without identity',
+      { type: 'approval-request', request: approvalRequest },
+    ],
+    ['an approval request without request', { type: 'approval-request', identity }],
+    ...(
+      [
+        ['an empty request id', { requestId: '' }],
+        ['a numeric tool call id', { toolCallId: 1 }],
+        ['an empty tool name', { toolName: '' }],
+        ['an unknown kind', { kind: 'network' }],
+        ['an inherited kind', { kind: 'toString' }],
+        ['a missing title', { title: undefined }],
+        ['a null detail', { detail: null }],
+        ['a numeric protected action', { protectedAction: 1 }],
+        ['a string expiry', { expiresAt: '1700000000000' }],
+        ['a non-positive expiry', { expiresAt: 0 }],
+        ['an infinite expiry', { expiresAt: Number.POSITIVE_INFINITY }],
+      ] as const
+    ).map(([label, patch]): [string, unknown] => [
+      `an approval request with ${label}`,
+      { type: 'approval-request', identity, request: { ...approvalRequest, ...patch } },
+    ]),
   ])('rejects %s', (_label, raw) => {
     expect(parseAgentWorkerEvent(raw)).toBeNull();
   });
