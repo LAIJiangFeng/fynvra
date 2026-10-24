@@ -21,6 +21,46 @@ export const IPC_CHANNELS = {
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
   /** Main → Renderer：窗口最大化状态变化 */
   WINDOW_MAXIMIZED_CHANGED: 'window:maximized-changed',
+
+  // --- providers ---
+  PROVIDERS_LIST: 'providers:list',
+  /** apiKey 明文只在这一跳从 Renderer 进入 Main */
+  PROVIDERS_UPSERT: 'providers:upsert',
+  PROVIDERS_REMOVE: 'providers:remove',
+  /** 用已保存的 key 发一个最小请求（列模型）验证连通性；只传 id */
+  PROVIDERS_TEST: 'providers:test',
+  /** Main → Renderer：模型服务列表已变更 */
+  PROVIDERS_CHANGED: 'providers:changed',
+
+  // --- roles ---
+  ROLES_LIST: 'roles:list',
+  ROLES_GET: 'roles:get',
+  ROLES_SAVE: 'roles:save',
+  ROLES_REMOVE: 'roles:remove',
+  /** Main → Renderer：角色已变更 */
+  ROLES_CHANGED: 'roles:changed',
+
+  // --- skills ---
+  SKILLS_LIST: 'skills:list',
+  /** 无参时 Main 弹目录选择框；传 candidateIds 时登记 skills:scan 找到的技能。Renderer 不传路径 */
+  SKILLS_ADD: 'skills:add',
+  SKILLS_REMOVE: 'skills:remove',
+  SKILLS_TOGGLE: 'skills:toggle',
+  /** 扫描 ~/.claude/skills、~/.codex/skills、~/.pi/agent/skills；只读，不登记 */
+  SKILLS_SCAN: 'skills:scan',
+  /** Main → Renderer：技能注册表已变更 */
+  SKILLS_CHANGED: 'skills:changed',
+
+  // --- mcp ---
+  MCP_LIST: 'mcp:list',
+  /** env / headers 明文只在这一跳从 Renderer 进入 Main */
+  MCP_UPSERT: 'mcp:upsert',
+  MCP_REMOVE: 'mcp:remove',
+  MCP_TOGGLE: 'mcp:toggle',
+  /** 导入 ~/.claude.json 与 ~/.claude/settings.json 里的 mcpServers */
+  MCP_IMPORT_CLAUDE: 'mcp:import-claude',
+  /** Main → Renderer：MCP 服务器列表已变更 */
+  MCP_CHANGED: 'mcp:changed',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
