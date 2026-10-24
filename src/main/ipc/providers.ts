@@ -3,10 +3,16 @@ import { errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { app, ipcMain, net } from 'electron';
 import type {
+  ProviderImportResult,
   ProviderListResult,
   ProviderSaveResult,
+  ProviderScanImportsResult,
   ProviderTestResult,
 } from '../../preload/domains/providers';
+import {
+  createProviderImporter,
+  type ProviderImporter,
+} from '../services/providers/import/providerImporter';
 import { isRegistryId } from '../services/providers/jsonRegistry';
 import { parseProviderUpsert } from '../services/providers/parseProviderInput';
 import {
@@ -26,6 +32,14 @@ let store: ProviderStore | null = null;
 export function getProviderStore(): ProviderStore {
   store ??= createProviderStore({ filePath: join(app.getPath('userData'), 'providers.json') });
   return store;
+}
+
+let importer: ProviderImporter | null = null;
+
+/** 「从本机导入」：最近一次扫描的结果（含明文 key）只缓存在这里。 */
+function getProviderImporter(): ProviderImporter {
+  importer ??= createProviderImporter({ store: getProviderStore() });
+  return importer;
 }
 
 export function registerProviderHandlers(): void {
@@ -81,6 +95,24 @@ export function registerProviderHandlers(): void {
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
       }
+    }
+  );
+
+  // 只读扫描本机配置；返回脱敏候选，含 key 的结果留在 Main 的缓存里
+  ipcMain.handle(
+    IPC_CHANNELS.PROVIDERS_SCAN_IMPORTS,
+    (_event, raw: unknown): Promise<ProviderScanImportsResult> => getProviderImporter().scan(raw)
+  );
+
+  // 只收候选 id：key 从扫描缓存取，不经过 Renderer
+  ipcMain.handle(
+    IPC_CHANNELS.PROVIDERS_IMPORT,
+    async (_event, raw: unknown): Promise<ProviderImportResult> => {
+      const result = await getProviderImporter().import(raw);
+      if (result.ok && result.imported.length > 0) {
+        sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
+      }
+      return result;
     }
   );
 }
