@@ -1,10 +1,10 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
-import { createOrchestrationApi } from './domains/orchestration';
-import { createSessionsApi } from './domains/sessions';
 import { createMcpApi } from './domains/mcp';
+import { createOrchestrationApi } from './domains/orchestration';
 import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
+import { createSessionsApi } from './domains/sessions';
 import { createSkillsApi } from './domains/skills';
 import type { FynvraApi, Unsubscribe } from './types';
 

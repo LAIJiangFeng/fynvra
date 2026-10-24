@@ -1,8 +1,8 @@
-import { registerOrchestrationHandlers } from './orchestration';
-import { registerSessionHandlers } from './sessions';
 import { registerMcpHandlers } from './mcp';
+import { registerOrchestrationHandlers } from './orchestration';
 import { registerProviderHandlers } from './providers';
 import { registerRoleHandlers } from './roles';
+import { registerSessionHandlers } from './sessions';
 import { registerSettingsHandlers } from './settings';
 import { registerSkillHandlers } from './skills';
 import { registerWindowHandlers } from './window';
