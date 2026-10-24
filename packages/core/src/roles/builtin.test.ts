@@ -16,12 +16,22 @@ describe('BUILTIN_ROLES', () => {
     for (const role of BUILTIN_ROLES) expect(role.builtin).toBe(true);
   });
 
-  it('orchestrator：编排工具集 + full 审批，系统提示词写清 §6 工作循环', () => {
+  it('orchestrator：编排工具集 + full 审批，系统提示词是人设与 §6 工作循环', () => {
     const role = getBuiltinRole(ORCHESTRATOR_ROLE_ID);
     expect(role?.tools).toBe('orchestrator');
     expect(role?.approvalMode).toBe('full');
     const prompt = role?.systemPrompt ?? '';
+    // 人设：只派活不干活，用用户的语言回复
+    expect(prompt).toContain('You never implement anything yourself');
+    expect(prompt).toContain('Reply to the user in the language they use.');
     // 派活 → 监控 → 验收合并 / 打回 → 汇报，每一步都点名对应工具
+    expect([...prompt.matchAll(/^\d\. (\w+):/gm)].map((match) => match[1])).toEqual([
+      'Plan',
+      'Dispatch',
+      'Monitor',
+      'Review',
+      'Report',
+    ]);
     for (const tool of [
       'dispatch_task',
       'wait_for_workers',
@@ -34,9 +44,21 @@ describe('BUILTIN_ROLES', () => {
     ]) {
       expect(prompt).toContain(`\`${tool}\``);
     }
-    expect(prompt).toMatch(/never implement anything yourself/i);
-    expect(prompt).toMatch(/do not edit files/i);
-    expect(prompt).toMatch(/report/i);
+  });
+
+  it('orchestrator 的系统提示词不重复 agent-runtime 的工具机制说明', () => {
+    const prompt = getBuiltinRole(ORCHESTRATOR_ROLE_ID)?.systemPrompt ?? '';
+    // 参数含义、任务书五段格式、超时语义、授权边界都在 ORCHESTRATOR_PROMPT 里
+    for (const mechanic of [
+      'timeout_ms',
+      'depends_on',
+      'dispatch_id',
+      '**Target**',
+      'checkpoint',
+    ]) {
+      expect(prompt).not.toContain(mechanic);
+    }
+    expect(prompt).not.toMatch(/approv|authori[sz]/i);
   });
 
   it('worker：全部工具 + auto-edits，没有系统提示词', () => {

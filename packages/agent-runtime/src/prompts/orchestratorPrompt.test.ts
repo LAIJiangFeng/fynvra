@@ -1,3 +1,4 @@
+import { getBuiltinRole, ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import { ORCHESTRATION_TOOL_METHODS } from '../host';
 import {
@@ -6,34 +7,52 @@ import {
   WORKER_CONTRACT_PROMPT,
 } from './orchestratorPrompt';
 
+const TOOLS = Object.keys(ORCHESTRATION_TOOL_METHODS);
+
+function count(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+function builtinOrchestrator(): Role {
+  const role = getBuiltinRole(ORCHESTRATOR_ROLE_ID);
+  if (!role) throw new Error('the builtin orchestrator role is missing');
+  return role;
+}
+
 describe('ORCHESTRATOR_PROMPT', () => {
-  it('walks through the work loop with every orchestration tool', () => {
-    for (const tool of Object.keys(ORCHESTRATION_TOOL_METHODS)) {
-      expect(ORCHESTRATOR_PROMPT).toContain(tool);
+  it('documents every orchestration tool in an entry of its own', () => {
+    for (const tool of TOOLS) {
+      expect(ORCHESTRATOR_PROMPT).toMatch(new RegExp(`^- ${tool} `, 'm'));
     }
   });
 
-  it('forbids changing code yourself', () => {
-    expect(ORCHESTRATOR_PROMPT).toContain('Never modify code yourself');
-  });
-
-  it('explains how to write a task brief', () => {
+  it('explains the brief that dispatch_task takes as spec', () => {
     for (const section of ['Target', 'Change', 'Constraints', 'Ownership', 'Acceptance']) {
       expect(ORCHESTRATOR_PROMPT).toContain(`**${section}**`);
     }
     expect(ORCHESTRATOR_PROMPT).toContain("worker's only context");
   });
 
-  it('defines acceptance and when to reject', () => {
-    expect(ORCHESTRATOR_PROMPT).toContain('## Judging acceptance');
-    expect(ORCHESTRATOR_PROMPT).toContain("never accept on the worker's word alone");
-    expect(ORCHESTRATOR_PROMPT).toContain('## When to reject');
-    expect(ORCHESTRATOR_PROMPT).toContain('pnpm typecheck && pnpm lint && pnpm test');
+  it('treats a wait timeout as a checkpoint', () => {
+    expect(ORCHESTRATOR_PROMPT).toContain('A timeout is a checkpoint, not a failure');
+  });
+
+  it('describes what happens after reject_work', () => {
+    expect(ORCHESTRATOR_PROMPT).toContain('new attempt with a new dispatch_id');
+    expect(ORCHESTRATOR_PROMPT).toContain('must call report_done again');
+    expect(ORCHESTRATOR_PROMPT).toContain("never on the worker's word alone");
   });
 
   it('keeps worker messages from counting as user approval', () => {
     expect(ORCHESTRATOR_PROMPT).toContain("never the user's approval");
     expect(ORCHESTRATOR_PROMPT).toContain('Never fabricate or predict results');
+  });
+
+  it('leaves the persona and the work loop to the role prompt', () => {
+    expect(ORCHESTRATOR_PROMPT).not.toContain('Work loop');
+    expect(ORCHESTRATOR_PROMPT).not.toMatch(/^\d+\. /m);
+    expect(ORCHESTRATOR_PROMPT).not.toContain('You never implement anything yourself');
+    expect(ORCHESTRATOR_PROMPT).not.toMatch(/language/i);
   });
 });
 
@@ -65,6 +84,17 @@ describe('buildRolePromptAppend', () => {
       { worker: false }
     );
     expect(text).toBe(`Speak Chinese.\n\n${ORCHESTRATOR_PROMPT}`);
+  });
+
+  it('builtin orchestrator: the persona once, every tool named, nothing said twice', () => {
+    const text = buildRolePromptAppend(builtinOrchestrator(), { worker: false });
+    expect(count(text, 'You never implement anything yourself')).toBe(1);
+    for (const tool of TOOLS) expect(text).toContain(tool);
+    // 工作循环只在角色提示词里，工具机制只在 ORCHESTRATOR_PROMPT 里
+    expect(count(text, 'Work loop')).toBe(1);
+    expect(count(text, '**Ownership**')).toBe(1);
+    expect(count(text, 'in the language')).toBe(1);
+    expect(count(text, 'approval')).toBe(1);
   });
 
   it('adds the worker contract only to worker sessions', () => {
