@@ -130,6 +130,8 @@ describe('createOrchestrationTools', () => {
       expect(tool.label, tool.name).toBeTruthy();
       expect(tool.description, tool.name).toBeTruthy();
       expect(tool.promptSnippet, tool.name).toBeTruthy();
+      // pi 渲染为 "- <name>: <snippet>"，snippet 自己不能再带工具名
+      expect(tool.promptSnippet?.startsWith(tool.name), tool.name).toBe(false);
       const schema = tool.parameters as {
         type: string;
         properties: Record<string, { description?: string }>;

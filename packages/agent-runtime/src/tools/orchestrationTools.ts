@@ -77,7 +77,7 @@ export function createOrchestrationTools(
         'Create a task and start a worker agent on it in a fresh git worktree (branch fynvra/<slug>). ' +
         "The spec is the worker's entire context, so write it as a complete brief. Returns task_id and " +
         'dispatch_id. Workers run in the background; wait_for_workers delivers their results.',
-      promptSnippet: 'dispatch_task: start a worker in its own git worktree on a task brief',
+      promptSnippet: 'Start a worker in its own git worktree on a task brief',
       promptGuidelines: [
         'Delegate every code change with dispatch_task; never edit files or run write commands yourself.',
         'Independent tasks can be dispatched back to back so their workers run in parallel; use depends_on only for real ordering constraints.',
@@ -98,7 +98,7 @@ export function createOrchestrationTools(
       label: 'List workers',
       description:
         'List every task of this run with its status, role, dispatch_id, branch and, once settled, the outcome reported by the worker.',
-      promptSnippet: 'list_workers: show all tasks with status, dispatch_id and branch',
+      promptSnippet: 'Show all tasks with status, dispatch_id and branch',
       parameters: Type.Object({}, { additionalProperties: false }),
       normalize: () => ({}),
       run: async (_params, signal) => {
@@ -115,8 +115,7 @@ export function createOrchestrationTools(
         "until='any' on the first worker_done. Always returns early when a worker asks a question or escalates. " +
         `timeout_ms is clamped to [${WAIT_TIMEOUT_MIN_MS}, ${WAIT_TIMEOUT_MAX_MS}] (default ${WAIT_TIMEOUT_DEFAULT_MS}); ` +
         'a timeout is not a failure and never stops a worker.',
-      promptSnippet:
-        'wait_for_workers: block until workers report done, ask a question or escalate',
+      promptSnippet: 'Block until workers report done, ask a question or escalate',
       promptGuidelines: [
         'You know nothing about a worker result until its worker_done message arrives; never predict or report results before that.',
       ],
@@ -155,7 +154,7 @@ export function createOrchestrationTools(
       description:
         "Read a worker's live output (its messages and tool activity) starting at a character cursor. " +
         `Returns at most ${WORKER_OUTPUT_PAGE_CHARS} characters per call; continue with the cursor named in the result.`,
-      promptSnippet: "read_worker_output: page through a worker's live output with a cursor",
+      promptSnippet: "Page through a worker's live output with a cursor",
       parameters: Type.Object(
         {
           dispatch_id: dispatchIdParam(),
@@ -183,7 +182,7 @@ export function createOrchestrationTools(
       label: 'Send to worker',
       description:
         'Send a message to a worker. If the worker is blocked on ask_coordinator this is the reply; otherwise it is delivered as an instruction.',
-      promptSnippet: 'send_to_worker: answer a worker question or send it an instruction',
+      promptSnippet: 'Answer a worker question or send it an instruction',
       parameters: Type.Object(
         {
           dispatch_id: dispatchIdParam(),
@@ -221,7 +220,7 @@ export function createOrchestrationTools(
       description:
         "Show a worker's changes relative to its base commit: changed files, diffstat and the diff " +
         `(truncated after ${DIFF_MAX_CHARS} characters).`,
-      promptSnippet: "review_diff: show a worker's changed files and diff",
+      promptSnippet: "Show a worker's changed files and diff",
       parameters: dispatchRefSchema(),
       normalize: normalizeRefArgs,
       run: async (params, signal) => {
@@ -238,7 +237,7 @@ export function createOrchestrationTools(
       description:
         "Run a verification command in a worker's worktree and return its exit code and the tail of its output. " +
         "Verify work yourself with it instead of trusting the worker's report.",
-      promptSnippet: "run_checks: run a verification command in a worker's worktree",
+      promptSnippet: "Run a verification command in a worker's worktree",
       parameters: Type.Object(
         {
           dispatch_id: dispatchIdParam(),
@@ -269,7 +268,7 @@ export function createOrchestrationTools(
       description:
         "Merge a worker's branch into your current branch with --no-ff. Use it only after review_diff and run_checks pass. " +
         'On conflicts the merge is aborted, the target branch stays unchanged and the conflicting files are listed.',
-      promptSnippet: "merge_worktree: merge an accepted worker's branch (--no-ff)",
+      promptSnippet: "Merge an accepted worker's branch (--no-ff)",
       promptGuidelines: [
         'Merge only after you reviewed the diff and the checks passed in this conversation.',
       ],
@@ -290,7 +289,7 @@ export function createOrchestrationTools(
       description:
         'Send review feedback to a worker and put its task back in progress. The worker keeps its worktree, ' +
         'fixes the issues and must report_done again.',
-      promptSnippet: 'reject_work: send concrete review feedback back to a worker',
+      promptSnippet: 'Send concrete review feedback back to a worker',
       parameters: Type.Object(
         {
           dispatch_id: dispatchIdParam(),
@@ -328,7 +327,7 @@ export function createOrchestrationTools(
       label: 'Clean up worktree',
       description:
         "Remove a worker's worktree and its branch. Call it after merge_worktree, or to abandon a task.",
-      promptSnippet: "cleanup_worktree: remove a finished or abandoned worker's worktree",
+      promptSnippet: "Remove a finished or abandoned worker's worktree",
       parameters: dispatchRefSchema(),
       executionMode: 'sequential',
       normalize: normalizeRefArgs,

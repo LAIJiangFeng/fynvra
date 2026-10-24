@@ -149,6 +149,8 @@ describe('createReadonlyTools', () => {
       'ls',
       'git_readonly',
     ]);
+    const git = createGitReadonlyTool('/repo', nodeExec);
+    expect(git.promptSnippet?.startsWith(git.name)).toBe(false);
   });
 });
 

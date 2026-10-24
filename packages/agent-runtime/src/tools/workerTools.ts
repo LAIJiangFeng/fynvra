@@ -80,8 +80,7 @@ export function createWorkerTools(
     description:
       'Ask your coordinator (the orchestrator agent that assigned this task) a question and wait for the reply. ' +
       'Use it only when you are blocked on a decision you cannot make from the brief or the code.',
-    promptSnippet:
-      'ask_coordinator: ask your coordinator a blocking question when the brief leaves a decision open',
+    promptSnippet: 'Ask your coordinator a blocking question when the brief leaves a decision open',
     parameters: askSchema,
     executionMode: 'sequential',
     prepareArguments: (raw) =>
@@ -109,8 +108,7 @@ export function createWorkerTools(
     description:
       'Report the result of your task to your coordinator. Call it exactly once when you finish (or cannot finish), then stop. ' +
       'Your coordinator only learns the result through this call.',
-    promptSnippet:
-      'report_done: report your task result to the coordinator, exactly once, then stop',
+    promptSnippet: 'Report your task result to the coordinator, exactly once, then stop',
     promptGuidelines: [
       'Call report_done exactly once, after your work is committed and verified (or when you cannot finish), and stop afterwards.',
     ],

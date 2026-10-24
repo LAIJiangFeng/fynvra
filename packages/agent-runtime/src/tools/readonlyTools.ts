@@ -115,8 +115,7 @@ export function createGitReadonlyTool(cwd: string, exec: ExecFn): ToolDefinition
     description:
       'Run a read-only git command in the working directory. Allowed: status, log, diff, show, branch (listing only), worktree list. ' +
       'Options that write files (--output) or run external diff programs (--ext-diff) are refused.',
-    promptSnippet:
-      'git_readonly: run read-only git commands (status, log, diff, show, branch, worktree list)',
+    promptSnippet: 'Run read-only git commands (status, log, diff, show, branch, worktree list)',
     parameters: gitSchema,
     prepareArguments: (raw) => normalizeGitArgs(raw) as Static<typeof gitSchema>,
     execute: (_toolCallId, params, signal) =>

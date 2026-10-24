@@ -19,6 +19,7 @@ describe('createWorkerTools', () => {
     expect(tools.map((tool) => tool.name)).toEqual(['ask_coordinator', 'report_done']);
     for (const tool of tools) {
       expect(tool.promptSnippet, tool.name).toBeTruthy();
+      expect(tool.promptSnippet?.startsWith(tool.name), tool.name).toBe(false);
       const schema = tool.parameters as {
         properties: Record<string, { description?: string }>;
         additionalProperties?: boolean;
