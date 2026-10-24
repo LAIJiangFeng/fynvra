@@ -1,4 +1,4 @@
-import type { SessionStatus, SessionSummary } from '@shared/types/chat';
+import type { ModelProviderOption, SessionStatus, SessionSummary } from '@shared/types/chat';
 import type { SessionsState } from './createSessionsStore';
 import type { PendingApproval, SessionRuntime, TimelineMessage } from './reducer';
 
@@ -6,6 +6,7 @@ import type { PendingApproval, SessionRuntime, TimelineMessage } from './reducer
 const EMPTY_SESSIONS: SessionSummary[] = [];
 const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
+const EMPTY_PROVIDERS: ModelProviderOption[] = [];
 
 type Lists = Pick<SessionsState, 'sessionsByWorkspace'>;
 
@@ -34,6 +35,9 @@ export const isBusy = (status: SessionStatus): boolean =>
 export const selectWorkspaceId = (state: SessionsState) => state.workspaceId;
 export const selectActiveSessionId = (state: SessionsState) => state.activeSessionId;
 export const selectNotice = (state: SessionsState) => state.notice;
+/** 可选的服务与模型；还没读到时为空列表 */
+export const selectModelProviders = (state: SessionsState): ModelProviderOption[] =>
+  state.modelProviders ?? EMPTY_PROVIDERS;
 
 export const selectSessionsOf =
   (workspaceId: string) =>
