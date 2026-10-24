@@ -194,6 +194,22 @@ describe('GitWorktreeManager.create', () => {
     expect(!result.ok && result.error).toMatch(/ENOENT/);
   });
 
+  it('某次 create 意外出错不会卡死后续调用（排队链不被污染）', async () => {
+    const git = scriptedGit([
+      resolveBase(),
+      listBranches(),
+      addWorktree('fynvra/add-parser', '/data/worktrees/ws_1/add-parser'),
+    ]);
+    const broken = await git.manager.create({
+      ...createInput,
+      slug: undefined as unknown as string,
+    });
+    expect(broken.ok).toBe(false);
+    git.calls.length = 0;
+    const result = await git.manager.create(createInput);
+    expect(result.ok).toBe(true);
+  });
+
   it('候选名全部被占用时返回错误', async () => {
     const taken = ['fynvra/add-parser'];
     for (let n = 2; n <= 99; n++) taken.push(`fynvra/add-parser-${n}`);

@@ -149,7 +149,10 @@ export class GitWorktreeManager {
    * `worktree add` 失败（如目标目录已存在且非空）时，删掉 git 已建出的分支再返回错误。
    */
   create(input: CreateWorktreeInput): Promise<CreateWorktreeResult> {
-    const result = this.#pendingCreate.then(() => this.#create(input));
+    // 意外异常也转成失败结果：排队链上不能留下 rejected promise，否则后续调用全部跟着失败
+    const result = this.#pendingCreate
+      .then(() => this.#create(input))
+      .catch((error: unknown) => fail(`worktree create failed: ${errorMessage(error)}`));
     this.#pendingCreate = result;
     return result;
   }
