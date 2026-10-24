@@ -87,6 +87,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.4.0
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.88)(@smithy/signature-v4@5.7.4)(ws@8.22.0)
+      '@fynvra/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core: {}
 

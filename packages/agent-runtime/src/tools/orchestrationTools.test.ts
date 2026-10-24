@@ -1,5 +1,5 @@
+import type { Dispatch, Message, Task } from '@fynvra/core';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
-import type { Dispatch, Message, Task } from '../coreTypes';
 import {
   ORCHESTRATION_TOOL_METHODS,
   type OrchestrationHost,

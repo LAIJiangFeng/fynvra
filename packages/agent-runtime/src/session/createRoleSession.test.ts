@@ -10,8 +10,8 @@ import {
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import type { Role } from '@fynvra/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { Role } from '../coreTypes';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
 import { ORCHESTRATOR_PROMPT, WORKER_CONTRACT_PROMPT } from '../prompts/orchestratorPrompt';

@@ -1,4 +1,4 @@
-import type { Dispatch, Message, MessageType, Task } from './coreTypes';
+import type { Dispatch, Message, MessageType, Task } from '@fynvra/core';
 
 /**
  * Host 调用结果。Host 不向工具抛异常：失败一律 `{ ok: false, error }`，
