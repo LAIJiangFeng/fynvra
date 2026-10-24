@@ -90,8 +90,12 @@ export const IPC_CHANNELS = {
   MCP_UPSERT: 'mcp:upsert',
   MCP_REMOVE: 'mcp:remove',
   MCP_TOGGLE: 'mcp:toggle',
-  /** 导入 ~/.claude.json 与 ~/.claude/settings.json 里的 mcpServers */
+  /** 导入 ~/.claude.json 与 ~/.claude/settings.json 里的 mcpServers（界面已改用下面两个通道，保留给旧调用方） */
   MCP_IMPORT_CLAUDE: 'mcp:import-claude',
+  /** 只读扫描本机 8 个工具的 MCP 配置，返回脱敏候选；含 env / headers 的结果在 Main 缓存 10 分钟 */
+  MCP_SCAN_IMPORTS: 'mcp:scan-imports',
+  /** 按候选 id 导入最近一次扫描的结果；env / headers 从 Main 的缓存取，不经过 Renderer */
+  MCP_IMPORT: 'mcp:import',
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
 } as const;

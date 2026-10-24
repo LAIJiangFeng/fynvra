@@ -5,42 +5,20 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useMcpStore } from '@/stores/mcp';
-import type { McpImportResult } from '../../../preload/domains/mcp';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { McpDialog, type McpEditing, TRANSPORT_LABELS } from './McpDialog';
+import { McpImportDialog } from './McpImportDialog';
 import { draftFromServer, emptyMcpDraft, type McpDraft } from './mcpForm';
 
 type Status = { tone: 'error' | 'success'; text: string };
-
-/** 导入结果 → 一句话：新增了谁、跳过几个、哪个文件读失败。 */
-function describeImport(result: Extract<McpImportResult, { ok: true }>): Status {
-  const failed = result.sources.filter((source) => source.status === 'error');
-  const found = result.sources.some((source) => source.status === 'found');
-  const parts: string[] = [];
-  if (!found && failed.length === 0) {
-    parts.push('没有找到 Claude Code 配置（~/.claude.json、~/.claude/settings.json）');
-  } else if (result.added.length > 0) {
-    parts.push(`已导入 ${result.added.length} 个：${result.added.map((s) => s.name).join('、')}`);
-  } else {
-    parts.push('没有新的服务器可导入');
-  }
-  if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 个重复`);
-  for (const source of failed)
-    parts.push(`读取 ${source.file} 失败：${source.error ?? '未知错误'}`);
-  return {
-    tone: failed.length > 0 && result.added.length === 0 ? 'error' : 'success',
-    text: parts.join('；'),
-  };
-}
 
 export function McpSettings() {
   const servers = useMcpStore((state) => state.servers);
   const loaded = useMcpStore((state) => state.loaded);
   const error = useMcpStore((state) => state.error);
-  const importClaude = useMcpStore((state) => state.importClaude);
   const [editing, setEditing] = useState<McpEditing | null>(null);
+  const [importSession, setImportSession] = useState<number | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
-  const [importing, setImporting] = useState(false);
   const sessions = useRef(0);
 
   const edit = (draft: McpDraft) => {
@@ -48,11 +26,10 @@ export function McpSettings() {
     setEditing({ key: sessions.current, draft });
   };
 
-  const runImport = async () => {
-    setImporting(true);
-    const result = await importClaude();
-    setImporting(false);
-    setStatus(result.ok ? describeImport(result) : { tone: 'error', text: result.error });
+  const openImport = () => {
+    sessions.current += 1;
+    setStatus(null);
+    setImportSession(sessions.current);
   };
 
   return (
@@ -61,8 +38,9 @@ export function McpSettings() {
         title="MCP 服务器"
         description="角色从这里挑选 MCP 服务器。环境变量与 Header 的值只保存在本机，界面上只显示键名。"
       >
-        <Button size="sm" variant="outline" disabled={importing} onClick={() => void runImport()}>
-          <HardDriveDownload />从 Claude Code 导入
+        <Button size="sm" variant="outline" onClick={openImport}>
+          <HardDriveDownload />
+          从本机导入…
         </Button>
         <Button size="sm" onClick={() => edit(emptyMcpDraft())}>
           <Plus />
@@ -81,10 +59,11 @@ export function McpSettings() {
         <EmptyState
           icon={Plug}
           title="还没有 MCP 服务器"
-          description="手动添加，或导入本机 Claude Code 的配置（按命令+参数 / URL 去重）。"
+          description="手动添加，或从本机的 Claude Code、Codex、Grok CLI、Gemini CLI、Cursor、VS Code、OpenCode、CC Switch 导入（按命令 + 参数 / URL 去重）。"
         >
-          <Button size="sm" variant="outline" disabled={importing} onClick={() => void runImport()}>
-            <HardDriveDownload />从 Claude Code 导入
+          <Button size="sm" variant="outline" onClick={openImport}>
+            <HardDriveDownload />
+            从本机导入
           </Button>
         </EmptyState>
       ) : (
@@ -101,6 +80,11 @@ export function McpSettings() {
       )}
 
       <McpDialog editing={editing} onClose={() => setEditing(null)} />
+      <McpImportDialog
+        session={importSession}
+        onClose={() => setImportSession(null)}
+        onImported={setStatus}
+      />
     </section>
   );
 }

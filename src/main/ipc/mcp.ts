@@ -3,8 +3,15 @@ import { join } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { app, ipcMain } from 'electron';
-import type { McpImportResult, McpListResult, McpSaveResult } from '../../preload/domains/mcp';
+import type {
+  McpImportCandidatesResult,
+  McpImportResult,
+  McpListResult,
+  McpSaveResult,
+  McpScanImportsResult,
+} from '../../preload/domains/mcp';
 import { importClaudeMcp } from '../services/mcp/claudeImport';
+import { createMcpImporter, type McpImporter } from '../services/mcp/import/mcpImporter';
 import { createMcpRegistry, type McpRegistry, toMcpServerView } from '../services/mcp/mcpRegistry';
 import { parseMcpUpsert } from '../services/mcp/parseMcpInput';
 import { isRegistryId } from '../services/providers/jsonRegistry';
@@ -16,6 +23,14 @@ let registry: McpRegistry | null = null;
 export function getMcpRegistry(): McpRegistry {
   registry ??= createMcpRegistry({ filePath: join(app.getPath('userData'), 'mcp.json') });
   return registry;
+}
+
+let importer: McpImporter | null = null;
+
+/** 「从本机导入」：最近一次扫描的结果（含 env / headers 明文）只缓存在这里。 */
+function getMcpImporter(): McpImporter {
+  importer ??= createMcpImporter({ registry: getMcpRegistry() });
+  return importer;
 }
 
 export function registerMcpHandlers(): void {
@@ -66,13 +81,32 @@ export function registerMcpHandlers(): void {
     }
   });
 
-  // 不接收参数：读哪两个文件由 Main 决定
+  // 只读扫描本机配置；返回脱敏候选，含 env / headers 的结果留在 Main 的缓存里
+  ipcMain.handle(
+    IPC_CHANNELS.MCP_SCAN_IMPORTS,
+    (_event, raw: unknown): Promise<McpScanImportsResult> => getMcpImporter().scan(raw)
+  );
+
+  // 只收候选 id：env / headers 从扫描缓存取，不经过 Renderer
+  ipcMain.handle(
+    IPC_CHANNELS.MCP_IMPORT,
+    async (_event, raw: unknown): Promise<McpImportCandidatesResult> => {
+      const result = await getMcpImporter().import(raw);
+      if (result.ok && result.imported.length > 0) sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
+      return result;
+    }
+  );
+
+  // 旧通道（界面已改用上面两个）：不接收参数，读哪两个文件由 Main 决定
   ipcMain.handle(IPC_CHANNELS.MCP_IMPORT_CLAUDE, async (): Promise<McpImportResult> => {
     try {
       const { servers, sources } = await importClaudeMcp({ home: homedir() });
-      const { added, skipped } = await getMcpRegistry().addMany(servers);
+      const outcomes = await getMcpRegistry().addMany(servers);
+      const added = outcomes.flatMap((outcome) =>
+        outcome.ok ? [toMcpServerView(outcome.server)] : []
+      );
       if (added.length > 0) sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
-      return { ok: true, added: added.map(toMcpServerView), skipped, sources };
+      return { ok: true, added, skipped: outcomes.length - added.length, sources };
     } catch (error) {
       return { ok: false, error: `导入失败：${errorMessage(error)}` };
     }

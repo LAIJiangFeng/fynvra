@@ -22,7 +22,7 @@ const TRANSPORTS: Readonly<Record<McpServerEntry['transport'], true>> = {
   sse: true,
   http: true,
 };
-const MAX_NAME_LENGTH = 80;
+export const MAX_NAME_LENGTH = 80;
 const MAX_COMMAND_LENGTH = 1024;
 const MAX_ARGS = 200;
 const MAX_ARG_LENGTH = 8192;

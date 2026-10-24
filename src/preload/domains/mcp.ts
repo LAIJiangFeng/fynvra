@@ -1,5 +1,10 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { McpServerEntry, McpServerEntryView } from '@shared/types/llm';
+import type {
+  McpImportCandidate,
+  McpImportSource,
+  McpServerEntry,
+  McpServerEntryView,
+} from '@shared/types/llm';
 
 /** env / headers 的一项。value 缺省表示沿用已保存的值（编辑时 Renderer 拿不到明文）。 */
 export interface SecretFieldInput {
@@ -25,7 +30,8 @@ export interface McpUpsertInput {
   headers?: SecretFieldInput[];
 }
 
-export interface McpImportSource {
+/** mcp:import-claude 读的一个文件的状态 */
+export interface McpImportFileStatus {
   /** 仅供展示 */
   file: string;
   status: 'found' | 'not-found' | 'error';
@@ -39,7 +45,27 @@ export type McpImportResult = IpcResult<{
   added: McpServerEntryView[];
   /** 与已登记或本次已导入的服务器重复（命令+参数 / URL 相同）而跳过的数量 */
   skipped: number;
-  sources: McpImportSource[];
+  sources: McpImportFileStatus[];
+}>;
+
+/** `mcp:scan-imports` 入参；sources 缺省扫描全部来源 */
+export interface McpScanImportsInput {
+  sources?: McpImportSource[];
+}
+export type McpScanImportsResult = IpcResult<{
+  candidates: McpImportCandidate[];
+  /** 读失败、格式不对、缺环境变量等，可直接展示；不含文件原文与 env / header 的值 */
+  warnings: string[];
+}>;
+/** 选了但没导入的候选及原因（如与已有服务器重复） */
+export interface McpImportSkipped {
+  id: string;
+  name: string;
+  reason: string;
+}
+export type McpImportCandidatesResult = IpcResult<{
+  imported: McpServerEntryView[];
+  skipped: McpImportSkipped[];
 }>;
 
 export interface McpApi {
@@ -50,6 +76,10 @@ export interface McpApi {
   toggle(input: { id: string; enabled: boolean }): Promise<McpSaveResult>;
   /** 导入 ~/.claude.json 与 ~/.claude/settings.json 的 mcpServers，按命令+参数 / URL 去重 */
   importClaude(): Promise<McpImportResult>;
+  /** 只读扫描本机 8 个工具的 MCP 配置；候选只有 env / header 的键名，含值的结果留在 Main 10 分钟 */
+  scanImports(input?: McpScanImportsInput): Promise<McpScanImportsResult>;
+  /** 导入最近一次扫描里的候选；只传候选 id，env / headers 由 Main 从扫描缓存取 */
+  importCandidates(input: { candidateIds: string[] }): Promise<McpImportCandidatesResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -64,6 +94,11 @@ export function createMcpApi(ipc: Invoker, subscribe: Subscribe): McpApi {
     remove: (id) => ipc.invoke(IPC_CHANNELS.MCP_REMOVE, id),
     toggle: (input) => ipc.invoke(IPC_CHANNELS.MCP_TOGGLE, input),
     importClaude: () => ipc.invoke(IPC_CHANNELS.MCP_IMPORT_CLAUDE),
+    scanImports: (input) =>
+      input
+        ? ipc.invoke(IPC_CHANNELS.MCP_SCAN_IMPORTS, input)
+        : ipc.invoke(IPC_CHANNELS.MCP_SCAN_IMPORTS),
+    importCandidates: (input) => ipc.invoke(IPC_CHANNELS.MCP_IMPORT, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.MCP_CHANGED, () => callback()),
   };
 }
