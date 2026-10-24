@@ -1,8 +1,9 @@
 {
   // Main / preload / shared 与全部测试（vitest 跑在 node 环境）。没有 DOM 类型。
+  // 不设 composite：经 paths 解析到的包源码、renderer 测试 import 的 renderer 源码都不在 include 里，
+  // composite 下会报 TS6307。typecheck 只用 tsc -p --noEmit，不走 tsc -b，用不到 composite。
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "composite": true,
     "paths": {
       "@shared/*": ["./src/shared/*"],
       "@fynvra/core": ["./packages/core/src/index.ts"],
