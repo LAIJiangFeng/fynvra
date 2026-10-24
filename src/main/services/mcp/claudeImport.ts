@@ -1,5 +1,5 @@
 import { asRecord, errorMessage } from '@shared/guards';
-import type { McpImportSource } from '../../../preload/domains/mcp';
+import type { McpImportFileStatus } from '../../../preload/domains/mcp';
 import { parseJsonc } from './import/jsonc';
 import { locateMcpSources, readTextIfExists } from './import/locate';
 import { claudeConfigServers } from './import/readers/claudeCode';
@@ -11,9 +11,9 @@ import type { ImportedMcpServer } from './import/readers/common';
 /** 依次读取 Claude 的两个配置文件；单个文件缺失或损坏只体现在它自己的 status 上。 */
 export async function importClaudeMcp(options: {
   home: string;
-}): Promise<{ servers: ImportedMcpServer[]; sources: McpImportSource[] }> {
+}): Promise<{ servers: ImportedMcpServer[]; sources: McpImportFileStatus[] }> {
   const servers: ImportedMcpServer[] = [];
-  const sources: McpImportSource[] = [];
+  const sources: McpImportFileStatus[] = [];
   const files = locateMcpSources({ home: options.home, env: {}, platform: process.platform })[
     'claude-code'
   ];
