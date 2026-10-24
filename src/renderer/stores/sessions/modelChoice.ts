@@ -4,19 +4,28 @@ import {
   type ModelProviderOption,
   pickThinkingLevel,
   type SessionModelRef,
+  THINKING_LEVEL_HINTS,
+  THINKING_LEVEL_LABELS,
 } from '@shared/types/chat';
+import type { ProviderApi } from '@shared/types/llm';
 
 // 新建会话弹层与模型选择器的选择逻辑（纯函数；不碰 store 与 DOM，便于在 node 环境测试）
 
-/** 与设置页角色编辑器的档位文字一致 */
-export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
-  off: '关闭',
-  minimal: '最少',
-  low: '低',
-  medium: '中',
-  high: '高',
-  xhigh: '最高',
-};
+/** 档位控件的一项：官方等级名，悬停显示中文说明 */
+export interface ThinkingChoice {
+  value: ThinkingLevel;
+  label: string;
+  hint: string;
+}
+
+/** 档位控件只渲染模型自己的档位（sessions:model-options 给的数组），顺序不变；角色编辑器也用它 */
+export function thinkingChoices(levels: readonly ThinkingLevel[]): ThinkingChoice[] {
+  return levels.map((level) => ({
+    value: level,
+    label: THINKING_LEVEL_LABELS[level],
+    hint: THINKING_LEVEL_HINTS[level],
+  }));
+}
 
 type ModelRef = Pick<SessionModelRef, 'providerId' | 'modelId'>;
 
@@ -102,7 +111,10 @@ export function filterModelOptions(
   });
 }
 
-/** 胶囊与状态栏上的文字：服务名 · 模型名 · 档位；选项里找不到（停用、还没读到）时退回 id */
+/**
+ * 胶囊与状态栏上的文字：服务名 · 模型名 · 档位；选项里找不到（停用、还没读到）时退回 id。
+ * 档位就写官方等级名本身（off 也不附中文，免得与「·」分隔的字段混在一起），中文说明放在悬停提示里。
+ */
 export function modelLabel(
   providers: readonly ModelProviderOption[],
   ref: ModelRef | undefined,
@@ -113,6 +125,26 @@ export function modelLabel(
   return {
     provider: found?.provider.name ?? ref.providerId,
     model: found?.model.name ?? ref.modelId,
-    ...(thinking ? { thinking: THINKING_LABELS[thinking] } : {}),
+    ...(thinking ? { thinking } : {}),
   };
+}
+
+/**
+ * 拉取面板里一个远程模型的档位（只有 sessions:model-options 已经描述过的才有）：本服务存过的就用它；
+ * 别的同协议服务存过、而且是按目录或按目录推断来的也能借——这两种与设置里的推理标记无关。
+ * 按协议兜底的（fallback）取决于那个服务的推理标记，不借；表单里改了协议时，本服务存的条目也不算。
+ */
+export function describedThinking(
+  providers: readonly ModelProviderOption[],
+  { api, modelId, providerId }: { api: ProviderApi; modelId: string; providerId?: string }
+): ModelOption | undefined {
+  const own = providers.find((provider) => provider.providerId === providerId);
+  const saved = own?.api === api ? own.models.find((model) => model.id === modelId) : undefined;
+  if (saved) return saved;
+  for (const provider of providers) {
+    if (provider.api !== api) continue;
+    const model = provider.models.find((candidate) => candidate.id === modelId);
+    if (model?.source && model.source !== 'fallback') return model;
+  }
+  return undefined;
 }

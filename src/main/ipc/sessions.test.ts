@@ -158,7 +158,7 @@ describe('sessions IPC', () => {
       {
         workspaceId: 'ws-1',
         roleId: 'worker',
-        model: { providerId: 'a', modelId: 'b', thinking: 'max' },
+        model: { providerId: 'a', modelId: 'b', thinking: 'ultra' },
       },
     ],
     [IPC_CHANNELS.SESSIONS_SET_MODEL, null],

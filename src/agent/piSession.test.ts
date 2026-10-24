@@ -132,6 +132,12 @@ describe('createPiSessionFactory model switch', () => {
     );
   });
 
+  it("hands pi's max level to pi when the model settles on it", async () => {
+    const { session, piSession } = await openWith();
+    await session.setModel({ ...modelB, modelId: 'gpt-6-sol', thinking: 'max' });
+    expect(piSession.setThinkingLevel).toHaveBeenCalledWith('max');
+  });
+
   it('reports the model the session uses when it opens and after every switch', async () => {
     const { session, onModelSelected } = await openWith();
     await session.setModel({ ...modelB, thinking: 'xhigh' });

@@ -24,7 +24,10 @@ const THINKING_LEVEL_SET: Record<ThinkingLevel, true> = {
   medium: true,
   high: true,
   xhigh: true,
+  max: true,
 };
+/** 档位的别名 → 档位：OpenAI 的 reasoning effort 把「关闭」叫 none */
+const THINKING_LEVEL_ALIASES: Readonly<Record<string, ThinkingLevel>> = { none: 'off' };
 const TASK_STATUS_SET: Record<TaskStatus, true> = {
   todo: true,
   'in-progress': true,
@@ -68,8 +71,15 @@ export const DISPATCH_OUTCOMES = membersOf(DISPATCH_OUTCOME_SET);
 export const isApprovalMode = memberGuard(APPROVAL_MODE_SET);
 /** `value` 是否为合法 {@link ToolPolicy}。 */
 export const isToolPolicy = memberGuard(TOOL_POLICY_SET);
-/** `value` 是否为合法 {@link ThinkingLevel}。 */
+/** `value` 是否为合法 {@link ThinkingLevel}。别名（`none`）不算，要接受别名用 {@link normalizeThinkingLevel}。 */
 export const isThinkingLevel = memberGuard(THINKING_LEVEL_SET);
+/** 外部输入的档位 → {@link ThinkingLevel}：合法档位原样返回，别名 `none` 归一为 `off`，其他（含大小写不同）为 undefined。 */
+export function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  if (isThinkingLevel(value)) return value;
+  return typeof value === 'string' && Object.hasOwn(THINKING_LEVEL_ALIASES, value)
+    ? THINKING_LEVEL_ALIASES[value]
+    : undefined;
+}
 /** `value` 是否为合法 {@link TaskStatus}。 */
 export const isTaskStatus = memberGuard(TASK_STATUS_SET);
 /** `value` 是否为合法 {@link MessageType}。 */

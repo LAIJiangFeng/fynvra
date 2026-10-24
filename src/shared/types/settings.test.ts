@@ -138,7 +138,7 @@ describe('parsePreferences', () => {
   it('lastModelByWorkspace 逐条丢弃非法项，全部非法时去掉整个字段', () => {
     const parsed = parsePreferences({
       lastModelByWorkspace: {
-        'ws-1': { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'max' },
+        'ws-1': { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'ultra' },
         'ws-2': { providerId: '', modelId: 'gpt-5.5' },
         'ws-3': { providerId: 'openai' },
         '../ws': { providerId: 'openai', modelId: 'gpt-5.5' },

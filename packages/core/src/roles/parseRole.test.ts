@@ -18,6 +18,11 @@ describe('parseRole', () => {
     expect(parseRole(valid)).toEqual({ ok: true, role: valid });
   });
 
+  it('思考档位可以是 pi 的 max', () => {
+    const model = { providerId: 'anthropic', modelId: 'claude-fable-5-1', thinking: 'max' };
+    expect(parseRole({ ...valid, model })).toEqual({ ok: true, role: { ...valid, model } });
+  });
+
   it('只保留已知字段，丢弃多余键', () => {
     const result = parseRole({ ...valid, extra: 1 });
     expect(result.ok && Object.keys(result.role).sort()).toEqual(Object.keys(valid).sort());
@@ -93,7 +98,7 @@ describe('parseRole', () => {
     ],
     [
       'model.thinking 非法',
-      { ...valid, model: { providerId: 'p', modelId: 'm', thinking: 'max' } },
+      { ...valid, model: { providerId: 'p', modelId: 'm', thinking: 'ultra' } },
       'role.model.thinking',
     ],
     ['skillIds 非数组', { ...valid, skillIds: 'tdd' }, 'role.skillIds'],

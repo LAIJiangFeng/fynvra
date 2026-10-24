@@ -1,7 +1,13 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
-import type { ModelProviderOption, SessionModelRef } from '@shared/types/chat';
+import {
+  type ModelProviderOption,
+  type SessionModelRef,
+  THINKING_LEVEL_HINTS,
+  type ThinkingSource,
+  thinkingSourceNote,
+} from '@shared/types/chat';
 import { Check, ChevronsUpDown, Cpu, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,7 +37,7 @@ import {
   findModel,
   modelKey,
   modelLabel,
-  THINKING_LABELS,
+  thinkingChoices,
 } from '@/stores/sessions/modelChoice';
 
 /**
@@ -106,7 +112,13 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         render={
           <button
             type="button"
-            title={busy ? '会话正在运行，等本轮结束再切换模型' : '切换模型'}
+            title={
+              busy
+                ? '会话正在运行，等本轮结束再切换模型'
+                : thinking
+                  ? `切换模型（思考档位 ${thinking}：${THINKING_LEVEL_HINTS[thinking]}）`
+                  : '切换模型'
+            }
             className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground"
           />
         }
@@ -182,14 +194,17 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
           )}
         </div>
         {current && current.model.thinkingLevels.length > 0 && (
-          <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
-            <span className="shrink-0 text-muted-foreground text-xs">思考档位</span>
-            <ThinkingLevelPicker
-              levels={current.model.thinkingLevels}
-              value={thinking}
-              disabled={busy}
-              onChange={(level) => pick(chooseModel(current, level))}
-            />
+          <div className="grid shrink-0 gap-1 border-t px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-muted-foreground text-xs">思考档位</span>
+              <ThinkingLevelPicker
+                levels={current.model.thinkingLevels}
+                value={thinking}
+                disabled={busy}
+                onChange={(level) => pick(chooseModel(current, level))}
+              />
+            </div>
+            <ThinkingSourceNote source={current.model.source} />
           </div>
         )}
         {(busy || optionsError) && (
@@ -202,7 +217,13 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels） */
+/** 档位旁的小字：推断来的写「按 <id> 推断」，兜底的说明目录里没有；目录里有的不显示 */
+export function ThinkingSourceNote({ source }: { source: ThinkingSource | undefined }) {
+  const note = thinkingSourceNote(source);
+  return note ? <p className="text-[11px] text-muted-foreground">{note}</p> : null;
+}
+
+/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels），官方等级名，悬停显示中文说明 */
 export function ThinkingLevelPicker({
   levels,
   value,
@@ -224,13 +245,14 @@ export function ThinkingLevelPicker({
       }}
       className="flex min-w-0 flex-wrap gap-1"
     >
-      {levels.map((level) => (
+      {thinkingChoices(levels).map((choice) => (
         <Radio.Root
-          key={level}
-          value={level}
+          key={choice.value}
+          value={choice.value}
+          title={choice.hint}
           className="cursor-default select-none rounded-md border px-2 py-0.5 text-xs outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[checked]:border-primary data-[checked]:bg-primary data-[checked]:text-primary-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
         >
-          {THINKING_LABELS[level]}
+          {choice.label}
         </Radio.Root>
       ))}
     </RadioGroup>

@@ -31,9 +31,10 @@ export interface ProvidersState {
   /** 拉取服务端的模型列表（不写盘，不进 store）：已保存的服务带 id，表单里的协议 / 地址 / 新 key 放在 draft */
   listRemoteModels(input: ListRemoteModelsInput): Promise<ListRemoteModelsResult>;
   /**
-   * 可用服务（启用、填了 key）里每个模型的思考档位：sessions:model-options 经 worker 按 pi 内置目录算出，
-   * 目录外的模型按 reasoning 标记。`providers` 是发请求时的服务列表，判断推理由不由目录决定要用算档位时的标记。
-   * 角色编辑器按它列档位，服务弹窗按它判断；null 表示还没读到，读过之后服务列表一变就跟着重读。
+   * 可用服务（启用、填了 key）里每个模型的思考档位与来源：sessions:model-options 经 worker 按 pi 内置目录算出
+   * （含 max），目录外的按目录里最接近的模型推断，推断不出才看 reasoning 标记按协议兜底。`providers` 是发请求时
+   * 的服务列表，判断推理由不由目录决定要用算档位时的标记。角色编辑器按它列档位，服务弹窗按它判断，
+   * 拉取面板按它标「推理」徽标；null 表示还没读到，读过之后服务列表一变就跟着重读。
    */
   modelOptions: { options: ModelProviderOption[]; providers: ModelProviderView[] } | null;
   /** 最近一次读档位失败的原因；之前读到的 modelOptions 保留 */

@@ -1,6 +1,10 @@
 import type { Role, ThinkingLevel } from '@fynvra/core';
-import { type ModelProviderOption, pickThinkingLevel } from '@shared/types/chat';
-import { findModel, THINKING_LABELS } from '../../stores/sessions/modelChoice';
+import {
+  type ModelProviderOption,
+  pickThinkingLevel,
+  type ThinkingSource,
+} from '@shared/types/chat';
+import { findModel, type ThinkingChoice, thinkingChoices } from '../../stores/sessions/modelChoice';
 
 // 角色编辑器里模型与思考档位的规则（纯函数，在 node 下测试）。档位来自 sessions:model-options：
 // worker 按 pi 内置目录算出每个模型可选的档位，与新建会话、模型选择器用的是同一份。
@@ -13,12 +17,13 @@ export type RoleThinking =
   | { kind: 'follow-session' }
   /** 模型不支持推理：不显示档位控件，保存时去掉角色里的 thinking */
   | { kind: 'unsupported' }
-  /** 只列这个模型的档位；value 是生效的档位（角色的不在集合里就是模型的默认档位） */
+  /** 只列这个模型的档位；value 是生效的档位（角色的不在集合里就是模型的默认档位）；source 是档位的来源 */
   | {
       kind: 'levels';
       levels: ThinkingLevel[];
       value: ThinkingLevel;
       defaultThinking?: ThinkingLevel;
+      source?: ThinkingSource;
     }
   /** 读不到这个模型的档位：还在读、读失败，或服务停用 / 没填 key / 模型已删（不在 model-options 里） */
   | { kind: 'unknown'; reason: 'loading' | 'failed' | 'unavailable' };
@@ -41,6 +46,7 @@ export function roleThinking(
     levels: found.thinkingLevels,
     value,
     ...(found.defaultThinking ? { defaultThinking: found.defaultThinking } : {}),
+    ...(found.source ? { source: found.source } : {}),
   };
 }
 
@@ -83,13 +89,12 @@ export function normalizeRoleThinking(
   return { ...role, model };
 }
 
-/** 档位下拉的选项：文字与会话里一致，模型的默认档位标「默认」 */
+/** 档位下拉的选项：官方等级名与会话里一致，模型的默认档位标「默认」，悬停显示中文说明 */
 export function thinkingOptions(
   levels: readonly ThinkingLevel[],
   defaultThinking?: ThinkingLevel
-): { value: ThinkingLevel; label: string }[] {
-  return levels.map((level) => ({
-    value: level,
-    label: level === defaultThinking ? `${THINKING_LABELS[level]}（默认）` : THINKING_LABELS[level],
-  }));
+): ThinkingChoice[] {
+  return thinkingChoices(levels).map((choice) =>
+    choice.value === defaultThinking ? { ...choice, label: `${choice.label}（默认）` } : choice
+  );
 }

@@ -1,17 +1,18 @@
 import {
   type FynvraSessionEvent,
   type FynvraSessionEventBody,
-  isThinkingLevel,
+  normalizeThinkingLevel,
   parseRole,
   type Role,
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
-import type {
-  ApprovalDecision,
-  ApprovalKind,
-  ModelThinkingCapability,
-  SessionStatus,
+import {
+  type ApprovalDecision,
+  type ApprovalKind,
+  isThinkingSource,
+  type ModelThinkingCapability,
+  type SessionStatus,
 } from './chat';
 
 /**
@@ -36,11 +37,17 @@ export interface ResolvedModelSpec {
   apiKey?: string;
   modelId: string;
   thinking?: ThinkingLevel;
-  /** 设置里模型条目的 reasoning 标记：只对 pi 内置目录里没有的模型生效，目录里有的以目录为准 */
+  /**
+   * 设置里模型条目的 reasoning 标记：只对 pi 内置目录里没有、也推断不出的模型生效（按协议兜底）；
+   * 目录里有的、按目录推断出来的，以目录为准
+   */
   reasoning?: boolean;
 }
 
-/** describe-models 的一项：按协议与模型 id 在 pi 内置目录里找，目录里没有时按 reasoning 标记 */
+/**
+ * describe-models 的一项：按协议与模型 id 在 pi 内置目录里找；找不到就按目录里最接近的模型推断，
+ * 再找不到时按协议兜底（看 reasoning 标记）
+ */
 export interface ModelQuery {
   api: string;
   modelId: string;
@@ -405,14 +412,15 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     return null;
   }
   if (!isOptional(baseUrl, isNonEmptyString) || !isOptional(apiKey, isNonEmptyString)) return null;
-  if (!isOptional(thinking, isThinkingLevel) || !isOptional(reasoning, isBoolean)) return null;
+  const level = normalizeThinkingLevel(thinking);
+  if ((thinking !== undefined && !level) || !isOptional(reasoning, isBoolean)) return null;
   return {
     providerId,
     api,
     modelId,
     ...(baseUrl !== undefined ? { baseUrl: baseUrl as string } : {}),
     ...(apiKey !== undefined ? { apiKey: apiKey as string } : {}),
-    ...(thinking !== undefined ? { thinking: thinking as ThinkingLevel } : {}),
+    ...(level ? { thinking: level } : {}),
     ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
   };
 }
@@ -426,17 +434,29 @@ function parseModelQuery(raw: unknown): ModelQuery | null {
   return { api, modelId, ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}) };
 }
 
-/** 档位不重复、都是 fynvra 认识的；默认档位必须在可选集合里 */
+/**
+ * 档位都是 fynvra 认识的（含 max，别名 none 归一为 off）、归一后不重复；默认档位必须在可选集合里；
+ * 来源可缺省，有就得是 catalog / fallback / inferred:<id>
+ */
 function parseThinkingCapability(raw: unknown): ModelThinkingCapability | null {
   const record = asRecord(raw);
   if (!record || !Array.isArray(record.thinkingLevels)) return null;
-  const levels: unknown[] = record.thinkingLevels;
-  if (!levels.every(isThinkingLevel) || new Set(levels).size !== levels.length) return null;
-  const thinkingLevels = [...levels] as ThinkingLevel[];
-  const { defaultThinking } = record;
-  if (defaultThinking === undefined) return { thinkingLevels };
-  if (!isThinkingLevel(defaultThinking) || !thinkingLevels.includes(defaultThinking)) return null;
-  return { thinkingLevels, defaultThinking };
+  const thinkingLevels = parseList(
+    record.thinkingLevels,
+    (level) => normalizeThinkingLevel(level) ?? null
+  );
+  if (!thinkingLevels || new Set(thinkingLevels).size !== thinkingLevels.length) return null;
+  const capability: ModelThinkingCapability = { thinkingLevels };
+  if (record.defaultThinking !== undefined) {
+    const defaultThinking = normalizeThinkingLevel(record.defaultThinking);
+    if (!defaultThinking || !thinkingLevels.includes(defaultThinking)) return null;
+    capability.defaultThinking = defaultThinking;
+  }
+  if (record.source !== undefined) {
+    if (!isThinkingSource(record.source)) return null;
+    capability.source = record.source;
+  }
+  return capability;
 }
 
 function parseModelsDescribedResult(raw: unknown): ModelsDescribedResult | null {
