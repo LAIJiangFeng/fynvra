@@ -54,6 +54,10 @@ export const IPC_CHANNELS = {
   PROVIDERS_REMOVE: 'providers:remove',
   /** 用已保存的 key 发一个最小请求（列模型）验证连通性；只传 id */
   PROVIDERS_TEST: 'providers:test',
+  /** 只读扫描本机 Claude Code / Codex / CC Switch 的配置，返回脱敏候选；含 key 的结果在 Main 缓存 10 分钟 */
+  PROVIDERS_SCAN_IMPORTS: 'providers:scan-imports',
+  /** 按候选 id 导入最近一次扫描的结果；key 从 Main 的缓存取，不经过 Renderer */
+  PROVIDERS_IMPORT: 'providers:import',
   /** Main → Renderer：模型服务列表已变更 */
   PROVIDERS_CHANGED: 'providers:changed',
 

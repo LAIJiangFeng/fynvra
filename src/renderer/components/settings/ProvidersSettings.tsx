@@ -1,6 +1,6 @@
 import { MODEL_CATALOG, providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelProviderView } from '@shared/types/llm';
-import { Boxes, ChevronDown, Pencil, Plus, Trash2, Zap } from 'lucide-react';
+import { Boxes, ChevronDown, HardDriveDownload, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,12 +8,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { useProvidersStore } from '@/stores/providers';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
+import { type ImportStatus, ProviderImportDialog } from './ProviderImportDialog';
 import { draftFromCatalog, draftFromProvider, type ProviderDraft } from './providerForm';
 
 const MAX_MODEL_BADGES = 4;
@@ -23,11 +25,19 @@ export function ProvidersSettings() {
   const loaded = useProvidersStore((state) => state.loaded);
   const error = useProvidersStore((state) => state.error);
   const [editing, setEditing] = useState<ProviderEditing | null>(null);
+  const [importSession, setImportSession] = useState<number | null>(null);
+  const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const sessions = useRef(0);
 
   const edit = (draft: ProviderDraft) => {
     sessions.current += 1;
     setEditing({ key: sessions.current, draft });
+  };
+
+  const openImport = () => {
+    sessions.current += 1;
+    setImportStatus(null);
+    setImportSession(sessions.current);
   };
 
   return (
@@ -48,18 +58,32 @@ export function ProvidersSettings() {
                 {entry.name}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={openImport}>
+              <HardDriveDownload />
+              从本机导入…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SectionHeader>
 
+      {importStatus && (
+        <InlineMessage tone={importStatus.tone} className="mb-3 break-all">
+          {importStatus.text}
+        </InlineMessage>
+      )}
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && providers.length === 0 ? (
         <EmptyState
           icon={Boxes}
           title="还没有模型服务"
-          description="添加 Anthropic、OpenAI、Google 或任意 OpenAI 兼容服务后，角色和会话才能选用模型。"
+          description="从本机的 Claude Code、Codex、CC Switch 导入，或添加 Anthropic、OpenAI、Google、任意 OpenAI 兼容服务，角色和会话才能选用模型。"
         >
+          <Button size="sm" onClick={openImport}>
+            <HardDriveDownload />
+            从本机导入
+          </Button>
           {MODEL_CATALOG.map((entry) => (
             <Button
               key={entry.id}
@@ -84,6 +108,11 @@ export function ProvidersSettings() {
       )}
 
       <ProviderDialog editing={editing} onClose={() => setEditing(null)} />
+      <ProviderImportDialog
+        session={importSession}
+        onClose={() => setImportSession(null)}
+        onImported={setImportStatus}
+      />
     </section>
   );
 }

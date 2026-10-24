@@ -1,5 +1,11 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { ModelEntry, ModelProviderView, ProviderApi } from '@shared/types/llm';
+import type {
+  ModelEntry,
+  ModelProviderView,
+  ProviderApi,
+  ProviderImportCandidate,
+  ProviderImportSource,
+} from '@shared/types/llm';
 
 /** `providers:upsert` 入参。apiKey 明文只在这一跳出现：缺省保留已保存的 key，`null` 清除。 */
 export interface ProviderUpsertInput {
@@ -18,6 +24,26 @@ export type ProviderListResult = IpcResult<{ providers: ModelProviderView[] }>;
 export type ProviderSaveResult = IpcResult<{ provider: ModelProviderView }>;
 export type ProviderTestResult = IpcResult<{ latencyMs: number; modelCount?: number }>;
 
+/** `providers:scan-imports` 入参；sources 缺省扫描全部来源 */
+export interface ProviderScanImportsInput {
+  sources?: ProviderImportSource[];
+}
+export type ProviderScanImportsResult = IpcResult<{
+  candidates: ProviderImportCandidate[];
+  /** 读失败、格式不对、缺环境变量等，可直接展示；不含文件原文 */
+  warnings: string[];
+}>;
+/** 选了但没导入的候选及原因（如与已有服务重复） */
+export interface ProviderImportSkipped {
+  id: string;
+  name: string;
+  reason: string;
+}
+export type ProviderImportResult = IpcResult<{
+  imported: ModelProviderView[];
+  skipped: ProviderImportSkipped[];
+}>;
+
 export interface ProvidersApi {
   /** key 已脱敏：只有 hasApiKey 与末 4 位 apiKeyHint */
   list(): Promise<ProviderListResult>;
@@ -25,6 +51,10 @@ export interface ProvidersApi {
   remove(id: string): Promise<IpcResult>;
   /** 用已保存的 key 发一个最小请求（列模型）验证 key 与地址 */
   test(id: string): Promise<ProviderTestResult>;
+  /** 只读扫描本机 Claude Code / Codex / CC Switch 的配置；候选已脱敏，含 key 的结果留在 Main 10 分钟 */
+  scanImports(input?: ProviderScanImportsInput): Promise<ProviderScanImportsResult>;
+  /** 导入最近一次扫描里的候选；只传候选 id，key 由 Main 从扫描缓存取 */
+  importCandidates(input: { candidateIds: string[] }): Promise<ProviderImportResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -41,6 +71,11 @@ export function createProvidersApi(ipc: Invoker, subscribe: Subscribe): Provider
     upsert: (input) => ipc.invoke(IPC_CHANNELS.PROVIDERS_UPSERT, input),
     remove: (id) => ipc.invoke(IPC_CHANNELS.PROVIDERS_REMOVE, id),
     test: (id) => ipc.invoke(IPC_CHANNELS.PROVIDERS_TEST, id),
+    scanImports: (input) =>
+      input
+        ? ipc.invoke(IPC_CHANNELS.PROVIDERS_SCAN_IMPORTS, input)
+        : ipc.invoke(IPC_CHANNELS.PROVIDERS_SCAN_IMPORTS),
+    importCandidates: (input) => ipc.invoke(IPC_CHANNELS.PROVIDERS_IMPORT, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PROVIDERS_CHANGED, () => callback()),
   };
 }
