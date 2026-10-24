@@ -1,6 +1,3 @@
-import * as fs from 'node:fs/promises';
-import { join } from 'node:path';
-import { JsonFileRoleStore } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
@@ -11,6 +8,7 @@ import {
   type OrchestrationRegistry,
 } from '../services/orchestration/registry';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { getRoleStore } from './roles';
 import { getWorkspaceService } from './workspaces';
 
 let registry: OrchestrationRegistry | null = null;
@@ -23,15 +21,15 @@ function listWorkspaces(): Workspace[] {
 
 /**
  * Main 内共享的编排注册表（每个工作区一个 OrchestrationService）；userData 在启动早期才确定，延迟创建。
+ * 角色与 roles IPC、agent host 共用 {@link getRoleStore} 单例。
  * agent-host 的接线见 `src/main/services/orchestration/README.md`。
  */
 export function getOrchestrationRegistry(): OrchestrationRegistry {
   if (registry === null) {
-    const userDataPath = app.getPath('userData');
     registry = createOrchestrationRegistry({
-      userDataPath,
+      userDataPath: app.getPath('userData'),
       listWorkspaces,
-      roles: new JsonFileRoleStore({ fs, dir: join(userDataPath, 'roles') }),
+      roles: getRoleStore(),
       notifyChanged: (workspaceId) =>
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId),
     });
