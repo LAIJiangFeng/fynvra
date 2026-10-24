@@ -21,6 +21,8 @@ export interface PiSessionFactoryOptions {
   resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
   /** 事件 listener 抛出的异常（被 subscribeNormalized 兜住，不打断 pi 的 jsonl 持久化） */
   onListenerError?: (error: unknown) => void;
+  /** 会话用上了一个模型（创建时、换模型后）：入口据此记一条日志，之后的请求都打到这个地址 */
+  onModelSelected?: (sessionId: string, model: ResolvedModel) => void;
 }
 
 /**
@@ -29,7 +31,7 @@ export interface PiSessionFactoryOptions {
  * 换模型直接调 pi 的 setModel / setThinkingLevel：pi 在 jsonl 里记一条模型切换，历史照常保留。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
-  return async ({ spec, host, workerHost, approval }) => {
+  return async ({ identity, spec, host, workerHost, approval }) => {
     const model = await options.resolveModel(withRoleThinking(spec.model, spec.role));
     const sessionManager = SessionManager.open(
       spec.sessionFile,
@@ -50,6 +52,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       settingsManager: createSessionSettings(spec.shellPath),
     });
     const { session } = created;
+    options.onModelSelected?.(identity.sessionId, model);
     return {
       warnings: created.warnings,
       subscribe: (listener) => {
@@ -69,6 +72,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（不支持推理时没有）
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
+        options.onModelSelected?.(identity.sessionId, resolved);
       },
       abort: () => session.abort(),
       isIdle: () => session.isIdle,

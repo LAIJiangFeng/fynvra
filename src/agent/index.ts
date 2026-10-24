@@ -35,12 +35,27 @@ const supervisor = new SessionSupervisor({
     resolveModel: async (spec) => (await modelRegistry()).resolve(spec),
     onListenerError: (error) =>
       log('error', `session event listener failed: ${errorMessage(error)}`),
+    // 只写协议、模型、档位与请求地址（去掉 userinfo 与 query），不写 key
+    onModelSelected: (sessionId, { model, thinking }) =>
+      log(
+        'info',
+        `session ${sessionId}: ${model.api} ${model.id}${thinking ? ` thinking=${thinking}` : ''} → ${endpointOf(model.baseUrl)}`
+      ),
   }),
   describeModels: async (queries) => {
     const registry = await modelRegistry();
     return queries.map((query) => registry.describe(query));
   },
 });
+
+function endpointOf(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '(invalid base URL)';
+  }
+}
 
 let exiting = false;
 function exit(): void {

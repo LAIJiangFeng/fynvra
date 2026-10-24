@@ -95,7 +95,12 @@ describe('createPiSessionFactory model switch', () => {
           ...(spec.thinking && spec.thinking !== 'minimal' ? { thinking: spec.thinking } : {}),
         }) as unknown as ResolvedModel
     );
-    const open = createPiSessionFactory({ agentDir: join(dir, 'agent'), resolveModel });
+    const onModelSelected = vi.fn();
+    const open = createPiSessionFactory({
+      agentDir: join(dir, 'agent'),
+      resolveModel,
+      onModelSelected,
+    });
     const session = await open({
       identity: { sessionId: 'session-1', generation: 1 },
       spec: {
@@ -111,7 +116,7 @@ describe('createPiSessionFactory model switch', () => {
       host: null,
       workerHost: null,
     });
-    return { session, piSession, resolveModel };
+    return { session, piSession, resolveModel, onModelSelected };
   }
 
   it('registers the new model and hands it to pi with the settled thinking level', async () => {
@@ -125,6 +130,15 @@ describe('createPiSessionFactory model switch', () => {
     expect(piSession.setModel.mock.invocationCallOrder[0]).toBeLessThan(
       piSession.setThinkingLevel.mock.invocationCallOrder[0] ?? 0
     );
+  });
+
+  it('reports the model the session uses when it opens and after every switch', async () => {
+    const { session, onModelSelected } = await openWith();
+    await session.setModel({ ...modelB, thinking: 'xhigh' });
+    expect(onModelSelected.mock.calls).toEqual([
+      ['session-1', { model: { id: 'claude-opus-5-5', provider: 'fynvra-a' } }],
+      ['session-1', { model: { id: 'gpt-5.5', provider: 'fynvra-b' }, thinking: 'xhigh' }],
+    ]);
   });
 
   it("falls back to the role's thinking level when the session has none, like a spawn does", async () => {
