@@ -5,7 +5,7 @@ import {
   providerApiLabel,
 } from '@shared/modelCatalog';
 import { Plus, X } from 'lucide-react';
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,7 +28,13 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useProvidersStore } from '@/stores/providers';
 import { Field, InlineMessage } from './common';
-import { addModel, draftToUpsertInput, type ProviderDraft } from './providerForm';
+import {
+  addModel,
+  draftToUpsertInput,
+  type ProviderDraft,
+  reasoningControl,
+  setModelReasoning,
+} from './providerForm';
 
 const API_ITEMS = PROVIDER_APIS.map((api) => ({ value: api, label: providerApiLabel(api) }));
 
@@ -66,6 +72,8 @@ export function ProviderDialog({
 
 function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () => void }) {
   const upsert = useProvidersStore((state) => state.upsert);
+  const described = useProvidersStore((state) => state.modelOptions);
+  const loadModelOptions = useProvidersStore((state) => state.loadModelOptions);
   const [draft, setDraft] = useState(initial);
   const [modelInput, setModelInput] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +81,11 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
   const id = useId();
   const update = (patch: Partial<ProviderDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
+
+  // 已保存模型的档位：判断「推理」由内置目录决定还是由开关决定
+  useEffect(() => {
+    void loadModelOptions();
+  }, [loadModelOptions]);
 
   const addModelFromInput = () => {
     const result = addModel(draft.models, modelInput);
@@ -196,32 +209,63 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
           <span className="text-muted-foreground text-xs">{draft.models.length} 个</span>
         </div>
         <ul className="max-h-44 divide-y overflow-y-auto rounded-md border">
-          {draft.models.map((model) => (
-            <li key={model.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">
-                {model.name}
-                {model.name !== model.id && (
-                  <span className="ml-2 text-muted-foreground text-xs">{model.id}</span>
+          {draft.models.map((model) => {
+            const control = reasoningControl(draft.api, model.id, described, initial.id);
+            const switchId = `${id}-reasoning-${model.id}`;
+            return (
+              <li key={model.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                <span className="min-w-0 flex-1 truncate">
+                  {model.name}
+                  {model.name !== model.id && (
+                    <span className="ml-2 text-muted-foreground text-xs">{model.id}</span>
+                  )}
+                </span>
+                {control.kind === 'catalog' ? (
+                  <Badge
+                    variant="outline"
+                    title="由内置目录决定"
+                    className={control.reasoning ? undefined : 'opacity-60'}
+                  >
+                    {control.reasoning ? '推理' : '不推理'}
+                  </Badge>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <Switch
+                      id={switchId}
+                      aria-label={`推理：${model.id}`}
+                      checked={model.reasoning === true}
+                      onCheckedChange={(on) =>
+                        update({ models: setModelReasoning(draft.models, model.id, on) })
+                      }
+                    />
+                    <label htmlFor={switchId} className="text-muted-foreground text-xs">
+                      推理
+                    </label>
+                  </span>
                 )}
-              </span>
-              {model.reasoning && <Badge variant="outline">推理</Badge>}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`移除模型 ${model.id}`}
-                onClick={() => update({ models: draft.models.filter((m) => m.id !== model.id) })}
-              >
-                <X />
-              </Button>
-            </li>
-          ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`移除模型 ${model.id}`}
+                  onClick={() => update({ models: draft.models.filter((m) => m.id !== model.id) })}
+                >
+                  <X />
+                </Button>
+              </li>
+            );
+          })}
           {draft.models.length === 0 && (
             <li className="px-3 py-3 text-center text-muted-foreground text-xs">
               还没有模型：在下面输入模型 id 添加
             </li>
           )}
         </ul>
+        {draft.models.length > 0 && (
+          <p className="text-muted-foreground text-xs">
+            带徽标的模型由内置目录决定是否推理；其他模型用「推理」开关标记，打开后会话里可选思考档位。
+          </p>
+        )}
         <div className="flex gap-2">
           <Input
             aria-label="要添加的模型 id"

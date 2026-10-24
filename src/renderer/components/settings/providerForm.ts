@@ -1,4 +1,5 @@
-import type { CatalogProvider } from '@shared/modelCatalog';
+import { type CatalogProvider, MODEL_CATALOG } from '@shared/modelCatalog';
+import type { ModelProviderOption } from '@shared/types/chat';
 import type { ModelEntry, ModelProviderView, ProviderApi } from '@shared/types/llm';
 import type { ProviderUpsertInput } from '../../../preload/domains/providers';
 
@@ -92,6 +93,72 @@ export function addModel(
   if (/\s/.test(id)) return { ok: false, error: '模型 id 不能包含空白' };
   if (models.some((model) => model.id === id)) return { ok: false, error: `已经有模型 ${id}` };
   return { ok: true, models: [...models, { id, name: id }] };
+}
+
+/** 打开 / 关闭目录外模型的推理标记；关闭时去掉字段（worker 只认 `reasoning === true`）。 */
+export function setModelReasoning(
+  models: readonly ModelEntry[],
+  id: string,
+  on: boolean
+): ModelEntry[] {
+  return models.map((model) => {
+    if (model.id !== id) return model;
+    const { reasoning: _omit, ...rest } = model;
+    return on ? { ...rest, reasoning: true } : rest;
+  });
+}
+
+/** sessions:model-options 的回答，连同发请求时的服务列表（档位按其中的 reasoning 标记算出） */
+export interface DescribedModels {
+  options: readonly ModelProviderOption[];
+  providers: readonly ModelProviderView[];
+}
+
+/** 模型行的「推理」：由内置目录决定（只读徽标），或由设置里的标记决定（开关） */
+export type ReasoningControl = { kind: 'catalog'; reasoning: boolean } | { kind: 'switch' };
+
+/**
+ * worker 对 pi 内置目录里有的模型（同协议同 id）只认目录，设置里的 reasoning 标记只对目录外的模型生效。
+ * Renderer 不加载 pi，从两处推断「由内置目录决定」：
+ * 1. 设置页的模板目录（MODEL_CATALOG，元数据取自 pi 目录）里有同协议同 id 的模型；
+ * 2. 已保存的模型：model-options 的档位与算档位时的标记对不上。目录外的模型有档位当且仅当标了推理，
+ *    所以没标却有档位、标了却没有档位，只能是目录在决定。
+ * 推断不出的按目录外处理，给开关（目录里的非推理模型没标推理时分辨不出来，也给开关，打开不起作用）。
+ * `savedProviderId`：编辑已保存的服务时它的 id；表单改了协议、模型是新加的，就没有档位可比。
+ */
+export function reasoningControl(
+  api: ProviderApi,
+  modelId: string,
+  described: DescribedModels | null,
+  savedProviderId: string | undefined
+): ReasoningControl {
+  const template = MODEL_CATALOG.filter((entry) => entry.api === api)
+    .flatMap((entry) => entry.models)
+    .find((model) => model.id === modelId);
+  const compared = describedModel(described, savedProviderId, api, modelId);
+  if (compared && (template || compared.reasoning !== compared.flagged)) {
+    return { kind: 'catalog', reasoning: compared.reasoning };
+  }
+  if (template) return { kind: 'catalog', reasoning: template.reasoning === true };
+  return { kind: 'switch' };
+}
+
+/** 已保存模型在 model-options 里有没有档位，以及算档位时它标没标推理 */
+function describedModel(
+  described: DescribedModels | null,
+  providerId: string | undefined,
+  api: ProviderApi,
+  modelId: string
+): { reasoning: boolean; flagged: boolean } | undefined {
+  if (!described || !providerId) return undefined;
+  const provider = described.providers.find((view) => view.id === providerId);
+  const entry =
+    provider?.api === api ? provider.models.find((model) => model.id === modelId) : undefined;
+  const option = described.options
+    .find((candidate) => candidate.providerId === providerId)
+    ?.models.find((model) => model.id === modelId);
+  if (!entry || !option) return undefined;
+  return { reasoning: option.thinkingLevels.length > 0, flagged: entry.reasoning === true };
 }
 
 function isHttpUrl(value: string): boolean {
