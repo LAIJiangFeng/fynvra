@@ -27,6 +27,7 @@ function session(patch: Partial<StoredSession> = {}): StoredSession {
     status: 'idle',
     createdAt: 1_000,
     updatedAt: 1_000,
+    approvalMode: 'auto-edits',
     ...patch,
   };
 }
@@ -77,7 +78,8 @@ describe('parseSessionsFile', () => {
     const parsed = parseSessionsFile({
       version: 1,
       sessions: [
-        { ...valid, apiKey: 'sk-should-not-survive' },
+        // 分支是 Main 每次现读的，不落盘：磁盘上有也丢掉
+        { ...valid, apiKey: 'sk-should-not-survive', branch: 'main' },
         { ...valid, title: 'duplicate id' },
         session({ id: '../evil' }),
         session({ id: 'no-role', roleId: 'Not A Slug' }),
@@ -110,6 +112,36 @@ describe('parseSessionsFile', () => {
       thinking,
       { ...extraModelField, model: bare },
       { ...unknownLevel, model: bare },
+    ]);
+  });
+
+  it('keeps the approval mode the session was switched to', () => {
+    const parsed = parseSessionsFile({
+      sessions: [
+        session({ id: 'a', roleId: 'worker', approvalMode: 'full' }),
+        session({ id: 'b', roleId: 'orchestrator', approvalMode: 'supervised' }),
+      ],
+    });
+    expect(parsed.map((entry) => entry.approvalMode)).toEqual(['full', 'supervised']);
+  });
+
+  it("gives records without a valid approval mode the built-in role's mode, other roles supervised", () => {
+    const { approvalMode: _none, ...older } = session();
+    const parsed = parseSessionsFile({
+      sessions: [
+        { ...older, id: 'coordinator', roleId: 'orchestrator' },
+        { ...older, id: 'worker', roleId: 'worker' },
+        // 自定义角色的档位要读角色文件才知道：fail-closed，按全程审批，用户可在输入框里切
+        { ...older, id: 'custom', roleId: 'tester' },
+        // 不认识的档位（如更新版本写的）只丢档位，不丢会话
+        { ...older, id: 'unknown', roleId: 'worker', approvalMode: 'yolo' },
+      ],
+    });
+    expect(parsed.map((entry) => [entry.id, entry.approvalMode])).toEqual([
+      ['coordinator', 'full'],
+      ['worker', 'auto-edits'],
+      ['custom', 'supervised'],
+      ['unknown', 'auto-edits'],
     ]);
   });
 

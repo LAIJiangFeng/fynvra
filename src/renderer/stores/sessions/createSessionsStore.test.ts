@@ -44,6 +44,7 @@ function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummar
     status: 'idle',
     createdAt: 1,
     updatedAt: 1,
+    approvalMode: 'auto-edits',
     ...patch,
   };
 }

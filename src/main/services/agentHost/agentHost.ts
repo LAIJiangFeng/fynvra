@@ -699,6 +699,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model: sessionModelOf(resolved.ref, requested?.thinking),
+        // 按派出的角色自己的档位，不继承主 agent 会话的
+        approvalMode: role.approvalMode,
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -774,6 +776,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model,
+        approvalMode: role.approvalMode,
         autoTitle: true,
       };
       deps.store.put(stored);

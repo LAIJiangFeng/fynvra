@@ -1,4 +1,4 @@
-import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
+import { type FynvraSessionEvent, type FynvraSessionEventBody, getBuiltinRole } from '@fynvra/core';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -446,6 +446,8 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         createdAt: time,
         updatedAt: time,
         model: input.model ?? MOCK_MODEL,
+        // 与 Main 相同：取角色的档位（mock 只认内置角色，其余按全程审批）
+        approvalMode: getBuiltinRole(input.roleId)?.approvalMode ?? 'supervised',
       };
       const session: MockSession = {
         summary,

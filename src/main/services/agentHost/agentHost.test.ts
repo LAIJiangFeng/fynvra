@@ -147,10 +147,51 @@ describe('createAgentHost sessions', () => {
       createdAt: 1_000,
       updatedAt: 1_000,
       model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5' },
+      approvalMode: 'auto-edits',
     });
     expect(env.host.list('ws-1')).toEqual([session]);
     expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toEqual([['ws-1']]);
     expect(env.sent()).toEqual([]);
+  });
+
+  it("records the role's approval mode; a dispatched worker takes its own role's, not the orchestrator's", async () => {
+    const careful: Role = { ...tester, id: 'careful', name: 'Careful', approvalMode: 'supervised' };
+    const env = setup({
+      roles: {
+        get: async (id) => getBuiltinRole(id) ?? [tester, careful].find((role) => role.id === id),
+        list: async () => [...BUILTIN_ROLES, tester, careful],
+      },
+    });
+    const coordinator = await createSession(env, 'orchestrator');
+    expect(coordinator.approvalMode).toBe('full');
+    expect((await createSession(env, 'careful')).approvalMode).toBe('supervised');
+
+    env.host.setCoordinatorLookup(() => coordinator.id);
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'tester',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const worker = env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    expect(worker).toMatchObject({ parentSessionId: coordinator.id, approvalMode: 'auto-edits' });
+    // 落盘的也是它
+    expect(env.store.flush()).toBe(true);
+    const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
+    expect(
+      file.sessions.map((session: { roleId: string; approvalMode: string }) => [
+        session.roleId,
+        session.approvalMode,
+      ])
+    ).toEqual([
+      ['orchestrator', 'full'],
+      ['careful', 'supervised'],
+      ['tester', 'auto-edits'],
+    ]);
   });
 
   it('keeps the settings model reference on the session and resolves it again on spawn', async () => {

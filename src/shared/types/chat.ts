@@ -29,6 +29,10 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;
+  /** 审批档位：创建时取角色的值，之后是会话自己的设置（`sessions:set-approval-mode`，运行中也能切） */
+  approvalMode: ApprovalMode;
+  /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
+  branch?: string;
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {

@@ -1,6 +1,12 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isThinkingLevel, isValidRoleId } from '@fynvra/core';
+import {
+  type ApprovalMode,
+  getBuiltinRole,
+  isApprovalMode,
+  isThinkingLevel,
+  isValidRoleId,
+} from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '@shared/guards';
 import { isSessionStatus } from '@shared/types/agent';
 import type { SessionStatus, SessionSummary } from '@shared/types/chat';
@@ -9,8 +15,11 @@ import { parseWorkspaceId } from '@shared/types/workspace';
 export const SESSIONS_FILE_VERSION = 1;
 export const SESSIONS_WRITE_DEBOUNCE_MS = 300;
 
-/** sessions.json 里的一条记录：SessionSummary 加 Main 内部字段（不经 IPC 暴露） */
-export interface StoredSession extends SessionSummary {
+/**
+ * sessions.json 里的一条记录：SessionSummary 加 Main 内部字段（不经 IPC 暴露）。
+ * 分支不在记录里：每次由 Main 读 git 现给。
+ */
+export interface StoredSession extends Omit<SessionSummary, 'branch'> {
   /** 标题仍是创建时的默认值：第一条 prompt 到达时换成它的摘要 */
   autoTitle?: boolean;
 }
@@ -156,6 +165,7 @@ function parseStoredSession(raw: unknown): StoredSession | null {
     status: restoredStatus(status),
     createdAt: createdAt as number,
     updatedAt: updatedAt as number,
+    approvalMode: storedApprovalMode(record.approvalMode, roleId),
   };
   for (const key of ['worktreeId', 'parentSessionId', 'dispatchId'] as const) {
     const value = record[key];
@@ -180,6 +190,15 @@ function parseStoredSession(raw: unknown): StoredSession | null {
 
 function restoredStatus(status: SessionStatus): SessionStatus {
   return status === 'running' || status === 'waiting-approval' ? 'idle' : status;
+}
+
+/**
+ * 早于会话级审批档位的记录没有这个字段（当时每次 spawn 都取角色的档位）。内置角色的档位是固定的，照取；
+ * 自定义角色要读角色文件才知道，这里 fail-closed 取 supervised（用户可在输入框里再切）。不认识的值同样处理。
+ */
+function storedApprovalMode(raw: unknown, roleId: string): ApprovalMode {
+  if (isApprovalMode(raw)) return raw;
+  return getBuiltinRole(roleId)?.approvalMode ?? 'supervised';
 }
 
 function readJson(filePath: string): unknown {
