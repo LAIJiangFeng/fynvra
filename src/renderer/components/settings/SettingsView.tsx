@@ -1,10 +1,11 @@
-import { type LucideIcon, Palette, X } from 'lucide-react';
+import { Boxes, type LucideIcon, Palette, X } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
+import { ProvidersSettings } from './ProvidersSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 
 interface SectionSpec {
@@ -18,6 +19,13 @@ interface SectionSpec {
 }
 
 const SECTIONS: SectionSpec[] = [
+  {
+    value: 'providers',
+    label: '模型服务',
+    description: 'Anthropic、OpenAI、Google 与 OpenAI 兼容服务的地址、API Key 和模型。',
+    icon: Boxes,
+    Component: ProvidersSettings,
+  },
   {
     value: 'appearance',
     label: '外观',
