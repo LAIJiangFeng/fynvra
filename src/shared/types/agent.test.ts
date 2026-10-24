@@ -92,6 +92,7 @@ describe('parseAgentCommand', () => {
       spec: { ...spec, model: { ...spec.model, reasoning: true } },
     },
     { type: 'set-model', identity, model: spec.model },
+    { type: 'set-model', identity, model: { ...spec.model, thinking: 'max' } },
     {
       type: 'set-model',
       identity,
@@ -147,6 +148,14 @@ describe('parseAgentCommand', () => {
       requestId: 'describe-1',
       models: [{ api: 'anthropic-messages', modelId: 'claude-opus-5-5' }],
     });
+  });
+
+  it('normalizes the none alias of off in a model spec', () => {
+    const parsed = parseAgentCommand(withModel({ thinking: 'none' }));
+    expect(parsed?.type === 'spawn-session' && parsed.spec.model.thinking).toBe('off');
+    expect(
+      parseAgentCommand({ type: 'set-model', identity, model: { ...spec.model, thinking: 'none' } })
+    ).toEqual({ type: 'set-model', identity, model: { ...spec.model, thinking: 'off' } });
   });
 
   it.each([
@@ -340,6 +349,26 @@ describe('parseAgentWorkerEvent', () => {
     },
     {
       type: 'models-described',
+      requestId: 'describe-3',
+      result: {
+        ok: true,
+        models: [
+          {
+            thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+            defaultThinking: 'medium',
+            source: 'catalog',
+          },
+          {
+            thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultThinking: 'medium',
+            source: 'inferred:gpt-6.1-sol',
+          },
+          { thinkingLevels: [], source: 'fallback' },
+        ],
+      },
+    },
+    {
+      type: 'models-described',
       requestId: 'describe-2',
       result: { ok: false, error: 'the model catalog is not ready' },
     },
@@ -400,6 +429,22 @@ describe('parseAgentWorkerEvent', () => {
       })
     ).toEqual(
       described({ ok: true, models: [{ thinkingLevels: ['high'], defaultThinking: 'high' }] })
+    );
+  });
+
+  it('normalizes the none alias of off in a capability', () => {
+    expect(
+      parseAgentWorkerEvent(
+        described({
+          ok: true,
+          models: [{ thinkingLevels: ['none', 'low', 'medium'], defaultThinking: 'none' }],
+        })
+      )
+    ).toEqual(
+      described({
+        ok: true,
+        models: [{ thinkingLevels: ['off', 'low', 'medium'], defaultThinking: 'off' }],
+      })
     );
   });
 
@@ -515,6 +560,14 @@ describe('parseAgentWorkerEvent', () => {
       'a capability that repeats a level',
       described({ ok: true, models: [{ thinkingLevels: ['low', 'low'] }] }),
     ],
+    [
+      'a capability that repeats off through its none alias',
+      described({ ok: true, models: [{ thinkingLevels: ['none', 'off'] }] }),
+    ],
+    ...['guess', 'inferred:', 'Catalog', 1].map((source): [string, unknown] => [
+      `a capability with the source ${JSON.stringify(source)}`,
+      described({ ok: true, models: [{ thinkingLevels: ['high'], source }] }),
+    ]),
     [
       'a default level the model does not offer',
       described({ ok: true, models: [{ thinkingLevels: ['low'], defaultThinking: 'medium' }] }),
