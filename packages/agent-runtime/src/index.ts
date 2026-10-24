@@ -1,5 +1,5 @@
 // @fynvra/agent-runtime：pi SDK 封装、fynvra 工具与事件归一化（纯 Node，不依赖 Electron）。
-// §4 领域类型以 @fynvra/core 为准；coreTypes.ts 只是 Task 02 合并前的临时副本，不从这里导出。
+// §4 领域类型与会话事件类型以 @fynvra/core 为准；事件类型经 events/normalize 继续从这里导出。
 
 export {
   createEventNormalizer,

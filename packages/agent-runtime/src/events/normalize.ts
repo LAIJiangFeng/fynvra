@@ -1,65 +1,14 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
+import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
 import { truncateHeadChars } from '../tools/result';
+
+// 事件类型定义在 @fynvra/core（src/shared 只能 import core）；这里继续导出，现有 import 方不变
+export type { FynvraSessionEvent, FynvraSessionEventBody };
 
 /** tool_end 携带的输出预览长度；完整结果以 pi 会话 jsonl 为准 */
 export const TOOL_OUTPUT_PREVIEW_CHARS = 8_000;
-
-/** 归一化后的会话事件（不含 seq）。Renderer 只持有投影，会话正文权威源是 pi jsonl。 */
-export type FynvraSessionEventBody =
-  | { type: 'text_delta'; delta: string }
-  | { type: 'thinking_delta'; delta: string }
-  | {
-      type: 'tool_start';
-      toolCallId: string;
-      toolName: string;
-      args: unknown;
-      parentToolCallId?: string;
-    }
-  | {
-      type: 'tool_end';
-      toolCallId: string;
-      toolName: string;
-      isError: boolean;
-      output: string;
-      outputTruncated: boolean;
-      durationMs?: number;
-      parentToolCallId?: string;
-    }
-  | {
-      type: 'message_end';
-      role: 'user' | 'assistant';
-      text: string;
-      stopReason?: string;
-      errorMessage?: string;
-    }
-  | { type: 'agent_settled'; aborted: boolean }
-  | {
-      /** pi 没有审批事件：由宿主的审批门（tool_call 拦截）经 emit() 注入 */
-      type: 'approval_request';
-      requestId: string;
-      toolCallId: string;
-      toolName: string;
-      args: unknown;
-      reason?: string;
-    }
-  | {
-      type: 'usage';
-      provider: string;
-      model: string;
-      input: number;
-      output: number;
-      cacheRead: number;
-      cacheWrite: number;
-      totalTokens: number;
-      /** 美元，pi 按模型价目计算 */
-      cost: number;
-    }
-  | { type: 'error'; source: 'model' | 'compaction' | 'host'; message: string };
-
-/** 每条事件带递增 seq（从 1 开始）；消费方丢弃过期 seq */
-export type FynvraSessionEvent = FynvraSessionEventBody & { seq: number };
 
 export interface NormalizerStats {
   emitted: number;
