@@ -121,6 +121,7 @@ export interface Message {
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
+    approval?: ApprovalPolicyHooks;     // 审批门（按 role.approvalMode 拦截 tool_call）的人工审批通道；不提供时需审批的调用一律拒绝
   }
   interface RoleSession {
     session: AgentSession;
@@ -137,6 +138,7 @@ export interface Message {
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
+  - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止按 deny，拒绝以可读文本作为工具结果返回模型。worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main，再发 `approval_request` 会话事件。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现），与 EnsoCode `AgentControlInvoker` 同构。`OrchestrationHost` 的方法名与上述工具一一对应。
