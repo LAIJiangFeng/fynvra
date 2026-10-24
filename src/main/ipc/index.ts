@@ -1,3 +1,4 @@
+import { registerProviderHandlers } from './providers';
 import { registerSettingsHandlers } from './settings';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
@@ -7,4 +8,5 @@ export function registerIpcHandlers(): void {
   registerSettingsHandlers();
   registerWorkspaceHandlers();
   registerWindowHandlers();
+  registerProviderHandlers();
 }
