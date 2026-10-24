@@ -1,6 +1,7 @@
 export * from './fs';
 export * from './guards';
 export * from './orchestration/ids';
+export * from './orchestration/store';
 export * from './orchestration/transitions';
 export * from './roles/builtin';
 export * from './roles/JsonFileRoleStore';
