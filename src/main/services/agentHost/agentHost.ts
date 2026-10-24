@@ -1,21 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import type { FynvraSessionEvent, FynvraSessionEventBody, Role } from '@fynvra/core';
-import { asRecord, errorMessage } from '@shared/guards';
-import {
-  type AgentCommand,
-  type AgentMcpServer,
-  type AgentRoleOption,
-  type AgentWorkerEvent,
-  APPROVAL_TIMEOUT_MS,
-  type HostCallResult,
-  type LogLevel,
-  type SessionIdentity,
-  type SpawnSessionSpec,
+import { errorMessage } from '@shared/guards';
+import type {
+  AgentApprovalRequest,
+  AgentCommand,
+  AgentMcpServer,
+  AgentRoleOption,
+  AgentWorkerEvent,
+  HostCallResult,
+  LogLevel,
+  SessionIdentity,
+  SpawnSessionSpec,
 } from '@shared/types/agent';
 import type {
   ApprovalDecision,
-  ApprovalKind,
   ApprovalRequest,
   ChatMessage,
   SessionEventEnvelope,
@@ -129,7 +128,6 @@ const NO_ORCHESTRATION_HOST =
 const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
 const TITLE_MAX_CHARS = 60;
-const APPROVAL_DETAIL_MAX_CHARS = 500;
 
 /**
  * Main 侧的 agent 会话管理（EnsoCode agentHost 的精简版）：
@@ -137,6 +135,7 @@ const APPROVAL_DETAIL_MAX_CHARS = 500;
  * - 会话注册表在 sessions.json，正文在 pi jsonl；会话首次使用时才在 worker 里 spawn（新 generation）；
  * - worker 事件已由 workerClient 收窄，这里再丢弃过期 generation / 重复 seq，改写为会话级 seq 后推给 Renderer；
  * - 编排 / worker 工具的 host-invoke 交给注入的 OrchestrationHost / WorkerHost 工厂执行；
+ * - 审批门的 approval-request 记为待审批并推给 Renderer，respondApproval 只回给提出请求的 generation；
  * - worker 崩溃后 generation+1 重新 spawn 崩溃前的会话，进行中的回合按中止处理。
  */
 export function createAgentHost(deps: AgentHostDeps): AgentHostService {
@@ -302,9 +301,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         state.workerSeq = event.seq;
         const { sessionId } = event.identity;
         deliver(sessionId, state, event.event);
-        if (event.event.type === 'approval_request') {
-          announceApproval(sessionId, event.identity.generation, event.event);
-        }
         if (event.event.type === 'agent_settled') {
           for (const [requestId, pending] of approvals) {
             if (pending.sessionId === sessionId) approvals.delete(requestId);
@@ -326,6 +322,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         currentOf(event.identity)
           ?.calls.get(`${event.identity.generation}:${event.callId}`)
           ?.abort();
+        return;
+      case 'approval-request':
+        // 过期 generation 的请求没有人在等，不推给 Renderer
+        if (!currentOf(event.identity)) return;
+        announceApproval(event.identity, event.request);
         return;
       case 'session-error': {
         const state = currentOf(event.identity);
@@ -378,22 +379,20 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
-  function announceApproval(
-    sessionId: string,
-    generation: number,
-    event: Extract<FynvraSessionEventBody, { type: 'approval_request' }>
-  ): void {
-    const expiresAt = now() + APPROVAL_TIMEOUT_MS;
-    approvals.set(event.requestId, { sessionId, generation, expiresAt });
-    const request: ApprovalRequest = {
-      id: event.requestId,
+  /** 审批门的请求：记为待审批，推给 Renderer 的审批条（kind / 标题 / 详情 / 到期时间以 worker 为准） */
+  function announceApproval(identity: SessionIdentity, request: AgentApprovalRequest): void {
+    const { sessionId, generation } = identity;
+    const { requestId, kind, title, detail, protectedAction, expiresAt } = request;
+    approvals.set(requestId, { sessionId, generation, expiresAt });
+    const pushed: ApprovalRequest = {
+      id: requestId,
       sessionId,
-      kind: approvalKindOf(event.toolName),
-      title: event.toolName,
-      detail: describeArgs(event.args),
+      kind,
+      title: protectedAction ? `${title}（保护底线：${protectedAction}）` : title,
+      detail,
       expiresAt,
     };
-    deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, request);
+    deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, pushed);
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
@@ -448,7 +447,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const state = live.get(sessionId);
     if (!state?.spawned) return;
     send({ type: 'dispose-session', identity: identityOf(sessionId, state) });
+    const wasRunning = state.running;
     detach(sessionId, state);
+    if (!wasRunning) return;
+    // worker 关闭会话时按 deny 结束待审批、不再发事件：这里替它收尾，Renderer 据此清掉审批条
+    deliver(sessionId, state, { type: 'agent_settled', aborted: true });
+    setStatus(sessionId, 'idle');
   }
 
   async function remove(sessionId: string): Promise<Result> {
@@ -638,26 +642,4 @@ export function titleFrom(text: string): string {
       .find(Boolean) ?? '';
   const flat = line.replace(/\s+/g, ' ');
   return flat.length > TITLE_MAX_CHARS ? `${flat.slice(0, TITLE_MAX_CHARS - 1)}…` : flat;
-}
-
-function approvalKindOf(toolName: string): ApprovalKind {
-  if (toolName === 'edit') return 'file-edit';
-  if (toolName === 'write') return 'file-write';
-  if (toolName.startsWith('mcp__')) return 'mcp';
-  return 'command';
-}
-
-function describeArgs(args: unknown): string {
-  const record = asRecord(args);
-  if (typeof record?.command === 'string') return record.command;
-  if (typeof record?.path === 'string') return record.path;
-  let text: string;
-  try {
-    text = JSON.stringify(args) ?? '';
-  } catch {
-    text = '';
-  }
-  return text.length > APPROVAL_DETAIL_MAX_CHARS
-    ? `${text.slice(0, APPROVAL_DETAIL_MAX_CHARS - 1)}…`
-    : text;
 }

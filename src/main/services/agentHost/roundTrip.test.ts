@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import { BUILTIN_ROLES, getBuiltinRole } from '@fynvra/core';
-import type { SessionEventEnvelope } from '@shared/types/chat';
+import { createApprovalGate, type OrchestrationHost, type WorkerHost } from '@fynvra/agent-runtime';
+import { BUILTIN_ROLES, getBuiltinRole, type Role } from '@fynvra/core';
+import type { ApprovalRequest, SessionEventEnvelope } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OpenSession } from '../../../agent/supervisor';
@@ -17,7 +17,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(openSession: OpenSession) {
+function setup(openSession: OpenSession, extraRoles: Role[] = []) {
   const dir = mkdtempSync(join(tmpdir(), 'fynvra-round-trip-'));
   dirs.push(dir);
   const broadcasts: unknown[][] = [];
@@ -32,7 +32,10 @@ function setup(openSession: OpenSession) {
     agentDir: join(dir, 'agent'),
     store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
     workspaces: { get: (id) => (id === workspace.id ? workspace : undefined) },
-    roles: { get: async (id) => getBuiltinRole(id), list: async () => [...BUILTIN_ROLES] },
+    roles: {
+      get: async (id) => getBuiltinRole(id) ?? extraRoles.find((role) => role.id === id),
+      list: async () => [...BUILTIN_ROLES, ...extraRoles],
+    },
     models: createModelResolver({
       list: async () => [
         {
@@ -59,7 +62,11 @@ function setup(openSession: OpenSession) {
     vi.waitFor(() => {
       expect(events(sessionId).some((event) => event.type === 'agent_settled')).toBe(true);
     });
-  return { host, events, settled };
+  const approvals = () =>
+    broadcasts
+      .filter(([channel]) => channel === IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)
+      .map(([, request]) => request as ApprovalRequest);
+  return { host, events, settled, approvals };
 }
 
 describe('host-invoke round trip through the protocol', () => {
@@ -155,5 +162,159 @@ describe('host-invoke round trip through the protocol', () => {
     expect(
       env.events(created.sessionId).map((event) => event.type === 'text_delta' && event.delta)
     ).toContain('reported');
+  });
+});
+
+describe('approval round trip through the protocol', () => {
+  const careful: Role = {
+    id: 'careful',
+    name: 'Careful',
+    skillIds: [],
+    mcpServerIds: [],
+    tools: 'all',
+    approvalMode: 'supervised',
+  };
+
+  /**
+   * 代替 pi 的会话：每次 prompt 依次「调用」这些 bash 命令。工具开始后先过真实的审批门
+   * （按角色档位，经 supervisor 的审批通道），放行才「执行」，拦截时把拒绝文本当作工具结果。
+   */
+  const bashSession =
+    (...commands: string[]): OpenSession =>
+    async ({ spec, approval }) => {
+      if (!approval) throw new Error('the supervisor gave the session no approval channel');
+      const gate = createApprovalGate({ mode: spec.role.approvalMode, ...approval });
+      let calls = 0;
+      return new ScriptedSession(async (_text, emit) => {
+        for (const command of commands) {
+          const toolCallId = `call-${++calls}`;
+          const args = { command };
+          emit({ type: 'tool_start', toolCallId, toolName: 'bash', args });
+          const verdict = await gate.check({ toolCallId, toolName: 'bash', input: args });
+          emit({
+            type: 'tool_end',
+            toolCallId,
+            toolName: 'bash',
+            isError: verdict !== undefined,
+            output: verdict ? verdict.reason : command.replace(/^echo /, ''),
+            outputTruncated: false,
+          });
+        }
+      });
+    };
+
+  async function started(env: ReturnType<typeof setup>, roleId: string, text: string) {
+    const created = await env.host.create({ workspaceId: 'ws-1', roleId });
+    if (!created.ok) throw new Error(created.error);
+    expect(await env.host.prompt(created.session.id, text)).toEqual({ ok: true });
+    return created.session.id;
+  }
+
+  const waitForApprovals = (env: ReturnType<typeof setup>, count: number) =>
+    vi.waitFor(() => {
+      expect(env.approvals()).toHaveLength(count);
+    });
+
+  it('asks before a supervised session runs bash and lets the tool run once allowed', async () => {
+    const env = setup(bashSession('echo hi'), [careful]);
+    const sessionId = await started(env, 'careful', 'Say hi');
+
+    await waitForApprovals(env, 1);
+    const [request] = env.approvals();
+    expect(request).toEqual({
+      id: expect.any(String),
+      sessionId,
+      kind: 'command',
+      title: 'bash',
+      detail: 'echo hi',
+      expiresAt: expect.any(Number),
+    });
+    await vi.waitFor(() => expect(env.host.list('ws-1')[0]?.status).toBe('waiting-approval'));
+    expect(env.events(sessionId).map((event) => event.type)).toEqual([
+      'message_end',
+      'tool_start',
+      'approval_request',
+    ]);
+    expect(env.events(sessionId)[2]).toMatchObject({
+      requestId: request?.id,
+      toolCallId: 'call-1',
+    });
+
+    expect(
+      await env.host.respondApproval({ sessionId, requestId: request?.id ?? '', decision: 'allow' })
+    ).toEqual({ ok: true });
+    await env.settled(sessionId);
+
+    expect(env.events(sessionId).slice(3)).toEqual([
+      expect.objectContaining({
+        type: 'tool_end',
+        toolCallId: 'call-1',
+        isError: false,
+        output: 'hi',
+      }),
+      expect.objectContaining({ type: 'agent_settled', aborted: false }),
+    ]);
+    await vi.waitFor(() => expect(env.host.list('ws-1')[0]?.status).toBe('idle'));
+  });
+
+  it('hands the refusal to the session as the tool result when denied', async () => {
+    const env = setup(bashSession('echo hi'), [careful]);
+    const sessionId = await started(env, 'careful', 'Say hi');
+    await waitForApprovals(env, 1);
+
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'deny',
+    });
+    await env.settled(sessionId);
+
+    expect(env.events(sessionId).find((event) => event.type === 'tool_end')).toMatchObject({
+      isError: true,
+      output: expect.stringContaining('The user denied the command `echo hi`'),
+    });
+  });
+
+  it('asks a dispatched worker (auto-edits) once when the user allows the session', async () => {
+    const env = setup(bashSession('echo one', 'echo two', 'git push'));
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/task',
+      worktreeId: 'wt_1',
+      brief: '# Task',
+    });
+    if (!created.ok) throw new Error(created.error);
+
+    await waitForApprovals(env, 1);
+    await env.host.respondApproval({
+      sessionId: created.sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'allowSession',
+    });
+    // echo two 不再询问；git push 是保护底线，照样要人确认
+    await waitForApprovals(env, 2);
+    expect(env.approvals()[1]).toMatchObject({
+      kind: 'command',
+      title: 'bash（保护底线：git push）',
+      detail: 'git push',
+    });
+    await env.host.respondApproval({
+      sessionId: created.sessionId,
+      requestId: env.approvals()[1]?.id ?? '',
+      decision: 'deny',
+    });
+    await env.settled(created.sessionId);
+
+    const ends = env.events(created.sessionId).filter((event) => event.type === 'tool_end');
+    expect(ends.map((event) => event.type === 'tool_end' && [event.isError, event.output])).toEqual(
+      [
+        [false, 'one'],
+        [false, 'two'],
+        [true, expect.stringContaining('protected action (git push)')],
+      ]
+    );
   });
 });
