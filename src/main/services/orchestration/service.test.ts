@@ -123,6 +123,19 @@ describe('createOrchestrationService', () => {
     expect(snapshot.tasks[0]?.status).toBe('in-review');
   });
 
+  it('coordinatorOf：起 worker 会话时 Run 已经落库，按 run id 能查到主 agent 会话', async () => {
+    const service = make();
+    let seen: string | undefined;
+    // launcher 被调用时 Dispatch 还没写入，worker 会话的 parentSessionId 只能经 Run 反查
+    launcher.createWorkerSession.mockImplementationOnce(async (input) => {
+      seen = service.coordinatorOf(input.runId);
+      return { ok: true, sessionId: 'session_w1' };
+    });
+    await dispatchOn(service);
+    expect(seen).toBe('session_coord');
+    expect(service.coordinatorOf('run_missing')).toBeUndefined();
+  });
+
   it('快照加载完成前 workerHostFor 返回 null，加载后能找到磁盘上的 worker 会话', async () => {
     const first = make();
     await dispatchOn(first);

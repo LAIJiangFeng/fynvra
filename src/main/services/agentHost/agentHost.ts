@@ -78,6 +78,11 @@ export interface RespondApprovalInput {
 
 /** AgentHost（§9.5）加上 sessions IPC 用到的会话操作 */
 export interface AgentHostService extends AgentHost {
+  /**
+   * 派发出的 worker 会话以 Run 的主 agent 会话为 parentSessionId（launcher 入参只有 runId，
+   * 此时 Dispatch 也还没写入）；由 orchestration 接线时注入，之前不设 parentSessionId。
+   */
+  setCoordinatorLookup(f: (workspaceId: string, runId: string) => string | undefined): void;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -148,6 +153,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     workspaceId: string
   ) => OrchestrationHost | null = () => null;
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
+  let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
 
   const client = createWorkerClient({
     fork: deps.fork,
@@ -468,6 +474,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!role) return fail(`角色不存在：${input.roleId}`);
       const resolved = await deps.models.resolve(modelRefOf(role));
       if (!resolved.ok) return resolved;
+      const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -476,6 +483,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         title: titleFrom(input.brief) || role.name,
         cwd: input.cwd,
         worktreeId: input.worktreeId,
+        ...(parentSessionId ? { parentSessionId } : {}),
         dispatchId: input.dispatchId,
         status: 'idle',
         createdAt: time,
@@ -515,6 +523,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setWorkerHostFactory(factory) {
       workerHostFor = factory;
+    },
+    setCoordinatorLookup(lookup) {
+      coordinatorOf = lookup;
     },
     start() {
       client.start();

@@ -54,6 +54,8 @@ export interface OrchestrationService {
   hostFor(coordinatorSessionId: string): OrchestrationHost;
   /** worker 会话的 WorkerHost：按 `Dispatch.workerSessionId` 反查；不是 worker（或状态未加载）返回 null。 */
   workerHostFor(sessionId: string): WorkerHost | null;
+  /** Run 的主 agent 会话（worker 会话的 parentSessionId）；起 worker 会话时 Run 已经落库。 */
+  coordinatorOf(runId: string): string | undefined;
   hasDispatch(dispatchId: string): boolean;
   /** 面板用的完整快照（§9.4）。 */
   snapshot(): Promise<OrchestrationSnapshotView>;
@@ -248,6 +250,8 @@ export function createOrchestrationService(
         },
       };
     },
+
+    coordinatorOf: (runId) => (loaded ? store.runs.get(runId)?.coordinatorSessionId : undefined),
 
     hasDispatch: (dispatchId) => loaded && store.dispatches.get(dispatchId) !== undefined,
 

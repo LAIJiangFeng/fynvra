@@ -78,6 +78,18 @@ describe('createOrchestrationRegistry', () => {
     expect(await registry.serviceForDispatch('dispatch_missing')).toBeUndefined();
   });
 
+  it('coordinatorOf：按工作区与 run id 查到派发它的主 agent 会话', async () => {
+    const launcher = createFakeLauncher();
+    const registry = make({ launcher });
+    await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK);
+    const runId = launcher.created()[0]?.runId ?? '';
+
+    expect(registry.coordinatorOf('ws_2', runId)).toBe('session_coord');
+    expect(registry.coordinatorOf('ws_1', runId)).toBeUndefined();
+    expect(registry.coordinatorOf('ws_missing', runId)).toBeUndefined();
+    expect(registry.coordinatorOf('ws_2', 'run_missing')).toBeUndefined();
+  });
+
   it('openAll 之后 workerHostFor 能找到磁盘快照里的 worker 会话', async () => {
     const first = make({ launcher: createFakeLauncher() });
     await first.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);

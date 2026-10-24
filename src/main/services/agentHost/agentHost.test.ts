@@ -628,6 +628,85 @@ describe('createAgentHost launcher', () => {
     ).toMatchObject({ ok: false });
     expect(env.host.list('ws-1')).toEqual([]);
   });
+
+  it('makes the coordinator of the run the parent of the worker session', async () => {
+    const env = setup();
+    const lookup = vi.fn((workspaceId: string, runId: string) =>
+      workspaceId === 'ws-1' && runId === 'run_1' ? 'session-coord' : undefined
+    );
+    env.host.setCoordinatorLookup(lookup);
+    const launcher = env.host.implementsLauncher();
+    const input = {
+      workspaceId: 'ws-1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    };
+
+    const child = await launcher.createWorkerSession({ ...input, runId: 'run_1' });
+    const orphan = await launcher.createWorkerSession({ ...input, runId: 'run_gone' });
+    const byId = (result: typeof child) =>
+      env.host.list('ws-1').find((session) => result.ok && session.id === result.sessionId);
+    expect(byId(child)?.parentSessionId).toBe('session-coord');
+    expect(byId(orphan)).not.toHaveProperty('parentSessionId');
+    expect(lookup).toHaveBeenCalledWith('ws-1', 'run_1');
+  });
+
+  it('keeps the launcher contract the orchestration host relies on', async () => {
+    const env = setup();
+    const launcher = env.host.implementsLauncher();
+    // 1. brief 提交即 resolve：不等 worker 这一轮跑完（Host 在 resolve 后同步写入 Dispatch）
+    const created = await launcher.createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const identity = { sessionId: created.sessionId, generation: 1 };
+    expect(env.sent().map((command) => command.type)).toEqual(['spawn-session', 'prompt']);
+    expect(env.events(created.sessionId)).toEqual([]);
+
+    // 2. WorkerHost 工厂在 host 调用到达时才查：Dispatch 写入前没有 Host，之后的调用就能拿到
+    const reportDone = vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true }));
+    const invoke = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: 'done' },
+      });
+    invoke('1');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '1', result: { ok: false } });
+    env.host.setWorkerHostFactory((sessionId) =>
+      sessionId === created.sessionId ? { askCoordinator: vi.fn(), reportDone } : null
+    );
+    invoke('2');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '2', result: { ok: true } });
+    expect(reportDone).toHaveBeenCalledWith('succeeded', 'done', undefined);
+
+    // 3. 会话空闲后 promptSession 作为新的 prompt 发出（新一轮，reject_work 靠它重新开放 report_done）
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    expect(env.host.list('ws-1')[0]?.status).toBe('idle');
+    expect(await launcher.promptSession(created.sessionId, 'Review feedback')).toEqual({
+      ok: true,
+    });
+    expect(env.sent('prompt').at(-1)).toEqual({
+      type: 'prompt',
+      identity,
+      text: 'Review feedback',
+    });
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
+  });
 });
 
 describe('createAgentHost approvals', () => {
