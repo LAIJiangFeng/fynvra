@@ -201,7 +201,7 @@ export function createMockOrchestrationApi(
           ok: true,
           branch: 'fynvra/sidebar-search',
           baseCommit: BASE_COMMIT,
-          ...(committed ? SEARCH_DIFF : { files: [], stat: '', diff: '' }),
+          ...(committed ? searchDiff() : { files: [], stat: '', diff: '' }),
         });
       }
       if (dispatchId === DISPATCH_TESTS_1 || dispatchId === DISPATCH_TESTS_2) {
@@ -209,7 +209,7 @@ export function createMockOrchestrationApi(
           ok: true,
           branch: 'fynvra/filter-tests',
           baseCommit: BASE_COMMIT,
-          ...TESTS_DIFF,
+          ...testsDiff(),
         });
       }
       return respond({ ok: false, error: `unknown dispatch ${dispatchId}` });
@@ -320,7 +320,7 @@ function demoView(workspaceId: string, start: number, t: number): OrchestrationS
       settledAt: at(-6 * MINUTE),
       outcome: 'succeeded',
       summary: TESTS_SUMMARY,
-      filesModified: TESTS_DIFF.files,
+      filesModified: testsDiff().files,
     },
     search,
   ];
@@ -391,7 +391,7 @@ function demoView(workspaceId: string, start: number, t: number): OrchestrationS
       ...toCoordinator(DISPATCH_TESTS_2, WORKER_TESTS),
       type: 'worker_done',
       subject: 'succeeded',
-      body: report(TESTS_SUMMARY, TESTS_DIFF.files),
+      body: report(TESTS_SUMMARY, testsDiff().files),
       createdAt: at(-6 * MINUTE),
     },
   ];
@@ -749,230 +749,247 @@ function renameLabel(from: string, to: string): string {
 
 const FIXTURE_NAMES = ['fynvra', 'EnsoCode', 'pi', 'orca', 'dotfiles', 'blog', 'infra', 'notes'];
 
-const TESTS_DIFF = fakeDiff([
-  {
-    path: 'src/renderer/lib/filterWorkspaces.test.ts',
-    kind: 'modified',
-    hunks: [
-      {
-        oldStart: 1,
-        newStart: 1,
-        lines: [
-          " import { describe, expect, it } from 'vitest';",
-          "-import { filterWorkspaces } from './filterWorkspaces';",
-          "+import fixtures from './__fixtures__/workspaces.json';",
-          "+import { filterWorkspaces, normalizeQuery } from './filterWorkspaces';",
-          ' ',
-          ' const list = [',
-          "   { id: 'a', name: 'fynvra', displayPath: '~/code/fynvra', defaultBranch: 'main' },",
-        ],
-      },
-      {
-        oldStart: 24,
-        newStart: 25,
-        section: "describe('filterWorkspaces', () => {",
-        lines: [
-          "   it('matches the display path', () => {",
-          "     expect(filterWorkspaces(list, 'code/en').map((w) => w.id)).toEqual(['b']);",
-          '   });',
-          '+',
-          "+  it('returns everything for an empty query', () => {",
-          "+    expect(filterWorkspaces(list, '')).toEqual(list);",
-          "+    expect(filterWorkspaces(list, '   ')).toEqual(list);",
-          '+  });',
-          '+',
-          "+  it('treats full-width spaces as spaces', () => {",
-          "+    expect(normalizeQuery('\\u3000Fyn\\u3000')).toBe('fyn');",
-          "+    expect(filterWorkspaces(list, '\\u3000fyn').map((w) => w.id)).toEqual(['a']);",
-          '+  });',
-          '+',
-          "+  it('does not depend on the locale', () => {",
-          "+    const names = filterWorkspaces(fixtures, 'o').map((w) => w.name);",
-          '+    expect(names).toEqual([...names].sort());',
-          '+  });',
-          '+',
-          "+  it('handles a 600-item list', () => {",
-          '+    expect(fixtures).toHaveLength(600);',
-          "+    expect(filterWorkspaces(fixtures, 'orca')).toHaveLength(75);",
-          '+  });',
-          '+',
-          "+  it('returns an empty list when nothing matches', () => {",
-          "+    expect(filterWorkspaces(list, 'zzz')).toEqual([]);",
-          '+  });',
-          ' });',
-        ],
-      },
-    ],
-  },
-  {
-    path: 'src/renderer/lib/filterWorkspaces.ts',
-    kind: 'modified',
-    hunks: [
-      {
-        oldStart: 1,
-        newStart: 1,
-        lines: [
-          " import type { WorkspaceSummary } from '@shared/types/workspace';",
-          ' ',
-          '+/** 去掉首尾空白（含全角空格）并转小写；与 locale 无关。 */',
-          '+export function normalizeQuery(query: string): string {',
-          "+  return query.replace(/\\u3000/g, ' ').trim().toLowerCase();",
-          '+}',
-          '+',
-          ' export function filterWorkspaces(',
-          '   list: readonly WorkspaceSummary[],',
-          '   query: string',
-          ' ): WorkspaceSummary[] {',
-          '-  const needle = query.trim().toLocaleLowerCase();',
-          '+  const needle = normalizeQuery(query);',
-          "   if (needle === '') return [...list];",
-          '   return list.filter(',
-          '-    (w) => w.name.toLocaleLowerCase().includes(needle) || w.displayPath.includes(needle)',
-          '+    (w) => w.name.toLowerCase().includes(needle) || w.displayPath.toLowerCase().includes(needle)',
-          '   );',
-          ' }',
-        ],
-      },
-    ],
-  },
-  {
-    path: 'src/renderer/lib/__fixtures__/workspaces.json',
-    kind: 'added',
-    hunks: [
-      {
-        oldStart: 0,
-        newStart: 1,
-        lines: [
-          '+[',
-          ...Array.from({ length: 600 }, (_, index) => {
-            const name = FIXTURE_NAMES[index % FIXTURE_NAMES.length] ?? 'repo';
-            const comma = index === 599 ? '' : ',';
-            return `+  { "id": "ws-${index + 1}", "name": "${name}-${index + 1}", "displayPath": "~/code/${name}-${index + 1}", "defaultBranch": "main" }${comma}`;
-          }),
-          '+]',
-        ],
-      },
-    ],
-  },
-  {
-    path: 'src/renderer/lib/legacyFilter.ts',
-    kind: 'deleted',
-    hunks: [
-      {
-        oldStart: 1,
-        newStart: 0,
-        lines: [
-          "-import type { WorkspaceSummary } from '@shared/types/workspace';",
-          '-',
-          '-/** @deprecated 用 filterWorkspaces */',
-          '-export function legacyFilter(list: WorkspaceSummary[], query: string) {',
-          '-  const q = query.toLocaleLowerCase();',
-          '-  return list.filter((w) => w.name.toLocaleLowerCase().indexOf(q) !== -1);',
-          '-}',
-        ],
-      },
-    ],
-  },
-  {
-    path: 'docs/TESTING.md',
-    oldPath: 'docs/testing.md',
-    kind: 'renamed',
-    hunks: [
-      {
-        oldStart: 3,
-        newStart: 3,
-        section: '## 渲染进程',
-        lines: [
-          ' 渲染进程的纯函数放在 `src/renderer/lib/`，测试与源码同目录。',
-          '-大列表用例直接在测试里拼数组。',
-          '+大列表用例用 `__fixtures__/` 里的 JSON，避免测试文件过长。',
-          '+断言不要依赖 locale（CI 默认 `en-US`）。',
-        ],
-      },
-    ],
-  },
-  { path: 'test/fixtures/empty-state.png', kind: 'binary', hunks: [] },
-]);
+type FakeDiff = ReturnType<typeof fakeDiff>;
+let testsDiffCache: FakeDiff | null = null;
+let searchDiffCache: FakeDiff | null = null;
 
-const SEARCH_DIFF = fakeDiff([
-  {
-    path: 'src/renderer/components/layout/WorkspaceSearch.tsx',
-    kind: 'added',
-    hunks: [
-      {
-        oldStart: 0,
-        newStart: 1,
-        lines: [
-          "+import { Search, X } from 'lucide-react';",
-          "+import { Button } from '@/components/ui/button';",
-          "+import { Input } from '@/components/ui/input';",
-          '+',
-          '+/** 工作区列表顶部的搜索框：输入即过滤，Esc 清空。 */',
-          '+export function WorkspaceSearch({',
-          '+  value,',
-          '+  onChange,',
-          '+}: {',
-          '+  value: string;',
-          '+  onChange: (value: string) => void;',
-          '+}) {',
-          '+  return (',
-          '+    <div className="sticky top-0 z-10 flex items-center gap-1 bg-sidebar px-2 py-1.5">',
-          '+      <Search className="size-3.5 text-muted-foreground" />',
-          '+      <Input',
-          '+        value={value}',
-          '+        placeholder="搜索工作区"',
-          '+        className="h-7"',
-          '+        onChange={(event) => onChange(event.target.value)}',
-          "+        onKeyDown={(event) => event.key === 'Escape' && onChange('')}",
-          '+      />',
-          '+      {value && (',
-          '+        <Button size="icon-xs" variant="ghost" onClick={() => onChange(\'\')}>',
-          '+          <X />',
-          '+        </Button>',
-          '+      )}',
-          '+    </div>',
-          '+  );',
-          '+}',
-        ],
-      },
-    ],
-  },
-  {
-    path: 'src/renderer/components/layout/Sidebar.tsx',
-    kind: 'modified',
-    hunks: [
-      {
-        oldStart: 1,
-        newStart: 1,
-        lines: [
-          " import { FolderGit2, Plus } from 'lucide-react';",
-          "+import { useState } from 'react';",
-          " import { Button } from '@/components/ui/button';",
-          " import { filterWorkspaces } from '@/lib/filterWorkspaces';",
-          " import { useWorkspacesStore } from '@/stores/workspaces';",
-          "+import { WorkspaceSearch } from './WorkspaceSearch';",
-        ],
-      },
-      {
-        oldStart: 18,
-        newStart: 20,
-        section: 'export function Sidebar() {',
-        lines: [
-          '   const workspaces = useWorkspacesStore((state) => state.workspaces);',
-          '-  const visible = workspaces;',
-          "+  const [query, setQuery] = useState('');",
-          '+  const visible = filterWorkspaces(workspaces, query);',
-          ' ',
-          '   return (',
-          '     <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar">',
-          '-      <ScrollArea className="flex-1">',
-          '+      <WorkspaceSearch value={query} onChange={setQuery} />',
-          '+      <ScrollArea className="flex-1">',
-          '+        {visible.length === 0 && (',
-          '+          <p className="px-3 py-6 text-center text-muted-foreground text-xs">没有匹配的工作区</p>',
-          '+        )}',
-        ],
-      },
-    ],
-  },
-]);
+// 假 diff 第一次用到时才生成（含 600 行 fixture），不拖慢没打开演示数据的启动
+function testsDiff(): FakeDiff {
+  testsDiffCache ??= buildTestsDiff();
+  return testsDiffCache;
+}
+
+function searchDiff(): FakeDiff {
+  searchDiffCache ??= buildSearchDiff();
+  return searchDiffCache;
+}
+
+const buildTestsDiff = () =>
+  fakeDiff([
+    {
+      path: 'src/renderer/lib/filterWorkspaces.test.ts',
+      kind: 'modified',
+      hunks: [
+        {
+          oldStart: 1,
+          newStart: 1,
+          lines: [
+            " import { describe, expect, it } from 'vitest';",
+            "-import { filterWorkspaces } from './filterWorkspaces';",
+            "+import fixtures from './__fixtures__/workspaces.json';",
+            "+import { filterWorkspaces, normalizeQuery } from './filterWorkspaces';",
+            ' ',
+            ' const list = [',
+            "   { id: 'a', name: 'fynvra', displayPath: '~/code/fynvra', defaultBranch: 'main' },",
+          ],
+        },
+        {
+          oldStart: 24,
+          newStart: 25,
+          section: "describe('filterWorkspaces', () => {",
+          lines: [
+            "   it('matches the display path', () => {",
+            "     expect(filterWorkspaces(list, 'code/en').map((w) => w.id)).toEqual(['b']);",
+            '   });',
+            '+',
+            "+  it('returns everything for an empty query', () => {",
+            "+    expect(filterWorkspaces(list, '')).toEqual(list);",
+            "+    expect(filterWorkspaces(list, '   ')).toEqual(list);",
+            '+  });',
+            '+',
+            "+  it('treats full-width spaces as spaces', () => {",
+            "+    expect(normalizeQuery('\\u3000Fyn\\u3000')).toBe('fyn');",
+            "+    expect(filterWorkspaces(list, '\\u3000fyn').map((w) => w.id)).toEqual(['a']);",
+            '+  });',
+            '+',
+            "+  it('does not depend on the locale', () => {",
+            "+    const names = filterWorkspaces(fixtures, 'o').map((w) => w.name);",
+            '+    expect(names).toEqual([...names].sort());',
+            '+  });',
+            '+',
+            "+  it('handles a 600-item list', () => {",
+            '+    expect(fixtures).toHaveLength(600);',
+            "+    expect(filterWorkspaces(fixtures, 'orca')).toHaveLength(75);",
+            '+  });',
+            '+',
+            "+  it('returns an empty list when nothing matches', () => {",
+            "+    expect(filterWorkspaces(list, 'zzz')).toEqual([]);",
+            '+  });',
+            ' });',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'src/renderer/lib/filterWorkspaces.ts',
+      kind: 'modified',
+      hunks: [
+        {
+          oldStart: 1,
+          newStart: 1,
+          lines: [
+            " import type { WorkspaceSummary } from '@shared/types/workspace';",
+            ' ',
+            '+/** 去掉首尾空白（含全角空格）并转小写；与 locale 无关。 */',
+            '+export function normalizeQuery(query: string): string {',
+            "+  return query.replace(/\\u3000/g, ' ').trim().toLowerCase();",
+            '+}',
+            '+',
+            ' export function filterWorkspaces(',
+            '   list: readonly WorkspaceSummary[],',
+            '   query: string',
+            ' ): WorkspaceSummary[] {',
+            '-  const needle = query.trim().toLocaleLowerCase();',
+            '+  const needle = normalizeQuery(query);',
+            "   if (needle === '') return [...list];",
+            '   return list.filter(',
+            '-    (w) => w.name.toLocaleLowerCase().includes(needle) || w.displayPath.includes(needle)',
+            '+    (w) => w.name.toLowerCase().includes(needle) || w.displayPath.toLowerCase().includes(needle)',
+            '   );',
+            ' }',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'src/renderer/lib/__fixtures__/workspaces.json',
+      kind: 'added',
+      hunks: [
+        {
+          oldStart: 0,
+          newStart: 1,
+          lines: [
+            '+[',
+            ...Array.from({ length: 600 }, (_, index) => {
+              const name = FIXTURE_NAMES[index % FIXTURE_NAMES.length] ?? 'repo';
+              const comma = index === 599 ? '' : ',';
+              return `+  { "id": "ws-${index + 1}", "name": "${name}-${index + 1}", "displayPath": "~/code/${name}-${index + 1}", "defaultBranch": "main" }${comma}`;
+            }),
+            '+]',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'src/renderer/lib/legacyFilter.ts',
+      kind: 'deleted',
+      hunks: [
+        {
+          oldStart: 1,
+          newStart: 0,
+          lines: [
+            "-import type { WorkspaceSummary } from '@shared/types/workspace';",
+            '-',
+            '-/** @deprecated 用 filterWorkspaces */',
+            '-export function legacyFilter(list: WorkspaceSummary[], query: string) {',
+            '-  const q = query.toLocaleLowerCase();',
+            '-  return list.filter((w) => w.name.toLocaleLowerCase().indexOf(q) !== -1);',
+            '-}',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'docs/TESTING.md',
+      oldPath: 'docs/testing.md',
+      kind: 'renamed',
+      hunks: [
+        {
+          oldStart: 3,
+          newStart: 3,
+          section: '## 渲染进程',
+          lines: [
+            ' 渲染进程的纯函数放在 `src/renderer/lib/`，测试与源码同目录。',
+            '-大列表用例直接在测试里拼数组。',
+            '+大列表用例用 `__fixtures__/` 里的 JSON，避免测试文件过长。',
+            '+断言不要依赖 locale（CI 默认 `en-US`）。',
+          ],
+        },
+      ],
+    },
+    { path: 'test/fixtures/empty-state.png', kind: 'binary', hunks: [] },
+  ]);
+
+const buildSearchDiff = () =>
+  fakeDiff([
+    {
+      path: 'src/renderer/components/layout/WorkspaceSearch.tsx',
+      kind: 'added',
+      hunks: [
+        {
+          oldStart: 0,
+          newStart: 1,
+          lines: [
+            "+import { Search, X } from 'lucide-react';",
+            "+import { Button } from '@/components/ui/button';",
+            "+import { Input } from '@/components/ui/input';",
+            '+',
+            '+/** 工作区列表顶部的搜索框：输入即过滤，Esc 清空。 */',
+            '+export function WorkspaceSearch({',
+            '+  value,',
+            '+  onChange,',
+            '+}: {',
+            '+  value: string;',
+            '+  onChange: (value: string) => void;',
+            '+}) {',
+            '+  return (',
+            '+    <div className="sticky top-0 z-10 flex items-center gap-1 bg-sidebar px-2 py-1.5">',
+            '+      <Search className="size-3.5 text-muted-foreground" />',
+            '+      <Input',
+            '+        value={value}',
+            '+        placeholder="搜索工作区"',
+            '+        className="h-7"',
+            '+        onChange={(event) => onChange(event.target.value)}',
+            "+        onKeyDown={(event) => event.key === 'Escape' && onChange('')}",
+            '+      />',
+            '+      {value && (',
+            '+        <Button size="icon-xs" variant="ghost" onClick={() => onChange(\'\')}>',
+            '+          <X />',
+            '+        </Button>',
+            '+      )}',
+            '+    </div>',
+            '+  );',
+            '+}',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'src/renderer/components/layout/Sidebar.tsx',
+      kind: 'modified',
+      hunks: [
+        {
+          oldStart: 1,
+          newStart: 1,
+          lines: [
+            " import { FolderGit2, Plus } from 'lucide-react';",
+            "+import { useState } from 'react';",
+            " import { Button } from '@/components/ui/button';",
+            " import { filterWorkspaces } from '@/lib/filterWorkspaces';",
+            " import { useWorkspacesStore } from '@/stores/workspaces';",
+            "+import { WorkspaceSearch } from './WorkspaceSearch';",
+          ],
+        },
+        {
+          oldStart: 18,
+          newStart: 20,
+          section: 'export function Sidebar() {',
+          lines: [
+            '   const workspaces = useWorkspacesStore((state) => state.workspaces);',
+            '-  const visible = workspaces;',
+            "+  const [query, setQuery] = useState('');",
+            '+  const visible = filterWorkspaces(workspaces, query);',
+            ' ',
+            '   return (',
+            '     <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar">',
+            '-      <ScrollArea className="flex-1">',
+            '+      <WorkspaceSearch value={query} onChange={setQuery} />',
+            '+      <ScrollArea className="flex-1">',
+            '+        {visible.length === 0 && (',
+            '+          <p className="px-3 py-6 text-center text-muted-foreground text-xs">没有匹配的工作区</p>',
+            '+        )}',
+          ],
+        },
+      ],
+    },
+  ]);
