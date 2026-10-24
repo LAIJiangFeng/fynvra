@@ -1,9 +1,11 @@
 {
   // Renderer：只有 DOM 与 vite/client 类型，不含 Node 全局。
   // 测试文件排除在外（vitest 类型会把 @types/node 带进来），由 tsconfig.node.json 检查。
+  // 不设 composite，原因同 tsconfig.node.json（src/shared import @fynvra/core 时，core 源码不在 include 里）。
+  // paths 刻意不映射 @fynvra/agent-runtime：它经 pi 把 @types/node 带进来，renderer 写 process 就不再报错。
+  // src/shared 需要的会话事件类型从 @fynvra/core 导入。
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "composite": true,
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "types": ["vite/client"],

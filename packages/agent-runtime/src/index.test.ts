@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import type {
+  FynvraSessionEvent as CoreSessionEvent,
+  FynvraSessionEventBody as CoreSessionEventBody,
+} from '@fynvra/core';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   buildRolePromptAppend,
   checkGitArgs,
@@ -8,6 +12,8 @@ import {
   createReadonlyTools,
   createRoleSession,
   createWorkerTools,
+  type FynvraSessionEvent,
+  type FynvraSessionEventBody,
   nodeExec,
   ORCHESTRATION_TOOL_METHODS,
   ORCHESTRATOR_PROMPT,
@@ -35,5 +41,10 @@ describe('@fynvra/agent-runtime entry point', () => {
     expect(typeof ORCHESTRATOR_PROMPT).toBe('string');
     expect(typeof WORKER_CONTRACT_PROMPT).toBe('string');
     expect(Object.keys(ORCHESTRATION_TOOL_METHODS)).toHaveLength(10);
+  });
+
+  it('re-exports the session event types of @fynvra/core', () => {
+    expectTypeOf<FynvraSessionEvent>().toEqualTypeOf<CoreSessionEvent>();
+    expectTypeOf<FynvraSessionEventBody>().toEqualTypeOf<CoreSessionEventBody>();
   });
 });

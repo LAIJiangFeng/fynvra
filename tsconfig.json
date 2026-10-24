@@ -1,6 +1,7 @@
 {
   // 基础编译选项：tsconfig.node.json、tsconfig.web.json 与 packages/*/tsconfig.json 都继承本文件。
   // 本文件自身不含源码（files 为空），编辑器经 references 找到各段配置。
+  // 引用方没有输入文件时，tsc 不要求被引用的配置设 composite，也允许它们 noEmit（不报 TS6306 / TS6310）。
   "compilerOptions": {
     "target": "ES2024",
     "lib": ["ES2024"],
@@ -23,5 +24,10 @@
     }
   },
   "files": [],
-  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+  "references": [
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.web.json" },
+    { "path": "./packages/core" },
+    { "path": "./packages/agent-runtime" }
+  ]
 }

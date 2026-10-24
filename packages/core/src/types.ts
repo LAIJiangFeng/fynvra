@@ -1,5 +1,5 @@
 /**
- * Fynvra 领域模型（docs/ARCHITECTURE.md §4）。字段名是跨包契约：改动前先改 ARCHITECTURE.md。
+ * Fynvra 领域模型（docs/ARCHITECTURE.md §4）与会话事件（§5）。字段名是跨包契约：改动前先改 ARCHITECTURE.md。
  * @packageDocumentation
  */
 
@@ -156,3 +156,61 @@ export interface Message {
   /** 确认时间（epoch ms）；缺省表示未确认。 */
   ackedAt?: number;
 }
+
+/**
+ * 归一化后的会话事件（不含 seq），由 agent-runtime 从 pi 会话事件映射而来。
+ * Renderer 只持有投影，会话正文权威源是 pi jsonl。
+ */
+export type FynvraSessionEventBody =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'thinking_delta'; delta: string }
+  | {
+      type: 'tool_start';
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      parentToolCallId?: string;
+    }
+  | {
+      type: 'tool_end';
+      toolCallId: string;
+      toolName: string;
+      isError: boolean;
+      output: string;
+      outputTruncated: boolean;
+      durationMs?: number;
+      parentToolCallId?: string;
+    }
+  | {
+      type: 'message_end';
+      role: 'user' | 'assistant';
+      text: string;
+      stopReason?: string;
+      errorMessage?: string;
+    }
+  | { type: 'agent_settled'; aborted: boolean }
+  | {
+      /** pi 没有审批事件：由宿主的审批门（tool_call 拦截）经 agent-runtime 的 `emit()` 注入。 */
+      type: 'approval_request';
+      requestId: string;
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      reason?: string;
+    }
+  | {
+      type: 'usage';
+      provider: string;
+      model: string;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      totalTokens: number;
+      /** 美元，pi 按模型价目计算。 */
+      cost: number;
+    }
+  | { type: 'error'; source: 'model' | 'compaction' | 'host'; message: string };
+
+/** 每条事件带递增 `seq`（从 1 开始）；消费方丢弃过期 seq。 */
+export type FynvraSessionEvent = FynvraSessionEventBody & { seq: number };
