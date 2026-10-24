@@ -3,7 +3,9 @@ import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { errorMessage } from '@shared/guards';
 import { app, BrowserWindow, dialog } from 'electron';
 import { registerIpcHandlers } from './ipc';
+import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
+import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { createAppWindow } from './windows/createAppWindow';
 
 /** 退出时等 agent worker 关闭会话（MCP 连接、bash 进程组）的上限 */
@@ -54,17 +56,21 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     void getAgentHost()
       .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)
+      // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
+      .then(() => getOrchestrationRegistry().flushAll())
+      .catch((error: unknown) => console.error('[fynvra] 退出前收尾失败', error))
       .finally(() => app.quit());
   });
 
   app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       electronApp.setAppUserModelId('com.fynvra.app');
       registerIpcHandlers();
       const agentHost = getAgentHost();
-      // 编排 host 由 orchestration-host 接线；在那之前 orchestrator 的编排工具返回「未接线」错误
-      agentHost.setOrchestrationHostFactory(() => null);
+      // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
+      // 启动或恢复任何会话之前先加载全部工作区的编排快照
+      await connectOrchestration(agentHost, getOrchestrationRegistry());
       agentHost.start();
       showMainWindow();
     })
