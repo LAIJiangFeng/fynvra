@@ -265,6 +265,23 @@ describe('createAgentHost sessions', () => {
     ]);
   });
 
+  it('spawns with the shell path the resolver gives, and leaves it out when there is none', async () => {
+    const resolveShellPath = vi.fn(async () => 'D:\\Software\\Git\\bin\\bash.exe');
+    const env = setup({ resolveShellPath });
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'git --version');
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec.shellPath).toBe(
+      'D:\\Software\\Git\\bin\\bash.exe'
+    );
+    expect(resolveShellPath).toHaveBeenCalledTimes(1);
+
+    const fallback = setup({ resolveShellPath: async () => undefined });
+    await fallback.host.prompt((await createSession(fallback)).id, 'git --version');
+    const spawned = fallback.sent('spawn-session')[0];
+    expect(spawned?.type === 'spawn-session' && spawned.spec).not.toHaveProperty('shellPath');
+  });
+
   it('re-stamps worker events per session and drops stale generations and duplicate seqs', async () => {
     const env = setup();
     const session = await createSession(env);

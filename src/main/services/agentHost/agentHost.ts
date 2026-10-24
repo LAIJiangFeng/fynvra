@@ -55,6 +55,8 @@ export interface AgentHostDeps {
   broadcast(channel: string, ...args: unknown[]): void;
   /** role.skillIds / mcpServerIds → 路径与服务器配置（生产为 createRoleResourceResolver）；缺省都为空 */
   resolveResources?(role: Role): Promise<RoleResources>;
+  /** 会话 bash 工具用的 shell（生产为 createShellPathResolver）；缺省或返回 undefined 时由 pi 自己找 */
+  resolveShellPath?(): Promise<string | undefined>;
   workerOptions?: Pick<
     WorkerClientOptions,
     'readyTimeoutMs' | 'maxRestarts' | 'restartWindowMs' | 'restartDelayMs'
@@ -146,6 +148,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const resolveResources =
     deps.resolveResources ??
     (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
+  const resolveShellPath = deps.resolveShellPath ?? (async () => undefined);
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
   let orchestrationHostFor: (
@@ -247,6 +250,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const resources = await resolveResources(role);
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
+      const shellPath = await resolveShellPath();
       return {
         ok: true,
         spec: {
@@ -258,6 +262,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           mcpServers: resources.mcpServers,
           worker: stored.dispatchId !== undefined,
           roles,
+          ...(shellPath ? { shellPath } : {}),
         },
       };
     } catch (error) {
