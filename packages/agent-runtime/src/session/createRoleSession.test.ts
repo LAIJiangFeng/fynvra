@@ -10,7 +10,7 @@ import {
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
-import type { Role } from '@fynvra/core';
+import { getBuiltinRole, ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
@@ -67,8 +67,19 @@ function systemText(context: TranscriptContext): string {
     .join('\n');
 }
 
+/** pi 结构化系统提示词里的一段（`<name>…</name>`），如 Fynvra 追加的 `addendum` */
+function section(prompt: string, name: string): string {
+  return new RegExp(`<${name}>\\n([\\s\\S]*?)\\n</${name}>`).exec(prompt)?.[1] ?? '';
+}
+
 function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
+}
+
+function builtinRole(id: string): Role {
+  const found = getBuiltinRole(id);
+  if (!found) throw new Error(`the builtin role "${id}" is missing`);
+  return found;
 }
 
 let tmp = '';
@@ -219,13 +230,9 @@ describe('createRoleSession end to end with a scripted model', () => {
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
   });
 
-  it('appends the orchestrator prompt once, however many runs follow', async () => {
+  it('gives the builtin orchestrator its persona and the tool guide once, however many runs follow', async () => {
     const { session } = await open({
-      role: role({
-        id: 'orchestrator',
-        tools: 'orchestrator',
-        systemPrompt: 'ORCHESTRATOR_ROLE_MARKER',
-      }),
+      role: builtinRole(ORCHESTRATOR_ROLE_ID),
       host: orchestrationHost(),
     });
     const contexts: TranscriptContext[] = [];
@@ -239,9 +246,13 @@ describe('createRoleSession end to end with a scripted model', () => {
 
     expect(contexts).toHaveLength(2);
     const prompt = systemText(contexts[1] as TranscriptContext);
-    expect(count(prompt, 'ORCHESTRATOR_ROLE_MARKER')).toBe(1);
-    expect(count(prompt, 'Never modify code yourself')).toBe(2); // 标题与正文各一次
+    expect(count(prompt, 'You never implement anything yourself')).toBe(1);
+    expect(count(prompt, 'Work loop')).toBe(1);
+    expect(count(prompt, ORCHESTRATOR_PROMPT)).toBe(1);
     expect(prompt).not.toContain(WORKER_CONTRACT_PROMPT);
+    // pi 自带的工具列表之外，追加段（角色提示词 + 工具说明）自己也点名每个编排工具
+    const appended = section(prompt, 'addendum');
+    for (const tool of ORCHESTRATION_TOOLS) expect(appended).toContain(tool);
   });
 
   it('reopens report_done when a new run starts, e.g. after reject_work feedback', async () => {
