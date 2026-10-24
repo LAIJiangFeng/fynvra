@@ -8,7 +8,7 @@
   "main": "./out/main/index.js",
   "packageManager": "pnpm@10.26.2",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "electron-vite dev",

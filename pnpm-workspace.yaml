@@ -4,5 +4,10 @@ packages:
 # 依赖安装脚本白名单（pnpm 10.26+ / 11 的 allowBuilds）。
 # electron 45 首次运行时按需下载二进制，无需安装脚本；
 # electron-winstaller 只服务 Squirrel.Windows 目标，本项目用 NSIS。
+# @google/genai、protobufjs 是 pi-ai 的传递依赖，脚本对本项目无用：
+# @google/genai 的 preinstall 只是 echo no-op（prepare 不会对 registry 包执行，脚本文件也不随包发布）；
+# protobufjs 的 postinstall 只检查依赖方 package.json 里的版本前缀并打印提示，不产出文件。
 allowBuilds:
   electron-winstaller: false
+  '@google/genai': false
+  protobufjs: false
