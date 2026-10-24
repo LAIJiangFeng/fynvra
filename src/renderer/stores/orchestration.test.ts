@@ -10,6 +10,7 @@ import {
   mergeSnapshot,
   messagesOf,
   OUTPUT_POLL_MS,
+  reviewCandidatesOf,
   tasksByStatus,
 } from './orchestration';
 
@@ -203,6 +204,36 @@ describe('selectors', () => {
     expect(messages.map((m) => m.id)).toEqual(['m1', 'm2']);
     expect(messagesOf(snapshot, 'dispatch_b1')).toBe(messages);
     expect(messagesOf(snapshot, 'dispatch_none')).toEqual([]);
+  });
+
+  it('offers the current attempt of reviewable tasks, in-review first and newest first', () => {
+    const snapshot = view({
+      tasks: [
+        task('task_a', 'completed'),
+        task('task_b', 'in-progress'),
+        task('task_c', 'in-review'),
+        task('task_d', 'in-review'),
+        task('task_e', 'in-review', 'run_2'),
+        task('task_f', 'completed'),
+      ],
+      dispatches: [
+        dispatch('dispatch_a1', 'task_a', 10, 20),
+        dispatch('dispatch_b1', 'task_b', 30),
+        dispatch('dispatch_c1', 'task_c', 40, 50),
+        dispatch('dispatch_c2', 'task_c', 70, 80),
+        dispatch('dispatch_d1', 'task_d', 55, 60),
+        dispatch('dispatch_e1', 'task_e', 55, 90),
+      ],
+    });
+    const candidates = reviewCandidatesOf(snapshot, 'run_1');
+    expect(candidates.map((candidate) => candidate.dispatch.id)).toEqual([
+      'dispatch_c2',
+      'dispatch_d1',
+      'dispatch_a1',
+    ]);
+    expect(candidates[0]?.task.id).toBe('task_c');
+    expect(reviewCandidatesOf(snapshot, 'run_1')).toBe(candidates);
+    expect(reviewCandidatesOf(null, 'run_1')).toEqual([]);
   });
 
   it('finds the latest message across all attempts of a task', () => {

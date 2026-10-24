@@ -490,6 +490,45 @@ export function latestMessageOfTask(
   return latest;
 }
 
+export interface ReviewCandidate {
+  task: Task;
+  /** 任务的当前尝试（{@link latestDispatchOf}） */
+  dispatch: Dispatch;
+}
+
+const NO_CANDIDATES: ReviewCandidate[] = [];
+const reviewCache = new WeakMap<OrchestrationSnapshotView, Map<string, ReviewCandidate[]>>();
+const REVIEW_ORDER: Partial<Record<TaskStatus, number>> = { 'in-review': 0, completed: 1 };
+
+/** 「改动」tab 可选的尝试：Run 里待验收 / 已完成任务的当前尝试；待验收在前，同组按结算时间倒序。 */
+export function reviewCandidatesOf(
+  view: OrchestrationSnapshotView | null,
+  runId: string | null
+): ReviewCandidate[] {
+  if (view === null || runId === null) return NO_CANDIDATES;
+  let byRun = reviewCache.get(view);
+  if (!byRun) {
+    byRun = new Map();
+    reviewCache.set(view, byRun);
+  }
+  const cached = byRun.get(runId);
+  if (cached) return cached;
+  const candidates: ReviewCandidate[] = [];
+  for (const task of view.tasks) {
+    if (task.runId !== runId || REVIEW_ORDER[task.status] === undefined) continue;
+    const dispatch = latestDispatchOf(view, task.id);
+    if (dispatch) candidates.push({ task, dispatch });
+  }
+  candidates.sort(
+    (a, b) =>
+      (REVIEW_ORDER[a.task.status] ?? 0) - (REVIEW_ORDER[b.task.status] ?? 0) ||
+      (b.dispatch.settledAt ?? b.dispatch.startedAt) -
+        (a.dispatch.settledAt ?? a.dispatch.startedAt)
+  );
+  byRun.set(runId, candidates);
+  return candidates;
+}
+
 /** 工作区的 Run，最新的在前。 */
 export function runsOf(view: OrchestrationSnapshotView | null): Run[] {
   if (view === null) return [];
