@@ -8,12 +8,12 @@ Fynvra 是一个基于 Electron + [pi](https://github.com/earendil-works/pi) SDK
 
 ### 1. 多角色（Role）
 每个 agent 会话都挂一个角色。角色 = 系统提示词 + 技能(Skills) + MCP 服务器 + 模型/思考档位 + 工具白名单 + 审批档位。
-- 内置角色：`orchestrator`（主 agent，见下）、`worker`（默认普通 agent，无额外提示词/技能/MCP）。
+- 内置角色：`orchestrator`（默认主 agent，见下）、`worker`（默认普通 agent）。内置配置仅作参考，可直接修改提示词、技能、MCP、模型和策略并保存，也可恢复默认；id 固定且不可删除。
 - 用户自定义角色：如「全栈开发工程师」「测试工程师」「代码审查员」。角色以文件形式存放，可导入导出。
 - 没有指定角色时，派发出去的就是原生 `worker`。
 
-### 2. 主 agent 只听人安排、只派活、不干活
-用户只和 **Orchestrator（主 agent）** 对话。主 agent：
+### 2. 默认主 agent 只听人安排、只派活、不干活
+默认 **Orchestrator（主 agent）** 使用编排工具策略，用户可以按需调整角色配置。默认主 agent：
 - 把用户的需求拆成任务，为每个任务 **开一个 git worktree**，启动一个 worker agent（可指定角色；未指定则用 `worker`），把任务书发给它。
 - **自己不改代码**：工具集被限制为只读（读文件、git 只读、orchestration 工具），不能写文件 / 执行任意 shell。
 - **监控** worker：收件箱收到 `worker_done` / `question` / `escalation`，回答问题、等待完成。

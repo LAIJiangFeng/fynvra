@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoreFs } from '../fs';
 import type { Role } from '../types';
-import { BUILTIN_ROLES } from './builtin';
+import { BUILTIN_ROLES, getBuiltinRole } from './builtin';
 import { JsonFileRoleStore } from './JsonFileRoleStore';
 
 const tester: Role = {
@@ -67,17 +67,72 @@ describe('JsonFileRoleStore', () => {
     expect(await readdir(dir)).toEqual(['tester.json']);
   });
 
-  it('内置角色不可覆盖、不可删除', async () => {
+  it('内置角色可覆盖配置并持久化，但身份固定且不可删除', async () => {
     const store = createStore();
-    const overwrite = await store.save({ ...BUILTIN_ROLES[1], name: 'Hacked' } as Role);
-    expect(overwrite.ok).toBe(false);
-    expect(!overwrite.ok && overwrite.error).toMatch(/built-in/);
+    const original = getBuiltinRole('orchestrator') as Role;
+    const edited: Role = {
+      ...original,
+      name: '我的主角色',
+      description: '自定义职责',
+      systemPrompt: '先澄清再执行',
+      skillIds: ['tdd'],
+      mcpServerIds: ['pencil'],
+      model: { providerId: 'local', modelId: 'model', thinking: 'high' },
+      tools: 'readonly',
+      approvalMode: 'supervised',
+      builtin: false,
+    };
+    expect(await store.save(edited)).toEqual({ ok: true, role: { ...edited, builtin: true } });
+    const { builtin: _builtin, ...stored } = edited;
+    expect(JSON.parse(await readFile(join(dir, 'orchestrator.json'), 'utf8'))).toEqual(stored);
+    const reopened = createStore();
+    expect(await reopened.get('orchestrator')).toEqual({ ...edited, builtin: true });
+    expect((await reopened.list()).map((role) => role.id)).toEqual(['orchestrator', 'worker']);
+    expect((await reopened.list())[0]).toEqual({ ...edited, builtin: true });
+    expect(getBuiltinRole('orchestrator')).toEqual(original);
     for (const id of ['orchestrator', 'worker']) {
       const removal = await store.remove(id);
       expect(!removal.ok && removal.error).toMatch(/built-in/);
     }
-    expect((await store.get('worker'))?.name).toBe('Worker');
-    await expect(readdir(dir)).rejects.toThrow();
+    expect(await store.get('orchestrator')).toEqual({ ...edited, builtin: true });
+  });
+
+  it('清空内置提示词和关联项后不重新注入模板；可以保存默认模板恢复配置', async () => {
+    const original = getBuiltinRole('orchestrator') as Role;
+    const { systemPrompt: _prompt, description: _description, ...cleared } = original;
+    const store = createStore();
+    await store.save({
+      ...original,
+      skillIds: ['tdd'],
+      mcpServerIds: ['pencil'],
+      model: { providerId: 'local', modelId: 'model' },
+    });
+    expect((await store.save(cleared)).ok).toBe(true);
+    expect(await createStore().get(original.id)).toEqual(cleared);
+    await store.save(original);
+    expect(await createStore().get(original.id)).toEqual(original);
+  });
+
+  it('损坏的内置覆盖文件回退默认并报告，不影响自定义角色', async () => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'orchestrator.json'), '{ broken');
+    await writeFile(
+      join(dir, 'worker.json'),
+      JSON.stringify({ ...tester, id: 'worker', tools: 'invalid' })
+    );
+    const onInvalidFile = vi.fn();
+    const store = createStore(realFs, onInvalidFile);
+    await store.save(tester);
+    expect(await store.get('orchestrator')).toEqual(getBuiltinRole('orchestrator'));
+    expect(await store.list()).toEqual([...BUILTIN_ROLES, tester]);
+    expect(onInvalidFile).toHaveBeenCalledWith(
+      'orchestrator.json',
+      expect.stringContaining('invalid JSON')
+    );
+    expect(onInvalidFile).toHaveBeenCalledWith(
+      'worker.json',
+      expect.stringContaining('role.tools')
+    );
   });
 
   it('save 拒绝非法角色，并去掉自定义角色上的 builtin 标记', async () => {
@@ -120,7 +175,7 @@ describe('JsonFileRoleStore', () => {
       JSON.stringify({ ...tester, id: 'bad-shape', tools: 'x' })
     );
     await writeFile(join(dir, 'renamed.json'), JSON.stringify(tester));
-    await writeFile(join(dir, 'worker.json'), JSON.stringify({ ...tester, id: 'worker' }));
+    await writeFile(join(dir, 'worker.json'), JSON.stringify({ ...tester, id: 'mismatched' }));
     await writeFile(join(dir, 'Bad Name.json'), JSON.stringify(tester));
 
     const onInvalidFile = vi.fn();
@@ -140,7 +195,7 @@ describe('JsonFileRoleStore', () => {
     expect(reasons['broken.json']).toMatch(/invalid JSON/);
     expect(reasons['bad-shape.json']).toContain('role.tools');
     expect(reasons['renamed.json']).toMatch(/does not match/);
-    expect(reasons['worker.json']).toMatch(/built-in/);
+    expect(reasons['worker.json']).toMatch(/does not match/);
 
     expect(await store.get('broken')).toBeUndefined();
   });

@@ -5,12 +5,12 @@ import { create } from 'zustand';
 import type { RoleResult } from '../../preload/domains/roles';
 
 export interface RolesState {
-  /** 内置角色在前（builtin: true，只读），自定义角色按 id 排序 */
+  /** 内置角色在前（builtin: true，可配置），自定义角色按 id 排序 */
   roles: Role[];
   loaded: boolean;
   error: string | null;
   refresh(): Promise<void>;
-  /** 新建或覆盖自定义角色，落盘到 userData/roles/<id>.json */
+  /** 新建或覆盖角色配置，落盘到 userData/roles/<id>.json */
   save(role: Role): Promise<RoleResult>;
   remove(id: string): Promise<IpcResult>;
 }

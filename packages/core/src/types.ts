@@ -23,7 +23,7 @@ export interface Role {
   name: string;
   /** 一句话用途说明。 */
   description?: string;
-  /** 内置角色标记；内置角色不可覆盖、不可删除。 */
+  /** 内置角色标记，由 id 决定；配置可覆盖，id 固定且不可删除。 */
   builtin?: boolean;
   /** 追加到 pi 系统提示词之后（`before_agent_start`）。 */
   systemPrompt?: string;

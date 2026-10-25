@@ -67,13 +67,10 @@ describe('roles IPC', () => {
     });
   });
 
-  it('save 校验入参，内置 id 拒绝，都不广播', async () => {
+  it('save 拒绝非法入参，不写盘也不广播', async () => {
     for (const raw of [null, { ...tester, tools: 'root' }, { ...tester, id: '../evil' }]) {
       expect(await invoke(IPC_CHANNELS.ROLES_SAVE, raw)).toMatchObject({ ok: false });
     }
-    expect(await invoke(IPC_CHANNELS.ROLES_SAVE, { ...tester, id: 'worker' })).toMatchObject({
-      ok: false,
-    });
     expect(mocks.send).not.toHaveBeenCalled();
     expect(existsSync(join(mocks.userData, 'roles'))).toBe(false);
   });
@@ -102,6 +99,27 @@ describe('roles IPC', () => {
     });
     expect(await invoke(IPC_CHANNELS.ROLES_GET, 'ghost')).toMatchObject({ ok: false });
     expect(await invoke(IPC_CHANNELS.ROLES_GET, { id: 'tester' })).toMatchObject({ ok: false });
+  });
+
+  it('save 接受内置角色修改，读取和广播包含有效配置且保留内置身份', async () => {
+    const edited = { ...tester, id: 'orchestrator', mcpServerIds: ['pencil'], builtin: false };
+    expect(await invoke(IPC_CHANNELS.ROLES_SAVE, edited)).toEqual({
+      ok: true,
+      role: { ...edited, builtin: true },
+    });
+    expect(await invoke(IPC_CHANNELS.ROLES_GET, 'orchestrator')).toEqual({
+      ok: true,
+      role: { ...edited, builtin: true },
+    });
+    const disk = JSON.parse(readFileSync(rolePath('orchestrator'), 'utf8'));
+    expect(disk).toMatchObject({
+      systemPrompt: tester.systemPrompt,
+      skillIds: ['pdf'],
+      mcpServerIds: ['pencil'],
+    });
+    expect(disk).not.toHaveProperty('builtin');
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.ROLES_CHANGED);
+    expect(existsSync(join(mocks.userData, 'settings.json'))).toBe(false);
   });
 
   it('remove：内置角色不可删；自定义角色删文件并广播', async () => {

@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import { BUILTIN_ROLES, getBuiltinRole, type Role } from '@fynvra/core';
+import { BUILTIN_ROLES, getBuiltinRole, JsonFileRoleStore, type Role } from '@fynvra/core';
 import type { AgentApprovalRequest, AgentCommand, ModelQuery } from '@shared/types/agent';
 import type {
   ApprovalDecision,
@@ -311,6 +312,50 @@ describe('createAgentHost sessions', () => {
       { id: 'worker', name: 'Worker', description: expect.any(String) },
       { id: 'tester', name: 'Test Engineer', description: 'Writes tests' },
     ]);
+  });
+
+  it('从磁盘加载内置覆盖配置启动新会话，后续编辑不会强制重启已有会话', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fynvra-role-overrides-'));
+    dirs.push(root);
+    const roles = new JsonFileRoleStore({ fs, dir: join(root, 'roles') });
+    const edited: Role = {
+      ...(getBuiltinRole('orchestrator') as Role),
+      systemPrompt: '按我的参考提示词执行',
+      skillIds: ['tdd'],
+      mcpServerIds: ['pencil'],
+      approvalMode: 'supervised',
+    };
+    expect((await roles.save(edited)).ok).toBe(true);
+    const resolveResources = vi.fn(async (role: Role) => ({
+      skills: role.skillIds.map((id) => `/skills/${id}`),
+      mcpServers: role.mcpServerIds.map((name) => ({ name, command: 'test-mcp' })),
+      warnings: [],
+    }));
+    const env = setup({ roles, resolveResources });
+    const first = await createSession(env, 'orchestrator');
+    await env.host.prompt(first.id, '验证修改后的配置');
+    expect(resolveResources).toHaveBeenCalledWith(edited);
+    const initial = env.sent('spawn-session')[0];
+    expect(initial?.type === 'spawn-session' && initial.spec).toMatchObject({
+      role: edited,
+      skills: ['/skills/tdd'],
+      mcpServers: [{ name: 'pencil', command: 'test-mcp' }],
+    });
+    const { systemPrompt: _prompt, ...rest } = edited;
+    const cleared = { ...rest, skillIds: [], mcpServerIds: [] };
+    await roles.save(cleared);
+    const second = await createSession(env, 'orchestrator');
+    await env.host.prompt(second.id, '验证清空后的配置');
+    const latest = env.sent('spawn-session')[1];
+    expect(latest?.type === 'spawn-session' && latest.spec).toMatchObject({
+      role: cleared,
+      skills: [],
+      mcpServers: [],
+    });
+    expect(latest?.type === 'spawn-session' && latest.spec.role).not.toHaveProperty('systemPrompt');
+    await env.host.prompt(first.id, '继续原会话');
+    expect(env.sent('spawn-session')).toHaveLength(2);
+    expect(env.sent('dispose-session')).toHaveLength(0);
   });
 
   it('spawns with the shell path the resolver gives, and leaves it out when there is none', async () => {

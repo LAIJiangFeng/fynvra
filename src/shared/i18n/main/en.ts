@@ -99,7 +99,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidId: 'Invalid role id',
     notFound: 'Role not found',
     invalid: 'Invalid role: {error}',
-    builtinReadOnly: 'Built-in roles are read-only; duplicate it to make changes',
     saveFailed: 'Failed to save role: {error}',
     builtinUndeletable: "Built-in roles can't be deleted",
     removeFailed: 'Failed to delete role: {error}',

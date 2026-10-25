@@ -1,6 +1,8 @@
 import {
   type ApprovalMode,
+  getBuiltinRole,
   isApprovalMode,
+  isBuiltinRoleId,
   isThinkingLevel,
   isToolPolicy,
   isValidRoleId,
@@ -9,12 +11,20 @@ import {
   type ToolPolicy,
 } from '@fynvra/core';
 import type { ModelProviderOption } from '@shared/types/chat';
-import { Copy, Download, Save, Trash2 } from 'lucide-react';
+import { Copy, Download, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { ThinkingSourceBadge } from '@/components/chat/ModelPicker';
 import { roleDescription } from '@/components/chat/roles';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -81,13 +91,14 @@ export function RoleEditor({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const id = useId();
   const t = useT();
   const toolPolicyItems = toItems(TOOL_POLICIES, (policy) =>
     t(`settings.roles.toolPolicies.${policy}`)
   );
   const approvalItems = toItems(APPROVAL_MODES, (mode) => t(`approval.modes.${mode}`));
-  const readOnly = initial.builtin === true;
+  const builtin = isBuiltinRoleId(initial.id);
   const dirty = isNew || JSON.stringify(draft) !== JSON.stringify(initial);
   const options = modelOptions?.options ?? null;
   const thinking = roleThinking(draft.model, options, modelOptionsError !== null);
@@ -108,6 +119,7 @@ export function RoleEditor({
   };
 
   const submit = async () => {
+    if (saving) return;
     if (isNew && !isValidRoleId(draft.id)) {
       setError(t('settings.roles.idInvalid'));
       return;
@@ -145,9 +157,9 @@ export function RoleEditor({
         void submit();
       }}
     >
-      {readOnly && (
+      {builtin && (
         <InlineMessage className="rounded-md border bg-muted/50 px-3 py-2">
-          {t('settings.roles.readOnly')}
+          {t('settings.roles.builtinEditable')}
         </InlineMessage>
       )}
 
@@ -156,7 +168,7 @@ export function RoleEditor({
           <Input
             id={`${id}-name`}
             value={draft.name}
-            disabled={readOnly}
+            disabled={saving}
             onChange={(event) => update({ ...draft, name: event.target.value })}
           />
         </Field>
@@ -168,7 +180,7 @@ export function RoleEditor({
           <Input
             id={`${id}-role-id`}
             value={draft.id}
-            disabled={!isNew}
+            disabled={!isNew || saving}
             spellCheck={false}
             className="font-mono"
             onChange={(event) => update({ ...draft, id: event.target.value.trim().toLowerCase() })}
@@ -179,8 +191,8 @@ export function RoleEditor({
       <Field label={t('settings.roles.description')} htmlFor={`${id}-description`}>
         <Input
           id={`${id}-description`}
-          value={(readOnly ? roleDescription(draft, t) : draft.description) ?? ''}
-          disabled={readOnly}
+          value={roleDescription(draft, t) ?? ''}
+          disabled={saving}
           placeholder={t('settings.roles.descriptionPlaceholder')}
           onChange={(event) => setText('description', event.target.value)}
         />
@@ -195,7 +207,7 @@ export function RoleEditor({
           id={`${id}-prompt`}
           rows={10}
           value={draft.systemPrompt ?? ''}
-          disabled={readOnly}
+          disabled={saving}
           spellCheck={false}
           className="max-h-[50vh] min-h-40 font-mono text-xs md:text-xs"
           onChange={(event) => setText('systemPrompt', event.target.value)}
@@ -208,7 +220,7 @@ export function RoleEditor({
           role={draft}
           options={options}
           unsupported={thinking.kind === 'unsupported'}
-          disabled={readOnly}
+          disabled={saving}
           onChange={update}
         />
         {thinking.kind !== 'unsupported' && (
@@ -217,7 +229,7 @@ export function RoleEditor({
             role={draft}
             state={thinking}
             error={modelOptionsError}
-            disabled={readOnly}
+            disabled={saving}
             onChange={update}
           />
         )}
@@ -225,7 +237,7 @@ export function RoleEditor({
           <Select
             items={toolPolicyItems}
             value={draft.tools}
-            disabled={readOnly}
+            disabled={saving}
             onValueChange={(value) => {
               if (isToolPolicy(value)) update({ ...draft, tools: value });
             }}
@@ -246,7 +258,7 @@ export function RoleEditor({
           <Select
             items={approvalItems}
             value={draft.approvalMode}
-            disabled={readOnly}
+            disabled={saving}
             onValueChange={(value) => {
               if (isApprovalMode(value)) update({ ...draft, approvalMode: value });
             }}
@@ -268,12 +280,12 @@ export function RoleEditor({
       <div className="grid gap-4 lg:grid-cols-2">
         <SkillToggles
           selected={draft.skillIds}
-          disabled={readOnly}
+          disabled={saving}
           onChange={(skillIds) => update({ ...draft, skillIds })}
         />
         <McpToggles
           selected={draft.mcpServerIds}
-          disabled={readOnly}
+          disabled={saving}
           onChange={(mcpServerIds) => update({ ...draft, mcpServerIds })}
         />
       </div>
@@ -281,10 +293,19 @@ export function RoleEditor({
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        {!readOnly && (
-          <Button type="submit" disabled={saving || !dirty}>
-            <Save />
-            {t(saving ? 'common.saving' : 'common.save')}
+        <Button type="submit" disabled={saving || !dirty}>
+          <Save />
+          {t(saving ? 'common.saving' : 'common.save')}
+        </Button>
+        {builtin && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={() => setConfirmingReset(true)}
+          >
+            <RotateCcw />
+            {t('settings.roles.resetDefaults')}
           </Button>
         )}
         {!isNew && (
@@ -299,7 +320,7 @@ export function RoleEditor({
             </Button>
           </>
         )}
-        {!readOnly && !isNew && (
+        {!builtin && !isNew && (
           <div className="ml-auto flex items-center gap-2">
             {confirmingRemove ? (
               <>
@@ -337,6 +358,29 @@ export function RoleEditor({
           </div>
         )}
       </div>
+      <Dialog open={confirmingReset} onOpenChange={setConfirmingReset}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('settings.roles.resetTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.roles.resetHint')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmingReset(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                const defaults = getBuiltinRole(initial.id);
+                if (defaults) update(defaults);
+                setConfirmingReset(false);
+              }}
+            >
+              {t('settings.roles.resetDefaults')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

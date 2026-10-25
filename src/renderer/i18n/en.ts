@@ -415,7 +415,12 @@ export const en: MessagesShape<typeof zhCN> = {
       noRoles: 'No roles in the file',
       invalidNth: 'Role {index} is invalid: {error}',
       invalid: 'Invalid role: {error}',
-      readOnly: 'Built-in roles are read-only',
+      builtinEditable:
+        'Built-in settings are editable defaults. Saved changes apply to newly started sessions; the ID is fixed and cannot be deleted',
+      resetDefaults: 'Restore defaults',
+      resetTitle: 'Restore built-in defaults?',
+      resetHint:
+        'Resets the prompt, model, tool policy, approval mode, skills, MCP and other settings. Changes take effect only after saving',
       name: 'Name',
       idHint: "Can't be changed after saving",
       idInvalid: 'ID may only use lowercase letters, digits and -, not at the start or end',
@@ -423,7 +428,8 @@ export const en: MessagesShape<typeof zhCN> = {
       description: 'Description',
       descriptionPlaceholder: 'What this role does, in one line',
       systemPrompt: 'System prompt',
-      systemPromptHint: 'Appended to the default system prompt',
+      systemPromptHint:
+        'Edit or clear this role prompt freely; it is appended after the base system prompt',
       model: 'Model',
       followSession: 'Follow session model',
       unavailableModel: '{model} (unavailable)',

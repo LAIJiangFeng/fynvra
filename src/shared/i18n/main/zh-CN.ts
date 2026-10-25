@@ -93,7 +93,6 @@ export const mainZhCN = {
     invalidId: '无效的角色 id',
     notFound: '角色不存在',
     invalid: '角色无效：{error}',
-    builtinReadOnly: '内置角色只读，请复制为新角色后修改',
     saveFailed: '保存角色失败：{error}',
     builtinUndeletable: '内置角色不可删除',
     removeFailed: '删除角色失败：{error}',

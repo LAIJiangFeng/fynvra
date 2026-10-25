@@ -16,7 +16,7 @@ import { sendToAllWindows } from '../windows/createAppWindow';
 
 let store: RoleStore | null = null;
 
-/** Main 唯一的角色仓库：内置角色常驻内存，自定义角色是 userData/roles/<id>.json。 */
+/** Main 唯一的角色仓库：内置覆盖配置和自定义角色均存于 userData/roles/<id>.json。 */
 export function getRoleStore(): RoleStore {
   store ??= new JsonFileRoleStore({
     fs,
@@ -50,9 +50,6 @@ export function registerRoleHandlers(): void {
     const parsed = parseRole(raw);
     if (!parsed.ok)
       return { ok: false, error: translate('roles.invalid', { error: parsed.error }) };
-    if (isBuiltinRoleId(parsed.role.id)) {
-      return { ok: false, error: translate('roles.builtinReadOnly') };
-    }
     try {
       const result = await getRoleStore().save(parsed.role);
       if (!result.ok) return result;

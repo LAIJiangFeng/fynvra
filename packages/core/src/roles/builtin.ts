@@ -7,7 +7,7 @@ export const WORKER_ROLE_ID = 'worker';
 
 /**
  * orchestrator 的角色提示词：人设与工作循环（ARCHITECTURE §6）——只派活不干活、监控、验收合并、汇报、
- * 用用户的语言回复。设置页里给用户看，也是「复制为新角色」的起点。
+ * 用用户的语言回复。仅作默认参考，用户可在设置页直接覆盖，也可「复制为新角色」。
  * 工具怎么用（参数、超时、打回流程、授权边界）不写在这里：那是 agent-runtime 的 `ORCHESTRATOR_PROMPT`，
  * 对 `tools: 'orchestrator'` 的角色总会追加在它后面。
  */
@@ -46,7 +46,7 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** 内置角色（深度冻结，只读）。需要可修改的副本用 {@link getBuiltinRole}。 */
+/** 内置默认模板（深度冻结）；用户覆盖配置由 RoleStore 提供，恢复默认用 {@link getBuiltinRole}。 */
 export const BUILTIN_ROLES: readonly Role[] = deepFreeze([
   {
     id: ORCHESTRATOR_ROLE_ID,

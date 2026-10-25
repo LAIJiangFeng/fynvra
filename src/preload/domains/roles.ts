@@ -5,10 +5,10 @@ export type RoleListResult = IpcResult<{ roles: Role[] }>;
 export type RoleResult = IpcResult<{ role: Role }>;
 
 export interface RolesApi {
-  /** 内置角色在前（builtin: true，只读），自定义角色按 id 排序 */
+  /** 内置角色在前（builtin: true，可配置），自定义角色按 id 排序 */
   list(): Promise<RoleListResult>;
   get(id: string): Promise<RoleResult>;
-  /** 新建或覆盖自定义角色：Main 经 parseRole 校验后写 userData/roles/<id>.json；内置 id 拒绝 */
+  /** 保存角色配置：Main 经 parseRole 校验后写 userData/roles/<id>.json，内置身份按 id 判定 */
   save(role: Role): Promise<RoleResult>;
   /** 删除自定义角色；内置角色拒绝 */
   remove(id: string): Promise<IpcResult>;

@@ -1,4 +1,11 @@
-import { BUILTIN_ROLES, ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
+import {
+  BUILTIN_ROLES,
+  getBuiltinRole,
+  ORCHESTRATOR_ROLE_ID,
+  type Role,
+  WORKER_ROLE_ID,
+} from '@fynvra/core';
+import type { T } from '../../i18n';
 
 // 新建会话弹层的角色选择（纯函数；不碰 roles store，便于在 node 环境测试）
 
@@ -14,4 +21,15 @@ export function pickRole(roles: readonly Role[], wantedId: string): Role | undef
     roles.find((role) => role.id === ORCHESTRATOR_ROLE_ID) ??
     roles[0]
   );
+}
+
+/** 只翻译尚未修改的内置描述，用户修改或清空后原样展示。 */
+export function roleDescription(role: Role, t: T): string | undefined {
+  if (
+    role.builtin &&
+    (role.id === ORCHESTRATOR_ROLE_ID || role.id === WORKER_ROLE_ID) &&
+    role.description === getBuiltinRole(role.id)?.description
+  )
+    return t(`sessions.builtinRoles.${role.id}`);
+  return role.description;
 }
