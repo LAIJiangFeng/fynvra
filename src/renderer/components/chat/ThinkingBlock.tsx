@@ -1,6 +1,7 @@
 import { Brain, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useT } from '@/i18n/I18nProvider';
 import { thinkingExpanded } from '@/stores/sessions/timeline';
 import { useGeneralPreferencesStore } from '@/stores/settings';
 
@@ -8,6 +9,7 @@ import { useGeneralPreferencesStore } from '@/stores/settings';
 export function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
   const autoExpand = useGeneralPreferencesStore((state) => state.timeline.autoExpandThinking);
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
+  const t = useT();
   return (
     <Collapsible
       open={thinkingExpanded(userToggled, active, autoExpand)}
@@ -15,7 +17,7 @@ export function ThinkingBlock({ text, active }: { text: string; active: boolean 
     >
       <CollapsibleTrigger className="group/thinking flex items-center gap-1.5 rounded-sm text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <Brain className={active ? 'size-3.5 animate-pulse' : 'size-3.5'} />
-        {active ? '思考中…' : '思考过程'}
+        {t(active ? 'chat.thinking' : 'chat.thoughts')}
         <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]/thinking:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1.5 whitespace-pre-wrap break-words border-l-2 pl-3 text-muted-foreground text-xs leading-relaxed">

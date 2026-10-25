@@ -1,5 +1,7 @@
-import { type ModelProviderOption, THINKING_LEVEL_HINTS } from '@shared/types/chat';
+import { THINKING_LEVELS } from '@fynvra/core';
+import type { ModelProviderOption } from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
+import { translatorOf } from '../../i18n';
 import {
   chooseModel,
   defaultModelChoice,
@@ -153,20 +155,37 @@ describe('chooseModel', () => {
 });
 
 describe('thinkingChoices', () => {
+  const zh = translatorOf('zh-CN');
+
   it('renders exactly the levels it is given, in order, with official names and Chinese hints', () => {
-    expect(thinkingChoices(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])).toEqual([
-      { value: 'minimal', label: 'minimal', hint: THINKING_LEVEL_HINTS.minimal },
-      { value: 'low', label: 'low', hint: THINKING_LEVEL_HINTS.low },
-      { value: 'medium', label: 'medium', hint: THINKING_LEVEL_HINTS.medium },
-      { value: 'high', label: 'high', hint: THINKING_LEVEL_HINTS.high },
-      { value: 'xhigh', label: 'xhigh', hint: THINKING_LEVEL_HINTS.xhigh },
-      { value: 'max', label: 'max', hint: THINKING_LEVEL_HINTS.max },
+    expect(thinkingChoices(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'], zh)).toEqual([
+      { value: 'minimal', label: 'minimal', hint: '极少思考' },
+      { value: 'low', label: 'low', hint: '少量思考' },
+      { value: 'medium', label: 'medium', hint: '适中' },
+      { value: 'high', label: 'high', hint: '深入思考' },
+      { value: 'xhigh', label: 'xhigh', hint: '更深入思考' },
+      { value: 'max', label: 'max', hint: '最大思考' },
     ]);
-    expect(thinkingChoices(['off', 'low']).map((choice) => choice.label)).toEqual([
+    expect(thinkingChoices(['off', 'low'], zh).map((choice) => choice.label)).toEqual([
       'off · 关闭',
       'low',
     ]);
-    expect(thinkingChoices([])).toEqual([]);
+    expect(thinkingChoices([], zh)).toEqual([]);
+  });
+
+  it('follows the interface language: English hints are a word or two, off has no suffix', () => {
+    expect(thinkingChoices(['off', 'high'], translatorOf('en'))).toEqual([
+      { value: 'off', label: 'off', hint: 'No thinking' },
+      { value: 'high', label: 'high', hint: 'Deep' },
+    ]);
+  });
+
+  it('keeps every hint to a few words that tell the levels apart', () => {
+    for (const t of [zh, translatorOf('en')]) {
+      const hints = THINKING_LEVELS.map((level) => t(`thinking.hints.${level}`));
+      for (const hint of hints) expect(hint).not.toMatch(/[：，、；,;.]/);
+      expect(new Set(hints).size).toBe(THINKING_LEVELS.length);
+    }
   });
 });
 

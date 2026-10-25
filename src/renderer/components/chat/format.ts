@@ -1,3 +1,5 @@
+import type { T } from '../../i18n';
+
 // 时间线、状态栏、会话列表共用的展示格式（纯函数）
 
 /** 耗时：850ms、1.2s、12s、1m 05s */
@@ -25,18 +27,18 @@ export function formatCost(usd: number): string {
   return `$${usd.toPrecision(2).replace(/0+$/, '')}`;
 }
 
-/** 列表里的「最近更新」：刚刚 / 5 分钟前 / 3 小时前 / 昨天 / 10-24 / 2025-10-24 */
-export function formatRelativeTime(timestamp: number, now: number): string {
+/** 列表里的「最近更新」：刚刚 / 5 分钟前 / 3 小时前 / 昨天 / 10-24 / 2025-10-24（按界面语言） */
+export function formatRelativeTime(timestamp: number, now: number, t: T): string {
   const diff = Math.max(0, now - timestamp);
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 60_000) return t('time.justNow');
+  if (diff < 3_600_000) return t('time.minutesAgo', { count: Math.floor(diff / 60_000) });
   const then = new Date(timestamp);
   const today = new Date(now);
   if (diff < 86_400_000 && then.getDate() === today.getDate()) {
-    return `${Math.floor(diff / 3_600_000)} 小时前`;
+    return t('time.hoursAgo', { count: Math.floor(diff / 3_600_000) });
   }
   const yesterday = new Date(now - 86_400_000);
-  if (sameDay(then, yesterday)) return '昨天';
+  if (sameDay(then, yesterday)) return t('time.yesterday');
   const monthDay = `${pad(then.getMonth() + 1)}-${pad(then.getDate())}`;
   return then.getFullYear() === today.getFullYear()
     ? monthDay

@@ -31,6 +31,7 @@ import {
 import { memo, type ReactNode, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type DiffLine, diffEdit, type FileChange, fileChangeOf } from '@/stores/sessions/timeline';
 import { useGeneralPreferencesStore } from '@/stores/settings';
@@ -100,7 +101,8 @@ export const ToolCallCard = memo(function ToolCallCard({
 });
 
 function GenericToolCard({ call, live }: { call: ChatToolCall; live: boolean }) {
-  const display = describeTool(call.name, call.args);
+  const t = useT();
+  const display = describeTool(call.name, call.args, t);
   const style = FAMILY_STYLE[display.family];
   const Icon = iconOf(call.name, display.family);
   const markdownOutput = display.family === 'orchestration' || display.family === 'worker';
@@ -132,12 +134,12 @@ function GenericToolCard({ call, live }: { call: ChatToolCall; live: boolean }) 
         ) : (
           call.args !== undefined &&
           prettyArgs(call.args) !== '{}' && (
-            <Section title="参数">
+            <Section title={t('tools.args')}>
               <Pre>{prettyArgs(call.args)}</Pre>
             </Section>
           )
         )}
-        <Section title="输出">
+        <Section title={t('tools.output')}>
           <Output call={call} markdown={markdownOutput} />
         </Section>
       </CollapsibleContent>
@@ -156,9 +158,10 @@ const DIFF_LINE_STYLE: Record<DiffLine['sign'], string> = {
 
 /** edit 的改动（逐处替换的行级 diff）或 write 写入的内容 */
 function FileChangeView({ change }: { change: FileChange }) {
+  const t = useT();
   if (change.kind === 'write') {
     return (
-      <Section title="内容">
+      <Section title={t('tools.content')}>
         <Pre>{change.content}</Pre>
       </Section>
     );
@@ -167,7 +170,7 @@ function FileChangeView({ change }: { change: FileChange }) {
   const total = hunks.reduce((sum, lines) => sum + lines.length, 0);
   let budget = DIFF_PREVIEW_LINES;
   return (
-    <Section title="改动">
+    <Section title={t('tools.changes')}>
       <div className="max-h-80 overflow-auto rounded border bg-background/60 py-1 font-mono text-xs leading-relaxed">
         {hunks.map((lines, hunk) => {
           const shown = lines.slice(0, Math.max(0, budget));
@@ -188,7 +191,9 @@ function FileChangeView({ change }: { change: FileChange }) {
           );
         })}
         {total > DIFF_PREVIEW_LINES && (
-          <div className="px-2 text-muted-foreground">… {total - DIFF_PREVIEW_LINES} 行</div>
+          <div className="px-2 text-muted-foreground">
+            {t('tools.moreLines', { count: total - DIFF_PREVIEW_LINES })}
+          </div>
         )}
       </div>
     </Section>
@@ -200,6 +205,7 @@ function FileChangeView({ change }: { change: FileChange }) {
  * 展开看每一行。每行再展开看输出。
  */
 export const ReadonlyTools = memo(function ReadonlyTools({ calls }: { calls: ChatToolCall[] }) {
+  const t = useT();
   const [first] = calls;
   if (calls.length === 1 && first) return <CompactToolLine call={first} />;
   const status: ChatToolCall['status'] = calls.some((call) => call.status === 'running')
@@ -208,14 +214,14 @@ export const ReadonlyTools = memo(function ReadonlyTools({ calls }: { calls: Cha
       ? 'error'
       : 'done';
   const summary = calls
-    .map((call) => describeTool(call.name, call.args).summary)
+    .map((call) => describeTool(call.name, call.args, t).summary)
     .filter(Boolean)
     .join(' · ');
   return (
     <Collapsible className="text-sm">
       <CollapsibleTrigger className="group/reads flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-1 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <FileSearch className="size-3.5 shrink-0" />
-        <span className="shrink-0">{calls.length} 次读取</span>
+        <span className="shrink-0">{t('tools.reads', { count: calls.length })}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary}</span>
         <span className="flex shrink-0 items-center gap-1.5 text-xs">
           <StatusIcon status={status} />
@@ -233,7 +239,8 @@ export const ReadonlyTools = memo(function ReadonlyTools({ calls }: { calls: Cha
 
 /** 单行的工具调用：没有卡片边框，图标、名称、参数摘要、耗时与状态；展开看输出 */
 function CompactToolLine({ call }: { call: ChatToolCall }) {
-  const display = describeTool(call.name, call.args);
+  const t = useT();
+  const display = describeTool(call.name, call.args, t);
   const Icon = iconOf(call.name, display.family);
   return (
     <Collapsible className="text-muted-foreground text-sm">
@@ -253,6 +260,7 @@ function CompactToolLine({ call }: { call: ChatToolCall }) {
 
 /** 主 agent 派发任务：突出任务标题与执行角色 */
 function DispatchTaskCard({ call }: { call: ChatToolCall }) {
+  const t = useT();
   const task = dispatchTaskView(call.args);
   const style = FAMILY_STYLE.orchestration;
 
@@ -262,8 +270,12 @@ function DispatchTaskCard({ call }: { call: ChatToolCall }) {
         icon={<Send className={cn('size-3.5 shrink-0', style.icon)} />}
         title={
           <>
-            <span className={cn('shrink-0 font-medium text-xs', style.icon)}>派发任务</span>
-            <span className="min-w-0 truncate font-medium">{task.title || '（未命名任务）'}</span>
+            <span className={cn('shrink-0 font-medium text-xs', style.icon)}>
+              {t('tools.labels.dispatch_task')}
+            </span>
+            <span className="min-w-0 truncate font-medium">
+              {task.title || t('tools.untitledTask')}
+            </span>
             <Badge variant="outline" className="shrink-0">
               {task.role}
             </Badge>
@@ -274,7 +286,7 @@ function DispatchTaskCard({ call }: { call: ChatToolCall }) {
       <CollapsibleContent className="space-y-2 border-t px-3 py-2">
         {task.dependsOn.length > 0 && (
           <p className="flex flex-wrap items-center gap-1 text-muted-foreground text-xs">
-            依赖
+            {t('tools.dependsOn')}
             {task.dependsOn.map((id) => (
               <Badge key={id} variant="outline" className="font-mono">
                 {id}
@@ -283,13 +295,13 @@ function DispatchTaskCard({ call }: { call: ChatToolCall }) {
           </p>
         )}
         {task.spec && (
-          <Section title="任务书">
+          <Section title={t('tools.brief')}>
             <div className="max-h-80 overflow-auto rounded border bg-background/60 px-3 py-2">
               <Markdown text={task.spec} />
             </div>
           </Section>
         )}
-        <Section title="结果">
+        <Section title={t('tools.result')}>
           <Output call={call} markdown />
         </Section>
       </CollapsibleContent>
@@ -299,12 +311,10 @@ function DispatchTaskCard({ call }: { call: ChatToolCall }) {
 
 const OUTCOME = {
   succeeded: {
-    label: '成功',
     card: 'border-emerald-500/30 bg-emerald-500/5',
     badge: 'border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
   },
   failed: {
-    label: '失败',
     card: 'border-destructive/30 bg-destructive/5',
     badge: 'border-transparent bg-destructive/10 text-destructive dark:bg-destructive/20',
   },
@@ -314,6 +324,7 @@ const FILES_PREVIEW = 8;
 
 /** worker 汇报结果：结果、总结、改动文件 */
 function ReportDoneCard({ call }: { call: ChatToolCall }) {
+  const t = useT();
   const report = reportDoneView(call.args);
   const outcome = report.outcome ? OUTCOME[report.outcome] : null;
   const style = FAMILY_STYLE.worker;
@@ -328,8 +339,12 @@ function ReportDoneCard({ call }: { call: ChatToolCall }) {
         icon={<Flag className={cn('size-3.5 shrink-0', style.icon)} />}
         title={
           <>
-            <span className="shrink-0 font-medium">汇报结果</span>
-            {outcome && <Badge className={cn('shrink-0', outcome.badge)}>{outcome.label}</Badge>}
+            <span className="shrink-0 font-medium">{t('tools.labels.report_done')}</span>
+            {report.outcome && outcome && (
+              <Badge className={cn('shrink-0', outcome.badge)}>
+                {t(`tools.outcome.${report.outcome}`)}
+              </Badge>
+            )}
           </>
         }
         call={call}
@@ -337,7 +352,7 @@ function ReportDoneCard({ call }: { call: ChatToolCall }) {
       <CollapsibleContent className="space-y-2 border-t px-3 py-2">
         {report.summary && <p className="whitespace-pre-wrap break-words">{report.summary}</p>}
         {files.length > 0 && (
-          <Section title={`改动文件（${files.length}）`}>
+          <Section title={t('tools.filesChanged', { count: files.length })}>
             <ul className="space-y-0.5 font-mono text-xs">
               {files.slice(0, FILES_PREVIEW).map((file) => (
                 <li key={file} className="truncate" title={file}>
@@ -345,13 +360,15 @@ function ReportDoneCard({ call }: { call: ChatToolCall }) {
                 </li>
               ))}
               {files.length > FILES_PREVIEW && (
-                <li className="text-muted-foreground">…等 {files.length} 个文件</li>
+                <li className="text-muted-foreground">
+                  {t('tools.moreFiles', { count: files.length })}
+                </li>
               )}
             </ul>
           </Section>
         )}
         {call.status === 'error' && (
-          <Section title="输出">
+          <Section title={t('tools.output')}>
             <Output call={call} markdown />
           </Section>
         )}
@@ -400,18 +417,23 @@ function CardTrigger({
 }
 
 function StatusIcon({ status }: { status: ChatToolCall['status'] }) {
+  const t = useT();
   if (status === 'running') {
-    return <LoaderCircle aria-label="运行中" className="size-3.5 animate-spin" />;
+    return <LoaderCircle aria-label={t('tools.running')} className="size-3.5 animate-spin" />;
   }
   if (status === 'error') {
-    return <CircleX aria-label="失败" className="size-3.5 text-destructive" />;
+    return <CircleX aria-label={t('tools.failed')} className="size-3.5 text-destructive" />;
   }
   return (
-    <CircleCheck aria-label="完成" className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+    <CircleCheck
+      aria-label={t('tools.done')}
+      className="size-3.5 text-emerald-600 dark:text-emerald-400"
+    />
   );
 }
 
 function Output({ call, markdown }: { call: ChatToolCall; markdown: boolean }) {
+  const t = useT();
   if (call.output) {
     return markdown ? (
       <div className="max-h-80 overflow-auto rounded border bg-background/60 px-3 py-2">
@@ -421,12 +443,13 @@ function Output({ call, markdown }: { call: ChatToolCall; markdown: boolean }) {
       <Pre className={cn(call.status === 'error' && 'text-destructive')}>{call.output}</Pre>
     );
   }
-  const placeholder =
+  const placeholder = t(
     call.status === 'running'
-      ? '运行中…'
+      ? 'tools.runningOutput'
       : call.status === 'error'
-        ? '已中断，没有输出'
-        : '（无输出）';
+        ? 'tools.interrupted'
+        : 'tools.noOutput'
+  );
   return <p className="text-muted-foreground text-xs">{placeholder}</p>;
 }
 

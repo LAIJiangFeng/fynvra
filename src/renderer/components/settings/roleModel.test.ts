@@ -1,6 +1,7 @@
 import type { Role, ThinkingLevel } from '@fynvra/core';
-import { type ModelProviderOption, THINKING_LEVEL_HINTS } from '@shared/types/chat';
+import type { ModelProviderOption } from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
+import { translatorOf } from '../../i18n';
 import { normalizeRoleThinking, roleThinking, thinkingOptions, withRoleModel } from './roleModel';
 
 // sessions:model-options 交来的形状；档位取自 pi 1.4.0 内置目录，自定义模型按 reasoning 标记
@@ -181,16 +182,24 @@ describe('roleModel', () => {
   });
 
   it('档位选项：官方等级名（与会话里一致），模型的默认档位带「默认」，悬停是中文说明', () => {
-    expect(thinkingOptions(['low', 'medium', 'high', 'xhigh', 'max'], 'medium')).toEqual([
-      { value: 'low', label: 'low', hint: THINKING_LEVEL_HINTS.low },
-      { value: 'medium', label: 'medium（默认）', hint: THINKING_LEVEL_HINTS.medium },
-      { value: 'high', label: 'high', hint: THINKING_LEVEL_HINTS.high },
-      { value: 'xhigh', label: 'xhigh', hint: THINKING_LEVEL_HINTS.xhigh },
-      { value: 'max', label: 'max', hint: THINKING_LEVEL_HINTS.max },
+    const zh = translatorOf('zh-CN');
+    expect(thinkingOptions(['low', 'medium', 'high', 'xhigh', 'max'], 'medium', zh)).toEqual([
+      { value: 'low', label: 'low', hint: '少量思考' },
+      { value: 'medium', label: 'medium（默认）', hint: '适中' },
+      { value: 'high', label: 'high', hint: '深入思考' },
+      { value: 'xhigh', label: 'xhigh', hint: '更深入思考' },
+      { value: 'max', label: 'max', hint: '最大思考' },
     ]);
-    expect(thinkingOptions(['off', 'minimal']).map((option) => option.label)).toEqual([
-      'off · 关闭',
-      'minimal',
+    expect(
+      thinkingOptions(['off', 'minimal'], undefined, zh).map((option) => option.label)
+    ).toEqual(['off · 关闭', 'minimal']);
+  });
+
+  it('档位选项按界面语言：英文的 off 不附说明，默认档位写 (default)', () => {
+    const en = translatorOf('en');
+    expect(thinkingOptions(['off', 'medium'], 'medium', en)).toEqual([
+      { value: 'off', label: 'off', hint: 'No thinking' },
+      { value: 'medium', label: 'medium (default)', hint: 'Balanced' },
     ]);
   });
 });

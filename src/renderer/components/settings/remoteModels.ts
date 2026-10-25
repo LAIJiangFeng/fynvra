@@ -1,5 +1,6 @@
 import type { ModelEntry, RemoteModelEntry } from '@shared/types/llm';
 import type { ListRemoteModelsInput } from '../../../preload/domains/providers';
+import { translate } from '../../i18n';
 import type { ProviderDraft } from './providerForm';
 
 // 服务弹窗「拉取模型列表」的纯逻辑（不碰 DOM 与 window.fynvra，在 node 下测试）。
@@ -22,14 +23,20 @@ export function canListRemoteModels(draft: ProviderDraft): boolean {
  */
 export function remoteModelsRequest(draft: ProviderDraft): RemoteModelsRequest {
   const baseUrl = draft.baseUrl.trim();
-  if (!baseUrl && draft.requiresBaseUrl) return { ok: false, error: '先填写 Base URL' };
+  if (!baseUrl && draft.requiresBaseUrl) {
+    return { ok: false, error: translate('settings.remoteModels.baseUrlFirst') };
+  }
   if (baseUrl && !isHttpUrl(baseUrl)) {
-    return { ok: false, error: 'Base URL 必须以 http:// 或 https:// 开头' };
+    return { ok: false, error: translate('settings.remoteModels.baseUrlHttp') };
   }
   const apiKey = draft.apiKey.trim();
-  if (/\s/.test(apiKey)) return { ok: false, error: 'API Key 不能包含空白字符' };
+  if (/\s/.test(apiKey)) {
+    return { ok: false, error: translate('settings.remoteModels.apiKeyWhitespace') };
+  }
   const savedKey = draft.id !== undefined && draft.hasSavedKey && !draft.clearApiKey;
-  if (!apiKey && !savedKey) return { ok: false, error: '先填写 API Key，再拉取模型列表' };
+  if (!apiKey && !savedKey) {
+    return { ok: false, error: translate('settings.remoteModels.apiKeyFirst') };
+  }
   return {
     ok: true,
     input: {
@@ -148,12 +155,19 @@ export function mergeRemoteModels(
 }
 
 export function mergeSummary({ added, existing, overLimit }: MergeResult): string {
-  const parts = [added > 0 ? `已加入 ${added} 个模型，保存后生效` : '没有加入新模型'];
-  if (existing > 0) parts.push(`${existing} 个已在列表里`);
+  const parts = [
+    added > 0
+      ? translate('settings.remoteModels.addedModels', { count: added })
+      : translate('settings.remoteModels.noneAdded'),
+  ];
+  if (existing > 0)
+    parts.push(translate('settings.remoteModels.alreadyListed', { count: existing }));
   if (overLimit > 0) {
-    parts.push(`每个服务最多 ${MAX_PROVIDER_MODELS} 个模型，${overLimit} 个没有加入`);
+    parts.push(
+      translate('settings.remoteModels.overLimit', { max: MAX_PROVIDER_MODELS, count: overLimit })
+    );
   }
-  return parts.join('；');
+  return parts.join(translate('common.listSeparator'));
 }
 
 function isHttpUrl(value: string): boolean {

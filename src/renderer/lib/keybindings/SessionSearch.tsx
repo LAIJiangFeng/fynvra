@@ -2,6 +2,7 @@ import type { SessionSummary } from '@shared/types/chat';
 import { Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { useSessionsStore } from '@/stores/sessions';
 import { runAction, useActionHandler } from './handlers';
 import { filterSessionsByTitle, useSessionSearchStore } from './sessionFilter';
@@ -17,14 +18,15 @@ export function useFilteredSessions(sessions: SessionSummary[]): SessionSummary[
 export function SessionSearchButton() {
   const show = useSessionSearchStore((state) => state.show);
   const chord = useChordLabel('search-sessions');
+  const t = useT();
   useActionHandler('search-sessions', show);
 
   return (
     <Button
       variant="ghost"
       size="icon-xs"
-      aria-label="搜索会话"
-      title={`搜索会话 ${chord}`}
+      aria-label={t('sessions.search')}
+      title={t('sessions.searchHint', { chord })}
       onClick={show}
     >
       <Search />
@@ -40,6 +42,7 @@ export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
   const setQuery = useSessionSearchStore((state) => state.setQuery);
   const close = useSessionSearchStore((state) => state.close);
   const input = useRef<HTMLInputElement>(null);
+  const t = useT();
 
   // 每次「搜索会话」都聚焦并全选，已经开着时也是
   useEffect(() => {
@@ -69,8 +72,8 @@ export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
       <input
         ref={input}
         value={query}
-        aria-label="搜索会话"
-        placeholder="搜索会话"
+        aria-label={t('sessions.search')}
+        placeholder={t('sessions.search')}
         className="h-7 w-full min-w-0 rounded-md border border-input bg-background pr-7 pl-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
@@ -90,8 +93,8 @@ export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
       {query && (
         <button
           type="button"
-          aria-label="清空"
-          title="清空"
+          aria-label={t('sessions.clearSearch')}
+          title={t('sessions.clearSearch')}
           className="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           // 不抢焦点：清空后接着在搜索框里输入
           onMouseDown={(event) => event.preventDefault()}

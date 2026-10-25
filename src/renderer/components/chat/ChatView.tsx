@@ -1,6 +1,7 @@
 import { GitBranch, MessagesSquare, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import {
   selectNotice,
   selectSessionOf,
@@ -11,7 +12,7 @@ import {
 import { ApprovalBar } from './ApprovalBar';
 import { Composer } from './Composer';
 import { NewSessionButton } from './NewSessionButton';
-import { RoleBadge, STATUS_LABEL, StatusDot, useSessionBranch } from './SessionBadges';
+import { RoleBadge, StatusDot, useSessionBranch } from './SessionBadges';
 import { StatusBar } from './StatusBar';
 import { Timeline } from './Timeline';
 
@@ -20,16 +21,17 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const session = useSessionsStore(selectSessionOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
   const branch = useSessionBranch(sessionId);
+  const t = useT();
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2.5 border-b px-4">
         <StatusDot status={status} />
-        <h1 className="min-w-0 truncate font-medium">{session?.title ?? '会话'}</h1>
+        <h1 className="min-w-0 truncate font-medium">{session?.title ?? t('sessions.title')}</h1>
         {session && <RoleBadge roleId={session.roleId} />}
         {branch && <BranchBadge branch={branch.branch} cwd={branch.cwd} />}
         <span className="ml-auto shrink-0 text-muted-foreground text-xs">
-          {STATUS_LABEL[status]}
+          {t(`sessions.status.${status}`)}
         </span>
       </header>
       <ChatNotice />
@@ -58,6 +60,7 @@ function BranchBadge({ branch, cwd }: { branch: string; cwd: string }) {
 function ChatNotice() {
   const notice = useSessionsStore(selectNotice);
   const dismiss = useSessionsStore((state) => state.dismissNotice);
+  const t = useT();
   if (!notice) return null;
   return (
     <div
@@ -67,7 +70,12 @@ function ChatNotice() {
       <span className="min-w-0 flex-1 truncate" title={notice}>
         {notice}
       </span>
-      <Button variant="ghost" size="icon-xs" aria-label="关闭提示" onClick={dismiss}>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={t('sessions.dismissNotice')}
+        onClick={dismiss}
+      >
         <X />
       </Button>
     </div>
@@ -77,11 +85,12 @@ function ChatNotice() {
 /** 工作区已选、还没选会话时的主区域内容。 */
 export function ChatPlaceholder({ workspaceId }: { workspaceId: string }) {
   const hasSessions = useSessionsStore((state) => selectSessionsOf(workspaceId)(state).length > 0);
+  const t = useT();
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
       <MessagesSquare className="size-10 text-muted-foreground/60" />
       <p className="text-muted-foreground text-sm">
-        {hasSessions ? '从左侧选择一个会话，或新建一个' : '还没有会话'}
+        {t(hasSessions ? 'sessions.pickOrCreate' : 'sessions.none')}
       </p>
       <NewSessionButton />
     </div>

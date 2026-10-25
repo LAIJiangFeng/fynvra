@@ -4,14 +4,13 @@ import {
   type ModelProviderOption,
   pickThinkingLevel,
   type SessionModelRef,
-  THINKING_LEVEL_HINTS,
-  THINKING_LEVEL_LABELS,
 } from '@shared/types/chat';
 import type { ProviderApi } from '@shared/types/llm';
+import type { T } from '../../i18n';
 
 // 新建会话弹层与模型选择器的选择逻辑（纯函数；不碰 store 与 DOM，便于在 node 环境测试）
 
-/** 档位控件的一项：官方等级名，悬停显示中文说明 */
+/** 档位控件的一项：官方等级名，悬停显示几个字的说明（按界面语言） */
 export interface ThinkingChoice {
   value: ThinkingLevel;
   label: string;
@@ -19,11 +18,11 @@ export interface ThinkingChoice {
 }
 
 /** 档位控件只渲染模型自己的档位（sessions:model-options 给的数组），顺序不变；角色编辑器也用它 */
-export function thinkingChoices(levels: readonly ThinkingLevel[]): ThinkingChoice[] {
+export function thinkingChoices(levels: readonly ThinkingLevel[], t: T): ThinkingChoice[] {
   return levels.map((level) => ({
     value: level,
-    label: THINKING_LEVEL_LABELS[level],
-    hint: THINKING_LEVEL_HINTS[level],
+    label: t(`thinking.levels.${level}`),
+    hint: t(`thinking.hints.${level}`),
   }));
 }
 

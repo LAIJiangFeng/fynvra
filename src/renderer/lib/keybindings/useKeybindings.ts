@@ -1,5 +1,6 @@
 import { type ActionId, chordFromEvent, formatChord, type KeyEventLike } from '@shared/keybindings';
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo } from 'react';
+import { useT } from '@/i18n/I18nProvider';
 import { useKeybindingsStore } from '@/stores/settings';
 import { browserInsertsNewline, composerHints } from './composer';
 import { runAction } from './handlers';
@@ -42,8 +43,9 @@ export function useChordLabel(action: ActionId): string {
   return formatChord(chord, KEY_PLATFORM);
 }
 
-/** 输入框的悬停提示与 aria-keyshortcuts，改键后跟着变 */
+/** 输入框的悬停提示与 aria-keyshortcuts，改键、换语言后跟着变 */
 export function useComposerHints(): { title: string; ariaKeyShortcuts: string } {
   const bindings = useKeybindingsStore((state) => state.bindings);
-  return useMemo(() => composerHints(bindings, KEY_PLATFORM), [bindings]);
+  const t = useT();
+  return useMemo(() => composerHints(bindings, KEY_PLATFORM, t), [bindings, t]);
 }
