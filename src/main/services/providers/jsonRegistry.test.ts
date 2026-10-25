@@ -102,12 +102,18 @@ describe('createJsonRegistry', () => {
 
   it('写入失败时 reject，内存状态保持不变', async () => {
     const blocker = join(dir, 'blocker');
-    writeFileSync(blocker, '');
     const registry = open(join(blocker, 'items.json'));
-    await expect(
-      registry.transact(() => ({ next: [{ id: 'a', label: 'A' }], result: undefined }))
-    ).rejects.toThrow();
+    // 先完成正常读取，再阻塞写入，避免各系统对非法父路径的读取错误不同。
     expect(await registry.list()).toEqual([]);
+    writeFileSync(blocker, '');
+    const update = vi.fn(() => ({ next: [{ id: 'a', label: 'A' }], result: undefined }));
+    await expect(registry.transact(update)).rejects.toThrow();
+    expect(update).toHaveBeenCalledOnce();
+    expect(await registry.list()).toEqual([]);
+
+    rmSync(blocker);
+    await registry.transact(update);
+    expect(await open(join(blocker, 'items.json')).list()).toEqual([{ id: 'a', label: 'A' }]);
   });
 
   it('返回副本：改动返回值不影响仓库', async () => {
