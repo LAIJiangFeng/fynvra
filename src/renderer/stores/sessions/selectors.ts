@@ -39,10 +39,41 @@ export const selectNotice = (state: SessionsState) => state.notice;
 export const selectModelProviders = (state: SessionsState): ModelProviderOption[] =>
   state.modelProviders ?? EMPTY_PROVIDERS;
 
+/** 工作区的全部会话（含归档的），最近更新的在前 */
 export const selectSessionsOf =
   (workspaceId: string) =>
   (state: SessionsState): SessionSummary[] =>
     state.sessionsByWorkspace[workspaceId] ?? EMPTY_SESSIONS;
+
+interface SessionGroups {
+  active: SessionSummary[];
+  /** 最近归档的在前 */
+  archived: SessionSummary[];
+}
+
+// 按列表引用缓存分组：同一份列表总拿到同一对数组，订阅它的组件不会因为新数组反复渲染
+const groupsByList = new WeakMap<SessionSummary[], SessionGroups>();
+
+function groupsOf(sessions: SessionSummary[]): SessionGroups {
+  let groups = groupsByList.get(sessions);
+  if (!groups) {
+    const archived = sessions.filter((session) => session.archivedAt !== undefined);
+    groups = {
+      active: sessions.filter((session) => session.archivedAt === undefined),
+      archived: archived.sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0)),
+    };
+    groupsByList.set(sessions, groups);
+  }
+  return groups;
+}
+
+/** 侧栏的会话：没归档的，最近更新的在前 */
+export const selectActiveSessionsOf = (workspaceId: string) => (state: SessionsState) =>
+  groupsOf(selectSessionsOf(workspaceId)(state)).active;
+
+/** 侧栏底部「已归档」分组：最近归档的在前 */
+export const selectArchivedSessionsOf = (workspaceId: string) => (state: SessionsState) =>
+  groupsOf(selectSessionsOf(workspaceId)(state)).archived;
 
 export const selectListErrorOf = (workspaceId: string) => (state: SessionsState) =>
   state.listErrors[workspaceId];

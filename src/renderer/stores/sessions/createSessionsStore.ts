@@ -84,6 +84,13 @@ export interface SessionsState extends ChatProjection {
     sessionId: string,
     mode: ApprovalMode
   ): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
+   * 归档会话：先在列表里标上（乐观更新），Main 回包后以它的归档时间为准；失败时换回、提示原因并重拉列表。
+   * 运行中、等审批或消息在途时直接拒绝。
+   */
+  archiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 恢复归档的会话：同上；恢复算一次更新，会话回到列表顶部 */
+  unarchiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -98,6 +105,7 @@ export interface SessionsStoreOptions {
 
 const EVENT_BATCH_MS = 16;
 const SWITCH_WHILE_BUSY = '会话正在运行，等本轮结束再切换模型';
+const ARCHIVE_WHILE_BUSY = '会话正在运行，结束后再归档';
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -136,6 +144,11 @@ function mapSession(
 function withModel(session: SessionSummary, model: SessionModelRef | undefined): SessionSummary {
   const { model: _previous, ...rest } = session;
   return model ? { ...rest, model } : rest;
+}
+
+function withArchivedAt(session: SessionSummary, archivedAt: number | undefined): SessionSummary {
+  const { archivedAt: _previous, ...rest } = session;
+  return archivedAt === undefined ? rest : { ...rest, archivedAt };
 }
 
 /** 去掉开头的空行与末尾空白，保留首行缩进（可能是代码） */
@@ -190,6 +203,44 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       return undefined;
     }
 
+    /** 归档 / 恢复：乐观改 archivedAt，回包后取 Main 的 archivedAt 与 updatedAt（恢复会改最后更新） */
+    async function setArchived(
+      sessionId: string,
+      archived: boolean
+    ): Promise<IpcResult<{ session: SessionSummary }>> {
+      const session = findSession(get(), sessionId);
+      if (!session) return { ok: false, error: '会话不存在' };
+      if (archived && (sending.has(sessionId) || isBusy(statusOf(get(), sessionId)))) {
+        return { ok: false, error: ARCHIVE_WHILE_BUSY };
+      }
+      const { workspaceId, archivedAt: previous } = session;
+      const mark = (archivedAt: number | undefined, updatedAt?: number) =>
+        set((state) => {
+          const lists = mapSession(state.sessionsByWorkspace, sessionId, (item) => ({
+            ...withArchivedAt(item, archivedAt),
+            updatedAt: updatedAt ?? item.updatedAt,
+          }));
+          const list = lists[workspaceId];
+          return {
+            sessionsByWorkspace: list
+              ? { ...lists, [workspaceId]: [...list].sort(byRecent) }
+              : lists,
+          };
+        });
+      mark(archived ? now() : undefined);
+      const result = await safely(() =>
+        archived ? api.archive(sessionId) : api.unarchive(sessionId)
+      );
+      if (result.ok) {
+        mark(result.session.archivedAt, result.session.updatedAt);
+        return result;
+      }
+      mark(previous);
+      set({ notice: `${archived ? '归档' : '恢复'}失败：${result.error}` });
+      void get().loadSessions(workspaceId);
+      return result;
+    }
+
     return {
       ...emptyProjection(),
       workspaceId: null,
@@ -219,7 +270,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       async loadSessions(workspaceId) {
         const request = ++requestSeq;
         listRequests.set(workspaceId, request);
-        const result = await safely(() => api.list(workspaceId));
+        // 归档的也拉：侧栏底部的「已归档」分组用
+        const result = await safely(() => api.list(workspaceId, { includeArchived: true }));
         if (listRequests.get(workspaceId) !== request) return;
         if (!result.ok) {
           set((state) => ({ listErrors: { ...state.listErrors, [workspaceId]: result.error } }));
@@ -464,6 +516,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         void get().loadSessions(session.workspaceId);
         return result;
       },
+
+      archiveSession: (sessionId) => setArchived(sessionId, true),
+
+      unarchiveSession: (sessionId) => setArchived(sessionId, false),
 
       openModelPicker(sessionId) {
         set({ modelPickerFor: sessionId });
