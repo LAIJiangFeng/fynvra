@@ -2,39 +2,45 @@ import {
   ACTION_IDS,
   type ActionId,
   chordFromEvent,
-  conflictLabel,
   findConflict,
   formatChord,
   isAllowedChord,
   KEY_ACTIONS,
+  type KeyConflict,
   type KeyScope,
 } from '@shared/keybindings';
 import { RotateCcw } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import type { T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { KEY_PLATFORM } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useKeybindingsStore } from '@/stores/settings';
 import { InlineMessage, SectionHeader } from './common';
 
-const GROUPS: { scope: KeyScope; title: string }[] = [
-  { scope: 'global', title: '全局' },
-  { scope: 'composer', title: '输入框' },
-];
+/** 分组标题在字典 settings.keybindings.<作用域> */
+const SCOPES: readonly KeyScope[] = ['global', 'composer'];
 
-const NEEDS_MODIFIER = KEY_PLATFORM === 'mac' ? '要带 ⌘、⌃ 或 ⌥' : '要带 Ctrl 或 Alt';
+/** 冲突对象的名字：另一个动作，或保留的编辑键（全选、复制……） */
+function conflictName(conflict: KeyConflict, t: T): string {
+  return 'action' in conflict
+    ? t(`keys.actions.${conflict.action}`)
+    : t(`keys.reserved.${conflict.reserved}`);
+}
 
 /** 快捷键：每行「动作 — 当前键 — 改键 / 重置」。改键是按下新的组合键，冲突的不保存。 */
 export function KeybindingsSettings() {
   const customized = useKeybindingsStore((state) => Object.keys(state.overrides).length > 0);
   const resetAll = useKeybindingsStore((state) => state.resetAll);
   const [recording, setRecording] = useState<ActionId | null>(null);
+  const t = useT();
 
   return (
     <div className="grid gap-8">
-      {GROUPS.map(({ scope, title }, index) => (
+      {SCOPES.map((scope, index) => (
         <section key={scope}>
-          <SectionHeader title={title}>
+          <SectionHeader title={t(`settings.keybindings.${scope}`)}>
             {index === 0 && (
               <Button
                 size="sm"
@@ -50,7 +56,7 @@ export function KeybindingsSettings() {
                 }}
               >
                 <RotateCcw />
-                全部重置
+                {t('settings.keybindings.resetAll')}
               </Button>
             )}
           </SectionHeader>
@@ -85,11 +91,14 @@ function KeyRow({
   const reset = useKeybindingsStore((state) => state.reset);
   const [problem, setProblem] = useState<string | null>(null);
   const recorder = useRef<HTMLButtonElement>(null);
-  const { label } = KEY_ACTIONS[action];
+  const t = useT();
+  const label = t(`keys.actions.${action}`);
   const chord = bindings[action];
   // 手改 settings.json、或新版本的默认键撞上了改过的键
   const conflict = findConflict(action, chord, bindings, KEY_PLATFORM);
-  const message = recording ? problem : conflict && `与「${conflictLabel(conflict)}」冲突`;
+  const message = recording
+    ? problem
+    : conflict && t('settings.keybindings.conflict', { name: conflictName(conflict, t) });
 
   useEffect(() => {
     if (recording) recorder.current?.focus();
@@ -112,12 +121,18 @@ function KeyRow({
     // 只按了修饰键：等主键
     if (pressed === null) return;
     if (!isAllowedChord(action, pressed)) {
-      setProblem(NEEDS_MODIFIER);
+      setProblem(
+        t(
+          KEY_PLATFORM === 'mac'
+            ? 'settings.keybindings.needsModifierMac'
+            : 'settings.keybindings.needsModifier'
+        )
+      );
       return;
     }
     const taken = findConflict(action, pressed, bindings, KEY_PLATFORM);
     if (taken) {
-      setProblem(`已被「${conflictLabel(taken)}」使用`);
+      setProblem(t('settings.keybindings.taken', { name: conflictName(taken, t) }));
       return;
     }
     stop();
@@ -134,7 +149,7 @@ function KeyRow({
       )}
       {recording ? (
         <span className="shrink-0 rounded border border-dashed px-1.5 py-0.5 text-muted-foreground text-xs">
-          按下组合键
+          {t('settings.keybindings.pressKeys')}
         </span>
       ) : (
         <kbd className="shrink-0 rounded border bg-muted/60 px-1.5 py-0.5 font-sans text-xs">
@@ -145,7 +160,11 @@ function KeyRow({
         ref={recorder}
         size="sm"
         variant="ghost"
-        aria-label={recording ? '按下组合键，Esc 取消' : `改键：${label}`}
+        aria-label={
+          recording
+            ? t('settings.keybindings.pressKeysHint')
+            : t('settings.keybindings.rebindAction', { label })
+        }
         onClick={() => {
           setProblem(null);
           onRecordingChange(!recording);
@@ -153,12 +172,12 @@ function KeyRow({
         onKeyDown={recording ? capture : undefined}
         onBlur={recording ? stop : undefined}
       >
-        {recording ? '取消' : '改键'}
+        {t(recording ? 'common.cancel' : 'settings.keybindings.rebind')}
       </Button>
       <Button
         size="sm"
         variant="ghost"
-        aria-label={`重置：${label}`}
+        aria-label={t('settings.keybindings.resetAction', { label })}
         disabled={!custom}
         className={cn(!custom && 'invisible')}
         onClick={() => {
@@ -167,7 +186,7 @@ function KeyRow({
           void reset(action);
         }}
       >
-        重置
+        {t('settings.keybindings.reset')}
       </Button>
     </li>
   );

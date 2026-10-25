@@ -2,6 +2,7 @@ import { type CatalogProvider, MODEL_CATALOG } from '@shared/modelCatalog';
 import type { ModelProviderOption } from '@shared/types/chat';
 import type { ModelEntry, ModelProviderView, ProviderApi } from '@shared/types/llm';
 import type { ProviderUpsertInput } from '../../../preload/domains/providers';
+import { type T, translate } from '../../i18n';
 
 // 模型服务表单的纯逻辑（不碰 DOM，可在 node 下测试）。
 
@@ -26,9 +27,14 @@ export interface ProviderDraft {
 
 type FormResult<T> = ({ ok: true } & T) | { ok: false; error: string };
 
+/** 模板的显示名：自定义 OpenAI 兼容按界面语言，其余是服务商名 */
+export function catalogName(entry: CatalogProvider, t: T): string {
+  return entry.id === 'openai-compatible' ? t('settings.providers.openaiCompatible') : entry.name;
+}
+
 export function draftFromCatalog(entry: CatalogProvider): ProviderDraft {
   return {
-    name: entry.name,
+    name: catalogName(entry, translate),
     api: entry.api,
     baseUrl: entry.baseUrl ?? '',
     apiKey: '',
@@ -61,14 +67,18 @@ export function draftToUpsertInput(
   draft: ProviderDraft
 ): FormResult<{ input: ProviderUpsertInput }> {
   const name = draft.name.trim();
-  if (!name) return { ok: false, error: '请填写名称' };
+  if (!name) return { ok: false, error: translate('settings.providers.nameRequired') };
   const baseUrl = draft.baseUrl.trim();
-  if (!baseUrl && draft.requiresBaseUrl) return { ok: false, error: '请填写 Base URL' };
+  if (!baseUrl && draft.requiresBaseUrl) {
+    return { ok: false, error: translate('settings.providers.baseUrlRequired') };
+  }
   if (baseUrl && !isHttpUrl(baseUrl)) {
-    return { ok: false, error: 'Base URL 必须以 http:// 或 https:// 开头' };
+    return { ok: false, error: translate('settings.remoteModels.baseUrlHttp') };
   }
   const apiKey = draft.apiKey.trim();
-  if (/\s/.test(apiKey)) return { ok: false, error: 'API Key 不能包含空白字符' };
+  if (/\s/.test(apiKey)) {
+    return { ok: false, error: translate('settings.remoteModels.apiKeyWhitespace') };
+  }
   return {
     ok: true,
     input: {
@@ -89,9 +99,13 @@ export function addModel(
   rawId: string
 ): FormResult<{ models: ModelEntry[] }> {
   const id = rawId.trim();
-  if (!id) return { ok: false, error: '请输入模型 id' };
-  if (/\s/.test(id)) return { ok: false, error: '模型 id 不能包含空白' };
-  if (models.some((model) => model.id === id)) return { ok: false, error: `已经有模型 ${id}` };
+  if (!id) return { ok: false, error: translate('settings.providers.modelIdRequired') };
+  if (/\s/.test(id)) {
+    return { ok: false, error: translate('settings.providers.modelIdWhitespace') };
+  }
+  if (models.some((model) => model.id === id)) {
+    return { ok: false, error: translate('settings.providers.modelExists', { id }) };
+  }
   return { ok: true, models: [...models, { id, name: id }] };
 }
 

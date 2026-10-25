@@ -112,7 +112,8 @@ export const MODEL_CATALOG: readonly CatalogProvider[] = [
   },
   {
     id: 'openai-compatible',
-    name: '自定义 OpenAI 兼容',
+    // 界面上按语言显示（Renderer 字典 settings.providers.openaiCompatible），这里是默认名
+    name: 'OpenAI Compatible',
     api: 'openai-completions',
     models: [],
   },

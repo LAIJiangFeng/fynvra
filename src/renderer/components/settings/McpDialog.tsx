@@ -20,23 +20,18 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import type { MessageId } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { useMcpStore } from '@/stores/mcp';
 import { Field, InlineMessage } from './common';
 import { addSecretRow, draftToMcpInput, type McpDraft, type SecretRow } from './mcpForm';
 
 type Transport = McpServerEntry['transport'];
 
-export const TRANSPORT_LABELS: Record<Transport, string> = {
-  stdio: '本地进程（stdio）',
-  http: '远程（Streamable HTTP）',
-  sse: '远程（SSE）',
-};
-const TRANSPORT_ITEMS = (Object.keys(TRANSPORT_LABELS) as Transport[]).map((value) => ({
-  value,
-  label: TRANSPORT_LABELS[value],
-}));
+/** 传输方式；显示名在字典 settings.mcp.transports */
+const TRANSPORTS: readonly Transport[] = ['stdio', 'http', 'sse'];
 const isTransport = (value: unknown): value is Transport =>
-  typeof value === 'string' && Object.hasOwn(TRANSPORT_LABELS, value);
+  typeof value === 'string' && (TRANSPORTS as readonly string[]).includes(value);
 
 /** 一次编辑会话：key 变化时表单重置。 */
 export interface McpEditing {
@@ -76,7 +71,12 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const id = useId();
+  const t = useT();
   const update = (patch: Partial<McpDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const transportItems = TRANSPORTS.map((value) => ({
+    value,
+    label: t(`settings.mcp.transports.${value}`),
+  }));
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -95,21 +95,23 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
   return (
     <form onSubmit={submit} className="grid min-w-0 gap-4">
       <DialogHeader>
-        <DialogTitle>{initial.id ? `编辑 ${initial.name}` : '添加 MCP 服务器'}</DialogTitle>
+        <DialogTitle>
+          {initial.id ? t('common.editItem', { name: initial.name }) : t('settings.mcp.addTitle')}
+        </DialogTitle>
       </DialogHeader>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="名称" htmlFor={`${id}-name`}>
+        <Field label={t('common.name')} htmlFor={`${id}-name`}>
           <Input
             id={`${id}-name`}
             value={draft.name}
-            placeholder="例如 github"
+            placeholder={t('settings.mcp.namePlaceholder')}
             onChange={(event) => update({ name: event.target.value })}
           />
         </Field>
-        <Field label="传输方式" htmlFor={`${id}-transport`}>
+        <Field label={t('settings.mcp.transport')} htmlFor={`${id}-transport`}>
           <Select
-            items={TRANSPORT_ITEMS}
+            items={transportItems}
             value={draft.transport}
             onValueChange={(value) => {
               if (isTransport(value)) update({ transport: value });
@@ -119,7 +121,7 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TRANSPORT_ITEMS.map((item) => (
+              {transportItems.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
@@ -131,17 +133,21 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
 
       {draft.transport === 'stdio' ? (
         <>
-          <Field label="命令" htmlFor={`${id}-command`}>
+          <Field label={t('settings.mcp.command')} htmlFor={`${id}-command`}>
             <Input
               id={`${id}-command`}
               value={draft.command}
-              placeholder="例如 npx"
+              placeholder={t('settings.mcp.commandPlaceholder')}
               spellCheck={false}
               className="font-mono"
               onChange={(event) => update({ command: event.target.value })}
             />
           </Field>
-          <Field label="参数" htmlFor={`${id}-args`} hint="一行一个参数">
+          <Field
+            label={t('settings.mcp.args')}
+            htmlFor={`${id}-args`}
+            hint={t('settings.mcp.argsHint')}
+          >
             <Textarea
               id={`${id}-args`}
               rows={3}
@@ -153,7 +159,7 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
             />
           </Field>
           <SecretRowsEditor
-            label="环境变量"
+            label="settings.mcp.env"
             keyPlaceholder="GITHUB_TOKEN"
             rows={draft.env}
             onChange={(env) => update({ env })}
@@ -172,7 +178,7 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
             />
           </Field>
           <SecretRowsEditor
-            label="Header"
+            label="settings.mcp.header"
             keyPlaceholder="Authorization"
             rows={draft.headers}
             onChange={(headers) => update({ headers })}
@@ -186,15 +192,17 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
           checked={draft.enabled}
           onCheckedChange={(enabled) => update({ enabled })}
         />
-        <label htmlFor={`${id}-enabled`}>启用</label>
+        <label htmlFor={`${id}-enabled`}>{t('common.enable')}</label>
       </div>
 
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button type="button" variant="outline" />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button type="submit" disabled={saving}>
-          {saving ? '保存中…' : '保存'}
+          {t(saving ? 'common.saving' : 'common.save')}
         </Button>
       </DialogFooter>
     </form>
@@ -208,18 +216,20 @@ function SecretRowsEditor({
   rows,
   onChange,
 }: {
-  label: string;
+  label: MessageId;
   keyPlaceholder: string;
   rows: SecretRow[];
   onChange: (rows: SecretRow[]) => void;
 }) {
+  const t = useT();
+  const name = t(label);
   const patch = (rowId: number, changes: Partial<SecretRow>) =>
     onChange(rows.map((row) => (row.rowId === rowId ? { ...row, ...changes } : row)));
 
   return (
     <div className="grid min-w-0 gap-2">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">{label}</span>
+        <span className="font-medium text-sm">{name}</span>
         <Button
           type="button"
           variant="ghost"
@@ -227,14 +237,16 @@ function SecretRowsEditor({
           onClick={() => onChange(addSecretRow(rows))}
         >
           <Plus />
-          添加
+          {t('common.add')}
         </Button>
       </div>
-      {rows.length === 0 && <p className="text-muted-foreground text-xs">没有{label}</p>}
+      {rows.length === 0 && (
+        <p className="text-muted-foreground text-xs">{t('settings.mcp.none', { label: name })}</p>
+      )}
       {rows.map((row) => (
         <div key={row.rowId} className="flex min-w-0 gap-2">
           <Input
-            aria-label={`${label}名`}
+            aria-label={t('settings.mcp.keyName', { label: name })}
             className="w-2/5 font-mono"
             value={row.key}
             placeholder={keyPlaceholder}
@@ -243,19 +255,19 @@ function SecretRowsEditor({
             onChange={(event) => patch(row.rowId, { key: event.target.value })}
           />
           <Input
-            aria-label={`${label} ${row.key || ''} 的值`}
+            aria-label={t('settings.mcp.valueOf', { label: name, key: row.key })}
             type="password"
             autoComplete="off"
             className="min-w-0 flex-1 font-mono"
             value={row.value}
-            placeholder={row.saved ? '已保存，留空则不修改' : '值'}
+            placeholder={t(row.saved ? 'settings.mcp.savedValue' : 'settings.mcp.value')}
             onChange={(event) => patch(row.rowId, { value: event.target.value })}
           />
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={`删除 ${row.key || '这一行'}`}
+            aria-label={t('settings.mcp.deleteRow', { key: row.key || t('settings.mcp.thisRow') })}
             onClick={() => onChange(rows.filter((item) => item.rowId !== row.rowId))}
           >
             <X />

@@ -4,9 +4,10 @@ import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { useT } from '@/i18n/I18nProvider';
 import { useMcpStore } from '@/stores/mcp';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
-import { McpDialog, type McpEditing, TRANSPORT_LABELS } from './McpDialog';
+import { McpDialog, type McpEditing } from './McpDialog';
 import { McpImportDialog } from './McpImportDialog';
 import { draftFromServer, emptyMcpDraft, type McpDraft } from './mcpForm';
 import { maskSecrets } from './secretMask';
@@ -21,6 +22,7 @@ export function McpSettings() {
   const [importSession, setImportSession] = useState<number | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const sessions = useRef(0);
+  const t = useT();
 
   const edit = (draft: McpDraft) => {
     sessions.current += 1;
@@ -35,14 +37,14 @@ export function McpSettings() {
 
   return (
     <section>
-      <SectionHeader title="MCP 服务器">
+      <SectionHeader title={t('settings.mcp.title')}>
         <Button size="sm" variant="outline" onClick={openImport}>
           <HardDriveDownload />
-          从本机导入…
+          {t('settings.import.fromLocal')}
         </Button>
         <Button size="sm" onClick={() => edit(emptyMcpDraft())}>
           <Plus />
-          添加服务器
+          {t('settings.mcp.add')}
         </Button>
       </SectionHeader>
 
@@ -54,10 +56,10 @@ export function McpSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && servers.length === 0 ? (
-        <EmptyState icon={Plug} title="还没有 MCP 服务器">
+        <EmptyState icon={Plug} title={t('settings.mcp.empty')}>
           <Button size="sm" variant="outline" onClick={openImport}>
             <HardDriveDownload />
-            从本机导入
+            {t('settings.import.fromLocalShort')}
           </Button>
         </EmptyState>
       ) : (
@@ -95,6 +97,7 @@ function McpRow({
   const toggle = useMcpStore((state) => state.toggle);
   const remove = useMcpStore((state) => state.remove);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const t = useT();
   // 参数、URL 里的密钥打码显示；编辑弹窗里仍是原值
   const summary = maskSecrets(server.url ?? [server.command, ...(server.args ?? [])].join(' '));
   const secretKeys = [...server.envKeys, ...server.headerKeys];
@@ -104,8 +107,8 @@ function McpRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-sm">{server.name}</span>
-          <Badge variant="outline">{TRANSPORT_LABELS[server.transport]}</Badge>
-          {!server.enabled && <Badge>已停用</Badge>}
+          <Badge variant="outline">{t(`settings.mcp.transports.${server.transport}`)}</Badge>
+          {!server.enabled && <Badge>{t('common.disabled')}</Badge>}
         </div>
         <p className="truncate font-mono text-muted-foreground text-xs" title={summary}>
           {summary}
@@ -117,7 +120,7 @@ function McpRow({
                 key={key}
                 variant="outline"
                 className="font-mono"
-                title="值已保存在本机，不在界面显示"
+                title={t('settings.mcp.keySaved')}
               >
                 <KeyRound />
                 {key}
@@ -127,7 +130,9 @@ function McpRow({
         )}
         {confirmingRemove && (
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">引用它的角色将不再加载它</span>
+            <span className="text-muted-foreground text-xs">
+              {t('settings.mcp.removeConsequence')}
+            </span>
             <Button
               size="sm"
               variant="destructive"
@@ -139,10 +144,10 @@ function McpRow({
                 }
               }}
             >
-              确认删除
+              {t('common.confirmDelete')}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setConfirmingRemove(false)}>
-              取消
+              {t('common.cancel')}
             </Button>
           </div>
         )}
@@ -150,19 +155,24 @@ function McpRow({
       <Switch
         className="mt-1"
         checked={server.enabled}
-        aria-label={`启用 ${server.name}`}
+        aria-label={t('common.enableItem', { name: server.name })}
         onCheckedChange={async (enabled) => {
           const result = await toggle(server.id, enabled);
           if (!result.ok) onError(result.error);
         }}
       />
-      <Button variant="ghost" size="icon-xs" aria-label={`编辑 ${server.name}`} onClick={onEdit}>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={t('common.editItem', { name: server.name })}
+        onClick={onEdit}
+      >
         <Pencil />
       </Button>
       <Button
         variant="ghost"
         size="icon-xs"
-        aria-label={`删除 ${server.name}`}
+        aria-label={t('common.deleteItem', { name: server.name })}
         className="text-destructive hover:text-destructive"
         onClick={() => setConfirmingRemove(true)}
       >

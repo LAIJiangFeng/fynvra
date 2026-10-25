@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { useT } from '@/i18n/I18nProvider';
 import { useProvidersStore } from '@/stores/providers';
 import { Field, InlineMessage } from './common';
 import {
@@ -88,6 +89,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
   const [saving, setSaving] = useState(false);
   const [remote, setRemote] = useState<{ key: number; request: RemoteModelsRequest } | null>(null);
   const id = useId();
+  const t = useT();
   const update = (patch: Partial<ProviderDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
 
@@ -134,24 +136,28 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
 
   const keyPlaceholder =
     draft.hasSavedKey && !draft.clearApiKey
-      ? `已保存 ••••${draft.savedKeyHint ?? ''}，留空则不修改`
-      : '粘贴 API Key';
+      ? t('settings.providers.savedKey', { hint: draft.savedKeyHint ?? '' })
+      : t('settings.providers.pasteKey');
 
   return (
     <form onSubmit={submit} className="grid min-w-0 gap-4">
       <DialogHeader>
-        <DialogTitle>{initial.id ? `编辑 ${initial.name}` : `添加 ${initial.name}`}</DialogTitle>
+        <DialogTitle>
+          {initial.id
+            ? t('common.editItem', { name: initial.name })
+            : t('settings.providers.addTitle', { name: initial.name })}
+        </DialogTitle>
       </DialogHeader>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="名称" htmlFor={`${id}-name`}>
+        <Field label={t('common.name')} htmlFor={`${id}-name`}>
           <Input
             id={`${id}-name`}
             value={draft.name}
             onChange={(event) => update({ name: event.target.value })}
           />
         </Field>
-        <Field label="API 协议" htmlFor={`${id}-api`}>
+        <Field label={t('settings.providers.api')} htmlFor={`${id}-api`}>
           <Select
             items={API_ITEMS}
             value={draft.api}
@@ -176,7 +182,9 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       <Field
         label="Base URL"
         htmlFor={`${id}-base-url`}
-        hint={draft.requiresBaseUrl ? '必填' : '留空使用官方地址'}
+        hint={t(
+          draft.requiresBaseUrl ? 'settings.providers.required' : 'settings.providers.officialUrl'
+        )}
       >
         <Input
           id={`${id}-base-url`}
@@ -192,7 +200,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       <Field
         label="API Key"
         htmlFor={`${id}-api-key`}
-        hint={draft.clearApiKey ? '保存后清除 key' : undefined}
+        hint={draft.clearApiKey ? t('settings.providers.clearOnSave') : undefined}
       >
         <div className="flex gap-2">
           <Input
@@ -210,7 +218,9 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
               variant="outline"
               onClick={() => update({ clearApiKey: !draft.clearApiKey, apiKey: '' })}
             >
-              {draft.clearApiKey ? '撤销清除' : '清除 key'}
+              {t(
+                draft.clearApiKey ? 'settings.providers.undoClear' : 'settings.providers.clearKey'
+              )}
             </Button>
           )}
         </div>
@@ -218,9 +228,11 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
 
       <div className="grid min-w-0 gap-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-sm">模型</span>
+          <span className="font-medium text-sm">{t('settings.providers.models')}</span>
           <span className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">{draft.models.length} 个</span>
+            <span className="text-muted-foreground text-xs">
+              {t('settings.providers.modelCount', { count: draft.models.length })}
+            </span>
             <Button
               type="button"
               variant="outline"
@@ -229,7 +241,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
               onClick={openRemote}
             >
               <CloudDownload />
-              拉取模型列表
+              {t('settings.providers.fetchModels')}
             </Button>
           </span>
         </div>
@@ -258,26 +270,30 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
                 {control.kind === 'catalog' ? (
                   <Badge
                     variant="outline"
-                    title="由内置目录决定"
+                    title={t('settings.providers.catalogDecides')}
                     className={control.reasoning ? undefined : 'opacity-60'}
                   >
-                    {control.reasoning ? '推理' : '不推理'}
+                    {t(
+                      control.reasoning
+                        ? 'settings.providers.reasoning'
+                        : 'settings.providers.noReasoning'
+                    )}
                   </Badge>
                 ) : (
                   <span
                     className="flex shrink-0 items-center gap-1.5"
-                    title="打开后会话里可选思考档位"
+                    title={t('settings.providers.reasoningHint')}
                   >
                     <Switch
                       id={switchId}
-                      aria-label={`推理：${model.id}`}
+                      aria-label={t('settings.providers.reasoningFor', { id: model.id })}
                       checked={model.reasoning === true}
                       onCheckedChange={(on) =>
                         update({ models: setModelReasoning(draft.models, model.id, on) })
                       }
                     />
                     <label htmlFor={switchId} className="text-muted-foreground text-xs">
-                      推理
+                      {t('settings.providers.reasoning')}
                     </label>
                   </span>
                 )}
@@ -285,7 +301,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={`移除模型 ${model.id}`}
+                  aria-label={t('settings.providers.removeModel', { id: model.id })}
                   onClick={() => update({ models: draft.models.filter((m) => m.id !== model.id) })}
                 >
                   <X />
@@ -294,13 +310,15 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
             );
           })}
           {draft.models.length === 0 && (
-            <li className="px-3 py-3 text-center text-muted-foreground text-xs">还没有模型</li>
+            <li className="px-3 py-3 text-center text-muted-foreground text-xs">
+              {t('settings.providers.noModels')}
+            </li>
           )}
         </ul>
         <div className="flex gap-2">
           <Input
-            aria-label="要添加的模型 id"
-            placeholder="模型 id，例如 deepseek-chat"
+            aria-label={t('settings.providers.modelInput')}
+            placeholder={t('settings.providers.modelPlaceholder')}
             spellCheck={false}
             value={modelInput}
             onChange={(event) => setModelInput(event.target.value)}
@@ -313,7 +331,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
           />
           <Button type="button" variant="outline" onClick={addModelFromInput}>
             <Plus />
-            添加
+            {t('common.add')}
           </Button>
         </div>
       </div>
@@ -324,15 +342,17 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
           checked={draft.enabled}
           onCheckedChange={(enabled) => update({ enabled })}
         />
-        <label htmlFor={`${id}-enabled`}>启用</label>
+        <label htmlFor={`${id}-enabled`}>{t('common.enable')}</label>
       </div>
 
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button type="button" variant="outline" />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button type="submit" disabled={saving}>
-          {saving ? '保存中…' : '保存'}
+          {t(saving ? 'common.saving' : 'common.save')}
         </Button>
       </DialogFooter>
     </form>

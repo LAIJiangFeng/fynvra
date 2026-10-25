@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
 import { InlineMessage, WarningList } from './common';
@@ -87,6 +88,7 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
   const [selected, setSelected] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const t = useT();
 
   // 只认最后一次扫描的返回；Main 也按顺序扫，它缓存的正是这一次的结果
   useEffect(() => {
@@ -129,7 +131,7 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
   return (
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
-        <DialogTitle>从本机导入模型服务</DialogTitle>
+        <DialogTitle>{t('settings.providers.importTitle')}</DialogTitle>
       </DialogHeader>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -158,37 +160,42 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
           onClick={() => setSources((current) => [...current])}
         >
           <RefreshCw />
-          重新扫描
+          {t('settings.import.rescan')}
         </Button>
       </div>
 
       {sources.length === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-sm">至少选择一个来源</p>
+        <p className="py-6 text-center text-muted-foreground text-sm">
+          {t('settings.import.pickSource')}
+        </p>
       ) : scan.phase === 'scanning' ? (
         <p className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
           <Loader2 className="size-4 animate-spin" />
-          正在扫描本机配置…
+          {t('settings.import.scanning')}
         </p>
       ) : scan.phase === 'failed' ? (
         <InlineMessage tone="error">{scan.error}</InlineMessage>
       ) : candidates.length === 0 ? (
-        <p className="py-6 text-center text-sm">没有找到带 API Key 或自定义地址的配置</p>
+        <p className="py-6 text-center text-sm">{t('settings.providers.importNone')}</p>
       ) : (
         <div className="grid min-w-0 gap-2">
           <div className="flex items-center justify-between text-muted-foreground text-xs">
             <span>
-              共 {candidates.length} 个，已选 {selected.length}
+              {t('settings.import.selectedOf', {
+                total: candidates.length,
+                selected: selected.length,
+              })}
             </span>
             <span className="flex gap-1">
               <Button variant="ghost" size="sm" onClick={() => setSelected(selectAll(candidates))}>
-                全选
+                {t('common.selectAll')}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelected(invertSelection(candidates, selected))}
               >
-                反选
+                {t('common.invertSelection')}
               </Button>
             </span>
           </div>
@@ -214,12 +221,14 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
         <Button
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >
-          {importing ? '导入中…' : `导入所选（${selected.length}）`}
+          {importing
+            ? t('settings.import.importing')
+            : t('settings.import.importPicked', { count: selected.length })}
         </Button>
       </DialogFooter>
     </div>
@@ -237,6 +246,7 @@ function CandidateRow({
 }) {
   const reason = duplicateReason(candidate);
   const id = useId();
+  const t = useT();
   return (
     <li>
       {/* 整行都是标签：点哪里都能勾选；Checkbox 的 onClick 会 preventDefault，不会被标签再触发一次 */}
@@ -261,7 +271,7 @@ function CandidateRow({
               {sourceLabel(candidate.source)}
             </Badge>
             <Badge variant="outline">{providerApiLabel(candidate.api)}</Badge>
-            {candidate.isCurrent && <Badge>当前使用</Badge>}
+            {candidate.isCurrent && <Badge>{t('settings.providers.current')}</Badge>}
             {reason && <Badge title={reason}>{duplicateBadge(candidate)}</Badge>}
           </div>
           <p className="truncate text-muted-foreground text-xs">
@@ -272,7 +282,7 @@ function CandidateRow({
             {candidate.hasApiKey ? (
               <span className="font-mono">••••{candidate.apiKeyHint ?? ''}</span>
             ) : (
-              <span className="text-destructive">没有 API Key</span>
+              <span className="text-destructive">{t('settings.providers.noKey')}</span>
             )}
           </p>
           <p className="truncate text-muted-foreground text-xs">{modelSummary(candidate)}</p>

@@ -11,6 +11,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import type { T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { useSkillsStore } from '@/stores/skills';
 import type {
   SkillCandidate,
@@ -25,10 +27,10 @@ const SOURCE_LABELS: Record<SkillSourceId, string> = {
   pi: 'pi',
 };
 
-function sourceStatus(source: SkillScanSource): string {
-  if (source.status === 'not-found') return '未找到目录';
-  if (source.status === 'error') return '读取失败';
-  return `${source.count} 个`;
+function sourceStatus(source: SkillScanSource, t: T): string {
+  if (source.status === 'not-found') return t('settings.skills.dirNotFound');
+  if (source.status === 'error') return t('common.loadFailed');
+  return t('settings.skills.count', { count: source.count });
 }
 
 /** 扫描本机技能并勾选登记。每次打开（session 变化）重新扫描。 */
@@ -78,6 +80,7 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     let active = true;
@@ -104,8 +107,14 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
       setError(added.error);
       return;
     }
-    const skipped = added.skipped.length > 0 ? `，跳过 ${added.skipped.length} 个` : '';
-    onRegistered(`已登记 ${added.skills.length} 个技能${skipped}`);
+    onRegistered(
+      added.skipped.length > 0
+        ? t('settings.skills.registeredSkipped', {
+            count: added.skills.length,
+            skipped: added.skipped.length,
+          })
+        : t('settings.skills.registeredCount', { count: added.skills.length })
+    );
   };
 
   const selectable = result?.candidates.filter((item) => !item.registered) ?? [];
@@ -113,13 +122,13 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
   return (
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
-        <DialogTitle>扫描本机技能</DialogTitle>
+        <DialogTitle>{t('settings.skills.scanTitle')}</DialogTitle>
       </DialogHeader>
 
       {!result && !error && (
         <p className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
           <Loader2 className="size-4 animate-spin" />
-          正在扫描…
+          {t('settings.skills.scanning')}
         </p>
       )}
 
@@ -132,7 +141,7 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
                   variant={source.status === 'error' ? 'destructive' : 'outline'}
                   title={source.error ?? source.root}
                 >
-                  {source.label}：{sourceStatus(source)}
+                  {t('common.labeled', { label: source.label, text: sourceStatus(source, t) })}
                 </Badge>
               </li>
             ))}
@@ -140,13 +149,16 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
 
           {result.candidates.length === 0 ? (
             <p className="py-6 text-center text-muted-foreground text-sm">
-              没有找到含 SKILL.md 的技能目录
+              {t('settings.skills.none')}
             </p>
           ) : (
             <div className="grid min-w-0 gap-2">
               <div className="flex items-center justify-between text-muted-foreground text-xs">
                 <span>
-                  共 {result.candidates.length} 个，已选 {selected.length}
+                  {t('settings.import.selectedOf', {
+                    total: result.candidates.length,
+                    selected: selected.length,
+                  })}
                 </span>
                 <span className="flex gap-1">
                   <Button
@@ -154,10 +166,10 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
                     size="sm"
                     onClick={() => setSelected(selectable.map((item) => item.id))}
                   >
-                    全选
+                    {t('common.selectAll')}
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
-                    全不选
+                    {t('settings.skills.selectNone')}
                   </Button>
                 </span>
               </div>
@@ -168,7 +180,9 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
                       <div className="flex flex-wrap items-center gap-1.5 text-sm">
                         <span className="font-medium">{candidate.name}</span>
                         <Badge variant="outline">{SOURCE_LABELS[candidate.source]}</Badge>
-                        {candidate.registered && <Badge>已登记</Badge>}
+                        {candidate.registered && (
+                          <Badge>{t('settings.skills.alreadyRegistered')}</Badge>
+                        )}
                       </div>
                       {candidate.description && (
                         <p className="line-clamp-2 text-muted-foreground text-xs">
@@ -186,7 +200,7 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
                       className="mt-1"
                       checked={selected.includes(candidate.id)}
                       disabled={candidate.registered}
-                      aria-label={`登记 ${candidate.name}`}
+                      aria-label={t('settings.skills.register', { name: candidate.name })}
                       onCheckedChange={(on) =>
                         setSelected((current) =>
                           on
@@ -206,12 +220,14 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
         <Button
           disabled={!result || selected.length === 0 || registering}
           onClick={() => void register()}
         >
-          {registering ? '登记中…' : `登记所选（${selected.length}）`}
+          {registering
+            ? t('settings.skills.registering')
+            : t('settings.skills.registerPicked', { count: selected.length })}
         </Button>
       </DialogFooter>
     </div>

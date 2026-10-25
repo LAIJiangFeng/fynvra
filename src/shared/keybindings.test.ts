@@ -360,12 +360,13 @@ describe('findConflict', () => {
 
   it('剪切板、撤销、全选这些编辑键保留，按平台判断', () => {
     expect(findConflict('search-sessions', 'ctrl+c', windows, 'windows')).toEqual({
-      reserved: '复制',
+      reserved: 'copy',
     });
-    expect(findConflict('send', 'ctrl+z', windows, 'windows')).toEqual({ reserved: '撤销' });
-    expect(findConflict('send', 'ctrl+shift+z', windows, 'windows')).toEqual({ reserved: '重做' });
+    expect(findConflict('send', 'ctrl+z', windows, 'windows')).toEqual({ reserved: 'undo' });
+    expect(findConflict('send', 'ctrl+shift+z', windows, 'windows')).toEqual({ reserved: 'redo' });
+    expect(findConflict('send', 'ctrl+a', windows, 'windows')).toEqual({ reserved: 'select-all' });
     const mac = resolveKeybindings(undefined, 'mac');
-    expect(findConflict('search-sessions', 'meta+v', mac, 'mac')).toEqual({ reserved: '粘贴' });
+    expect(findConflict('search-sessions', 'meta+v', mac, 'mac')).toEqual({ reserved: 'paste' });
     // macOS 上 ⌃C 不是复制
     expect(findConflict('search-sessions', 'ctrl+c', mac, 'mac')).toBeNull();
   });
@@ -373,12 +374,12 @@ describe('findConflict', () => {
 
 describe('scopesOverlap', () => {
   it('同作用域重叠；全局动作只有在输入框里也响应时才与输入框动作重叠', () => {
-    const composer = { label: '', scope: 'composer', chord: 'enter' } as const;
+    const composer = { scope: 'composer', chord: 'enter' } as const;
     expect(scopesOverlap(composer, composer)).toBe(true);
-    expect(
-      scopesOverlap({ label: '', scope: 'global', chord: 'mod+k', allowInInput: true }, composer)
-    ).toBe(true);
-    expect(scopesOverlap(composer, { label: '', scope: 'global', chord: 'mod+k' })).toBe(false);
+    expect(scopesOverlap({ scope: 'global', chord: 'mod+k', allowInInput: true }, composer)).toBe(
+      true
+    );
+    expect(scopesOverlap(composer, { scope: 'global', chord: 'mod+k' })).toBe(false);
   });
 });
 
