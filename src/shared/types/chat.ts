@@ -70,7 +70,7 @@ export interface SessionEventEnvelope {
   event: FynvraSessionEvent;
 }
 
-/** 审批档位的显示名：输入框胶囊、档位列表与状态栏共用 */
+/** 审批档位的显示名：输入框胶囊、档位列表、状态栏与角色编辑器共用 */
 export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
   supervised: '全程审批',
   'auto-edits': '自动接受编辑',
