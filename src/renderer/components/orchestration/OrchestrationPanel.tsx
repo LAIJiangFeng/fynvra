@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/i18n/I18nProvider';
 import {
   isOrchestrationDemo,
   setOrchestrationDemo,
@@ -36,11 +37,14 @@ type PanelTab = 'tasks' | 'changes';
 export function OrchestrationPanel() {
   const selectedId = useWorkspacesStore((state) => state.selectedId);
   const workspaceId = selectedId ?? (USING_MOCK ? DEMO_WORKSPACE_ID : null);
+  const t = useT();
   if (workspaceId === null) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <PanelHeaderBar>
-          <span className="px-1 font-medium text-muted-foreground text-xs">编排</span>
+          <span className="px-1 font-medium text-muted-foreground text-xs">
+            {t('orchestration.title')}
+          </span>
           {/* 没有工作区也能进演示数据 */}
           {import.meta.env.DEV && (
             <div className="ml-auto">
@@ -48,7 +52,7 @@ export function OrchestrationPanel() {
             </div>
           )}
         </PanelHeaderBar>
-        <PanelMessage icon={Workflow} title="选择一个工作区查看编排" />
+        <PanelMessage icon={Workflow} title={t('orchestration.pickWorkspace')} />
       </div>
     );
   }
@@ -73,6 +77,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const t = useT();
 
   const runs = useMemo(() => runsOf(view), [view]);
   const run = runs.find((candidate) => candidate.id === runId) ?? runs[0];
@@ -90,17 +95,17 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   let notice: ReactNode = null;
   if (!view) {
     notice = error ? (
-      <PanelMessage icon={CircleAlert} title="读取编排状态失败" description={error}>
+      <PanelMessage icon={CircleAlert} title={t('orchestration.loadFailed')} description={error}>
         <Button size="sm" variant="outline" onClick={() => void refresh(workspaceId)}>
           <RefreshCw />
-          重试
+          {t('common.retry')}
         </Button>
       </PanelMessage>
     ) : (
-      <PanelMessage icon={Loader2} spin title="正在读取编排状态…" />
+      <PanelMessage icon={Loader2} spin title={t('orchestration.loading')} />
     );
   } else if (!run) {
-    notice = <PanelMessage icon={Workflow} title="主 agent 还没有派发任务" />;
+    notice = <PanelMessage icon={Workflow} title={t('orchestration.noTasks')} />;
   }
 
   return (
@@ -115,30 +120,32 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
           <TabsList className="h-7">
             <TabsTrigger value="tasks" className="px-2 text-xs">
               <ListChecks />
-              任务
+              {t('orchestration.tabs.tasks')}
               {taskCount > 0 && <Count value={taskCount} />}
             </TabsTrigger>
             <TabsTrigger value="changes" className="px-2 text-xs">
               <GitCompareArrows />
-              改动
+              {t('orchestration.tabs.changes')}
               {!plain && candidates.length > 0 && <Count value={candidates.length} />}
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-0.5">
             {USING_MOCK && (
               <Badge variant="outline" className="mr-1 text-[10px]">
-                演示数据
+                {t('orchestration.demo')}
               </Badge>
             )}
             {import.meta.env.DEV && <DemoToggle />}
             <Tooltip>
               <TooltipTrigger
-                render={<Button size="icon-xs" variant="ghost" aria-label="刷新" />}
+                render={
+                  <Button size="icon-xs" variant="ghost" aria-label={t('orchestration.refresh')} />
+                }
                 onClick={() => void refresh(workspaceId)}
               >
                 <RefreshCw className={cn(loading && 'animate-spin')} />
               </TooltipTrigger>
-              <TooltipContent side="bottom">刷新</TooltipContent>
+              <TooltipContent side="bottom">{t('orchestration.refresh')}</TooltipContent>
             </Tooltip>
           </div>
         </PanelHeaderBar>
@@ -147,7 +154,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             role="alert"
             className="shrink-0 border-b bg-destructive/10 px-3 py-1 text-destructive text-xs"
           >
-            刷新失败：{error}
+            {t('orchestration.refreshFailed', { error })}
           </p>
         )}
 
@@ -168,7 +175,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
         </TabsContent>
         <TabsContent value="changes" className="flex min-h-0 flex-col overflow-y-auto">
           {plain ? (
-            <PanelMessage icon={GitCompareArrows} title="无 git" />
+            <PanelMessage icon={GitCompareArrows} title={t('common.noGit')} />
           ) : (
             (notice ??
             (view && (
@@ -212,7 +219,8 @@ function Count({ value }: { value: number }) {
 /** 仅开发模式：切换内存 mock，便于没有真实编排时预览面板。数据源在页面加载时定下，所以要重新加载。 */
 function DemoToggle() {
   const demo = isOrchestrationDemo();
-  const label = demo ? '退出演示数据' : '使用演示数据';
+  const t = useT();
+  const label = t(demo ? 'orchestration.demoExit' : 'orchestration.demoEnter');
   return (
     <Tooltip>
       <TooltipTrigger
@@ -231,7 +239,7 @@ function DemoToggle() {
       >
         <FlaskConical />
       </TooltipTrigger>
-      <TooltipContent side="bottom">{label}（开发模式，会重新加载页面）</TooltipContent>
+      <TooltipContent side="bottom">{t('orchestration.demoHint', { label })}</TooltipContent>
     </Tooltip>
   );
 }

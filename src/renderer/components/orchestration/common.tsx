@@ -2,9 +2,10 @@ import type { TaskStatus } from '@fynvra/core';
 import { Bot, type LucideIcon } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
-import { TASK_STATUS_LABEL, TASK_STATUS_TONE } from './format';
+import { TASK_STATUS_TONE, taskStatusLabel } from './format';
 
 /** 面板里的空态 / 加载 / 出错提示，居中显示。 */
 export function PanelMessage({
@@ -46,9 +47,10 @@ export function StatusDot({ status, className }: { status: TaskStatus; className
 }
 
 export function StatusBadge({ status }: { status: TaskStatus }) {
+  const t = useT();
   return (
     <Badge className={cn('border-transparent', TASK_STATUS_TONE[status].badge)}>
-      {TASK_STATUS_LABEL[status]}
+      {taskStatusLabel(status, t)}
     </Badge>
   );
 }
@@ -56,8 +58,13 @@ export function StatusBadge({ status }: { status: TaskStatus }) {
 /** 角色徽标：有对应角色时显示角色名，否则显示 id（角色可能已被删除）。 */
 export function RoleBadge({ roleId }: { roleId: string }) {
   const name = useRolesStore((state) => state.roles.find((role) => role.id === roleId)?.name);
+  const t = useT();
   return (
-    <Badge variant="outline" className="max-w-32" title={`角色：${name ?? roleId}`}>
+    <Badge
+      variant="outline"
+      className="max-w-32"
+      title={t('sessions.roleHint', { name: name ?? roleId })}
+    >
       <Bot />
       <span className="truncate">{name ?? roleId}</span>
     </Badge>

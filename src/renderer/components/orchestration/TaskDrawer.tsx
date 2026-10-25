@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { dispatchesOf, latestDispatchOf } from '@/stores/orchestration';
@@ -31,6 +32,7 @@ export function TaskDrawer({
   onReview: (dispatchId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const t = useT();
   const dispatches = dispatchesOf(view, task.id);
   const latest = latestDispatchOf(view, task.id);
   // 无 git 的尝试原地进行：没有分支，也没有 diff 可看
@@ -47,7 +49,7 @@ export function TaskDrawer({
       ref={containerRef}
       role="dialog"
       aria-modal="false"
-      aria-label={`任务详情：${task.title}`}
+      aria-label={t('orchestration.taskDetails', { title: task.title })}
       tabIndex={-1}
       className="absolute inset-0 z-20 flex flex-col bg-sidebar outline-none transition-[opacity,translate] duration-150 starting:translate-x-3 starting:opacity-0"
       onKeyDown={(event) => {
@@ -62,8 +64,8 @@ export function TaskDrawer({
         <Button
           size="icon-xs"
           variant="ghost"
-          aria-label="返回任务列表"
-          title="返回任务列表（Esc）"
+          aria-label={t('orchestration.backToTasks')}
+          title={t('orchestration.backToTasksHint')}
           onClick={onClose}
         >
           <ArrowLeft />
@@ -89,7 +91,7 @@ export function TaskDrawer({
             onClick={() => onReview(latest.id)}
           >
             <GitCompareArrows />
-            查看改动
+            {t('orchestration.viewChanges')}
           </Button>
         )}
       </header>
@@ -99,18 +101,22 @@ export function TaskDrawer({
         {task.dependsOn.length > 0 && (
           <DependencySection view={view} task={task} onOpenTask={onOpenTask} />
         )}
-        <section aria-label="尝试">
-          <SectionTitle>尝试（{dispatches.length}）</SectionTitle>
+        <section aria-label={t('orchestration.attempts')}>
+          <SectionTitle>
+            {t('orchestration.attemptsCount', { count: dispatches.length })}
+          </SectionTitle>
           {dispatches.length === 0 ? (
             <p className="text-muted-foreground text-xs">
-              {task.status === 'todo' ? '等待依赖完成后派发' : '还没有派发'}
+              {t(
+                task.status === 'todo' ? 'orchestration.waitingDeps' : 'orchestration.notDispatched'
+              )}
             </p>
           ) : (
             <DispatchTimeline dispatches={dispatches} latestId={latest?.id} />
           )}
         </section>
-        <section aria-label="消息">
-          <SectionTitle>消息</SectionTitle>
+        <section aria-label={t('orchestration.messages')}>
+          <SectionTitle>{t('orchestration.messages')}</SectionTitle>
           <MessageStream view={view} dispatches={dispatches} />
         </section>
         {latest && <WorkerOutput key={latest.id} dispatchId={latest.id} />}
@@ -120,15 +126,16 @@ export function TaskDrawer({
 }
 
 function BriefSection({ spec }: { spec: string }) {
+  const t = useT();
   return (
     <Collapsible>
       <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded text-left font-medium text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]:rotate-90" />
-        任务书
+        {t('orchestration.brief')}
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1.5">
         {spec.trim() === '' ? (
-          <p className="text-muted-foreground text-xs">（空）</p>
+          <p className="text-muted-foreground text-xs">{t('orchestration.emptyBrief')}</p>
         ) : (
           <div className="rounded-md border bg-card px-2.5 py-2 text-xs leading-relaxed">
             <MarkdownLite text={spec} />
@@ -169,9 +176,10 @@ function DependencySection({
   task: Task;
   onOpenTask: (taskId: string) => void;
 }) {
+  const t = useT();
   return (
-    <section aria-label="依赖">
-      <SectionTitle>依赖</SectionTitle>
+    <section aria-label={t('orchestration.dependencies')}>
+      <SectionTitle>{t('orchestration.dependencies')}</SectionTitle>
       <ul className="flex flex-col gap-1">
         {task.dependsOn.map((id) => {
           const dependency = view.tasks.find((candidate) => candidate.id === id);
@@ -187,13 +195,13 @@ function DependencySection({
                   <span className="min-w-0 flex-1 truncate">{dependency.title}</span>
                   {dependency.status !== 'completed' && (
                     <span className="shrink-0 text-amber-700 text-[11px] dark:text-amber-300">
-                      未完成
+                      {t('orchestration.unfinished')}
                     </span>
                   )}
                 </button>
               ) : (
                 <span className="px-1 font-mono text-muted-foreground text-xs">
-                  {id}（已不存在）
+                  {t('orchestration.missingTask', { id })}
                 </span>
               )}
             </li>
@@ -213,6 +221,7 @@ function DispatchTimeline({
 }) {
   const running = dispatches.some((dispatch) => dispatch.settledAt === undefined);
   const now = useNow(1_000, running);
+  const t = useT();
   return (
     <ol className="relative flex flex-col gap-3 border-l pl-3">
       {dispatches.map((dispatch, index) => {
@@ -232,34 +241,37 @@ function DispatchTimeline({
               )}
             />
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="font-medium">第 {index + 1} 次</span>
+              <span className="font-medium">
+                {t('orchestration.attemptShort', { count: index + 1 })}
+              </span>
               {settledAt === undefined ? (
                 <Badge className="border-transparent bg-sky-500/15 text-sky-700 dark:text-sky-300">
                   <Loader2 className="animate-spin" />
-                  运行中
+                  {t('orchestration.running')}
                 </Badge>
               ) : dispatch.outcome === 'failed' ? (
-                <Badge variant="destructive">失败</Badge>
+                <Badge variant="destructive">{t('orchestration.outcome.failed')}</Badge>
               ) : (
                 <Badge className="border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                  成功
+                  {t('orchestration.outcome.succeeded')}
                 </Badge>
               )}
               {superseded && (
-                <span className="text-[11px] text-muted-foreground">已被后续尝试取代</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {t('orchestration.superseded')}
+                </span>
               )}
             </div>
             <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-              开始 {formatClock(dispatch.startedAt, now)}
-              {settledAt !== undefined ? (
-                <>
-                  {' '}
-                  · 结束 {formatClock(settledAt, now)} · 用时{' '}
-                  {formatDuration(settledAt - dispatch.startedAt)}
-                </>
-              ) : (
-                <> · 已运行 {formatDuration(now - dispatch.startedAt)}</>
-              )}
+              {t('orchestration.started', { time: formatClock(dispatch.startedAt, now) })}
+              {settledAt !== undefined
+                ? t('orchestration.ended', {
+                    time: formatClock(settledAt, now),
+                    duration: formatDuration(settledAt - dispatch.startedAt, t),
+                  })
+                : t('orchestration.elapsed', {
+                    duration: formatDuration(now - dispatch.startedAt, t),
+                  })}
             </p>
             {dispatch.summary && (
               <p className="mt-1 whitespace-pre-wrap break-words text-xs">{dispatch.summary}</p>
@@ -275,11 +287,12 @@ function DispatchTimeline({
 }
 
 function FilesModified({ files }: { files: string[] }) {
+  const t = useT();
   return (
     <Collapsible defaultOpen={files.length <= 5} className="mt-1">
       <CollapsibleTrigger className="group flex items-center gap-1 rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3 transition-transform group-data-[panel-open]:rotate-90" />
-        改动文件（{files.length}）
+        {t('orchestration.filesChanged', { count: files.length })}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul className="mt-0.5 flex flex-col pl-4 font-mono text-[11px] text-muted-foreground">

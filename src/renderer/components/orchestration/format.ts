@@ -1,6 +1,7 @@
 import type { Dispatch, Message, MessageType, TaskStatus } from '@fynvra/core';
+import type { T } from '../../i18n';
 
-// 编排面板的文案、配色与格式化。纯函数，不碰 DOM，可在 node 下测试。
+// 编排面板的配色与格式化（文案在字典 orchestration.* / time.*）。纯函数，不碰 DOM，可在 node 下测试。
 
 /** 任务看板的分组顺序。 */
 export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
@@ -11,15 +12,6 @@ export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
   'failed',
   'abandoned',
 ];
-
-export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
-  todo: '待开始',
-  'in-progress': '进行中',
-  'in-review': '待验收',
-  completed: '已完成',
-  failed: '失败',
-  abandoned: '已放弃',
-};
 
 /** 状态色：圆点 / 卡片左边框 / 徽标。 */
 export const TASK_STATUS_TONE: Record<TaskStatus, { dot: string; border: string; badge: string }> =
@@ -56,15 +48,6 @@ export const TASK_STATUS_TONE: Record<TaskStatus, { dot: string; border: string;
     },
   };
 
-export const MESSAGE_TYPE_LABEL: Record<MessageType, string> = {
-  question: '提问',
-  reply: '答复',
-  instruction: '指示',
-  worker_done: '完成汇报',
-  escalation: '上报',
-  heartbeat: '心跳',
-};
-
 /** worker → 主 agent 的类型；其余是主 agent → worker。 */
 const WORKER_SENT: ReadonlySet<MessageType> = new Set([
   'question',
@@ -80,16 +63,25 @@ export function isFromWorker(message: Message, dispatch: Dispatch | undefined): 
   return WORKER_SENT.has(message.type);
 }
 
-const OUTCOME_LABEL: Record<string, string> = { succeeded: '成功', failed: '失败' };
-
 /** worker_done 的 subject 是 outcome（追加汇报带 ` (follow-up)`）。 */
-export function describeSubject(message: Message): string | undefined {
+export function describeSubject(message: Message, t: T): string | undefined {
   if (!message.subject) return undefined;
   if (message.type !== 'worker_done') return message.subject;
   const followUp = message.subject.endsWith(' (follow-up)');
   const outcome = followUp ? message.subject.slice(0, -' (follow-up)'.length) : message.subject;
-  const label = OUTCOME_LABEL[outcome] ?? outcome;
-  return followUp ? `${label}（追加）` : label;
+  const label =
+    outcome === 'succeeded' || outcome === 'failed'
+      ? t(`orchestration.outcome.${outcome}`)
+      : outcome;
+  return followUp ? t('orchestration.followUp', { outcome: label }) : label;
+}
+
+export function messageTypeLabel(type: MessageType, t: T): string {
+  return t(`orchestration.messageTypes.${type}`);
+}
+
+export function taskStatusLabel(status: TaskStatus, t: T): string {
+  return t(`orchestration.status.${status}`);
 }
 
 /** worker_done 的结果；不是汇报或认不出时为 undefined。 */
@@ -101,12 +93,11 @@ export function reportOutcome(message: Message): 'succeeded' | 'failed' | undefi
 }
 
 /** 卡片上的「最近消息」一行。 */
-export function messageSummary(message: Message, max = 80): string {
-  const subject = describeSubject(message);
-  const head = subject
-    ? `${MESSAGE_TYPE_LABEL[message.type]}·${subject}`
-    : MESSAGE_TYPE_LABEL[message.type];
-  return `${head}：${oneLine(message.body, max)}`;
+export function messageSummary(message: Message, t: T, max = 80): string {
+  const subject = describeSubject(message, t);
+  const type = messageTypeLabel(message.type, t);
+  const head = subject ? t('orchestration.messageHead', { type, subject }) : type;
+  return t('orchestration.messageLine', { head, body: oneLine(message.body, max) });
 }
 
 /** 折叠空白并截断到 `max` 个字符。 */
@@ -126,25 +117,30 @@ export function formatClock(epoch: number, now: number = Date.now()): string {
     : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`;
 }
 
-/** `42 秒` / `3 分 12 秒` / `1 小时 5 分`。 */
-export function formatDuration(ms: number): string {
+/** `42 秒` / `3 分 12 秒` / `1 小时 5 分`（英文 `42s` / `3m 12s` / `1h 5m`）。 */
+export function formatDuration(ms: number, t: T): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds} 秒`;
+  if (seconds < 60) return t('time.seconds', { s: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60)
-    return seconds % 60 === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds % 60} 秒`;
+  if (minutes < 60) {
+    return seconds % 60 === 0
+      ? t('time.minutes', { m: minutes })
+      : t('time.minutesSeconds', { m: minutes, s: seconds % 60 });
+  }
   const hours = Math.floor(minutes / 60);
-  return minutes % 60 === 0 ? `${hours} 小时` : `${hours} 小时 ${minutes % 60} 分`;
+  return minutes % 60 === 0
+    ? t('time.hours', { h: hours })
+    : t('time.hoursMinutes', { h: hours, m: minutes % 60 });
 }
 
-/** `刚刚` / `3 分钟前` / `2 小时前`；超过一天给日期时间。 */
-export function formatRelative(epoch: number, now: number = Date.now()): string {
+/** `刚刚` / `3 分钟前` / `2 小时前`（按界面语言）；超过一天给日期时间。 */
+export function formatRelative(epoch: number, now: number, t: T): string {
   const seconds = Math.floor((now - epoch) / 1000);
-  if (seconds < 45) return '刚刚';
+  if (seconds < 45) return t('time.justNow');
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 60) return t('time.minutesAgo', { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
+  if (hours < 24) return t('time.hoursAgo', { count: hours });
   return formatClock(epoch, now);
 }
 

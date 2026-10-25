@@ -1,6 +1,7 @@
 import { ArrowDownToLine, Loader2, Pause, Play, RotateCw } from 'lucide-react';
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type OutputEntry, useOrchestrationStore } from '@/stores/orchestration';
 import { SectionTitle } from './common';
@@ -30,6 +31,7 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
   const [frozen, setFrozen] = useState<OutputEntry | null>(null);
   const [following, setFollowing] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const t = useT();
 
   useEffect(() => watchOutput(dispatchId), [watchOutput, dispatchId]);
 
@@ -49,21 +51,23 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
   };
 
   let status: ReactNode;
-  if (!entry) status = '读取中…';
-  else if (entry.error) status = <span className="text-destructive">读取失败</span>;
-  else if (paused) status = pending > 0 ? `已暂停 · 新增 ${pending} 字符` : '已暂停';
-  else if (entry.done) status = '已结束';
+  if (!entry) status = t('common.loading');
+  else if (entry.error) status = <span className="text-destructive">{t('common.loadFailed')}</span>;
+  else if (paused) {
+    status =
+      pending > 0 ? t('orchestration.pausedNew', { count: pending }) : t('orchestration.paused');
+  } else if (entry.done) status = t('orchestration.finished');
   else {
     status = (
       <span className="flex items-center gap-1 text-sky-700 dark:text-sky-300">
         <Loader2 className="size-3 animate-spin" />
-        运行中
+        {t('orchestration.running')}
       </span>
     );
   }
 
   return (
-    <section aria-label="worker 输出">
+    <section aria-label={t('orchestration.output')}>
       <SectionTitle
         aside={
           <>
@@ -71,8 +75,8 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
             <Button
               size="icon-xs"
               variant="ghost"
-              aria-label={paused ? '继续' : '暂停'}
-              title={paused ? '继续' : '暂停'}
+              aria-label={t(paused ? 'orchestration.resume' : 'orchestration.pause')}
+              title={t(paused ? 'orchestration.resume' : 'orchestration.pause')}
               disabled={!entry || (entry.done && !paused)}
               onClick={() => (paused ? jumpToBottom() : setFrozen(entry ?? null))}
             >
@@ -81,8 +85,8 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
             <Button
               size="icon-xs"
               variant="ghost"
-              aria-label="回到底部"
-              title="回到底部"
+              aria-label={t('chat.scrollToBottom')}
+              title={t('chat.scrollToBottom')}
               disabled={following && !paused}
               onClick={jumpToBottom}
             >
@@ -91,7 +95,7 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
           </>
         }
       >
-        worker 输出
+        {t('orchestration.output')}
       </SectionTitle>
       <div
         ref={scrollRef}
@@ -104,14 +108,18 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
         }}
       >
         {shown && shown.dropped > 0 && (
-          <p className="mb-1 text-muted-foreground">…前面 {shown.dropped} 个字符未保留</p>
+          <p className="mb-1 text-muted-foreground">
+            {t('orchestration.droppedChars', { count: shown.dropped })}
+          </p>
         )}
         {shown && shown.pages.length > 0 ? (
           <pre className="whitespace-pre-wrap break-words font-mono">
             <OutputPages pages={shown.pages} start={shown.dropped} />
           </pre>
         ) : (
-          <p className="text-muted-foreground">{entry?.done ? '没有输出' : '等待输出…'}</p>
+          <p className="text-muted-foreground">
+            {t(entry?.done ? 'orchestration.noOutput' : 'orchestration.waitingOutput')}
+          </p>
         )}
         {entry?.error && (
           <div className="mt-2 flex items-center gap-2 font-sans text-destructive text-xs">
@@ -123,7 +131,7 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
               onClick={() => retryOutput(dispatchId)}
             >
               <RotateCw />
-              重试
+              {t('common.retry')}
             </Button>
           </div>
         )}
