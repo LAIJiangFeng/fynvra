@@ -11,6 +11,7 @@ import { errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { app, ipcMain } from 'electron';
 import type { RoleListResult, RoleResult } from '../../preload/domains/roles';
+import { translate } from '../i18n';
 import { sendToAllWindows } from '../windows/createAppWindow';
 
 let store: RoleStore | null = null;
@@ -30,26 +31,27 @@ export function registerRoleHandlers(): void {
     try {
       return { ok: true, roles: await getRoleStore().list() };
     } catch (error) {
-      return { ok: false, error: `读取角色失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('roles.readFailed', { error: errorMessage(error) }) };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.ROLES_GET, async (_event, rawId: unknown): Promise<RoleResult> => {
-    if (!isValidRoleId(rawId)) return { ok: false, error: '无效的角色 id' };
+    if (!isValidRoleId(rawId)) return { ok: false, error: translate('roles.invalidId') };
     try {
       const role = await getRoleStore().get(rawId);
-      return role ? { ok: true, role } : { ok: false, error: '角色不存在' };
+      return role ? { ok: true, role } : { ok: false, error: translate('roles.notFound') };
     } catch (error) {
-      return { ok: false, error: `读取角色失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('roles.readFailed', { error: errorMessage(error) }) };
     }
   });
 
   // 整个角色经 parseRole 收窄（未知字段丢弃）；系统提示词随角色文件落盘，不进 settings.json
   ipcMain.handle(IPC_CHANNELS.ROLES_SAVE, async (_event, raw: unknown): Promise<RoleResult> => {
     const parsed = parseRole(raw);
-    if (!parsed.ok) return { ok: false, error: `角色无效：${parsed.error}` };
+    if (!parsed.ok)
+      return { ok: false, error: translate('roles.invalid', { error: parsed.error }) };
     if (isBuiltinRoleId(parsed.role.id)) {
-      return { ok: false, error: '内置角色只读，请复制为新角色后修改' };
+      return { ok: false, error: translate('roles.builtinReadOnly') };
     }
     try {
       const result = await getRoleStore().save(parsed.role);
@@ -57,20 +59,20 @@ export function registerRoleHandlers(): void {
       sendToAllWindows(IPC_CHANNELS.ROLES_CHANGED);
       return { ok: true, role: result.role };
     } catch (error) {
-      return { ok: false, error: `保存角色失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('roles.saveFailed', { error: errorMessage(error) }) };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.ROLES_REMOVE, async (_event, rawId: unknown): Promise<IpcResult> => {
-    if (!isValidRoleId(rawId)) return { ok: false, error: '无效的角色 id' };
-    if (isBuiltinRoleId(rawId)) return { ok: false, error: '内置角色不可删除' };
+    if (!isValidRoleId(rawId)) return { ok: false, error: translate('roles.invalidId') };
+    if (isBuiltinRoleId(rawId)) return { ok: false, error: translate('roles.builtinUndeletable') };
     try {
       const result = await getRoleStore().remove(rawId);
       if (!result.ok) return result;
       sendToAllWindows(IPC_CHANNELS.ROLES_CHANGED);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: `删除角色失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('roles.removeFailed', { error: errorMessage(error) }) };
     }
   });
 }

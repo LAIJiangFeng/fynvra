@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import { MODEL_CATALOG, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelEntry, ProviderApi, RemoteModelEntry } from '@shared/types/llm';
 import type { ListRemoteModelsResult } from '../../../../preload/domains/providers';
+import { mainLocale, translate } from '../../../i18n';
 import { MAX_MODEL_ID_LENGTH } from '../parseProviderInput';
 import {
   buildModelsRequest,
@@ -56,7 +57,6 @@ const ANTHROPIC_PAGE_LIMIT = 1000;
 const GOOGLE_PAGE_SIZE = 1000;
 /** 与 modelCatalog.resolveBaseUrl 判断 Google 版本段的规则相同 */
 const VERSION_SEGMENT = /\/v\d+(?:alpha|beta)?$/;
-const NOT_A_MODEL_LIST = '接口返回的不是模型列表';
 
 const PARSERS: Readonly<Record<ListShape, (body: unknown) => ParsedModelList | null>> = {
   anthropic: parseAnthropicModels,
@@ -87,14 +87,14 @@ export function remoteModelsRequests(
           headers,
           shape: 'anthropic',
           retryOn: [400, 401, 403, 404, 405],
-          via: 'Anthropic 形态（x-api-key）',
+          via: translate('remote.viaAnthropic'),
         },
         {
           url,
           headers: bearer,
           shape: 'openai',
           retryOn: [],
-          via: 'OpenAI 形态（Authorization: Bearer）',
+          via: translate('remote.viaOpenAI'),
         },
       ];
     }
@@ -140,7 +140,7 @@ export async function listRemoteModels(
   { fetch, timeoutMs = PROVIDER_TEST_TIMEOUT_MS }: ListRemoteModelsOptions
 ): Promise<ListRemoteModelsResult> {
   const { apiKey } = target;
-  if (!apiKey) return { ok: false, error: '还没有填写 API Key' };
+  if (!apiKey) return { ok: false, error: translate('remote.noApiKey') };
   const redact = (text: string) => text.split(apiKey).join('***');
   const requests = remoteModelsRequests(target.api, target.baseUrl, apiKey);
   const failures: Array<{ request: ModelsRequest; failure: Failure }> = [];
@@ -149,9 +149,13 @@ export async function listRemoteModels(
     const outcome = await send(request, fetch, timeoutMs);
     if (outcome.kind === 'list') {
       const { models, notes } = toEntries(outcome.list, target);
-      const fallbacks = failures.map(
-        (previous) =>
-          `${spaced(previous.request.via)}不可用（${reasonOf(previous.failure)}），已改用 ${request.via}`
+      const fallbacks = failures.map((previous) =>
+        translate('remote.fellBack', {
+          // 中文里拉丁字母与汉字之间留空格
+          from: mainLocale() === 'zh-CN' ? spaced(previous.request.via) : previous.request.via,
+          reason: reasonOf(previous.failure),
+          to: request.via,
+        })
       );
       return {
         ok: true,
@@ -191,16 +195,27 @@ async function send(request: ModelsRequest, fetch: FetchLike, timeoutMs: number)
     const detail = serverMessage(body);
     return {
       kind: 'not-list',
-      error: `${NOT_A_MODEL_LIST}${detail ? `：${detail}` : ''} · ${endpoint}`,
+      error: detail
+        ? translate('remote.notModelListDetail', { detail, endpoint })
+        : translate('remote.notModelListAt', { endpoint }),
     };
   } catch (error) {
     if (controller.signal.aborted) {
       return {
         kind: 'fatal',
-        error: `请求超时（${Math.ceil(timeoutMs / 1000)} 秒）：${hostOf(request.url)}`,
+        error: translate('remote.timeout', {
+          seconds: Math.ceil(timeoutMs / 1000),
+          host: hostOf(request.url),
+        }),
       };
     }
-    return { kind: 'fatal', error: `无法连接 ${hostOf(request.url)}：${networkReason(error)}` };
+    return {
+      kind: 'fatal',
+      error: translate('remote.unreachable', {
+        host: hostOf(request.url),
+        error: networkReason(error),
+      }),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -240,12 +255,12 @@ function toEntries(
   models.sort((a, b) => collator.compare(a.id, b.id));
 
   const notes: string[] = [];
-  if (invalid > 0) notes.push(`${invalid} 个条目没有有效的模型 id，已跳过`);
-  if (list.filtered > 0) {
-    notes.push(`已略过 ${list.filtered} 个不支持 generateContent 的模型（如嵌入、图像模型）`);
+  if (invalid > 0) notes.push(translate('remote.invalidEntries', { count: invalid }));
+  if (list.filtered > 0) notes.push(translate('remote.filtered', { count: list.filtered }));
+  if (list.more) notes.push(translate('remote.more'));
+  if (models.length > MAX_REMOTE_MODELS) {
+    notes.push(translate('remote.tooMany', { max: MAX_REMOTE_MODELS }));
   }
-  if (list.more) notes.push('服务端还有更多模型没有返回，这里只列出了第一页');
-  if (models.length > MAX_REMOTE_MODELS) notes.push(`模型太多，只列出前 ${MAX_REMOTE_MODELS} 个`);
   return { models: models.slice(0, MAX_REMOTE_MODELS), notes };
 }
 
@@ -281,7 +296,7 @@ function mostTelling(failures: readonly Failure[]): string {
 }
 
 function reasonOf(failure: Failure): string {
-  return failure.kind === 'http' ? `HTTP ${failure.status}` : '返回的不是模型列表';
+  return failure.kind === 'http' ? `HTTP ${failure.status}` : translate('remote.notList');
 }
 
 /** 地址后面接中文要隔一个空格，全角括号结尾的不用 */

@@ -1,6 +1,7 @@
 import { asRecord } from '@shared/guards';
 import { isProviderApi } from '@shared/modelCatalog';
 import type { ListRemoteModelsInput } from '../../../../preload/domains/providers';
+import { translate } from '../../../i18n';
 import { isRegistryId } from '../jsonRegistry';
 import {
   isHttpUrl,
@@ -15,7 +16,6 @@ type RemoteModelsDraft = NonNullable<ListRemoteModelsInput['draft']>;
 
 const INPUT_KEYS = new Set(['providerId', 'draft']);
 const DRAFT_KEYS = new Set(['api', 'baseUrl', 'apiKey']);
-const MISSING_SOURCE = '需要模型服务 id，或表单里的协议与地址';
 
 /**
  * `providers:list-remote-models` 入参收窄（严格）：未知字段、类型不符一律拒绝；providerId 与 draft 至少一个。
@@ -23,13 +23,17 @@ const MISSING_SOURCE = '需要模型服务 id，或表单里的协议与地址';
  */
 export function parseListRemoteModelsInput(raw: unknown): ParseInputResult<ListRemoteModelsInput> {
   const record = asRecord(raw);
-  if (!record) return invalid('无效的参数：需要一个对象');
+  if (!record) return invalid(translate('remote.notObject'));
   const unknownKey = Object.keys(record).find((key) => !INPUT_KEYS.has(key));
-  if (unknownKey !== undefined) return invalid(`无效的参数：未知字段 ${unknownKey}`);
+  if (unknownKey !== undefined)
+    return invalid(translate('remote.unknownField', { field: unknownKey }));
   const { providerId } = record;
-  if (providerId !== undefined && !isRegistryId(providerId)) return invalid('无效的模型服务 id');
+  if (providerId !== undefined && !isRegistryId(providerId))
+    return invalid(translate('providers.invalidId'));
   if (record.draft === undefined) {
-    return providerId === undefined ? invalid(MISSING_SOURCE) : { ok: true, input: { providerId } };
+    return providerId === undefined
+      ? invalid(translate('remote.missingSource'))
+      : { ok: true, input: { providerId } };
   }
   const draft = readDraft(record.draft);
   if (!draft.ok) return draft;
@@ -41,26 +45,28 @@ export function parseListRemoteModelsInput(raw: unknown): ParseInputResult<ListR
 
 function readDraft(raw: unknown): ParseInputResult<RemoteModelsDraft> {
   const record = asRecord(raw);
-  if (!record) return invalid('无效的服务表单：需要一个对象');
+  if (!record) return invalid(translate('remote.draftNotObject'));
   const unknownKey = Object.keys(record).find((key) => !DRAFT_KEYS.has(key));
-  if (unknownKey !== undefined) return invalid(`无效的服务表单：未知字段 ${unknownKey}`);
+  if (unknownKey !== undefined)
+    return invalid(translate('remote.draftUnknownField', { field: unknownKey }));
   const { api, baseUrl, apiKey } = record;
-  if (!isProviderApi(api)) return invalid('不支持的 API 协议');
+  if (!isProviderApi(api)) return invalid(translate('providers.badApi'));
 
   let url: string | undefined;
   if (baseUrl !== undefined && baseUrl !== null) {
-    if (typeof baseUrl !== 'string') return invalid('Base URL 必须是字符串');
+    if (typeof baseUrl !== 'string') return invalid(translate('providers.baseUrlString'));
     url = baseUrl.trim() || undefined;
     if (url && (url.length > MAX_URL_LENGTH || !isHttpUrl(url))) {
-      return invalid('Base URL 必须是 http(s) 地址');
+      return invalid(translate('providers.baseUrlHttp'));
     }
   }
   let key: string | undefined;
   if (apiKey !== undefined && apiKey !== null) {
-    if (typeof apiKey !== 'string') return invalid('API Key 必须是字符串');
+    if (typeof apiKey !== 'string') return invalid(translate('providers.apiKeyString'));
     key = apiKey.trim();
-    if (!key) return invalid('API Key 不能为空；用已保存的 key 请不传该字段');
-    if (key.length > MAX_KEY_LENGTH || /\s/.test(key)) return invalid('API Key 不能包含空白字符');
+    if (!key) return invalid(translate('remote.apiKeyEmpty'));
+    if (key.length > MAX_KEY_LENGTH || /\s/.test(key))
+      return invalid(translate('providers.apiKeyWhitespace'));
   }
   return {
     ok: true,
@@ -77,11 +83,11 @@ export function remoteModelsTarget(
   input: ListRemoteModelsInput,
   stored: StoredProvider | undefined
 ): { ok: true; target: RemoteModelsTarget } | { ok: false; error: string } {
-  if (input.providerId !== undefined && !stored) return invalid('模型服务不存在');
+  if (input.providerId !== undefined && !stored) return invalid(translate('providers.notFound'));
   const source = input.draft ?? stored;
-  if (!source) return invalid(MISSING_SOURCE);
+  if (!source) return invalid(translate('remote.missingSource'));
   const apiKey = input.draft?.apiKey ?? stored?.apiKey;
-  if (!apiKey) return invalid('还没有填写 API Key');
+  if (!apiKey) return invalid(translate('remote.noApiKey'));
   return {
     ok: true,
     target: {

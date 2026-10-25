@@ -1,5 +1,6 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { BrowserWindow, ipcMain } from 'electron';
+import { translate } from '../i18n';
 
 /** 自绘标题栏的窗口控制：一律作用于发起调用的窗口。 */
 export function registerWindowHandlers(): void {
@@ -17,7 +18,9 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, (event): IpcResult<{ maximized: boolean }> => {
     const win = senderWindow(event);
-    return win ? { ok: true, maximized: win.isMaximized() } : { ok: false, error: '窗口已关闭' };
+    return win
+      ? { ok: true, maximized: win.isMaximized() }
+      : { ok: false, error: translate('common.windowClosed') };
   });
 }
 
@@ -31,7 +34,7 @@ function withSenderWindow(
   action: (win: BrowserWindow) => void
 ): IpcResult {
   const win = senderWindow(event);
-  if (!win) return { ok: false, error: '窗口已关闭' };
+  if (!win) return { ok: false, error: translate('common.windowClosed') };
   action(win);
   return { ok: true };
 }

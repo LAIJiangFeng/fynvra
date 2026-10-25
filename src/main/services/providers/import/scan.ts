@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { errorMessage } from '@shared/guards';
 import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
 import type { ProviderUpsertInput } from '../../../../preload/domains/providers';
+import { translate } from '../../../i18n';
 import { MAX_NAME_LENGTH, parseProviderUpsert } from '../parseProviderInput';
 import { apiKeyHint, providerFingerprint, type StoredProvider } from '../providerStore';
 import {
@@ -70,7 +71,12 @@ export async function scanProviderImports(
       readSource(source, paths, env, tempDir).catch(
         (error): ReaderResult => ({
           providers: [],
-          warnings: [`${SOURCE_LABELS[source]}：读取失败（${errorMessage(error)}）`],
+          warnings: [
+            translate('importers.readFailed', {
+              subject: SOURCE_LABELS[source],
+              error: errorMessage(error),
+            }),
+          ],
         })
       )
     )
@@ -132,7 +138,9 @@ function toCandidates(
       ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
     });
     if (!parsed.ok) {
-      warnings.push(`${provider.sourceLabel}：${parsed.error}，已跳过`);
+      warnings.push(
+        translate('importers.skipped', { subject: provider.sourceLabel, reason: parsed.error })
+      );
       continue;
     }
     const { input } = parsed;

@@ -2,6 +2,7 @@ import { asRecord } from '@shared/guards';
 import { isProviderApi, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelEntry, ModelProvider, ModelProviderView, ProviderApi } from '@shared/types/llm';
 import type { ProviderUpsertInput } from '../../../preload/domains/providers';
+import { translate } from '../../i18n';
 import { createJsonRegistry, isRegistryId, toSlug, uniqueId } from './jsonRegistry';
 import { MAX_NAME_LENGTH } from './parseProviderInput';
 
@@ -60,7 +61,10 @@ export function createProviderStore(options: {
         }
         const index = providers.findIndex((provider) => provider.id === input.id);
         const current = providers[index];
-        if (!current) return { result: { ok: false, error: `模型服务 ${input.id} 不存在` } };
+        if (!current)
+          return {
+            result: { ok: false, error: translate('providers.notFoundId', { id: input.id }) },
+          };
         const apiKey = input.apiKey === undefined ? current.apiKey : (input.apiKey ?? undefined);
         const provider = buildProvider(current.id, input, apiKey);
         return { next: providers.with(index, provider), result: { ok: true, provider } };
@@ -82,7 +86,7 @@ export function createProviderStore(options: {
           const fingerprint = providerFingerprint(input);
           const owner = owners.get(fingerprint);
           if (owner !== undefined) {
-            return { ok: false, error: `与「${owner}」的地址和 API Key 都相同` };
+            return { ok: false, error: translate('providers.sameAs', { owner }) };
           }
           const name = uniqueName(input.name, names);
           const id = uniqueId(toSlug(name, 'provider'), ids);

@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { McpImportSource } from '@shared/types/llm';
+import { translate } from '../../../../i18n';
 import { parseTomlObject } from '../../../providers/import/readers/common';
 import {
   type Env,
@@ -88,8 +89,15 @@ function readCodexToml(
   const servers = files.flatMap((file) => {
     const parsed = parseTomlObject(file.text);
     if (!parsed.ok) {
-      const at = parsed.line === undefined ? ' ' : ` 第 ${parsed.line} 行`;
-      warnings.push(`${label}：${file.file}${at}不是有效的 TOML，已跳过`);
+      warnings.push(
+        parsed.line === undefined
+          ? translate('importers.invalidToml', { subject: label, file: file.file })
+          : translate('importers.invalidTomlAt', {
+              subject: label,
+              file: file.file,
+              line: parsed.line,
+            })
+      );
       return [];
     }
     return readServerMap(parsed.value.mcp_servers, { source, sourceLabel: label }, warnings, {
@@ -98,7 +106,10 @@ function readCodexToml(
         const server = codexServer(name, config, env, missing);
         if (server && missing.length > 0) {
           warnings.push(
-            `${label} · ${name}：环境变量 ${missing.join('、')} 没有设置，导入后需要在编辑里补上`
+            translate('importers.envMissing', {
+              subject: `${label} · ${name}`,
+              keys: missing.join(translate('importers.listSeparator')),
+            })
           );
         }
         return server;

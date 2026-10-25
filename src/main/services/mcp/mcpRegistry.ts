@@ -1,6 +1,7 @@
 import { asRecord } from '@shared/guards';
 import type { McpServerEntry, McpServerEntryView } from '@shared/types/llm';
 import type { McpUpsertInput, SecretFieldInput } from '../../../preload/domains/mcp';
+import { translate } from '../../i18n';
 import { createJsonRegistry, isRegistryId, toSlug, uniqueId } from '../providers/jsonRegistry';
 import type { ImportedMcpServer } from './import/readers/common';
 import { MAX_NAME_LENGTH } from './parseMcpInput';
@@ -48,7 +49,7 @@ export function createMcpRegistry(options: { filePath: string; now?: () => numbe
         const index = input.id === undefined ? -1 : servers.findIndex((s) => s.id === input.id);
         const previous = servers[index];
         if (input.id !== undefined && !previous) {
-          return { result: { ok: false, error: `MCP 服务器 ${input.id} 不存在` } };
+          return { result: { ok: false, error: translate('mcp.notFoundId', { id: input.id }) } };
         }
         const id =
           previous?.id ??
@@ -71,7 +72,7 @@ export function createMcpRegistry(options: { filePath: string; now?: () => numbe
           if (owner !== undefined) {
             return {
               ok: false,
-              error: `与「${owner}」的${server.url ? ' URL ' : '命令和参数'}相同`,
+              error: translate(server.url ? 'mcp.sameUrl' : 'mcp.sameCommand', { owner }),
             };
           }
           const name = uniqueName(
@@ -127,7 +128,7 @@ function buildServer(
     const env = mergeSecrets(
       input.env,
       previous?.transport === 'stdio' ? previous.env : undefined,
-      '环境变量'
+      translate('mcp.env')
     );
     if (typeof env === 'string') return env;
     return {
@@ -143,7 +144,7 @@ function buildServer(
   const headers = mergeSecrets(
     input.headers,
     previous && previous.transport !== 'stdio' ? previous.headers : undefined,
-    'Header'
+    translate('mcp.header')
   );
   if (typeof headers === 'string') return headers;
   return {
@@ -170,7 +171,7 @@ function mergeSecrets(
   for (const { key, value } of fields) {
     if (value !== undefined) merged[key] = value;
     else if (previous && Object.hasOwn(previous, key)) merged[key] = previous[key] ?? '';
-    else return `${label} ${key} 缺少值`;
+    else return translate('mcp.missingValue', { label, key });
   }
   return merged;
 }

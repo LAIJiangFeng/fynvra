@@ -2,6 +2,7 @@ import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { notificationPreferencesOf } from '@shared/types/settings';
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { translate } from '../i18n';
 import type { AgentHostService } from '../services/agentHost/agentHost';
 import {
   isDesktopNotificationSupported,
@@ -21,7 +22,7 @@ export interface NotificationSources {
   registry(): Pick<OrchestrationRegistry, 'onMessage'>;
 }
 
-const TEST_NOTIFICATION = { title: 'Fynvra', body: '测试通知' };
+const testNotification = () => ({ title: 'Fynvra', body: translate('notifications.testBody') });
 
 /** 各窗口（webContents id）里正看着的会话，由 Renderer 经 notifications:set-viewing 报告 */
 const viewing = new Map<number, string | null>();
@@ -56,10 +57,11 @@ export function registerNotificationHandlers(
 
   // 用户点的：不看聚焦、启动静默期与开关（总开关关着时界面上的按钮不可用）
   ipcMain.handle(IPC_CHANNELS.NOTIFICATIONS_TEST, (_event, ...args: unknown[]): IpcResult => {
-    if (args.length > 0) return { ok: false, error: '无效的参数' };
-    if (!isDesktopNotificationSupported()) return { ok: false, error: '系统不支持桌面通知' };
+    if (args.length > 0) return { ok: false, error: translate('common.invalidArgs') };
+    if (!isDesktopNotificationSupported())
+      return { ok: false, error: translate('notifications.unsupported') };
     try {
-      showDesktopNotification({ ...TEST_NOTIFICATION, silent: !preferences().sound });
+      showDesktopNotification({ ...testNotification(), silent: !preferences().sound });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
@@ -68,7 +70,7 @@ export function registerNotificationHandlers(
 
   ipcMain.handle(IPC_CHANNELS.NOTIFICATIONS_SET_VIEWING, (event, raw: unknown): IpcResult => {
     const input = parseSetViewingInput(raw);
-    if (!input) return { ok: false, error: '无效的会话 id' };
+    if (!input) return { ok: false, error: translate('common.invalidSessionId') };
     const { sender } = event;
     if (!viewing.has(sender.id)) sender.once('destroyed', () => viewing.delete(sender.id));
     viewing.set(sender.id, input.sessionId);

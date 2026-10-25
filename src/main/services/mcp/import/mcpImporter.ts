@@ -5,6 +5,7 @@ import type {
   McpImportSkipped,
   McpScanImportsResult,
 } from '../../../../preload/domains/mcp';
+import { translate } from '../../../i18n';
 import {
   type McpAddOutcome,
   type McpRegistry,
@@ -61,14 +62,18 @@ export function createMcpImporter(deps: {
       };
       return { ok: true, candidates: candidates.map((candidate) => candidate.view), warnings };
     } catch (error) {
-      return { ok: false, error: `扫描本机配置失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: translate('importers.scanFailed', { error: errorMessage(error) }),
+      };
     }
   };
 
   return {
     scan(raw) {
       const sources = parseScanSources(raw);
-      if (!sources) return Promise.resolve({ ok: false, error: '无效的扫描参数' });
+      if (!sources)
+        return Promise.resolve({ ok: false, error: translate('importers.invalidScanArgs') });
       const run = tail.then(() => runScan(sources));
       tail = run;
       return run;
@@ -76,15 +81,15 @@ export function createMcpImporter(deps: {
 
     async import(raw) {
       const ids = parseCandidateIds(raw);
-      if (!ids) return { ok: false, error: '无效的导入参数' };
+      if (!ids) return { ok: false, error: translate('importers.invalidImportArgs') };
       if (!cache || now() >= cache.expiresAt) {
         cache = null;
-        return { ok: false, error: '扫描结果已过期，请重新扫描' };
+        return { ok: false, error: translate('importers.scanStale') };
       }
       const picked: ScannedMcpCandidate[] = [];
       for (const id of ids) {
         const candidate = cache.byId.get(id);
-        if (!candidate) return { ok: false, error: '候选不在最近一次扫描结果里，请重新扫描' };
+        if (!candidate) return { ok: false, error: translate('importers.candidateMissing') };
         picked.push(candidate);
       }
 
@@ -92,7 +97,10 @@ export function createMcpImporter(deps: {
       try {
         outcomes = await registry.addMany(picked.map(({ server }) => server));
       } catch (error) {
-        return { ok: false, error: `导入失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('common.importFailed', { error: errorMessage(error) }),
+        };
       }
       const imported: McpServerEntryView[] = [];
       const skipped: McpImportSkipped[] = [];

@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { errorMessage } from '@shared/guards';
 import type { McpImportCandidate, McpImportSource } from '@shared/types/llm';
 import type { McpUpsertInput, SecretFieldInput } from '../../../../preload/domains/mcp';
+import { translate } from '../../../i18n';
 import { mcpDedupeKey, type StoredMcpServer } from '../mcpRegistry';
 import { MAX_NAME_LENGTH, parseMcpUpsert } from '../parseMcpInput';
 import { locateMcpSources, readCcSwitchMcpRows, readTextIfExists } from './locate';
@@ -109,7 +110,12 @@ export async function scanMcpImports(
       readSource(source, paths[source], env, tempDir).catch(
         (error): ReaderResult => ({
           servers: [],
-          warnings: [`${SOURCE_LABELS[source]}：读取失败（${errorMessage(error)}）`],
+          warnings: [
+            translate('importers.readFailed', {
+              subject: SOURCE_LABELS[source],
+              error: errorMessage(error),
+            }),
+          ],
         })
       )
     )
@@ -137,7 +143,13 @@ async function readSource(
       const text = await readTextIfExists(file);
       if (text !== null) files.push({ file, text });
     } catch (error) {
-      warnings.push(`${SOURCE_LABELS[source]}：读取 ${file} 失败（${errorMessage(error)}）`);
+      warnings.push(
+        translate('importers.readFileFailed', {
+          subject: SOURCE_LABELS[source],
+          file,
+          error: errorMessage(error),
+        })
+      );
     }
   }
   if (files.length === 0) return { servers: [], warnings };
@@ -161,7 +173,12 @@ function toCandidates(
   for (const found of discovered) {
     const parsed = parseMcpUpsert(toUpsertInput(found));
     if (!parsed.ok) {
-      warnings.push(`${found.sourceLabel} · ${found.name}：${parsed.error}，已跳过`);
+      warnings.push(
+        translate('importers.skipped', {
+          subject: `${found.sourceLabel} · ${found.name}`,
+          reason: parsed.error,
+        })
+      );
       continue;
     }
     const reference = referenceWarning(found);
@@ -250,14 +267,17 @@ function referenceWarning(found: DiscoveredMcpServer): string | null {
       .filter(([, value]) => VARIABLE_REFERENCE.test(value))
       .map(([key]) => key);
   const places = [
-    ...keysWithReference(found.env).map((key) => `环境变量 ${key}`),
+    ...keysWithReference(found.env).map((key) => translate('importers.envPlace', { key })),
     ...keysWithReference(found.headers).map((key) => `Header ${key}`),
     ...([found.command ?? '', ...(found.args ?? [])].some((arg) => VARIABLE_REFERENCE.test(arg))
-      ? ['命令参数']
+      ? [translate('importers.argsPlace')]
       : []),
     ...(VARIABLE_REFERENCE.test(found.url ?? '') ? ['URL'] : []),
   ];
   return places.length > 0
-    ? `${found.sourceLabel} · ${found.name}：${places.join('、')} 引用了变量，fynvra 不会展开，导入后请在编辑里改成实际值`
+    ? translate('importers.variables', {
+        subject: `${found.sourceLabel} · ${found.name}`,
+        places: places.join(translate('importers.listSeparator')),
+      })
     : null;
 }

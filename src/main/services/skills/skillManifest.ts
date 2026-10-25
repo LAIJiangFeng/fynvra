@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { errorMessage } from '@shared/guards';
+import { translate } from '../../i18n';
 
 export interface SkillManifest {
   name: string;
@@ -23,8 +24,8 @@ export async function readSkillManifest(
       ok: false,
       error:
         code === 'ENOENT' || code === 'ENOTDIR'
-          ? `目录里没有 SKILL.md：${dir}`
-          : `读取 SKILL.md 失败：${errorMessage(error)}`,
+          ? translate('skills.noManifest', { dir })
+          : translate('skills.manifestReadFailed', { error: errorMessage(error) }),
     };
   }
   const { name, description } = parseSkillFrontmatter(text);

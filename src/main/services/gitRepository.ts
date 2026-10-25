@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
+import { translate } from '../i18n';
 
 export type GitRunResult =
   | { ok: true; stdout: string }
@@ -47,7 +48,7 @@ export async function inspectDirectory(
   try {
     selected = await realpath(dir);
   } catch {
-    return { ok: false, code: 'failed', error: `目录不存在或无法访问：${dir}` };
+    return { ok: false, code: 'failed', error: translate('workspaces.dirMissing', { dir }) };
   }
 
   const plainDirectory = { ok: true, vcs: 'none', root: selected, name: nameOf(selected) } as const;
@@ -59,14 +60,18 @@ export async function inspectDirectory(
   try {
     root = await realpath(resolve(toplevel.stdout.trim()));
   } catch {
-    return { ok: false, code: 'failed', error: `无法解析仓库根目录：${toplevel.stdout.trim()}` };
+    return {
+      ok: false,
+      code: 'failed',
+      error: translate('workspaces.repoRootUnknown', { output: toplevel.stdout.trim() }),
+    };
   }
   if (!samePath(root, selected)) {
     return {
       ok: false,
       code: 'not-repo-root',
       repoRoot: root,
-      error: `所选目录位于 git 仓库 ${root} 内`,
+      error: translate('workspaces.insideRepoAt', { root }),
     };
   }
   return {

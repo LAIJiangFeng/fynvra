@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { McpImportSource, McpServerEntry } from '@shared/types/llm';
+import { translate } from '../../../../i18n';
 import { parseJsonc } from '../jsonc';
 
 // 读取器：把各来源的原始内容（文件文本 / 数据库行）解释成 MCP 服务器。纯函数，不碰文件系统与 process.env；
@@ -140,7 +141,9 @@ export function readServerMap(
   for (const [name, config] of Object.entries(asRecord(raw) ?? {})) {
     const server = read(name, config);
     if (!server) {
-      warnings.push(`${meta.sourceLabel} · ${name}：没有命令或 URL，已跳过`);
+      warnings.push(
+        translate('importers.noCommandOrUrl', { subject: `${meta.sourceLabel} · ${name}` })
+      );
       continue;
     }
     servers.push({ ...server, ...meta, enabledInSource: enabled(name, config) });
@@ -158,12 +161,21 @@ export function readJsonObject(
 ): Record<string, unknown> | null {
   const parsed = parseJsonc(source.text);
   if (!parsed.ok) {
-    const at = parsed.line === undefined ? ' ' : ` 第 ${parsed.line} 行`;
-    warnings.push(`${label}：${source.file}${at}不是有效的 JSON，已跳过`);
+    warnings.push(
+      parsed.line === undefined
+        ? translate('importers.invalidJson', { subject: label, file: source.file })
+        : translate('importers.invalidJsonAt', {
+            subject: label,
+            file: source.file,
+            line: parsed.line,
+          })
+    );
     return null;
   }
   if (parsed.value === undefined) return null;
   const record = asRecord(parsed.value);
-  if (!record) warnings.push(`${label}：${source.file} 不是 JSON 对象，已跳过`);
+  if (!record) {
+    warnings.push(translate('importers.notJsonObject', { subject: label, file: source.file }));
+  }
   return record;
 }

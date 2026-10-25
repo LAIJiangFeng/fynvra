@@ -9,6 +9,7 @@ import type {
   WorktreesRootInfo,
   WorktreesUsage,
 } from '@shared/types/settings';
+import { translate } from '../../i18n';
 
 // worktree 放在哪。这里算出的是 GitWorktreeManager.create 的 `worktreesRoot`，worktree 本身在它下面的
 // `<workspaceId>/<slug>`：
@@ -72,11 +73,14 @@ export function planWorktreesRoot(input: {
   if (configured !== undefined) return { root: configuredWorktreesRoot(configured, repoPath) };
   const root = defaultWorktreesRoot(repoPath);
   if (root === undefined) {
-    return { root: fallbackRoot, fallback: `仓库 ${repoPath} 在磁盘根目录上，没有同级目录` };
+    return { root: fallbackRoot, fallback: translate('worktrees.repoAtRoot', { repo: repoPath }) };
   }
   const host = input.repoPaths.find((repo) => isInsideDirectory(root, repo));
   if (host !== undefined) {
-    return { root: fallbackRoot, fallback: `同级目录 ${root} 在已挂入的仓库 ${host} 里` };
+    return {
+      root: fallbackRoot,
+      fallback: translate('worktrees.siblingInsideRepo', { root, host }),
+    };
   }
   return { root };
 }
@@ -165,11 +169,11 @@ export interface ValidateFs extends ProbeFs {
 function repoConflict(root: string, repoPaths: readonly string[]): string | undefined {
   for (const repo of repoPaths) {
     if (isInsideDirectory(root, repo)) {
-      return `${root} 是已挂入的仓库 ${repo} 或在它里面，worktree 不能建在仓库内`;
+      return translate('worktrees.insideRepo', { root, repo });
     }
     const target = configuredWorktreesRoot(root, repo);
     if (isInsideDirectory(target, repo)) {
-      return `仓库 ${repo} 的 worktree 会落在 ${target}，也就是仓库里面；请选一个专门放 worktree 的目录`;
+      return translate('worktrees.wouldNest', { repo, target });
     }
   }
   return undefined;
@@ -185,7 +189,8 @@ export async function validateWorktreesRoot(
   options: { repoPaths: readonly string[]; fs?: ValidateFs }
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
   const fs = options.fs ?? nodeFs;
-  if (!isAbsolute(candidate)) return { ok: false, error: `不是绝对路径：${candidate}` };
+  if (!isAbsolute(candidate))
+    return { ok: false, error: translate('worktrees.notAbsolute', { path: candidate }) };
   const root = resolve(candidate);
   const real = await fs.realpath(root).catch(() => root);
   for (const path of new Set([root, real])) {
@@ -193,7 +198,8 @@ export async function validateWorktreesRoot(
     if (conflict !== undefined) return { ok: false, error: conflict };
   }
   const probe = await probeWritable(root, fs);
-  if (!probe.ok) return { ok: false, error: `无法在 ${root} 下创建文件：${probe.error}` };
+  if (!probe.ok)
+    return { ok: false, error: translate('worktrees.notWritable', { root, error: probe.error }) };
   return { ok: true, path: root };
 }
 

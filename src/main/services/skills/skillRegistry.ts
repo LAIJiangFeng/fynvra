@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { SkillEntry } from '@shared/types/llm';
+import { translate } from '../../i18n';
 import { samePath } from '../gitRepository';
 import { createJsonRegistry, isRegistryId, toSlug, uniqueId } from '../providers/jsonRegistry';
 
@@ -42,12 +43,12 @@ export function createSkillRegistry(options: {
         for (const skill of skills) {
           const name = skill.name.trim();
           if (next.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) {
-            skipped.push(`${name}：已登记同名技能`);
+            skipped.push(translate('skills.sameName', { name }));
             continue;
           }
           const sameDir = next.find((entry) => samePath(entry.path, skill.path, platform));
           if (sameDir) {
-            skipped.push(`${name}：该目录已登记为「${sameDir.name}」`);
+            skipped.push(translate('skills.sameDir', { name, other: sameDir.name }));
             continue;
           }
           const entry: SkillEntry = {

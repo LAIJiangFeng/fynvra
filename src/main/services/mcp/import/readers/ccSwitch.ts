@@ -1,4 +1,5 @@
 import { asRecord } from '@shared/guards';
+import { translate } from '../../../../i18n';
 import { parseJsonc } from '../jsonc';
 import { type DiscoveredMcpServer, type ReaderResult, readServerConfig, text } from './common';
 
@@ -36,12 +37,17 @@ export function readCcSwitch(rows: readonly Record<string, unknown>[]): ReaderRe
     const parsed = parseJsonc(text(row.server_config));
     const config = parsed.ok ? asRecord(parsed.value) : null;
     if (!config) {
-      warnings.push(`CC Switch · ${name}：server_config 不是有效的 JSON，已跳过`);
+      warnings.push(
+        translate('importers.configInvalidJson', {
+          subject: `CC Switch · ${name}`,
+          field: 'server_config',
+        })
+      );
       continue;
     }
     const server = readServerConfig(name, config);
     if (!server) {
-      warnings.push(`CC Switch · ${name}：没有命令或 URL，已跳过`);
+      warnings.push(translate('importers.noCommandOrUrl', { subject: `CC Switch · ${name}` }));
       continue;
     }
     servers.push({

@@ -2,6 +2,7 @@ import { asRecord } from '@shared/guards';
 import { isProviderApi } from '@shared/modelCatalog';
 import type { ModelEntry } from '@shared/types/llm';
 import type { ProviderUpsertInput } from '../../../preload/domains/providers';
+import { translate } from '../../i18n';
 import { isRegistryId } from './jsonRegistry';
 
 export type ParseInputResult<T> = { ok: true; input: T } | { ok: false; error: string };
@@ -35,16 +36,22 @@ export function parseProviderUpsert(raw: unknown): ParseInputResult<ProviderUpse
 
 function readUpsert(raw: unknown): ProviderUpsertInput {
   const record = asRecord(raw);
-  check(record, '无效的模型服务：需要一个对象');
+  check(record, translate('providers.notObject'));
   const unknownKey = Object.keys(record).find((key) => !UPSERT_KEYS.has(key));
-  check(unknownKey === undefined, `无效的模型服务：未知字段 ${unknownKey}`);
+  check(
+    unknownKey === undefined,
+    translate('providers.unknownField', { field: String(unknownKey) })
+  );
 
   const { id, name, api, enabled } = record;
-  check(id === undefined || isRegistryId(id), '无效的模型服务 id');
-  check(typeof name === 'string' && name.trim() !== '', '名称不能为空');
-  check(name.trim().length <= MAX_NAME_LENGTH, `名称最多 ${MAX_NAME_LENGTH} 个字符`);
-  check(isProviderApi(api), '不支持的 API 协议');
-  check(typeof enabled === 'boolean', 'enabled 必须是布尔值');
+  check(id === undefined || isRegistryId(id), translate('providers.invalidId'));
+  check(typeof name === 'string' && name.trim() !== '', translate('validation.nameEmpty'));
+  check(
+    name.trim().length <= MAX_NAME_LENGTH,
+    translate('validation.nameTooLong', { max: MAX_NAME_LENGTH })
+  );
+  check(isProviderApi(api), translate('providers.badApi'));
+  check(typeof enabled === 'boolean', translate('validation.enabledBoolean'));
   const baseUrl = readBaseUrl(record.baseUrl);
   const apiKey = readApiKey(record.apiKey);
 
@@ -61,10 +68,10 @@ function readUpsert(raw: unknown): ProviderUpsertInput {
 
 function readBaseUrl(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
-  check(typeof value === 'string', 'Base URL 必须是字符串');
+  check(typeof value === 'string', translate('providers.baseUrlString'));
   const url = value.trim();
   if (url === '') return undefined;
-  check(url.length <= MAX_URL_LENGTH && isHttpUrl(url), 'Base URL 必须是 http(s) 地址');
+  check(url.length <= MAX_URL_LENGTH && isHttpUrl(url), translate('providers.baseUrlHttp'));
   return url;
 }
 
@@ -79,20 +86,20 @@ export function isHttpUrl(value: string): boolean {
 
 function readApiKey(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return value;
-  check(typeof value === 'string', 'API Key 必须是字符串');
+  check(typeof value === 'string', translate('providers.apiKeyString'));
   const key = value.trim();
-  check(key !== '', 'API Key 不能为空；不修改请不传该字段');
-  check(key.length <= MAX_KEY_LENGTH && !/\s/.test(key), 'API Key 不能包含空白字符');
+  check(key !== '', translate('providers.apiKeyEmpty'));
+  check(key.length <= MAX_KEY_LENGTH && !/\s/.test(key), translate('providers.apiKeyWhitespace'));
   return key;
 }
 
 function readModels(value: unknown): ModelEntry[] {
-  check(Array.isArray(value), '模型列表必须是数组');
-  check(value.length <= MAX_MODELS, `模型最多 ${MAX_MODELS} 个`);
+  check(Array.isArray(value), translate('providers.modelsArray'));
+  check(value.length <= MAX_MODELS, translate('providers.modelsTooMany', { max: MAX_MODELS }));
   const seen = new Set<string>();
   return value.map((item) => {
     const model = readModel(item);
-    check(!seen.has(model.id), `模型 ${model.id} 重复`);
+    check(!seen.has(model.id), translate('providers.modelDuplicate', { id: model.id }));
     seen.add(model.id);
     return model;
   });
@@ -100,19 +107,34 @@ function readModels(value: unknown): ModelEntry[] {
 
 function readModel(raw: unknown): ModelEntry {
   const record = asRecord(raw);
-  check(record, '模型必须是对象');
+  check(record, translate('providers.modelObject'));
   const unknownKey = Object.keys(record).find((key) => !MODEL_KEYS.has(key));
-  check(unknownKey === undefined, `模型含未知字段 ${unknownKey}`);
+  check(
+    unknownKey === undefined,
+    translate('providers.modelUnknownField', { field: String(unknownKey) })
+  );
   const id = typeof record.id === 'string' ? record.id.trim() : '';
   check(
     id !== '' && id.length <= MAX_MODEL_ID_LENGTH && !/\s/.test(id),
-    '模型 id 不能为空或含空白'
+    translate('providers.modelId')
   );
   const { name, reasoning } = record;
-  check(name === undefined || name === null || typeof name === 'string', `模型 ${id} 的名称无效`);
-  check(reasoning === undefined || typeof reasoning === 'boolean', `模型 ${id} 的 reasoning 无效`);
-  const contextWindow = readPositiveInt(record.contextWindow, `模型 ${id} 的上下文窗口无效`);
-  const maxOutput = readPositiveInt(record.maxOutput, `模型 ${id} 的最大输出无效`);
+  check(
+    name === undefined || name === null || typeof name === 'string',
+    translate('providers.modelName', { id })
+  );
+  check(
+    reasoning === undefined || typeof reasoning === 'boolean',
+    translate('providers.modelReasoning', { id })
+  );
+  const contextWindow = readPositiveInt(
+    record.contextWindow,
+    translate('providers.modelContext', { id })
+  );
+  const maxOutput = readPositiveInt(
+    record.maxOutput,
+    translate('providers.modelMaxOutput', { id })
+  );
   return {
     id,
     name: (typeof name === 'string' && name.trim()) || id,

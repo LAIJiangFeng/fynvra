@@ -55,4 +55,34 @@ describe('warningLine', () => {
   it('never shortens a warning to nothing', () => {
     expect(warningLine('，已跳过')).toBe('，已跳过');
   });
+
+  // 样本取自 Main 的英文字典（src/shared/i18n/main/en.ts）
+  it('shortens the English warnings at their 「; 」 follow-up the same way', () => {
+    expect(warningLine('Claude Code · pencil: no command or URL; skipped')).toBe(
+      'Claude Code · pencil: no command or URL'
+    );
+    expect(warningLine('Codex: ~/.codex/auth.json is not valid JSON; ignored its key')).toBe(
+      'Codex: ~/.codex/auth.json is not valid JSON'
+    );
+    expect(warningLine('Codex · github: env GITHUB_TOKEN not set; fill it in after import')).toBe(
+      'Codex · github: env GITHUB_TOKEN not set'
+    );
+    expect(
+      warningLine(
+        "Cursor · figma: env TOKEN reference variables; fynvra won't expand them, set real values after import"
+      )
+    ).toBe('Cursor · figma: env TOKEN reference variables');
+    expect(warningLine('GET /v1/models unavailable (HTTP 404); using GET /models')).toBe(
+      'GET /v1/models unavailable (HTTP 404)'
+    );
+    expect(warningLine('The server has more models; only the first page is listed')).toBe(
+      'The server has more models'
+    );
+    for (const kept of [
+      'Claude Code: failed to read (EACCES; permission denied)',
+      'Too many models; showing the first 2000',
+    ]) {
+      expect(warningLine(kept)).toBe(kept);
+    }
+  });
 });

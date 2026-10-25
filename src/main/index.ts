@@ -2,9 +2,11 @@ import { join, resolve } from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { errorMessage } from '@shared/guards';
 import { app, BrowserWindow, dialog } from 'electron';
+import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
+import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { createAppWindow } from './windows/createAppWindow';
 
@@ -66,6 +68,13 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(async () => {
       electronApp.setAppUserModelId('com.fynvra.app');
+      // Main 的文案按设置里的界面语言；跟随系统时与 Renderer 一样先看应用 locale（navigator.languages 由它而来）
+      const systemLanguages = [app.getLocale(), ...app.getPreferredSystemLanguages()];
+      configureMainLocale({
+        language: () => getSettingsFile().read().preferences.language,
+        systemLanguages: () => systemLanguages,
+        warnMissing: !app.isPackaged,
+      });
       registerIpcHandlers();
       const agentHost = getAgentHost();
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
@@ -75,7 +84,7 @@ if (!app.requestSingleInstanceLock()) {
       showMainWindow();
     })
     .catch((error: unknown) => {
-      dialog.showErrorBox('Fynvra 启动失败', errorMessage(error));
+      dialog.showErrorBox(translate('app.startFailed'), errorMessage(error));
       app.quit();
     });
 }
