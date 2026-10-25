@@ -89,6 +89,8 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const busy = isBusy(status);
   const streaming = Boolean(last?.role === 'assistant' && last.streaming && last.text);
   const context = useMemo(() => ({ busy, streaming, error }), [busy, streaming, error]);
+  // 最后一条提问之后的行是正在跑的这一轮：文件修改卡片按设置自动展开
+  const liveFrom = useMemo(() => rows.findLastIndex((row) => row.kind === 'user'), [rows]);
 
   const virtuoso = useRef<VirtuosoHandle>(null);
   const follow = useRef(true);
@@ -167,9 +169,9 @@ export function Timeline({ sessionId }: { sessionId: string }) {
         context={context}
         components={COMPONENTS}
         computeItemKey={(_, row) => row.key}
-        itemContent={(_, row) => (
+        itemContent={(index, row) => (
           <div className={cn('mx-auto max-w-3xl px-6', row.kind === 'turn' ? 'py-0.5' : 'py-2')}>
-            <TimelineRowView row={row} onToggleTurn={toggleTurn} />
+            <TimelineRowView row={row} live={busy && index > liveFrom} onToggleTurn={toggleTurn} />
           </div>
         )}
         initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
@@ -202,16 +204,23 @@ export function Timeline({ sessionId }: { sessionId: string }) {
 
 const TimelineRowView = memo(function TimelineRowView({
   row,
+  live,
   onToggleTurn,
 }: {
   row: TimelineRow;
+  /** 这一行属于正在跑的这一轮 */
+  live: boolean;
   onToggleTurn: (questionId: string, opening: boolean) => void;
 }) {
   if (row.kind === 'turn') {
     return <TurnHeader message={row.message} open={row.open} onToggle={onToggleTurn} />;
   }
   return (
-    <MessageItem message={row.message} tools={row.kind === 'assistant' ? row.tools : undefined} />
+    <MessageItem
+      message={row.message}
+      tools={row.kind === 'assistant' ? row.tools : undefined}
+      live={live}
+    />
   );
 });
 

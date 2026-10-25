@@ -10,18 +10,21 @@ import { ReadonlyTools, ToolCallCard } from './ToolCallCard';
 /**
  * 一条消息。assistant 的工具调用由时间线分好组传进来（`tools`：连续的只读调用可能合成一组，
  * 后面只有工具调用的消息也并在这里）；不传时按消息自己的工具调用逐个画卡片。
+ * `live`：消息属于正在跑的这一轮（文件修改卡片按设置自动展开）。
  */
 export const MessageItem = memo(function MessageItem({
   message,
   tools,
+  live = false,
 }: {
   message: TimelineMessage;
   tools?: ToolItem[];
+  live?: boolean;
 }) {
   return message.role === 'user' ? (
     <UserMessage message={message} />
   ) : (
-    <AssistantMessage message={message} tools={tools} />
+    <AssistantMessage message={message} tools={tools} live={live} />
   );
 });
 
@@ -48,7 +51,15 @@ function UserMessage({ message }: { message: TimelineMessage }) {
   );
 }
 
-function AssistantMessage({ message, tools }: { message: TimelineMessage; tools?: ToolItem[] }) {
+function AssistantMessage({
+  message,
+  tools,
+  live,
+}: {
+  message: TimelineMessage;
+  tools?: ToolItem[];
+  live: boolean;
+}) {
   const { text, thinking, streaming } = message;
   const items = tools ?? message.toolCalls.map((call): ToolItem => ({ kind: 'call', call }));
   return (
@@ -59,7 +70,7 @@ function AssistantMessage({ message, tools }: { message: TimelineMessage; tools?
         <div className="space-y-1.5">
           {items.map((item) =>
             item.kind === 'call' ? (
-              <ToolCallCard key={item.call.id} call={item.call} />
+              <ToolCallCard key={item.call.id} call={item.call} live={live} />
             ) : (
               <ReadonlyTools key={item.key} calls={item.calls} />
             )

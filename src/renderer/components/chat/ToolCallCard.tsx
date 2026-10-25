@@ -83,26 +83,36 @@ function iconOf(name: string, family: ToolFamily): LucideIcon {
   return ICONS[name] ?? (family === 'mcp' ? Plug : Wrench);
 }
 
-/** 工具调用卡片：名称、参数摘要、耗时、状态；展开看完整参数与输出。 */
-export const ToolCallCard = memo(function ToolCallCard({ call }: { call: ChatToolCall }) {
+/**
+ * 工具调用卡片：名称、参数摘要、耗时、状态；展开看完整参数与输出。
+ * `live`：卡片属于正在跑的这一轮（edit / write 按设置自动展开改动）。
+ */
+export const ToolCallCard = memo(function ToolCallCard({
+  call,
+  live = false,
+}: {
+  call: ChatToolCall;
+  live?: boolean;
+}) {
   if (call.name === 'dispatch_task') return <DispatchTaskCard call={call} />;
   if (call.name === 'report_done') return <ReportDoneCard call={call} />;
-  return <GenericToolCard call={call} />;
+  return <GenericToolCard call={call} live={live} />;
 });
 
-function GenericToolCard({ call }: { call: ChatToolCall }) {
+function GenericToolCard({ call, live }: { call: ChatToolCall; live: boolean }) {
   const display = describeTool(call.name, call.args);
   const style = FAMILY_STYLE[display.family];
   const Icon = iconOf(call.name, display.family);
   const markdownOutput = display.family === 'orchestration' || display.family === 'worker';
   const change = fileChangeOf(call.name, call.args);
   const autoExpandEdits = useGeneralPreferencesStore((state) => state.timeline.autoExpandEdits);
-  // edit / write 运行中自动展开改动；历史里的（挂载时已结束）照常折叠
-  const live = change !== null && autoExpandEdits && call.status === 'running';
-  const [open, setOpen] = useState(live);
+  // edit / write 在这一轮还在跑时自动展开改动（工具本身常常几毫秒就结束，不看它自己的状态）；
+  // 之前轮次的照常折叠。展开后不自动收起，用户收起的也不再弹开
+  const autoOpen = change !== null && autoExpandEdits && (live || call.status === 'running');
+  const [open, setOpen] = useState(autoOpen);
   useEffect(() => {
-    if (live) setOpen(true);
-  }, [live]);
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
 
   return (
     <Collapsible
