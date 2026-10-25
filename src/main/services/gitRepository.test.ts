@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type GitRunner, inspectGitRepository, samePath } from './gitRepository';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { type GitRunner, inspectDirectory, samePath } from './gitRepository';
 
 const hasGit = (() => {
   try {
@@ -38,40 +38,57 @@ describe.skipIf(!hasGit)('inspectGitRepository（真实 git）', () => {
     return repo;
   };
 
-  it('非 git 目录被拒绝', async () => {
+  it('不是 git 仓库的目录按普通目录挂入', async () => {
     const plain = join(base, 'plain');
     mkdirSync(plain);
-    expect(await inspectGitRepository(plain)).toMatchObject({ ok: false, code: 'not-git-repo' });
+    expect(await inspectDirectory(plain)).toEqual({
+      ok: true,
+      vcs: 'none',
+      root: plain,
+      name: 'plain',
+    });
   });
 
-  it('仓库根目录通过：名称取目录名，无远端且无 main/master 时取当前分支', async () => {
+  it('仓库根目录是 git 工作区：名称取目录名，无远端且无 main/master 时取当前分支', async () => {
     const repo = makeRepo('my-repo', 'trunk');
-    expect(await inspectGitRepository(repo)).toEqual({
+    expect(await inspectDirectory(repo)).toEqual({
       ok: true,
+      vcs: 'git',
       root: repo,
       name: 'my-repo',
       defaultBranch: 'trunk',
     });
   });
 
-  it('仓库子目录被拒绝，并指出仓库根目录', async () => {
+  it('仓库子目录不提升为外层仓库：返回 not-repo-root 与仓库根目录', async () => {
     const repo = makeRepo('nested-repo', 'main');
     const sub = join(repo, 'src');
     mkdirSync(sub);
-    const result = await inspectGitRepository(sub);
-    expect(result).toMatchObject({ ok: false, code: 'not-repo-root' });
+    const result = await inspectDirectory(sub);
+    expect(result).toMatchObject({ ok: false, code: 'not-repo-root', repoRoot: repo });
     expect(!result.ok && result.error).toContain(repo);
   });
 
+  it('plain：仓库子目录按普通目录挂入', async () => {
+    const sub = join(makeRepo('plain-nested', 'main'), 'docs');
+    mkdirSync(sub);
+    expect(await inspectDirectory(sub, { plain: true })).toEqual({
+      ok: true,
+      vcs: 'none',
+      root: sub,
+      name: 'docs',
+    });
+  });
+
   it('不存在的目录返回 failed', async () => {
-    expect(await inspectGitRepository(join(base, 'missing'))).toMatchObject({
+    expect(await inspectDirectory(join(base, 'missing'))).toMatchObject({
       ok: false,
       code: 'failed',
     });
   });
 });
 
-describe('inspectGitRepository（注入 runner）', () => {
+describe('inspectDirectory（注入 runner）', () => {
   const root = realpathSync.native(tmpdir());
 
   const runner =
@@ -83,12 +100,15 @@ describe('inspectGitRepository（注入 runner）', () => {
         : { ok: false, error: `fatal: ${args.join(' ')}` };
     };
 
-  it('找不到 git 可执行文件时返回 git-unavailable', async () => {
+  it('找不到 git 可执行文件时按普通目录挂入', async () => {
     const run: GitRunner = async () => ({ ok: false, error: 'spawn git ENOENT', missingGit: true });
-    expect(await inspectGitRepository(root, run)).toMatchObject({
-      ok: false,
-      code: 'git-unavailable',
-    });
+    expect(await inspectDirectory(root, { run })).toMatchObject({ ok: true, vcs: 'none', root });
+  });
+
+  it('plain 时不跑 git', async () => {
+    const run = vi.fn<GitRunner>(async () => ({ ok: true, stdout: `${root}\n` }));
+    expect(await inspectDirectory(root, { plain: true, run })).toMatchObject({ vcs: 'none' });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('优先使用 origin/HEAD 指向的分支', async () => {
@@ -96,8 +116,9 @@ describe('inspectGitRepository（注入 runner）', () => {
       'rev-parse --show-toplevel': root,
       'symbolic-ref --quiet --short refs/remotes/origin/HEAD': 'origin/develop',
     });
-    expect(await inspectGitRepository(root, run)).toMatchObject({
+    expect(await inspectDirectory(root, { run })).toMatchObject({
       ok: true,
+      vcs: 'git',
       defaultBranch: 'develop',
     });
   });
@@ -109,10 +130,14 @@ describe('inspectGitRepository（注入 runner）', () => {
       'rev-parse --verify --quiet refs/heads/master': 'abc123',
       'symbolic-ref --quiet --short HEAD': 'feature/x',
     });
-    expect(await inspectGitRepository(root, masterOnly)).toMatchObject({ defaultBranch: 'master' });
+    expect(await inspectDirectory(root, { run: masterOnly })).toMatchObject({
+      defaultBranch: 'master',
+    });
 
     const detached = runner(base);
-    expect(await inspectGitRepository(root, detached)).toMatchObject({ defaultBranch: 'main' });
+    expect(await inspectDirectory(root, { run: detached })).toMatchObject({
+      defaultBranch: 'main',
+    });
   });
 });
 

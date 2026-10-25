@@ -5,7 +5,8 @@ export interface WorkerSessionLauncher {
     dispatchId: string;
     roleId: string;
     cwd: string;
-    worktreeId: string;
+    /** 普通目录（工作区没有 git）的尝试没有 worktree，cwd 就是工作区目录 */
+    worktreeId?: string;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
   promptSession(

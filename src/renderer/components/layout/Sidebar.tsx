@@ -1,7 +1,8 @@
 import type { WorkspaceSummary } from '@shared/types/workspace';
-import { Ellipsis, FolderGit2, Plus, Trash2 } from 'lucide-react';
+import { Ellipsis, Folder, FolderGit2, Plus, Trash2 } from 'lucide-react';
 import { Fragment } from 'react';
 import { SessionList } from '@/components/chat/SessionList';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -32,13 +33,13 @@ export function Sidebar() {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button variant="ghost" size="icon-xs" aria-label="挂入仓库" disabled={adding} />
+              <Button variant="ghost" size="icon-xs" aria-label="挂入目录" disabled={adding} />
             }
             onClick={() => void add()}
           >
             <Plus />
           </TooltipTrigger>
-          <TooltipContent>挂入本地 git 仓库</TooltipContent>
+          <TooltipContent>挂入目录</TooltipContent>
         </Tooltip>
       </div>
 
@@ -48,7 +49,7 @@ export function Sidebar() {
             <p className="text-muted-foreground text-sm">还没有工作区</p>
             <Button size="sm" variant="outline" disabled={adding} onClick={() => void add()}>
               <Plus />
-              挂入仓库
+              挂入目录
             </Button>
           </div>
         ) : (
@@ -93,9 +94,24 @@ function WorkspaceItem({
           selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
         )}
       >
-        <FolderGit2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        {workspace.vcs === 'none' ? (
+          <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <FolderGit2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        )}
         <span className="min-w-0 flex-1 pr-6">
-          <span className="block truncate font-medium">{workspace.name}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-medium">{workspace.name}</span>
+            {workspace.vcs === 'none' && (
+              <Badge
+                variant="outline"
+                title="不会使用 worktree"
+                className="px-1 py-0 font-normal text-[10px] leading-4"
+              >
+                无 git
+              </Badge>
+            )}
+          </span>
           <span
             className="block truncate text-muted-foreground text-xs"
             title={workspace.displayPath}

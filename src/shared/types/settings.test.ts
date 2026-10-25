@@ -18,6 +18,7 @@ const workspace = {
   id: 'ws-1',
   name: 'fynvra',
   repoPath: '/repos/fynvra',
+  vcs: 'git' as const,
   defaultBranch: 'main',
 };
 

@@ -61,6 +61,10 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const view = useOrchestrationStore((state) => state.snapshots[workspaceId]?.view ?? null);
   const loading = useOrchestrationStore((state) => state.snapshots[workspaceId]?.loading ?? true);
   const error = useOrchestrationStore((state) => state.snapshots[workspaceId]?.error ?? null);
+  // 无 git 的工作区：worker 原地改，没有 diff 可看
+  const plain = useWorkspacesStore(
+    (state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.vcs === 'none'
+  );
 
   useEffect(() => watchWorkspace(workspaceId), [watchWorkspace, workspaceId]);
 
@@ -117,7 +121,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             <TabsTrigger value="changes" className="px-2 text-xs">
               <GitCompareArrows />
               改动
-              {candidates.length > 0 && <Count value={candidates.length} />}
+              {!plain && candidates.length > 0 && <Count value={candidates.length} />}
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-0.5">
@@ -163,7 +167,10 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             ))}
         </TabsContent>
         <TabsContent value="changes" className="flex min-h-0 flex-col overflow-y-auto">
-          {notice ??
+          {plain ? (
+            <PanelMessage icon={GitCompareArrows} title="无 git" />
+          ) : (
+            (notice ??
             (view && (
               <ChangesView
                 view={view}
@@ -171,7 +178,8 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
                 selectedId={reviewId}
                 onSelect={setReviewId}
               />
-            ))}
+            )))
+          )}
         </TabsContent>
       </Tabs>
 

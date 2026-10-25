@@ -1,8 +1,9 @@
 import { GitBranch } from 'lucide-react';
-import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
+import { useSessionsStore } from '@/stores/sessions';
 import { ApprovalModeStatus } from './ApprovalModePicker';
 import { formatCost, formatTokens } from './format';
 import { useSessionModel } from './ModelPicker';
+import { useSessionBranch } from './SessionBadges';
 
 /**
  * 会话底部一行：累计 tokens、费用（有才显示）；右侧是审批档位、当前分支（悬停看 cwd），
@@ -11,8 +12,7 @@ import { useSessionModel } from './ModelPicker';
 export function StatusBar({ sessionId }: { sessionId: string }) {
   const usage = useSessionsStore((state) => state.runtimeBySession[sessionId]?.usage);
   const reportedModel = useSessionsStore((state) => state.runtimeBySession[sessionId]?.model);
-  const branch = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.branch);
-  const cwd = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.cwd);
+  const branch = useSessionBranch(sessionId);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
   const { label } = useSessionModel(sessionId);
@@ -32,11 +32,11 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
         <ApprovalModeStatus sessionId={sessionId} />
         {branch && (
           <span
-            title={cwd ? `当前分支（${cwd}）` : '当前分支'}
+            title={`当前分支（${branch.cwd}）`}
             className="flex min-w-0 items-center gap-1 font-mono"
           >
             <GitBranch aria-hidden className="size-3 shrink-0" />
-            <span className="truncate">{branch}</span>
+            <span className="truncate">{branch.branch}</span>
           </span>
         )}
         {model && (

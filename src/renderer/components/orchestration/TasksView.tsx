@@ -211,7 +211,7 @@ function TaskCard({
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
-        {latest && (
+        {latest && latest.mode !== 'in-place' && (
           <span className="flex min-w-0 max-w-full items-center gap-1 font-mono">
             <GitBranch className="size-3 shrink-0" />
             <span className="truncate">{latest.branch}</span>

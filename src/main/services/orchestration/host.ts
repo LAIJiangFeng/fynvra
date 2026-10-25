@@ -63,7 +63,10 @@ export interface OrchestrationHostDeps {
   workspace: Workspace;
   /** 主 agent 会话；它的 Run 按 (workspace, coordinatorSessionId) 查找，首次派发时创建。 */
   coordinatorSessionId: string;
-  /** 主 agent 所在分支：worktree 从它切出，merge_worktree 合回它。 */
+  /**
+   * 主 agent 所在分支：worktree 从它切出，merge_worktree 合回它。
+   * 普通目录（`workspace.vcs` 为 `none`）没有分支，为空串：worker 直接在工作区目录里干活，整条编排不跑 git。
+   */
   coordinatorBranch: string;
   store: OrchestrationStore;
   git: GitWorktreeManager;
@@ -88,7 +91,13 @@ export interface OrchestrationHostDeps {
 export const HOST_SENDER = 'fynvra';
 
 type Resolved = { run: Run; task: Task; dispatch: Dispatch; worktree: Worktree | undefined };
-type Launched = { worktree: Worktree; dispatch: Dispatch };
+/** 普通目录的尝试没有 worktree */
+type Launched = { worktree: Worktree | undefined; dispatch: Dispatch };
+
+/** 尝试是否直接在工作区目录里进行（普通目录）：没有 worktree，也就谈不上「worktree 已清理」。 */
+function isInPlace(dispatch: Dispatch): boolean {
+  return dispatch.mode === 'in-place';
+}
 
 /** store / inbox 的「不该失败」的写入：失败说明状态被并发改动，抛给 guard 转成错误结果。 */
 function unwrap<T extends { ok: true }>(result: T | { ok: false; error: string }): T {
@@ -100,14 +109,14 @@ function cleanedUp(dispatch: Dispatch): string {
   return `the worktree of dispatch ${dispatch.id} was already cleaned up`;
 }
 
-function notMergeable(task: Task): string {
+function notMergeable(task: Task, inPlace: boolean): string {
   switch (task.status) {
     case 'in-progress':
       return `task ${task.id} is still in progress: its worker has not reported done; call wait_for_workers first`;
     case 'failed':
       return `the worker reported task ${task.id} as failed; reject_work to retry it or cleanup_worktree to abandon it`;
     case 'completed':
-      return `task ${task.id} is already merged; call cleanup_worktree`;
+      return `task ${task.id} is already ${inPlace ? 'accepted' : 'merged'}; call cleanup_worktree`;
     default:
       return `task ${task.id} is ${task.status} and cannot be merged`;
   }
@@ -117,13 +126,15 @@ function instructionPrompt(body: string): string {
   return ['Message from your coordinator:', '', body].join('\n');
 }
 
-function feedbackPrompt(feedback: string, dispatchId: string): string {
+function feedbackPrompt(feedback: string, dispatchId: string, inPlace: boolean): string {
   return [
     `Review feedback from your coordinator (dispatch \`${dispatchId}\`): your last report was not accepted.`,
     '',
     feedback,
     '',
-    'Address the feedback in this worktree, commit your changes, then call `report_done` again.',
+    inPlace
+      ? 'Address the feedback in the workspace directory (no git: do not commit), then call `report_done` again.'
+      : 'Address the feedback in this worktree, commit your changes, then call `report_done` again.',
   ].join('\n');
 }
 
@@ -134,11 +145,16 @@ function feedbackPrompt(feedback: string, dispatchId: string): string {
  *
  * 依赖未完成的任务先排队（只建 Task），在 `listWorkers` / `waitForWorkers` 被调用时补派：
  * 依赖只会经 `mergeWorktree` 变成 completed，而主 agent 合并之后总要回到这两个工具上。
+ *
+ * 普通目录（`workspace.vcs` 为 `none`）原地编排，不调用任何 git：派发不建 worktree，worker 的 cwd 是工作区目录、
+ * Dispatch 记 `mode: 'in-place'`；review 给出 worker 汇报的改动文件；merge 只把任务记为 completed；
+ * cleanup 只停 worker；run_checks 在工作区目录里跑。
  */
 export function createOrchestrationHost(deps: OrchestrationHostDeps): OrchestrationHost {
   const { workspace, coordinatorSessionId, coordinatorBranch, store, git, inbox, launcher, roles } =
     deps;
   const repoPath = workspace.repoPath;
+  const inPlace = workspace.vcs === 'none';
   const now = deps.now ?? Date.now;
   const policy = deps.checkPolicy ?? DEFAULT_CHECK_COMMAND_POLICY;
   /** 正在建 worktree / 起会话的 task，排队推进时跳过 */
@@ -199,17 +215,22 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return problems.length === 0 ? '' : ` (cleanup failed: ${problems.join('; ')})`;
   }
 
-  /** 建 worktree → 渲染任务书 → 起 worker 会话；会话起不来时删掉刚建的 worktree。不写 store。 */
+  /**
+   * 建 worktree（普通目录不建）→ 渲染任务书 → 起 worker 会话；会话起不来时删掉刚建的 worktree。不写 store。
+   */
   async function launch(task: Task): Promise<HostResult<Launched>> {
-    const created = await git.create({
-      repoPath,
-      workspaceId: workspace.id,
-      slug: task.title,
-      baseRef: coordinatorBranch,
-      worktreesRoot: await deps.resolveWorktreesRoot(workspace),
-    });
-    if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
-    const { worktree } = created;
+    let worktree: Worktree | undefined;
+    if (!inPlace) {
+      const created = await git.create({
+        repoPath,
+        workspaceId: workspace.id,
+        slug: task.title,
+        baseRef: coordinatorBranch,
+        worktreesRoot: await deps.resolveWorktreesRoot(workspace),
+      });
+      if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
+      worktree = created.worktree;
+    }
     const dispatchId = newId('dispatch');
     const brief = renderWorkerBrief({ title: task.title, spec: task.spec, dispatchId });
     let started: Awaited<ReturnType<WorkerSessionLauncher['createWorkerSession']>>;
@@ -219,23 +240,24 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         runId: task.runId,
         dispatchId,
         roleId: task.roleId,
-        cwd: worktree.path,
-        worktreeId: worktree.id,
+        cwd: worktree?.path ?? repoPath,
+        ...(worktree ? { worktreeId: worktree.id } : {}),
         brief,
       });
     } catch (error) {
       started = fail(errorMessage(error));
     }
     if (!started.ok) {
-      const cleanup = await discardWorktree(worktree);
+      const cleanup = worktree ? await discardWorktree(worktree) : '';
       return fail(`could not start the worker session: ${started.error}${cleanup}`);
     }
     const dispatch: Dispatch = {
       id: dispatchId,
       taskId: task.id,
       workerSessionId: started.sessionId,
-      worktreeId: worktree.id,
-      branch: worktree.branch,
+      worktreeId: worktree?.id ?? '',
+      branch: worktree?.branch ?? '',
+      ...(worktree ? {} : { mode: 'in-place' as const }),
       startedAt: now(),
     };
     return { ok: true, worktree, dispatch };
@@ -243,11 +265,17 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
 
   /** 落库一次启动成功的尝试；失败时撤掉已写入的行，task 保持原状。 */
   function record(task: Task, launched: Launched, isNew: boolean): HostResult<{ task: Task }> {
-    const worktree = store.worktrees.insert(launched.worktree);
-    if (!worktree.ok) return worktree;
+    const { worktree } = launched;
+    if (worktree) {
+      const inserted = store.worktrees.insert(worktree);
+      if (!inserted.ok) return inserted;
+    }
+    const dropWorktree = () => {
+      if (worktree) store.worktrees.delete(worktree.id);
+    };
     const dispatch = store.dispatches.insert(launched.dispatch);
     if (!dispatch.ok) {
-      store.worktrees.delete(launched.worktree.id);
+      dropWorktree();
       return dispatch;
     }
     const saved = isNew
@@ -255,7 +283,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       : store.tasks.update(task.id, { status: 'in-progress' });
     if (!saved.ok) {
       store.dispatches.delete(launched.dispatch.id);
-      store.worktrees.delete(launched.worktree.id);
+      dropWorktree();
       return saved;
     }
     return { ok: true, task: saved.value };
@@ -271,7 +299,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       const recorded = record(task, launched, isNew);
       if (!recorded.ok) {
         await disposeWorker(launched.dispatch.workerSessionId);
-        const cleanup = await discardWorktree(launched.worktree);
+        const cleanup = launched.worktree ? await discardWorktree(launched.worktree) : '';
         return fail(`${recorded.error}${cleanup}`);
       }
       return { ok: true, task: recorded.task, dispatch: launched.dispatch };
@@ -468,7 +496,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (task.status === 'completed' || task.status === 'abandoned') {
       return fail(`task ${task.id} is ${task.status}; dispatch a new task for further work`);
     }
-    if (found.worktree === undefined) return fail(cleanedUp(dispatch));
+    if (!isInPlace(dispatch) && found.worktree === undefined) return fail(cleanedUp(dispatch));
     const instruction = unwrap(
       inbox.post({
         runId: run.id,
@@ -488,9 +516,17 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return { ok: true, messageId: instruction.message.id, type: 'instruction' };
   }
 
+  /** 普通目录没有 diff：给出这个任务各次尝试里 worker 汇报的改动文件（去重，按汇报顺序）。 */
+  function reportedFiles(task: Task): HostResult<ReviewDiffOutput> {
+    const attempts = store.dispatches.list((dispatch) => dispatch.taskId === task.id);
+    const files = [...new Set(attempts.flatMap((dispatch) => dispatch.filesModified ?? []))];
+    return { ok: true, branch: '', baseCommit: '', files, stat: '', diff: '', mode: 'in-place' };
+  }
+
   async function reviewDiff(input: DispatchRef): Promise<HostResult<ReviewDiffOutput>> {
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
+    if (isInPlace(found.dispatch)) return reportedFiles(found.task);
     if (found.worktree === undefined) return fail(cleanedUp(found.dispatch));
     return reviewWorktreeDiff({ git, exec: deps.exec }, found.worktree);
   }
@@ -501,10 +537,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   ): Promise<HostResult<RunChecksOutput>> {
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
-    if (found.worktree === undefined) return fail(cleanedUp(found.dispatch));
+    const cwd = isInPlace(found.dispatch) ? repoPath : found.worktree?.path;
+    if (cwd === undefined) return fail(cleanedUp(found.dispatch));
     const verdict = checkCommand(input.command, policy);
     if (!verdict.ok) return fail(verdict.error);
-    const result = await deps.runChecks(found.worktree.path, verdict.command, signal);
+    const result = await deps.runChecks(cwd, verdict.command, signal);
     return {
       ok: true,
       exitCode: result.exitCode,
@@ -513,12 +550,21 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     };
   }
 
+  /** 普通目录：改动已经在目录里，没有可合并的分支；验收通过即完成。 */
+  function acceptInPlace(task: Task): HostResult<MergeWorktreeOutput> {
+    if (task.status !== 'in-review') return fail(notMergeable(task, true));
+    const completed = store.tasks.update(task.id, { status: 'completed' });
+    if (!completed.ok) return completed;
+    return { ok: true, merged: true, targetBranch: '', mode: 'in-place' };
+  }
+
   async function mergeWorktree(input: DispatchRef): Promise<HostResult<MergeWorktreeOutput>> {
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
     const { task, dispatch, worktree } = found;
+    if (isInPlace(dispatch)) return acceptInPlace(task);
     if (worktree === undefined) return fail(cleanedUp(dispatch));
-    if (task.status !== 'in-review') return fail(notMergeable(task));
+    if (task.status !== 'in-review') return fail(notMergeable(task, false));
 
     const status = await git.status(worktree);
     if (!status.ok) return fail(`could not read the worktree status: ${status.error}`);
@@ -581,17 +627,20 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
           : `task ${task.id} is ${task.status} and cannot be sent back`
       );
     }
-    if (worktree === undefined) return fail(`${cleanedUp(found.dispatch)}; dispatch a new task`);
+    if (!isInPlace(found.dispatch) && worktree === undefined) {
+      return fail(`${cleanedUp(found.dispatch)}; dispatch a new task`);
+    }
     const previous = latestDispatch(task.id);
     if (previous === undefined) return fail(`task ${task.id} has no previous attempt`);
 
-    // 打回 = 同一 worktree、同一 worker 会话上的一次新尝试
+    // 打回 = 同一 worktree（普通目录则是同一目录）、同一 worker 会话上的一次新尝试
     const next: Dispatch = {
       id: newId('dispatch'),
       taskId: task.id,
       workerSessionId: previous.workerSessionId,
       worktreeId: previous.worktreeId,
       branch: previous.branch,
+      ...(previous.mode ? { mode: previous.mode } : {}),
       startedAt: now(),
     };
     const inserted = store.dispatches.insert(next);
@@ -613,7 +662,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       })
     );
     // 作为新 prompt 发出：新的 agent run 开始时 report_done 才重新开放
-    const delivered = await promptWorker(next.workerSessionId, feedbackPrompt(feedback, next.id));
+    const delivered = await promptWorker(
+      next.workerSessionId,
+      feedbackPrompt(feedback, next.id, isInPlace(next))
+    );
     if (!delivered.ok) {
       store.messages.delete(instruction.message.id);
       store.dispatches.delete(next.id);
@@ -641,6 +693,12 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
     const { task, dispatch, worktree } = found;
+    if (isInPlace(dispatch)) {
+      // 普通目录没有 worktree 和分支可删：只停 worker；没完成的任务照样放弃，改动留在目录里
+      if (task.status !== 'completed') abandon(task);
+      await disposeWorker(dispatch.workerSessionId);
+      return { ok: true, removedWorktree: false, deletedBranch: false, mode: 'in-place' };
+    }
     if (worktree === undefined) return fail(cleanedUp(dispatch));
     const merged = task.status === 'completed';
     if (!merged) abandon(task);

@@ -33,7 +33,10 @@ export function TaskDrawer({
   const containerRef = useRef<HTMLDivElement>(null);
   const dispatches = dispatchesOf(view, task.id);
   const latest = latestDispatchOf(view, task.id);
-  const reviewable = latest && (task.status === 'in-review' || task.status === 'completed');
+  // 无 git 的尝试原地进行：没有分支，也没有 diff 可看
+  const inPlace = latest?.mode === 'in-place';
+  const reviewable =
+    latest && !inPlace && (task.status === 'in-review' || task.status === 'completed');
 
   useEffect(() => {
     containerRef.current?.focus();
@@ -70,7 +73,7 @@ export function TaskDrawer({
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <StatusBadge status={task.status} />
             <RoleBadge roleId={task.roleId} />
-            {latest && (
+            {latest && !inPlace && (
               <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-muted-foreground">
                 <GitBranch className="size-3 shrink-0" />
                 <span className="truncate">{latest.branch}</span>

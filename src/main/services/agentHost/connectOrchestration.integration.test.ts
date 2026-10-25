@@ -124,6 +124,7 @@ describe.skipIf(!hasGit)('agent host ⇄ orchestration（真实 git）', () => {
       id: 'ws_1',
       name: 'repo',
       repoPath: repo,
+      vcs: 'git',
       defaultBranch: 'main',
     };
     const roles = new JsonFileRoleStore({ fs, dir: join(userData, 'roles') });

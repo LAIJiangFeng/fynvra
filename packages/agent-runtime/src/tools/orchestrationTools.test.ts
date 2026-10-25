@@ -442,6 +442,111 @@ describe('review, checks, merge and follow-up tools', () => {
   });
 });
 
+describe('workspace without git (in-place dispatches)', () => {
+  const inPlace: Dispatch = { ...dispatch, worktreeId: '', branch: '', mode: 'in-place' };
+
+  it('dispatch_task: no branch, the shared directory, and one task at a time', async () => {
+    const host = createHost();
+    host.dispatchTask.mockResolvedValueOnce({ ok: true, task, dispatch: inPlace });
+    const run = await runTool(toolByName(createOrchestrationTools(host), 'dispatch_task'), {
+      title: 'Add login',
+      spec: 'S',
+    });
+    expect(run.text).toMatch(/^## Task dispatched/);
+    expect(run.text).toContain('works in: the workspace directory itself');
+    expect(run.text).toMatch(/dispatch one task at a time/i);
+    expect(run.text).not.toContain('branch:');
+    expect(run.text).not.toContain('own worktree');
+  });
+
+  it('list_workers: in place instead of a branch', async () => {
+    const host = createHost();
+    host.listWorkers.mockResolvedValueOnce({ ok: true, workers: [{ task, dispatch: inPlace }] });
+    const run = await runTool(toolByName(createOrchestrationTools(host), 'list_workers'), {});
+    expect(run.text).toContain('`d1` · in place (no git)');
+    expect(run.text).not.toContain('branch:');
+  });
+
+  it('review_diff: no diff, the files the worker reported instead', async () => {
+    const host = createHost();
+    const files = ['hello.txt', 'src/a.ts'];
+    host.reviewDiff.mockResolvedValueOnce({
+      ok: true,
+      branch: '',
+      baseCommit: '',
+      files,
+      stat: '',
+      diff: '',
+      mode: 'in-place',
+    });
+    host.reviewDiff.mockResolvedValueOnce({
+      ok: true,
+      branch: '',
+      baseCommit: '',
+      files: [],
+      stat: '',
+      diff: '',
+      mode: 'in-place',
+    });
+    const tool = toolByName(createOrchestrationTools(host), 'review_diff');
+    const listed = await runTool(tool, { dispatch_id: 'd1' });
+    expect(listed.isError).toBe(false);
+    expect(listed.text).toContain('there is no diff');
+    expect(listed.text).toContain('files reported by the worker (2): `hello.txt`, `src/a.ts`');
+    expect(listed.text).toContain('run_checks');
+    expect(listed.text).not.toContain('### Diff');
+    const empty = await runTool(tool, { dispatch_id: 'd1' });
+    expect(empty.text).toContain('files reported by the worker: none');
+    expect(empty.text).toContain('reject_work');
+  });
+
+  it('merge_worktree: nothing to merge, the task is completed', async () => {
+    const host = createHost();
+    host.mergeWorktree.mockResolvedValueOnce({
+      ok: true,
+      merged: true,
+      targetBranch: '',
+      mode: 'in-place',
+    });
+    const run = await runTool(toolByName(createOrchestrationTools(host), 'merge_worktree'), {
+      dispatch_id: 'd1',
+    });
+    expect(run.text).toMatch(/^## Accepted \(no git\)/);
+    expect(run.text).toContain('nothing to merge');
+    expect(run.text).toContain('the task is completed');
+    expect(run.text).toContain('cleanup_worktree');
+  });
+
+  it('cleanup_worktree: nothing to clean up, the changes stay', async () => {
+    const host = createHost();
+    host.cleanupWorktree.mockResolvedValueOnce({
+      ok: true,
+      removedWorktree: false,
+      deletedBranch: false,
+      mode: 'in-place',
+    });
+    const run = await runTool(toolByName(createOrchestrationTools(host), 'cleanup_worktree'), {
+      dispatch_id: 'd1',
+    });
+    expect(run.text).toContain('nothing to clean up');
+    expect(run.text).toContain('stay in the workspace directory');
+    expect(run.text).not.toContain('worktree removed');
+  });
+
+  it('the tool descriptions say what changes without git', () => {
+    const tools = createOrchestrationTools(createHost());
+    for (const name of [
+      'dispatch_task',
+      'review_diff',
+      'run_checks',
+      'merge_worktree',
+      'cleanup_worktree',
+    ] as const) {
+      expect(toolByName(tools, name).description, name).toMatch(/without git|no git/i);
+    }
+  });
+});
+
 describe('execute never throws', () => {
   it('returns error text for garbage params and a throwing host', async () => {
     const throwing = Object.fromEntries(

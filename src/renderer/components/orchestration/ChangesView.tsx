@@ -97,11 +97,15 @@ export function ChangesView({
           ))}
         </SelectContent>
       </Select>
-      <DispatchDiff
-        key={selected.dispatch.id}
-        dispatchId={selected.dispatch.id}
-        worktreeAlive={worktreeAlive}
-      />
+      {selected.dispatch.mode === 'in-place' ? (
+        <PanelMessage icon={GitCompareArrows} title="无 git" />
+      ) : (
+        <DispatchDiff
+          key={selected.dispatch.id}
+          dispatchId={selected.dispatch.id}
+          worktreeAlive={worktreeAlive}
+        />
+      )}
     </div>
   );
 }

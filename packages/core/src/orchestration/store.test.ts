@@ -322,6 +322,14 @@ describe('parseOrchestrationSnapshot', () => {
     });
   });
 
+  it('普通目录的尝试保留 mode: in-place（worktreeId / branch 为空串）', () => {
+    const inPlace = { ...dispatch, worktreeId: '', branch: '', mode: 'in-place' as const };
+    expect(parseOrchestrationSnapshot({ version: 1, dispatches: [inPlace] })).toMatchObject({
+      ok: true,
+      snapshot: { dispatches: [inPlace] },
+    });
+  });
+
   it.each<[string, unknown, RegExp]>([
     ['非对象', [], /snapshot must be an object/],
     ['缺 version', {}, /version/],
@@ -339,6 +347,7 @@ describe('parseOrchestrationSnapshot', () => {
       { version: 1, dispatches: [{ ...dispatch, ...settled, outcome: 'meh' }] },
       /outcome/,
     ],
+    ['未知的尝试方式', { version: 1, dispatches: [{ ...dispatch, mode: 'worktree' }] }, /mode/],
     ['重复 id', { version: 1, runs: [run, run] }, /already exists/],
   ])('坏快照：%s', (_label, input, error) => {
     const result = parseOrchestrationSnapshot(input);

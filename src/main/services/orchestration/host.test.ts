@@ -19,7 +19,13 @@ import {
 import { createWorkerHost } from './workerHost';
 
 const COORDINATOR = 'session_coord';
-const WORKSPACE = { id: 'ws_1', name: 'demo', repoPath: '/repo', defaultBranch: 'main' };
+const WORKSPACE = {
+  id: 'ws_1',
+  name: 'demo',
+  repoPath: '/repo',
+  vcs: 'git' as const,
+  defaultBranch: 'main',
+};
 const ROOT = '/data/worktrees';
 const WORKTREE_PATH = `${ROOT}/ws_1/add-toggle`;
 
@@ -782,5 +788,177 @@ describe('cleanupWorktree', () => {
       removedWorktree: true,
       deletedBranch: false,
     });
+  });
+});
+
+describe('普通目录（vcs: none）：原地编排，不调用 git', () => {
+  const PLAIN = { id: 'ws_1', name: 'notes', repoPath: '/notes', vcs: 'none' as const };
+  let resolveWorktreesRoot: Mock<OrchestrationHostDeps['resolveWorktreesRoot']>;
+
+  beforeEach(() => {
+    resolveWorktreesRoot = vi.fn(async () => ROOT);
+    host = makeHost({ workspace: PLAIN, coordinatorBranch: '', resolveWorktreesRoot });
+  });
+
+  /** 整个用例里都没有跑过 git，也没有算 worktree 根目录 */
+  const expectNoGit = () => {
+    expect(fake.calls).toEqual([]);
+    expect(resolveWorktreesRoot).not.toHaveBeenCalled();
+    expect(store.worktrees.list()).toEqual([]);
+  };
+
+  it('dispatch：worker 的 cwd 是工作区目录，没有 worktree；Dispatch 记 in-place', async () => {
+    const result = await dispatch();
+    expect(result.dispatch).toMatchObject({
+      worktreeId: '',
+      branch: '',
+      mode: 'in-place',
+      workerSessionId: 'session_w1',
+    });
+    const [created] = launcher.created();
+    expect(created).toMatchObject({ cwd: '/notes', roleId: 'worker' });
+    expect(created).not.toHaveProperty('worktreeId');
+    expect(created?.brief).toContain('report_done');
+    expect(store.tasks.get(result.task.id)?.status).toBe('in-progress');
+    expectNoGit();
+  });
+
+  it('并行派发的任务共用同一个目录', async () => {
+    const first = await dispatch('One');
+    const second = await dispatch('Two');
+    expect(launcher.created().map((input) => input.cwd)).toEqual(['/notes', '/notes']);
+    expect([first.dispatch.mode, second.dispatch.mode]).toEqual(['in-place', 'in-place']);
+    expectNoGit();
+  });
+
+  it('会话起不来：返回错误，没有 worktree 要回滚', async () => {
+    launcher.createWorkerSession.mockResolvedValueOnce({ ok: false, error: 'no model' });
+    expect(
+      await host.dispatchTask({ title: 'Doomed', spec: 'S', roleId: 'worker', dependsOn: [] })
+    ).toMatchObject({ ok: false, error: 'could not start the worker session: no model' });
+    expect(store.dispatches.list()).toEqual([]);
+    expectNoGit();
+  });
+
+  it('review：没有 diff，给出本任务各次尝试汇报的改动文件', async () => {
+    const first = await dispatch();
+    const empty = { ok: true, branch: '', baseCommit: '', stat: '', diff: '', mode: 'in-place' };
+    expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toEqual({
+      ...empty,
+      files: [],
+    });
+    await worker(first.dispatch.id).reportDone('succeeded', 'Done.', ['hello.txt', 'a.md']);
+    await host.rejectWork({ dispatchId: first.dispatch.id, feedback: 'Also b.md.' });
+    const retry = store.activeDispatch(first.task.id);
+    await worker(retry?.id ?? '').reportDone('succeeded', 'Added b.md.', ['b.md', 'a.md']);
+    expect(await host.reviewDiff({ dispatchId: retry?.id ?? '' })).toEqual({
+      ...empty,
+      files: ['hello.txt', 'a.md', 'b.md'],
+    });
+    expectNoGit();
+  });
+
+  it('run_checks：在工作区目录里跑；白名单照常生效', async () => {
+    const first = await dispatch();
+    expect(
+      await host.runChecks({ dispatchId: first.dispatch.id, command: 'pnpm test' })
+    ).toMatchObject({ ok: true, exitCode: 0 });
+    expect(runChecks).toHaveBeenCalledWith('/notes', 'pnpm test', undefined);
+    expect(
+      await host.runChecks({ dispatchId: first.dispatch.id, command: 'rm -rf .' })
+    ).toMatchObject({ ok: false });
+    expect(runChecks).toHaveBeenCalledTimes(1);
+  });
+
+  it('merge：无需合并，待验收的任务直接 completed；没汇报的不收', async () => {
+    const pending = await dispatch('Pending');
+    expect(await host.mergeWorktree({ dispatchId: pending.dispatch.id })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('still in progress'),
+    });
+    const first = await reported();
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toEqual({
+      ok: true,
+      merged: true,
+      targetBranch: '',
+      mode: 'in-place',
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('already accepted'),
+    });
+    expectNoGit();
+  });
+
+  it('cleanup：无需清理，只停 worker；已完成的保持 completed，可以重复调用', async () => {
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    const cleaned = { ok: true, removedWorktree: false, deletedBranch: false, mode: 'in-place' };
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual(cleaned);
+    expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1');
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual(cleaned);
+    expectNoGit();
+  });
+
+  it('cleanup 未完成的任务：放弃（进行中的尝试结算为 failed），改动留在目录里', async () => {
+    const first = await dispatch();
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+      mode: 'in-place',
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+    expect(store.dispatches.get(first.dispatch.id)).toMatchObject({ outcome: 'failed' });
+    expect(await host.sendToWorker({ dispatchId: first.dispatch.id, body: 'hi' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('abandoned'),
+    });
+    expectNoGit();
+  });
+
+  it('打回：同一会话、同一目录上的新尝试，反馈里不叫 worker 提交', async () => {
+    const first = await reported();
+    expect(
+      await host.rejectWork({ dispatchId: first.dispatch.id, feedback: 'Add tests.' })
+    ).toMatchObject({ ok: true });
+    expect(store.activeDispatch(first.task.id)).toMatchObject({
+      workerSessionId: 'session_w1',
+      worktreeId: '',
+      branch: '',
+      mode: 'in-place',
+    });
+    const [, prompt] = launcher.promptSession.mock.calls[0] ?? [];
+    expect(prompt).toContain('Add tests.');
+    expect(prompt).toContain('workspace directory');
+    expect(prompt).not.toContain('commit your changes');
+    expectNoGit();
+  });
+
+  it('send_to_worker：没有 worktree 也照常投递指示', async () => {
+    const first = await dispatch();
+    expect(
+      await host.sendToWorker({ dispatchId: first.dispatch.id, body: 'Use tabs.' })
+    ).toMatchObject({ ok: true, type: 'instruction' });
+    expect(launcher.promptSession).toHaveBeenCalledWith(
+      'session_w1',
+      expect.stringContaining('Use tabs.')
+    );
+  });
+
+  it('依赖：排队的任务在前一个验收后原地补派', async () => {
+    const first = await reported('Base');
+    const queued = await host.dispatchTask({
+      title: 'On top',
+      spec: 'S',
+      roleId: 'worker',
+      dependsOn: [first.task.id],
+    });
+    expect(queued.ok && queued.dispatch).toBeUndefined();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    const listed = await host.listWorkers();
+    expect(listed.ok && listed.workers[1]?.dispatch).toMatchObject({ mode: 'in-place' });
+    expect(launcher.created().map((input) => input.cwd)).toEqual(['/notes', '/notes']);
+    expectNoGit();
   });
 });

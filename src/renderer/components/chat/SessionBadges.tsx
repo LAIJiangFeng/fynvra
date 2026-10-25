@@ -2,6 +2,8 @@ import type { SessionStatus } from '@shared/types/chat';
 import { Crown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
+import { useWorkspacesStore } from '@/stores/workspaces';
 import { isOrchestratorRole, useRoles } from './roles';
 
 export const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -26,6 +28,20 @@ export function StatusDot({ status, className }: { status: SessionStatus; classN
       <span className="sr-only">{STATUS_LABEL[status]}</span>
     </span>
   );
+}
+
+/**
+ * 标题行 / 状态栏显示的分支（与会话 cwd）。无 git 工作区的会话不显示：按普通目录挂入的仓库子目录
+ * 也读得到外层仓库的分支，但这个工作区不用 git。
+ */
+export function useSessionBranch(sessionId: string): { branch: string; cwd: string } | undefined {
+  const branch = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.branch);
+  const cwd = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.cwd);
+  const workspaceId = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.workspaceId);
+  const plain = useWorkspacesStore(
+    (state) => state.workspaces.find((workspace) => workspace.id === workspaceId)?.vcs === 'none'
+  );
+  return branch && cwd && !plain ? { branch, cwd } : undefined;
 }
 
 /** 角色徽标；主 agent（orchestrator）带皇冠、紫色。 */

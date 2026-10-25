@@ -21,6 +21,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useGeneralPreferencesStore, useWorktreesRootStore } from '@/stores/settings';
+import { useWorktreesRootStore } from '@/stores/settings';
+import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -48,6 +50,7 @@ export function GeneralSettings() {
   const error = useWorktreesRootStore((state) => state.error);
   const refresh = useWorktreesRootStore((state) => state.refresh);
   const pick = useWorktreesRootStore((state) => state.pick);
+  const workspaces = useWorkspacesStore((state) => state.workspaces);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -123,6 +126,9 @@ export function GeneralSettings() {
               <WorkspaceRow
                 key={workspace.workspaceId}
                 workspace={workspace}
+                plain={workspaces.some(
+                  (candidate) => candidate.id === workspace.workspaceId && candidate.vcs === 'none'
+                )}
                 measuring={measuring}
               />
             ))}
@@ -319,11 +325,24 @@ function RootSummary({ info, failed }: { info: WorktreesRootInfo | null; failed:
 
 function WorkspaceRow({
   workspace,
+  plain,
   measuring,
 }: {
   workspace: WorkspaceWorktreesInfo;
+  /** 无 git 的工作区不建 worktree，不给位置与占用 */
+  plain: boolean;
   measuring: boolean;
 }) {
+  if (plain) {
+    return (
+      <li className="flex items-center gap-2 px-4 py-3">
+        <span className="font-medium text-sm">{workspace.name}</span>
+        <Badge variant="outline" title="不会使用 worktree">
+          无 git
+        </Badge>
+      </li>
+    );
+  }
   const { usage } = workspace;
   const size = usage ? formatBytes(usage.bytes) : measuring ? '统计中…' : '—';
   return (

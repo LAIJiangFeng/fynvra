@@ -63,6 +63,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       resourcePaths: { skills: spec.skills, mcpServers: spec.mcpServers.map(toMcpServerConfig) },
       agentDir: options.agentDir,
       roles: spec.roles,
+      ...(spec.inPlace ? { inPlace: true } : {}),
       settingsManager: createSessionSettings(spec.shellPath),
     });
     const { session } = created;
