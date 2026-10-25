@@ -8,6 +8,7 @@ import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
 import { createSkillsApi } from './domains/skills';
+import { createUpdatesApi } from './domains/updates';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -20,6 +21,7 @@ function subscribe(channel: string, listener: (...args: unknown[]) => void): Uns
 }
 
 const api: FynvraApi = {
+  updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     update: (patch) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),

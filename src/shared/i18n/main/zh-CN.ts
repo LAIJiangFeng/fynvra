@@ -20,6 +20,15 @@ export const mainZhCN = {
   app: {
     startFailed: 'Fynvra 启动失败',
   },
+  updates: {
+    downloaded: '版本 {version} 已下载，返回应用可重启安装',
+    notReady: '更新尚未下载完成，或已有安装确认正在进行',
+    installTitle: '安装 Fynvra 更新',
+    installFailed: '更新安装失败，请重新打开应用重试',
+    installMessage: '重启并安装版本 {version}？',
+    installDetail: '正在运行的任务将停止。未保存的文件仍会单独确认，取消退出不会安装更新。',
+    install: '重启并安装',
+  },
   files: {
     unsavedTitle: '文件修改尚未保存',
     unsavedMessage: '仍有未保存或正在保存的文件。',

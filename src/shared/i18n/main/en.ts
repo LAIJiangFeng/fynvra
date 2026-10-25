@@ -22,6 +22,16 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   app: {
     startFailed: 'Fynvra failed to start',
   },
+  updates: {
+    downloaded: 'Version {version} is downloaded. Return to the app to restart and install',
+    notReady: 'The update is not ready, or an installation confirmation is already open',
+    installTitle: 'Install Fynvra update',
+    installFailed: 'Update installation failed; reopen the app to retry',
+    installMessage: 'Restart and install version {version}?',
+    installDetail:
+      'Running tasks will stop. Unsaved files require a separate confirmation. Canceling exit cancels installation.',
+    install: 'Restart and install',
+  },
   files: {
     unsavedTitle: 'Unsaved file changes',
     unsavedMessage: 'Some files have unsaved changes or are still being saved.',

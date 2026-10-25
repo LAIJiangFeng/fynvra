@@ -3,6 +3,27 @@ import type { zhCN } from './zh-CN';
 
 /** 界面文案（English）：与 ./zh-CN.ts 同形，同样极简 */
 export const en: MessagesShape<typeof zhCN> = {
+  updates: {
+    title: 'App updates',
+    current: 'Current version {version}',
+    check: 'Check for updates',
+    install: 'Restart and install',
+    progress: 'Update download progress',
+    development: 'Updates are disabled in development; use an installed release',
+    unsupported: 'Automatic updates are not available for this platform yet',
+    automatic:
+      'Installed releases check at startup and every 4 hours; updates download automatically and install after confirmation',
+    status: {
+      idle: 'Will check for new versions automatically',
+      checking: 'Checking for updates...',
+      'not-available': 'You are up to date',
+      available: 'Version {version} found, preparing download',
+      downloading: 'Downloading version {version} - {percent}%',
+      downloaded: 'Version {version} is ready; restart to complete the update',
+      installing: 'Exiting to install the update...',
+      error: 'Update failed, please retry',
+    },
+  },
   common: {
     close: 'Close',
     cancel: 'Cancel',

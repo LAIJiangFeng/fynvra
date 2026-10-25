@@ -3,6 +3,12 @@
  * 新增通道必须三处同步：这里的常量、`src/main/ipc/<domain>.ts` 的 handler、`src/preload` 的 typed 出口。
  */
 export const IPC_CHANNELS = {
+  /** 更新操作无参；更新源和安装路径只由 Main 决定 */
+  UPDATES_STATE: 'updates:state',
+  UPDATES_CHECK: 'updates:check',
+  UPDATES_INSTALL: 'updates:install',
+  UPDATES_CHANGED: 'updates:changed',
+
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   /** Main → Renderer：偏好已变更，各窗口重读 */

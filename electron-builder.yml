@@ -10,11 +10,24 @@ files:
 win:
   target: nsis
 nsis:
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  deleteAppDataOnUninstall: false
 mac:
-  target: dmg
+  target: [dmg, zip]
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
   category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  forceCodeSigning: true
+  notarize: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
 linux:
   target: AppImage
   category: Development
 npmRebuild: false
+publish:
+  provider: github
+  owner: LAIJiangFeng
+  repo: fynvra
+  releaseType: release

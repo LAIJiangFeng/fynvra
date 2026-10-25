@@ -1,0 +1,246 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 发布串行，进行中的构建不会被下一次合并中断。
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release: ${{ steps.gate.outputs.release }}
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - uses: actions/github-script@v7
+        id: gate
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main') {
+              core.setFailed('Only main can publish a release');
+              return;
+            }
+            let release = context.eventName === 'workflow_dispatch';
+            if (!release) {
+              const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                ...context.repo, commit_sha: context.sha, per_page: 100
+              });
+              release = pulls.some(pr => pr.merged_at && pr.base.ref === 'main' && pr.merge_commit_sha === context.sha);
+            }
+            core.setOutput('release', String(release));
+            core.setOutput('sha', context.sha);
+
+  validate:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - id: version
+        run: pnpm release:plan
+
+  windows:
+    needs: [gate, validate]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Package Windows x64
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: pnpm exec electron-builder --win nsis --x64 --publish never "--config.extraMetadata.version=$env:RELEASE_VERSION"
+      - name: Verify packaged updater and exit guards
+        env:
+          FYNVRA_TEST_APP_ROOT: ${{ github.workspace }}/dist/win-unpacked/resources/app.asar
+        run: pnpm test:updates
+      - name: Verify update artifacts
+        run: pnpm release:verify dist "$env:RELEASE_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-x64-setup.exe
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-x64-setup.exe.blockmap
+            dist/latest.yml
+            dist/SHA256SUMS
+
+  macos:
+    needs: [gate, validate]
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - name: Require Developer ID and notarization credentials
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in MAC_CSC_LINK MAC_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name. See docs/RELEASE.md"
+              exit 1
+            fi
+          done
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # 单次构建汇总双架构元数据，禁止用两个任务互相覆盖 latest-mac.yml。
+      - name: Package signed and notarized Mac x64 and arm64
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm exec electron-builder --mac --x64 --arm64 --publish never "--config.extraMetadata.version=$RELEASE_VERSION"
+      - name: Verify signatures, notarization and architectures
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for arch in x64 arm64; do
+            directory=mac
+            expected=x86_64
+            if [ "$arch" = arm64 ]; then
+              directory=mac-arm64
+              expected=arm64
+            fi
+            bundle="dist/$directory/Fynvra.app"
+            test "$(lipo -archs "$bundle/Contents/MacOS/Fynvra")" = "$expected"
+            codesign --verify --deep --strict --verbose=2 "$bundle"
+            codesign --display --verbose=4 "$bundle" 2>&1 | grep -Fx "TeamIdentifier=$APPLE_TEAM_ID"
+            xcrun stapler validate "$bundle"
+            spctl --assess --type execute --verbose=2 "$bundle"
+          done
+      - name: Verify packaged updater and exit guards
+        env:
+          FYNVRA_TEST_APP_ROOT: ${{ github.workspace }}/dist/mac-arm64/Fynvra.app/Contents/Resources/app.asar
+        run: pnpm test:updates
+      - name: Verify both architectures and update artifacts
+        run: pnpm release:verify dist "$RELEASE_VERSION" mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-x64.dmg
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-x64.zip
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-x64.zip.blockmap
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-arm64.dmg
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-arm64.zip
+            dist/Fynvra-${{ env.RELEASE_VERSION }}-mac-arm64.zip.blockmap
+            dist/latest-mac.yml
+            dist/SHA256SUMS-mac
+
+  publish:
+    needs: [gate, validate, windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+      SOURCE_SHA: ${{ needs.gate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          merge-multiple: true
+          path: artifacts
+      - name: Verify upload integrity and release order
+        shell: bash
+        run: |
+          (cd artifacts && sha256sum --check SHA256SUMS && sha256sum --check SHA256SUMS-mac)
+          node scripts/release.ts plan > release-plan.txt
+          grep -Fx "version=$RELEASE_VERSION" release-plan.txt
+          grep -Fx "sha=$SOURCE_SHA" release-plan.txt
+      - name: Publish complete release
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json; then
+            if [ "$(jq -r .isDraft release.json)" = "false" ]; then
+              echo "Release already published; immutable assets are unchanged"
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --target "$SOURCE_SHA" --title "Fynvra $RELEASE_VERSION" --generate-notes --draft
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "artifacts/Fynvra-$RELEASE_VERSION-x64-setup.exe" \
+            "artifacts/Fynvra-$RELEASE_VERSION-x64-setup.exe.blockmap" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-x64.dmg" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-x64.zip" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-x64.zip.blockmap" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-arm64.dmg" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-arm64.zip" \
+            "artifacts/Fynvra-$RELEASE_VERSION-mac-arm64.zip.blockmap" \
+            artifacts/latest.yml artifacts/latest-mac.yml artifacts/SHA256SUMS artifacts/SHA256SUMS-mac --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

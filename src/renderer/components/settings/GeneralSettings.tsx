@@ -31,6 +31,7 @@ import {
 } from '@/stores/settings';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { UpdateSettings } from './UpdateSettings';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -86,6 +87,7 @@ export function GeneralSettings() {
   return (
     <div className="grid gap-8">
       <LanguageSection />
+      <UpdateSettings />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>

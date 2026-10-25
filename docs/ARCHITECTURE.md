@@ -192,6 +192,17 @@ export interface Message {
 - 未保存草稿不被目录刷新覆盖；切换对话、文件、工作区或折叠右栏不丢草稿；关闭标签及退出窗口前确认，取消退出不停止 agent 服务。保存中的新输入不能被旧保存响应覆盖。
 - 文件内容与打开标签只在内存，不写 `settings.json`；不包含删除、执行文件或切换到 worker 的 worktree。
 
+### 7.2 应用更新与发布
+
+- Main 独占 `electron-updater`，正式 Windows x64、macOS x64 / arm64 安装版启动后及每 4 小时检查公开的 `LAIJiangFeng/fynvra` GitHub Releases，发现稳定新版本后自动下载。开发模式和未发布的平台明确显示不可用，不请求更新源。
+- `updates:state`、`updates:check`、`updates:install` 均无参，Renderer 不传版本、URL、路径或命令；`updates:changed` 只推送带递增序号的状态快照。更新源由打包配置固定，禁止降级和预发行版本。
+- Renderer 的通用设置提供当前版本、检查按钮和进度；全局更新条在下载及下载完成时提醒。下载完成的状态不会被定时检查覆盖，失败可重试。
+- 默认只后台下载，不强制重启、不在退出时偷偷安装。点击安装先确认，再走现有未保存文件确认、agent 关闭和编排落盘，最后调用安装器；取消退出回到待安装状态，不能提前停止服务。
+- 发布工作流只对合并到 main 的 PR（通过 main push 的关联 PR 校验）或 main 上的手动触发执行。检查通过后，以该提交和已有稳定版本标签计算下一版本，打包、校验安装文件与更新元数据，全部上传到草稿 Release 后才公开。重跑不覆盖已公开的版本，不向 main 回写版本提交。
+- 必改层：shared 更新快照与通道、Main 更新服务/退出接线、preload typed 出口、Renderer 更新状态/设置/提醒、electron-builder 与 GitHub Actions。不会修改 agent 协议、角色配置、文件编辑器，也不引入自建更新服务器或客户端 GitHub token。
+- macOS 扩展只改 Main 的平台判断与异步安装失败处理、`electron-builder.yml` / entitlements、`scripts/release.ts` 与更新联调脚本、发布工作流及相关测试文档，不新增 IPC 或改界面交互。分别生成 x64 / arm64 的 DMG、ZIP、ZIP blockmap，单一构建任务汇总 `latest-mac.yml`，签名、公证、双架构文件和 Windows 产物全部校验通过后才公开同一 Release。
+- macOS 原生更新器的安装错误可能延迟到窗口和 agent 关闭之后；此时必须提示错误并正常退出，不能留下无窗口进程。用户仅关闭 Mac 窗口不视为退出，不停止 agent 或安装更新。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。

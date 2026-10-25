@@ -8,6 +8,7 @@ import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
+import { getUpdateService } from './services/updates';
 import { createAppWindow } from './windows/createAppWindow';
 import { createQuitGuard } from './windows/quitGuard';
 
@@ -28,6 +29,7 @@ let mainWindow: BrowserWindow | null = null;
 let quitGuard: ReturnType<typeof createQuitGuard> | undefined;
 
 function showMainWindow(): void {
+  if (getUpdateService().getState().status === 'installing') return;
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
@@ -37,6 +39,7 @@ function showMainWindow(): void {
   mainWindow.webContents.on('will-prevent-unload', (event) => {
     if (!event.defaultPrevented) {
       quitGuard?.cancel();
+      getUpdateService().cancelInstall();
     }
   });
   mainWindow.on('closed', () => {
@@ -58,6 +61,11 @@ if (!app.requestSingleInstanceLock()) {
   quitGuard = createQuitGuard({
     windows: () => BrowserWindow.getAllWindows(),
     quit: () => app.quit(),
+    completeQuit: () => {
+      const updates = getUpdateService();
+      if (updates.finishInstall()) return;
+      app.quit();
+    },
     mac: process.platform === 'darwin',
     shutdown: () =>
       getAgentHost()
@@ -68,6 +76,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('before-quit', quitGuard.beforeQuit);
   app.on('window-all-closed', quitGuard.allWindowsClosed);
+  app.on('will-quit', () => getUpdateService().stop());
 
   app
     .whenReady()
@@ -87,6 +96,7 @@ if (!app.requestSingleInstanceLock()) {
       await connectOrchestration(agentHost, getOrchestrationRegistry());
       agentHost.start();
       showMainWindow();
+      getUpdateService().start();
     })
     .catch((error: unknown) => {
       dialog.showErrorBox(translate('app.startFailed'), errorMessage(error));

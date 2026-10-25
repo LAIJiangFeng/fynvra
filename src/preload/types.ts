@@ -49,6 +49,7 @@ export interface WindowApi {
 
 /** 按领域分组的全部能力；刻意不提供通用 invoke / send。 */
 export interface FynvraApi {
+  updates: import('./domains/updates').UpdatesApi;
   settings: SettingsApi;
   workspaces: WorkspacesApi;
   files: import('./domains/files').FilesApi;

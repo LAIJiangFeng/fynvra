@@ -4,6 +4,26 @@
  * 参数写成 `{name}`；`{n|单数|复数}` 是英文的单复数写法，中文写一种即可。
  */
 export const zhCN = {
+  updates: {
+    title: '应用更新',
+    current: '当前版本 {version}',
+    check: '检查更新',
+    install: '重启并安装',
+    progress: '更新下载进度',
+    development: '开发模式不检查更新，请使用正式安装版',
+    unsupported: '当前平台暂未提供自动更新安装包',
+    automatic: '正式版启动后自动检查，此后每 4 小时检查一次；自动下载，确认后重启安装',
+    status: {
+      idle: '将自动检查新版本',
+      checking: '正在检查更新…',
+      'not-available': '当前已是最新版本',
+      available: '发现版本 {version}，准备下载',
+      downloading: '正在下载版本 {version} · {percent}%',
+      downloaded: '版本 {version} 已就绪，重启后完成更新',
+      installing: '正在退出并安装更新…',
+      error: '更新失败，请重试',
+    },
+  },
   common: {
     close: '关闭',
     cancel: '取消',
