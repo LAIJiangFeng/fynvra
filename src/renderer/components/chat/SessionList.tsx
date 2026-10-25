@@ -2,6 +2,7 @@ import type { SessionSummary } from '@shared/types/chat';
 import { memo, useCallback, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useNow } from '@/hooks/useNow';
+import { SessionSearchButton, SessionSearchInput, useFilteredSessions } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import {
   selectListErrorOf,
@@ -18,7 +19,8 @@ import { RoleBadge, StatusDot } from './SessionBadges';
  * 渲染为 `<li>`，挂在工作区条目之后；行用虚拟列表，滚动容器借用侧栏的 ScrollArea。
  */
 export function SessionList({ workspaceId }: { workspaceId: string }) {
-  const sessions = useSessionsStore(selectSessionsOf(workspaceId));
+  const all = useSessionsStore(selectSessionsOf(workspaceId));
+  const sessions = useFilteredSessions(all);
   const error = useSessionsStore(selectListErrorOf(workspaceId));
   const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
   const anchor = useCallback((node: HTMLElement | null) => {
@@ -29,11 +31,17 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
     <li ref={anchor} className="pb-1 pl-6">
       <div className="flex h-7 items-center justify-between pr-1 pl-2">
         <span className="text-muted-foreground text-xs">会话</span>
-        <NewSessionButton compact />
+        <span className="flex items-center">
+          <SessionSearchButton />
+          <NewSessionButton compact />
+        </span>
       </div>
+      <SessionSearchInput workspaceId={workspaceId} />
       {error && <p className="px-2 py-1 text-destructive text-xs">读取会话失败：{error}</p>}
       {sessions.length === 0 ? (
-        <p className="px-2 py-1 text-muted-foreground text-xs">暂无会话</p>
+        <p className="px-2 py-1 text-muted-foreground text-xs">
+          {all.length === 0 ? '暂无会话' : '没有匹配的会话'}
+        </p>
       ) : (
         scrollParent && (
           <Virtuoso

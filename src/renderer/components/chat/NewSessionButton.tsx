@@ -3,7 +3,7 @@ import { RadioGroup } from '@base-ui/react/radio-group';
 import { ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import type { SessionModelRef } from '@shared/types/chat';
 import { Crown, Plus } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { useActionHandler } from '@/lib/keybindings';
 import { useRolesStore } from '@/stores/roles';
 import { selectModelProviders, useSessionsStore } from '@/stores/sessions';
 import { chooseModel, defaultModelChoice, findModel } from '@/stores/sessions/modelChoice';
@@ -53,6 +54,9 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
   const [picked, setPicked] = useState<SessionModelRef | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // 「新建会话」快捷键：侧栏的小按钮负责（会话区的大按钮可能同时在），走与点击相同的打开流程
+  useActionHandler('new-session', () => trigger.current?.click(), compact);
 
   const selected = pickRole(roles, roleId);
   const model = picked ?? defaultModelChoice({ providers, roleModel: selected?.model, lastUsed });
@@ -82,6 +86,7 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
       }}
     >
       <DialogTrigger
+        ref={trigger}
         render={
           compact ? (
             <Button variant="ghost" size="icon-xs" aria-label="新建会话" title="新建会话" />
