@@ -129,6 +129,19 @@ export function reuseRows(previous: readonly TimelineRow[], next: TimelineRow[])
   });
 }
 
+/** 折起来的轮次标题行上的提问时间：当天 09:05，其他日子 10-24 23:59，跨年 2025-12-31 08:00 */
+export function formatTurnTime(timestamp: number, now: number): string {
+  const at = new Date(timestamp);
+  const today = new Date(now);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const day = `${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  if (at.getFullYear() !== today.getFullYear()) return `${at.getFullYear()}-${day} ${time}`;
+  return at.getMonth() === today.getMonth() && at.getDate() === today.getDate()
+    ? time
+    : `${day} ${time}`;
+}
+
 /** 思考块是否展开：手动点过以手动为准；否则开关打开且正在流式思考时展开，结束后收起 */
 export function thinkingExpanded(
   userToggled: boolean | null,

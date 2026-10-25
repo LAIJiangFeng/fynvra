@@ -5,6 +5,7 @@ import {
   buildTimelineRows,
   diffEdit,
   fileChangeOf,
+  formatTurnTime,
   isReadonlyTool,
   reuseRows,
   type TimelineRow,
@@ -279,6 +280,15 @@ describe('diffEdit', () => {
       { sign: '-', text: 'x' },
       { sign: '+', text: 'y' },
     ]);
+  });
+});
+
+describe('formatTurnTime', () => {
+  it('当天只写时分，其他日子带日期，跨年带年份', () => {
+    const now = new Date(2026, 9, 25, 15, 0).getTime();
+    expect(formatTurnTime(new Date(2026, 9, 25, 9, 5).getTime(), now)).toBe('09:05');
+    expect(formatTurnTime(new Date(2026, 9, 24, 23, 59).getTime(), now)).toBe('10-24 23:59');
+    expect(formatTurnTime(new Date(2025, 11, 31, 8, 0).getTime(), now)).toBe('2025-12-31 08:00');
   });
 });
 

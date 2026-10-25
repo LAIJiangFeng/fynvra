@@ -28,10 +28,12 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { memo, type ReactNode } from 'react';
+import { memo, type ReactNode, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { type DiffLine, diffEdit, type FileChange, fileChangeOf } from '@/stores/sessions/timeline';
+import { useGeneralPreferencesStore } from '@/stores/settings';
 import { formatDuration } from './format';
 import { Markdown } from './Markdown';
 import {
@@ -93,9 +95,21 @@ function GenericToolCard({ call }: { call: ChatToolCall }) {
   const style = FAMILY_STYLE[display.family];
   const Icon = iconOf(call.name, display.family);
   const markdownOutput = display.family === 'orchestration' || display.family === 'worker';
+  const change = fileChangeOf(call.name, call.args);
+  const autoExpandEdits = useGeneralPreferencesStore((state) => state.timeline.autoExpandEdits);
+  // edit / write 运行中自动展开改动；历史里的（挂载时已结束）照常折叠
+  const live = change !== null && autoExpandEdits && call.status === 'running';
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live]);
 
   return (
-    <Collapsible className={cn('rounded-md border text-sm', style.card)}>
+    <Collapsible
+      open={open}
+      onOpenChange={(next) => setOpen(next)}
+      className={cn('rounded-md border text-sm', style.card)}
+    >
       <CardTrigger
         icon={<Icon className={cn('size-3.5 shrink-0', style.icon)} />}
         title={<span className="shrink-0 font-medium">{display.label}</span>}
@@ -103,14 +117,125 @@ function GenericToolCard({ call }: { call: ChatToolCall }) {
         call={call}
       />
       <CollapsibleContent className="space-y-2 border-t px-3 py-2">
-        {call.args !== undefined && prettyArgs(call.args) !== '{}' && (
-          <Section title="参数">
-            <Pre>{prettyArgs(call.args)}</Pre>
-          </Section>
+        {change ? (
+          <FileChangeView change={change} />
+        ) : (
+          call.args !== undefined &&
+          prettyArgs(call.args) !== '{}' && (
+            <Section title="参数">
+              <Pre>{prettyArgs(call.args)}</Pre>
+            </Section>
+          )
         )}
         <Section title="输出">
           <Output call={call} markdown={markdownOutput} />
         </Section>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** diff 太长时只画前这么多行（每行一个元素） */
+const DIFF_PREVIEW_LINES = 400;
+
+const DIFF_LINE_STYLE: Record<DiffLine['sign'], string> = {
+  ' ': '',
+  '-': 'bg-red-500/10 text-red-700 dark:text-red-300',
+  '+': 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+};
+
+/** edit 的改动（逐处替换的行级 diff）或 write 写入的内容 */
+function FileChangeView({ change }: { change: FileChange }) {
+  if (change.kind === 'write') {
+    return (
+      <Section title="内容">
+        <Pre>{change.content}</Pre>
+      </Section>
+    );
+  }
+  const hunks = change.edits.map(diffEdit);
+  const total = hunks.reduce((sum, lines) => sum + lines.length, 0);
+  let budget = DIFF_PREVIEW_LINES;
+  return (
+    <Section title="改动">
+      <div className="max-h-80 overflow-auto rounded border bg-background/60 py-1 font-mono text-xs leading-relaxed">
+        {hunks.map((lines, hunk) => {
+          const shown = lines.slice(0, Math.max(0, budget));
+          budget -= shown.length;
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 改动是参数里的静态列表，不会重排
+            <div key={hunk} className={cn(hunk > 0 && 'mt-1 border-t pt-1')}>
+              {shown.map((line, at) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 同上
+                  key={at}
+                  className={cn('whitespace-pre-wrap break-all px-2', DIFF_LINE_STYLE[line.sign])}
+                >
+                  {line.sign} {line.text}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        {total > DIFF_PREVIEW_LINES && (
+          <div className="px-2 text-muted-foreground">… {total - DIFF_PREVIEW_LINES} 行</div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * 精简显示的只读工具（read / grep / find / ls）：一个就是一行；连续多个合成一条「N 次读取」，
+ * 展开看每一行。每行再展开看输出。
+ */
+export const ReadonlyTools = memo(function ReadonlyTools({ calls }: { calls: ChatToolCall[] }) {
+  const [first] = calls;
+  if (calls.length === 1 && first) return <CompactToolLine call={first} />;
+  const status: ChatToolCall['status'] = calls.some((call) => call.status === 'running')
+    ? 'running'
+    : calls.some((call) => call.status === 'error')
+      ? 'error'
+      : 'done';
+  const summary = calls
+    .map((call) => describeTool(call.name, call.args).summary)
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <Collapsible className="text-sm">
+      <CollapsibleTrigger className="group/reads flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-1 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <FileSearch className="size-3.5 shrink-0" />
+        <span className="shrink-0">{calls.length} 次读取</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{summary}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs">
+          <StatusIcon status={status} />
+          <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]/reads:rotate-90" />
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="ml-4 border-l pl-1">
+        {calls.map((call) => (
+          <CompactToolLine key={call.id} call={call} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+});
+
+/** 单行的工具调用：没有卡片边框，图标、名称、参数摘要、耗时与状态；展开看输出 */
+function CompactToolLine({ call }: { call: ChatToolCall }) {
+  const display = describeTool(call.name, call.args);
+  const Icon = iconOf(call.name, display.family);
+  return (
+    <Collapsible className="text-muted-foreground text-sm">
+      <CardTrigger
+        compact
+        icon={<Icon className="size-3.5 shrink-0" />}
+        title={<span className="shrink-0">{display.label}</span>}
+        summary={display.summary}
+        call={call}
+      />
+      <CollapsibleContent className="px-3 pb-1.5">
+        <Output call={call} markdown={false} />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -230,14 +355,22 @@ function CardTrigger({
   title,
   summary,
   call,
+  compact = false,
 }: {
   icon: ReactNode;
   title: ReactNode;
   summary?: string;
   call: ChatToolCall;
+  /** 单行显示（没有卡片边框）：行更矮，悬停时变亮 */
+  compact?: boolean;
 }) {
   return (
-    <CollapsibleTrigger className="group/tool flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-1.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+    <CollapsibleTrigger
+      className={cn(
+        'group/tool flex w-full min-w-0 items-center gap-2 rounded-md px-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        compact ? 'py-1 hover:text-foreground' : 'py-1.5'
+      )}
+    >
       {icon}
       {title}
       {summary ? (

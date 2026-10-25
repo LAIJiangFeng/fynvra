@@ -1,7 +1,8 @@
-import { ArrowDown, LoaderCircle, MessagesSquare, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare, TriangleAlert } from 'lucide-react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Components, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import {
   isBusy,
   selectLoadingHistoryOf,
@@ -10,7 +11,14 @@ import {
   type TimelineMessage,
   useSessionsStore,
 } from '@/stores/sessions';
-import { isVisibleMessage, MessageItem } from './MessageItem';
+import {
+  buildTimelineRows,
+  formatTurnTime,
+  reuseRows,
+  type TimelineRow,
+} from '@/stores/sessions/timeline';
+import { useGeneralPreferencesStore } from '@/stores/settings';
+import { MessageItem } from './MessageItem';
 
 interface TimelineContext {
   busy: boolean;
@@ -20,7 +28,7 @@ interface TimelineContext {
 }
 
 // 组件表放在模块级：每次渲染传新对象会让 Virtuoso 重新挂载页眉页脚
-const COMPONENTS: Components<TimelineMessage, TimelineContext> = {
+const COMPONENTS: Components<TimelineRow, TimelineContext> = {
   Header: () => <div className="h-4" />,
   Footer: ({ context }) => <TimelineFooter {...context} />,
 };
@@ -47,14 +55,36 @@ function TimelineFooter({ busy, streaming, error }: TimelineContext) {
   );
 }
 
-/** 会话时间线：虚拟列表；贴底时跟随流式输出，用户往上滚就停止跟随。 */
+/**
+ * 会话时间线：虚拟列表；贴底时跟随流式输出，用户往上滚就停止跟随。
+ * 行由 {@link buildTimelineRows} 按「通用 → 时间线」的偏好分好（只读工具合并、历史轮次折叠）。
+ */
 export function Timeline({ sessionId }: { sessionId: string }) {
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
   const error = useSessionsStore((state) => state.runtimeBySession[sessionId]?.error);
   const loading = useSessionsStore(selectLoadingHistoryOf(sessionId));
+  const compactReadonlyTools = useGeneralPreferencesStore(
+    (state) => state.timeline.compactReadonlyTools
+  );
+  const foldHistoryTurns = useGeneralPreferencesStore((state) => state.timeline.foldHistoryTurns);
+  // 用户手动展开的历史轮次（按提问消息 id），会话内记住
+  const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(() => new Set());
 
-  const visible = useMemo(() => messages.filter(isVisibleMessage), [messages]);
+  // 内容没变的行沿用上次的对象，流式输出时只重画变了的行
+  const committedRows = useRef<TimelineRow[]>([]);
+  const rows = useMemo(
+    () =>
+      reuseRows(
+        committedRows.current,
+        buildTimelineRows(messages, { compactReadonlyTools, foldHistoryTurns, openTurns })
+      ),
+    [messages, compactReadonlyTools, foldHistoryTurns, openTurns]
+  );
+  useEffect(() => {
+    committedRows.current = rows;
+  }, [rows]);
+
   const last = messages.at(-1);
   const busy = isBusy(status);
   const streaming = Boolean(last?.role === 'assistant' && last.streaming && last.text);
@@ -80,6 +110,17 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   }, []);
   useEffect(() => () => detachScroll.current?.(), []);
 
+  const toggleTurn = useCallback((questionId: string, opening: boolean) => {
+    // 展开一轮历史是在看旧内容：停止跟随，否则插进来的行会把视图拉到底部
+    if (opening) follow.current = false;
+    setOpenTurns((open) => {
+      const next = new Set(open);
+      if (opening) next.add(questionId);
+      else next.delete(questionId);
+      return next;
+    });
+  }, []);
+
   // 最后一条消息在长高（流式正文、思考、工具状态）：跟随时贴底。
   // 布局阶段调用，赶在 Virtuoso 量到新高度之前登记
   const growth = last
@@ -94,7 +135,15 @@ export function Timeline({ sessionId }: { sessionId: string }) {
     if (growth && follow.current) virtuoso.current?.autoscrollToBottom();
   }, [growth]);
 
-  if (visible.length === 0 && !busy && !error) {
+  // 折叠历史轮次时发了新消息：之前的轮次折起来，回到底部看新的一轮
+  const sentId = foldHistoryTurns && last?.role === 'user' ? last.id : undefined;
+  useLayoutEffect(() => {
+    if (!sentId) return;
+    follow.current = true;
+    virtuoso.current?.autoscrollToBottom();
+  }, [sentId]);
+
+  if (rows.length === 0 && !busy && !error) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground text-sm">
         {loading ? (
@@ -114,13 +163,13 @@ export function Timeline({ sessionId }: { sessionId: string }) {
       <Virtuoso
         ref={virtuoso}
         className="h-full"
-        data={visible}
+        data={rows}
         context={context}
         components={COMPONENTS}
-        computeItemKey={(_, message) => message.id}
-        itemContent={(_, message) => (
-          <div className="mx-auto max-w-3xl px-6 py-2">
-            <MessageItem message={message} />
+        computeItemKey={(_, row) => row.key}
+        itemContent={(_, row) => (
+          <div className={cn('mx-auto max-w-3xl px-6', row.kind === 'turn' ? 'py-0.5' : 'py-2')}>
+            <TimelineRowView row={row} onToggleTurn={toggleTurn} />
           </div>
         )}
         initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
@@ -148,5 +197,49 @@ export function Timeline({ sessionId }: { sessionId: string }) {
         </Button>
       )}
     </div>
+  );
+}
+
+const TimelineRowView = memo(function TimelineRowView({
+  row,
+  onToggleTurn,
+}: {
+  row: TimelineRow;
+  onToggleTurn: (questionId: string, opening: boolean) => void;
+}) {
+  if (row.kind === 'turn') {
+    return <TurnHeader message={row.message} open={row.open} onToggle={onToggleTurn} />;
+  }
+  return (
+    <MessageItem message={row.message} tools={row.kind === 'assistant' ? row.tools : undefined} />
+  );
+});
+
+/** 折起来的历史轮次：一行提问 + 时间，点开接着显示整轮 */
+function TurnHeader({
+  message,
+  open,
+  onToggle,
+}: {
+  message: TimelineMessage;
+  open: boolean;
+  onToggle: (questionId: string, opening: boolean) => void;
+}) {
+  const question = message.text.replace(/\s+/g, ' ').trim();
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={() => onToggle(message.id, !open)}
+      className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-muted-foreground text-sm outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} />
+      <span className="min-w-0 flex-1 truncate" title={question}>
+        {question}
+      </span>
+      <span className="shrink-0 text-xs tabular-nums">
+        {formatTurnTime(message.createdAt, Date.now())}
+      </span>
+    </button>
   );
 }
