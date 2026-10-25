@@ -4,22 +4,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/lib/utils';
 import { INLINE_WARNING_LIMIT, warningLine } from './warnings';
 
-/** 设置页里一组内容的标题：标题 + 说明，右侧放操作按钮。 */
-export function SectionHeader({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
+/** 设置页里一组内容的标题，右侧放操作按钮。只有标题，不加说明。 */
+export function SectionHeader({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div className="min-w-0">
-        <h3 className="font-medium">{title}</h3>
-        {description && <p className="text-muted-foreground text-sm">{description}</p>}
-      </div>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h3 className="min-w-0 font-medium">{title}</h3>
       {children && <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>}
     </div>
   );

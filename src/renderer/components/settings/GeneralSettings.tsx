@@ -56,10 +56,7 @@ export function GeneralSettings() {
   return (
     <div className="grid gap-8">
       <section>
-        <SectionHeader
-          title="Worktree 位置"
-          description="主 agent 派发的每个任务都在自己的 git worktree 里进行。修改只影响之后新建的 worktree，已有的留在原处。"
-        >
+        <SectionHeader title="Worktree 位置">
           <Button
             size="sm"
             variant="outline"
@@ -83,10 +80,7 @@ export function GeneralSettings() {
       </section>
 
       <section>
-        <SectionHeader
-          title="磁盘占用"
-          description="各工作区编排记录里登记的 worktree。已合并任务的 worktree 会在 cleanup 后删除。"
-        >
+        <SectionHeader title="磁盘占用">
           <Button
             size="sm"
             variant="outline"
@@ -103,11 +97,7 @@ export function GeneralSettings() {
           </InlineMessage>
         )}
         {info === null ? null : info.workspaces.length === 0 ? (
-          <EmptyState
-            icon={FolderTree}
-            title="还没有挂入工作区"
-            description="挂入仓库后，这里会列出它的 worktree 放在哪、占了多少空间。"
-          />
+          <EmptyState icon={FolderTree} title="还没有挂入工作区" />
         ) : (
           <ul className="divide-y rounded-lg border">
             {info.workspaces.map((workspace) => (
@@ -132,17 +122,19 @@ function RootSummary({ info, failed }: { info: WorktreesRootInfo | null; failed:
       </p>
     );
   }
+  // 布局一行写出来（路径或命名规则），规则与退回位置放在悬停提示里
   if (info.isDefault) {
     return (
       <div className="grid gap-1 rounded-lg border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">默认：仓库同级目录</span>
+          <span className="font-medium text-sm">仓库同级目录</span>
           <Badge variant="outline">默认</Badge>
         </div>
-        <p className="text-muted-foreground text-xs">
-          建在仓库旁边的 <code className="font-mono">{'<仓库目录名>-worktrees'}</code>{' '}
-          里，与仓库同盘；仓库父目录不可写时退回{' '}
-          <span className="break-all font-mono">{info.fallbackRoot}</span>。
+        <p
+          className="font-mono text-muted-foreground text-xs"
+          title={`仓库父目录不可写时退回 ${info.fallbackRoot}`}
+        >
+          {'<仓库目录名>-worktrees'}
         </p>
       </div>
     );
@@ -150,9 +142,8 @@ function RootSummary({ info, failed }: { info: WorktreesRootInfo | null; failed:
   return (
     <div className="grid gap-1 rounded-lg border px-4 py-3">
       <span className="font-medium text-sm">自定义目录</span>
-      <p className="break-all font-mono text-xs">{info.worktreesRoot}</p>
-      <p className="text-muted-foreground text-xs">
-        按仓库分子目录：<code className="font-mono">{'<根目录>/<仓库目录名>/…'}</code>
+      <p className="break-all font-mono text-xs" title="按仓库分子目录：<根目录>/<仓库目录名>/…">
+        {info.worktreesRoot}
       </p>
     </div>
   );
@@ -172,14 +163,15 @@ function WorkspaceRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm">{workspace.name}</span>
-          {workspace.fallback && <Badge variant="outline">已退回默认数据目录</Badge>}
+          {workspace.fallback && (
+            <Badge variant="outline" title={workspace.fallback}>
+              已退回数据目录
+            </Badge>
+          )}
         </div>
         <p className="truncate font-mono text-[11px] text-muted-foreground" title={workspace.root}>
           新建：{workspace.root}
         </p>
-        {workspace.fallback && (
-          <p className="text-muted-foreground text-xs">{workspace.fallback}</p>
-        )}
       </div>
       <div className="shrink-0 text-right">
         <p className={cn('font-medium text-sm tabular-nums', !usage && 'text-muted-foreground')}>
