@@ -70,7 +70,10 @@ export interface Role {
 }
 
 // 工作区 & 会话
-export interface Workspace { id: string; name: string; repoPath: string; defaultBranch: string; }
+// vcs：git 仓库根目录为 'git'；不是 git 仓库（或没装 git）的目录、按普通目录挂入的仓库子目录为 'none'（没有默认分支）。
+// 没有 vcs 的旧记录按 'git' 读。
+export type WorkspaceVcs = 'git' | 'none';
+export interface Workspace { id: string; name: string; repoPath: string; vcs: WorkspaceVcs; defaultBranch?: string; }
 export interface SessionRef {
   id: string; workspaceId: string; roleId: string; cwd: string;
   worktreeId?: string; parentSessionId?: string;
@@ -82,6 +85,7 @@ export interface Run { id: string; workspaceId: string; coordinatorSessionId: st
 export interface Task { id: string; runId: string; title: string; spec: string; roleId: string; status: TaskStatus; dependsOn: string[]; }
 export interface Dispatch {
   id: string; taskId: string; workerSessionId: string; worktreeId: string; branch: string;
+  mode?: 'in-place';          // 工作区 vcs 为 none：worker 直接在工作区目录里干活，worktreeId / branch 为空串；缺省是 worktree 模式
   startedAt: number; settledAt?: number; outcome?: 'succeeded' | 'failed';
   summary?: string; filesModified?: string[];
 }
@@ -118,6 +122,7 @@ export interface Message {
     workerHost?: WorkerHost | null;     // 提供即为 worker 会话
     workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
     roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
+    inPlace?: boolean;                  // 工作区没有 git（§6）：orchestrator 追加非 git 模式说明，worker 换用不提交的契约
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
@@ -155,6 +160,15 @@ export interface Message {
    - 通过：`merge_worktree`（no-ff 合并到主 agent 所在分支）→ `cleanup_worktree` → 向用户汇报。
    - 不通过：`reject_work` 把意见发回 worker，回到 3。
 5. 全部任务 settled 后向用户给出每个任务的结果、证据、未解决项。
+
+**没有 git 的工作区（`vcs: 'none'`）**：编排原地进行，Main 不调用任何 git。
+- 挂入：任意目录都能挂；git 仓库的子目录先问用户（改挂仓库根目录 / 仍然按普通目录挂入该子目录 / 取消）。
+- `dispatch_task` 不建 worktree，worker 的 cwd 是工作区目录（并行的 worker 共用它，工具结果建议一次只派一个），
+  Dispatch 记 `mode: 'in-place'`；`review_diff` 没有 diff，给出 worker 在 `report_done` 里汇报的改动文件；
+  `run_checks` 在工作区目录里跑；`merge_worktree` 无需合并，把 in-review 的任务记为 completed；
+  `cleanup_worktree` 只停 worker（未完成的任务照样放弃，改动留在目录里）。
+- 提示词：Main 在 spawn 时按工作区给 spawn spec 带 `inPlace: true`，orchestrator 在工具说明后追加非 git 模式一段，
+  worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 
 ## 7. IPC 规则（照搬 EnsoCode）
 
@@ -271,14 +285,17 @@ export interface OrchestrationApi {
 ```ts
 // 归属：orchestration-host，文件 src/main/services/orchestration/launcher.ts
 export interface WorkerSessionLauncher {
-  createWorkerSession(input: { workspaceId: string; runId: string; dispatchId: string; roleId: string; cwd: string; worktreeId: string; brief: string }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+  // worktreeId：in-place 的尝试（工作区没有 git）没有，cwd 就是工作区目录
+  createWorkerSession(input: { workspaceId: string; runId: string; dispatchId: string; roleId: string; cwd: string; worktreeId?: string; brief: string }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
   promptSession(sessionId: string, text: string): Promise<{ ok: true } | { ok: false; error: string }>;
   readTranscript(sessionId: string, cursor: number): Promise<{ ok: true; text: string; total: number; done: boolean } | { ok: false; error: string }>;
   disposeSession(sessionId: string): Promise<void>;
 }
 // orchestration-host 导出：
 export function createOrchestrationHost(deps: {
-  workspace: Workspace; coordinatorSessionId: string; coordinatorBranch: string; store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore;
+  workspace: Workspace; coordinatorSessionId: string;
+  coordinatorBranch: string;          // 工作区 vcs 为 none 时为空串（不读分支，整条编排不跑 git）
+  store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore;
   runChecks: (cwd: string, command: string, signal?: AbortSignal) => Promise<{ exitCode: number; output: string; durationMs: number }>;
   resolveWorktreesRoot: (workspace: Workspace) => Promise<string>; // worktree 托管根目录，每次建 worktree 时现算（store 里推导不出来）：
                                       // preferences.worktreesRoot 配置时为 <根目录>/<仓库目录名>，否则仓库同级的 <仓库目录名>-worktrees，
