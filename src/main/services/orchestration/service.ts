@@ -26,6 +26,7 @@ import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import { currentBranch, readDispatchOutput, reviewWorktreeDiff } from './queries';
 import { createWorkerHost } from './workerHost';
+import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
 export interface OrchestrationServiceOptions {
   workspace: Workspace;
@@ -64,6 +65,11 @@ export interface OrchestrationService {
     cursor: number;
   }): Promise<HostResult<ReadWorkerOutputOutput>>;
   reviewDiff(dispatchId: string): Promise<HostResult<ReviewDiffOutput>>;
+  /**
+   * 归档 worker 会话时调用（「通用 → 会话 → 归档时清理 worktree」）：它的 worktree 已合并且干净就删掉
+   * worktree 与分支，否则保留（见 `worktreeCleanup.ts`）。
+   */
+  cleanupMergedWorktree(sessionId: string): Promise<MergedCleanupResult>;
   /** 等待所有落盘完成并写入当前状态。 */
   flush(): Promise<void>;
 }
@@ -280,6 +286,12 @@ export function createOrchestrationService(
         }
         return reviewWorktreeDiff({ git, exec: options.exec }, worktree);
       }),
+
+    async cleanupMergedWorktree(sessionId) {
+      await ready;
+      const deps = { store, git, launcher, repoPath: workspace.repoPath };
+      return cleanupMergedWorktree(deps, dispatchOfSession(sessionId));
+    },
 
     async flush() {
       await ready;
