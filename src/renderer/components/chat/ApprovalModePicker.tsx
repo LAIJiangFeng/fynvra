@@ -1,7 +1,7 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { APPROVAL_MODES, type ApprovalMode, isApprovalMode } from '@fynvra/core';
-import { APPROVAL_MODE_HINTS, APPROVAL_MODE_LABELS } from '@shared/types/chat';
+import { APPROVAL_MODE_LABELS } from '@shared/types/chat';
 import {
   Check,
   ChevronsUpDown,
@@ -45,13 +45,13 @@ function useFlash(value: unknown): boolean {
   return flashing;
 }
 
-function modeTitle(mode: ApprovalMode): string {
-  return `审批档位：${APPROVAL_MODE_LABELS[mode]}（${APPROVAL_MODE_HINTS[mode]}）`;
-}
+/** 快捷键只放在悬停提示里：输入框里 Shift+Tab 循环切换（见 Composer） */
+const SHORTCUT_HINT = 'Shift+Tab 切换';
 
 /**
  * 输入框左下角、模型胶囊旁的审批胶囊：全程审批 / 自动接受编辑 / 完全放行。
- * 点开是三项说明列表；输入框里 Shift+Tab 循环切换（见 Composer）。运行中也能切，下一次需要审批的工具调用起生效。
+ * 点开是三项单选列表，每项只有名称与档位 id；输入框里 Shift+Tab 循环切换（见 Composer）。
+ * 运行中也能切，下一次需要审批的工具调用起生效。
  */
 export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
@@ -67,7 +67,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
         render={
           <button
             type="button"
-            title={`${modeTitle(mode)}，Shift+Tab 切换`}
+            title={SHORTCUT_HINT}
             data-flash={flashing ? '' : undefined}
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[flash]:ring-2 data-[flash]:ring-primary/60 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground',
@@ -80,7 +80,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
         <span>{APPROVAL_MODE_LABELS[mode]}</span>
         <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-60" />
       </PopoverTrigger>
-      <PopoverContent side="top" className="w-80 p-1">
+      <PopoverContent side="top" className="w-64 p-1">
         <RadioGroup
           aria-label="审批档位"
           value={mode}
@@ -97,35 +97,23 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
               <Radio.Root
                 key={option}
                 value={option}
-                className="flex cursor-default select-none items-start gap-2.5 rounded-sm px-2 py-1.5 outline-none hover:bg-accent focus-visible:bg-accent data-[checked]:bg-accent/60"
+                className="flex cursor-default select-none items-center gap-2.5 rounded-sm px-2 py-1.5 outline-none hover:bg-accent focus-visible:bg-accent data-[checked]:bg-accent/60"
               >
-                <OptionIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
-                <span className="grid min-w-0 flex-1 gap-0.5">
-                  <span className="flex items-baseline gap-1.5 font-medium text-sm">
-                    {APPROVAL_MODE_LABELS[option]}
-                    <span className="font-mono font-normal text-muted-foreground text-xs">
-                      {option}
-                    </span>
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {APPROVAL_MODE_HINTS[option]}
+                <OptionIcon aria-hidden className="size-4 shrink-0" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 font-medium text-sm">
+                  {APPROVAL_MODE_LABELS[option]}
+                  <span className="font-mono font-normal text-muted-foreground text-xs">
+                    {option}
                   </span>
                 </span>
                 <Check
                   aria-hidden
-                  className={cn(
-                    'mt-0.5 size-4 shrink-0',
-                    option === mode ? 'opacity-100' : 'opacity-0'
-                  )}
+                  className={cn('size-4 shrink-0', option === mode ? 'opacity-100' : 'opacity-0')}
                 />
               </Radio.Root>
             );
           })}
         </RadioGroup>
-        <p className="border-t px-2 pt-1.5 pb-1 text-[11px] text-muted-foreground">
-          在输入框里按 Shift+Tab
-          循环切换。运行中也能切，下一次需要审批的工具调用起生效；保护底线任何档位都要你确认。
-        </p>
       </PopoverContent>
     </Popover>
   );
@@ -139,7 +127,7 @@ export function ApprovalModeStatus({ sessionId }: { sessionId: string }) {
   const Icon = MODE_ICON[mode];
   return (
     <span
-      title={`${modeTitle(mode)}；在输入框里按 Shift+Tab 切换`}
+      title={`审批档位（${SHORTCUT_HINT}）`}
       aria-live="polite"
       data-flash={flashing ? '' : undefined}
       className={cn(

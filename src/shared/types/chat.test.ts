@@ -1,7 +1,6 @@
 import { APPROVAL_MODES, THINKING_LEVELS } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import {
-  APPROVAL_MODE_HINTS,
   APPROVAL_MODE_LABELS,
   isThinkingSource,
   type ModelThinkingCapability,
@@ -116,15 +115,6 @@ describe('approval modes', () => {
       '自动接受编辑',
       '完全放行',
     ]);
-  });
-
-  it('explains what each mode asks about, and that full still asks about the protected floor', () => {
-    expect(APPROVAL_MODE_HINTS.supervised).toContain('命令');
-    expect(APPROVAL_MODE_HINTS.supervised).toContain('文件');
-    expect(APPROVAL_MODE_HINTS['auto-edits']).toContain('命令');
-    expect(APPROVAL_MODE_HINTS.full).toContain('保护底线');
-    expect(APPROVAL_MODE_HINTS.full).toContain('git push');
-    expect(new Set(APPROVAL_MODES.map((mode) => APPROVAL_MODE_HINTS[mode])).size).toBe(3);
   });
 });
 

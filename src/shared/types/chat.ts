@@ -77,13 +77,6 @@ export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
   full: '完全放行',
 };
 
-/** 审批档位的说明：档位列表里每项的第二行（规则同 agent-runtime 的审批门） */
-export const APPROVAL_MODE_HINTS: Readonly<Record<ApprovalMode, string>> = {
-  supervised: '执行命令、写入 / 编辑文件、调用 MCP 工具前都先问你',
-  'auto-edits': '写入 / 编辑文件直接放行；执行命令、调用 MCP 工具前仍先问你',
-  full: '不再询问；rm -rf、git push、git reset --hard、publish 等保护底线仍要你确认',
-};
-
 /** 输入框里 Shift+Tab 的下一档：supervised → auto-edits → full → supervised */
 export function nextApprovalMode(mode: ApprovalMode): ApprovalMode {
   const index = APPROVAL_MODES.indexOf(mode);
