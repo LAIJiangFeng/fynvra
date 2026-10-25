@@ -243,3 +243,55 @@ describe('parseWorktreesRootInfoInput（IPC 入参收窄）', () => {
     expect(parseWorktreesRootInfoInput(raw)).toBeNull();
   });
 });
+
+// --- keybindings ---
+describe('preferences.keybindings（快捷键覆盖表）', () => {
+  it('parsePreferences 保留合法的覆盖项（规整后，mod 原样保留），没有默认值', () => {
+    expect(
+      parsePreferences({ keybindings: { 'new-session': 'Alt+Ctrl+N', send: 'Mod+Enter' } })
+    ).toEqual({
+      ...DEFAULT_PREFERENCES,
+      keybindings: { 'new-session': 'ctrl+alt+n', send: 'mod+enter' },
+    });
+    expect(parsePreferences({})).not.toHaveProperty('keybindings');
+  });
+
+  it('parsePreferences 逐条丢弃非法项，全部非法时去掉整个字段', () => {
+    expect(
+      parsePreferences({
+        keybindings: { 'new-session': 'ctrl+alt+n', 'no-such-action': 'ctrl+j', send: 'm' },
+      }).keybindings
+    ).toEqual({ 'new-session': 'ctrl+alt+n' });
+    for (const keybindings of [null, 'ctrl+n', [], {}, { send: 'hyper+enter' }]) {
+      expect(parsePreferences({ keybindings })).not.toHaveProperty('keybindings');
+    }
+  });
+
+  it('parseSettings 读回 settings.json 里的覆盖表', () => {
+    expect(
+      parseSettings({ preferences: { keybindings: { 'search-sessions': 'ctrl+shift+f' } } })
+        .preferences.keybindings
+    ).toEqual({ 'search-sessions': 'ctrl+shift+f' });
+  });
+
+  it('parsePreferencesPatch 接受合法的覆盖表；空表表示全部重置', () => {
+    expect(parsePreferencesPatch({ keybindings: { 'prev-session': 'Ctrl+Alt+Up' } })).toEqual({
+      keybindings: { 'prev-session': 'ctrl+alt+arrowup' },
+    });
+    expect(parsePreferencesPatch({ theme: 'dark', keybindings: {} })).toEqual({
+      theme: 'dark',
+      keybindings: {},
+    });
+  });
+
+  it.each([
+    ['不是对象', 'ctrl+n'],
+    ['数组', [['send', 'ctrl+enter']]],
+    ['未知动作', { 'no-such-action': 'ctrl+j' }],
+    ['认不出的键', { send: 'hyper+enter' }],
+    ['全局动作不带 Ctrl / Alt', { 'new-session': 'n' }],
+    ['有一条不合法', { 'new-session': 'ctrl+alt+n', send: 7 }],
+  ])('parsePreferencesPatch 拒绝 %s', (_label, keybindings) => {
+    expect(parsePreferencesPatch({ keybindings })).toBeNull();
+  });
+});

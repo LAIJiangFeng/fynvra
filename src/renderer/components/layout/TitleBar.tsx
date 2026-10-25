@@ -2,6 +2,7 @@ import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { SettingsButton } from '@/components/settings/SettingsButton';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ShortcutHint } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { selectSelectedWorkspace, useWorkspacesStore } from '@/stores/workspaces';
@@ -47,7 +48,10 @@ export function TitleBar() {
           >
             {sidePanelOpen ? <PanelRightClose /> : <PanelRightOpen />}
           </TooltipTrigger>
-          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
+          <TooltipContent side="bottom">
+            {panelLabel}
+            <ShortcutHint action="toggle-side-panel" />
+          </TooltipContent>
         </Tooltip>
       </div>
 
