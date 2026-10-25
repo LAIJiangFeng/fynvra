@@ -96,13 +96,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
       <PanelMessage icon={Loader2} spin title="正在读取编排状态…" />
     );
   } else if (!run) {
-    notice = (
-      <PanelMessage
-        icon={Workflow}
-        title="主 agent 还没有派发任务"
-        description="在 Orchestrator 会话里描述需求，主 agent 会把它拆成任务，为每个任务开 worktree 并派给 worker。"
-      />
-    );
+    notice = <PanelMessage icon={Workflow} title="主 agent 还没有派发任务" />;
   }
 
   return (
