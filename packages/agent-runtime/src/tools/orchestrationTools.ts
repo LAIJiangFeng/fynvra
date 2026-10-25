@@ -2,12 +2,15 @@ import { type Static, StringEnum, type TSchema, Type } from '@earendil-works/pi-
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Dispatch, Message, Role, Task } from '@fynvra/core';
 import type {
+  CleanupWorktreeOutput,
   DispatchRef,
   DispatchTaskInput,
+  MergeWorktreeOutput,
   OrchestrationHost,
   OrchestrationToolName,
   ReadWorkerOutputInput,
   RejectWorkInput,
+  ReviewDiffOutput,
   RunChecksInput,
   SendToWorkerInput,
   WaitForWorkersInput,
@@ -74,7 +77,8 @@ export function createOrchestrationTools(
       name: 'dispatch_task',
       label: 'Dispatch task',
       description:
-        'Create a task and start a worker agent on it in a fresh git worktree (branch fynvra/<slug>). ' +
+        'Create a task and start a worker agent on it in a fresh git worktree (branch fynvra/<slug>); ' +
+        'in a workspace without git the worker edits the workspace directory in place instead. ' +
         "The spec is the worker's entire context, so write it as a complete brief. Returns task_id and " +
         'dispatch_id. Workers run in the background; wait_for_workers delivers their results.',
       promptSnippet: 'Start a worker in its own git worktree on a task brief',
@@ -219,7 +223,7 @@ export function createOrchestrationTools(
       label: 'Review diff',
       description:
         "Show a worker's changes relative to its base commit: changed files, diffstat and the diff " +
-        `(truncated after ${DIFF_MAX_CHARS} characters).`,
+        `(truncated after ${DIFF_MAX_CHARS} characters). Without git there is no diff; it lists the files the worker reported instead.`,
       promptSnippet: "Show a worker's changed files and diff",
       parameters: dispatchRefSchema(),
       normalize: normalizeRefArgs,
@@ -235,7 +239,7 @@ export function createOrchestrationTools(
       name: 'run_checks',
       label: 'Run checks',
       description:
-        "Run a verification command in a worker's worktree and return its exit code and the tail of its output. " +
+        "Run a verification command in a worker's worktree (the workspace directory when there is no git) and return its exit code and the tail of its output. " +
         "Verify work yourself with it instead of trusting the worker's report.",
       promptSnippet: "Run a verification command in a worker's worktree",
       parameters: Type.Object(
@@ -267,7 +271,8 @@ export function createOrchestrationTools(
       label: 'Merge worktree',
       description:
         "Merge a worker's branch into your current branch with --no-ff. Use it only after review_diff and run_checks pass. " +
-        'On conflicts the merge is aborted, the target branch stays unchanged and the conflicting files are listed.',
+        'On conflicts the merge is aborted, the target branch stays unchanged and the conflicting files are listed. ' +
+        'Without git there is nothing to merge: it accepts the work in place and completes the task.',
       promptSnippet: "Merge an accepted worker's branch (--no-ff)",
       promptGuidelines: [
         'Merge only after you reviewed the diff and the checks passed in this conversation.',
@@ -326,7 +331,8 @@ export function createOrchestrationTools(
       name: 'cleanup_worktree',
       label: 'Clean up worktree',
       description:
-        "Remove a worker's worktree and its branch. Call it after merge_worktree, or to abandon a task.",
+        "Remove a worker's worktree and its branch. Call it after merge_worktree, or to abandon a task. " +
+        'Without git it only stops the worker; its changes stay in the workspace directory.',
       promptSnippet: "Remove a finished or abandoned worker's worktree",
       parameters: dispatchRefSchema(),
       executionMode: 'sequential',
@@ -336,14 +342,7 @@ export function createOrchestrationTools(
         if (!input.ok) return errorResult('cleanup_worktree', input.error);
         const result = await host.cleanupWorktree(input.value, signal);
         if (!result.ok) return errorResult('cleanup_worktree', result.error);
-        return textResult(
-          [
-            `## Cleaned up · dispatch ${code(input.value.dispatchId)}`,
-            `- worktree removed: ${result.removedWorktree ? 'yes' : 'no'}`,
-            `- branch deleted: ${result.deletedBranch ? 'yes' : 'no'}`,
-          ].join('\n'),
-          result
-        );
+        return textResult(formatCleanup(input.value.dispatchId, result), result);
       },
     }),
   ];
@@ -596,16 +595,21 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
       'Its worker starts automatically once the dependencies are completed. Keep monitoring with wait_for_workers.',
     ].join('\n');
   }
+  const inPlace = dispatch.mode === 'in-place';
   return [
     '## Task dispatched',
     `- task_id: ${code(task.id)}`,
     `- dispatch_id: ${code(dispatch.id)}`,
     `- title: ${task.title}`,
     `- role: ${task.roleId}`,
-    `- branch: ${code(dispatch.branch)}`,
+    inPlace
+      ? '- works in: the workspace directory itself (no git: no worktree or branch)'
+      : `- branch: ${code(dispatch.branch)}`,
     `- status: ${task.status}`,
     '',
-    'The worker runs in the background in its own worktree. You know nothing about its result until its worker_done message arrives; call wait_for_workers.',
+    inPlace
+      ? 'No git: the worker edits files directly in the workspace directory, and every running worker shares it. Dispatch one task at a time unless their files are strictly disjoint. You know nothing about its result until its worker_done message arrives; call wait_for_workers.'
+      : 'The worker runs in the background in its own worktree. You know nothing about its result until its worker_done message arrives; call wait_for_workers.',
   ].join('\n');
 }
 
@@ -624,7 +628,11 @@ function formatWorkers(workers: readonly WorkerEntry[]): string {
       lines.push('- not started yet (waiting for dependencies)');
       return lines.join('\n');
     }
-    lines.push(`- dispatch_id: ${code(dispatch.id)} · branch: ${code(dispatch.branch)}`);
+    lines.push(
+      dispatch.mode === 'in-place'
+        ? `- dispatch_id: ${code(dispatch.id)} · in place (no git)`
+        : `- dispatch_id: ${code(dispatch.id)} · branch: ${code(dispatch.branch)}`
+    );
     if (dispatch.outcome) {
       const summary = dispatch.summary ? ` — ${firstLine(dispatch.summary)}` : '';
       lines.push(`- outcome: ${dispatch.outcome}${summary}`);
@@ -711,10 +719,29 @@ function formatWorkerOutput(
   return lines.join('\n');
 }
 
-function formatDiff(
-  dispatchId: string,
-  result: { branch: string; baseCommit: string; files: string[]; stat: string; diff: string }
-): string {
+function listFiles(files: readonly string[]): string {
+  const listed = files.slice(0, MAX_LISTED_FILES).map(code);
+  if (files.length > MAX_LISTED_FILES) listed.push(`… and ${files.length - MAX_LISTED_FILES} more`);
+  return listed.join(', ');
+}
+
+/** 普通目录没有 diff：给出 worker 汇报的改动文件，让主 agent 自己读、自己跑检查。 */
+function formatInPlaceReview(dispatchId: string, files: readonly string[]): string {
+  return [
+    `## Diff · dispatch ${code(dispatchId)}`,
+    'No git: this workspace is not a git repository, so there is no diff to show.',
+    files.length === 0
+      ? '- files reported by the worker: none'
+      : `- files reported by the worker (${files.length}): ${listFiles(files)}`,
+    '',
+    files.length === 0
+      ? 'The worker listed no modified files in report_done. Check read_worker_output, or reject_work asking it to list every file it changed.'
+      : 'Read those files with read and grep to review the work, then verify it with run_checks.',
+  ].join('\n');
+}
+
+function formatDiff(dispatchId: string, result: ReviewDiffOutput): string {
+  if (result.mode === 'in-place') return formatInPlaceReview(dispatchId, result.files);
   const header = [
     `## Diff · dispatch ${code(dispatchId)}`,
     `- branch: ${code(result.branch)} (base ${code(shortSha(result.baseCommit))})`,
@@ -726,14 +753,10 @@ function formatDiff(
       `No changes on ${code(result.branch)} relative to its base. The worker may not have committed its work: check read_worker_output, or reject_work asking it to commit.`,
     ].join('\n');
   }
-  const listed = result.files.slice(0, MAX_LISTED_FILES).map(code);
-  if (result.files.length > MAX_LISTED_FILES) {
-    listed.push(`… and ${result.files.length - MAX_LISTED_FILES} more`);
-  }
   const diff = truncateHeadChars(result.diff, DIFF_MAX_CHARS);
   const lines = [
     ...header,
-    `- files changed (${result.files.length}): ${listed.join(', ')}`,
+    `- files changed (${result.files.length}): ${listFiles(result.files)}`,
     '',
     '### Stat',
     fence(result.stat || '(empty)'),
@@ -775,10 +798,15 @@ function formatChecks(
   return lines.join('\n');
 }
 
-function formatMerge(
-  dispatchId: string,
-  result: { merged: boolean; targetBranch: string; commit?: string; conflicts?: string[] }
-): string {
+function formatMerge(dispatchId: string, result: MergeWorktreeOutput): string {
+  if (result.mode === 'in-place') {
+    return [
+      '## Accepted (no git)',
+      `- dispatch ${code(dispatchId)}: nothing to merge, its changes are already in the workspace directory; the task is completed`,
+      '',
+      'Next: cleanup_worktree for this dispatch to stop its worker, then report the result to the user.',
+    ].join('\n');
+  }
   if (result.merged) {
     const commit = result.commit ? ` as ${code(shortSha(result.commit))}` : '';
     return [
@@ -795,5 +823,21 @@ function formatMerge(
     `- conflicting files: ${conflicts}`,
     '',
     'Ask the worker to merge or rebase onto the target branch and resolve the conflicts (reject_work), then review again.',
+  ].join('\n');
+}
+
+function formatCleanup(dispatchId: string, result: CleanupWorktreeOutput): string {
+  const title = `## Cleaned up · dispatch ${code(dispatchId)}`;
+  if (result.mode === 'in-place') {
+    return [
+      title,
+      '- no git: there is no worktree or branch to remove; nothing to clean up',
+      '- the worker was stopped; the changes it made stay in the workspace directory',
+    ].join('\n');
+  }
+  return [
+    title,
+    `- worktree removed: ${result.removedWorktree ? 'yes' : 'no'}`,
+    `- branch deleted: ${result.deletedBranch ? 'yes' : 'no'}`,
   ].join('\n');
 }

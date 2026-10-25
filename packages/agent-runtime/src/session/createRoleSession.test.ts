@@ -18,7 +18,12 @@ import type { ApprovalGateRequest, ApprovalRequestFn } from '../approval/gate';
 import type { ApprovalDecision } from '../approval/policy';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
-import { ORCHESTRATOR_PROMPT, WORKER_CONTRACT_PROMPT } from '../prompts/orchestratorPrompt';
+import {
+  IN_PLACE_ORCHESTRATOR_PROMPT,
+  IN_PLACE_WORKER_CONTRACT_PROMPT,
+  ORCHESTRATOR_PROMPT,
+  WORKER_CONTRACT_PROMPT,
+} from '../prompts/orchestratorPrompt';
 import {
   type CreateRoleSessionOptions,
   createRoleSession,
@@ -293,6 +298,35 @@ describe('createRoleSession end to end with a scripted model', () => {
     // pi 自带的工具列表之外，追加段（角色提示词 + 工具说明）自己也点名每个编排工具
     const appended = section(prompt, 'addendum');
     for (const tool of ORCHESTRATION_TOOLS) expect(appended).toContain(tool);
+    expect(prompt).not.toContain(IN_PLACE_ORCHESTRATOR_PROMPT);
+  });
+
+  it('inPlace (no git): the orchestrator gets the in-place section, a worker the in-place contract', async () => {
+    const contexts: TranscriptContext[] = [];
+    const reply = (context: TranscriptContext) => {
+      contexts.push(context);
+      return fauxAssistantMessage('ok');
+    };
+    faux.setResponses([reply, reply]);
+    const orchestrator = await open({
+      role: builtinRole(ORCHESTRATOR_ROLE_ID),
+      host: orchestrationHost(),
+      inPlace: true,
+    });
+    await orchestrator.session.prompt('Plan the work.');
+    const worker = await open({
+      role: role({ tools: 'all' }),
+      workerHost: workerHost(),
+      inPlace: true,
+    });
+    await worker.session.prompt('Do the task.');
+
+    const [planned, worked] = contexts.map((context) => systemText(context));
+    expect(count(planned ?? '', ORCHESTRATOR_PROMPT)).toBe(1);
+    expect(count(planned ?? '', IN_PLACE_ORCHESTRATOR_PROMPT)).toBe(1);
+    expect(worked).toContain(IN_PLACE_WORKER_CONTRACT_PROMPT);
+    expect(worked).not.toContain(WORKER_CONTRACT_PROMPT);
+    expect(worked).not.toContain(IN_PLACE_ORCHESTRATOR_PROMPT);
   });
 
   it('reopens report_done when a new run starts, e.g. after reject_work feedback', async () => {

@@ -61,6 +61,11 @@ export interface CreateRoleSessionOptions {
   workerTools?: WorkerToolsOptions;
   /** dispatch_task 可选的角色（orchestrator 用） */
   roles?: readonly RoleOption[];
+  /**
+   * 工作区没有 git（编排原地进行，没有 worktree）：orchestrator 追加非 git 模式说明，
+   * worker 换成不提交的契约（见 buildRolePromptAppend）
+   */
+  inPlace?: boolean;
   /** 默认 `SettingsManager.inMemory`：不读用户的 ~/.pi 与项目 .pi 设置 */
   settingsManager?: SettingsManager;
   /** git_readonly 的命令执行器，默认 child_process.execFile */
@@ -105,7 +110,10 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   const { customTools, noTools } = selectTools(options, workerToolset);
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
-  const promptAppend = buildRolePromptAppend(role, { worker: workerToolset !== undefined });
+  const promptAppend = buildRolePromptAppend(role, {
+    worker: workerToolset !== undefined,
+    inPlace: options.inPlace === true,
+  });
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),

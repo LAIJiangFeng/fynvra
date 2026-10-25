@@ -90,6 +90,11 @@ export interface ReviewDiffOutput {
   stat: string;
   /** 完整 diff 文本（工具负责截断） */
   diff: string;
+  /**
+   * 普通目录（工作区没有 git，Dispatch.mode 为 in-place）：没有 diff，`files` 是 worker 在 report_done
+   * 里汇报的改动文件，其余字段为空
+   */
+  mode?: 'in-place';
 }
 
 export interface RunChecksInput {
@@ -110,6 +115,8 @@ export interface MergeWorktreeOutput {
   commit?: string;
   /** merged=false 时的冲突文件；Host 已 `merge --abort` */
   conflicts?: string[];
+  /** 普通目录：改动已经在目录里，没有可合并的分支，只把任务记为 completed（`targetBranch` 为空） */
+  mode?: 'in-place';
 }
 
 export interface RejectWorkInput {
@@ -123,6 +130,8 @@ export interface RejectWorkOutput {
 export interface CleanupWorktreeOutput {
   removedWorktree: boolean;
   deletedBranch: boolean;
+  /** 普通目录：没有 worktree 和分支可删，只停掉 worker；它的改动留在目录里 */
+  mode?: 'in-place';
 }
 
 /**
