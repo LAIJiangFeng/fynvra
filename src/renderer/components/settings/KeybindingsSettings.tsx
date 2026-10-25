@@ -40,7 +40,14 @@ export function KeybindingsSettings() {
                 size="sm"
                 variant="outline"
                 disabled={!customized}
-                onClick={() => void resetAll()}
+                onClick={(event) => {
+                  // 按钮随即禁用、焦点会丢：交给第一行的「改键」
+                  event.currentTarget
+                    .closest('section')
+                    ?.querySelector<HTMLButtonElement>('li button')
+                    ?.focus();
+                  void resetAll();
+                }}
               >
                 <RotateCcw />
                 全部重置
@@ -154,7 +161,11 @@ function KeyRow({
         aria-label={`重置：${label}`}
         disabled={!custom}
         className={cn(!custom && 'invisible')}
-        onClick={() => void reset(action)}
+        onClick={() => {
+          // 按钮随即隐藏、焦点会丢：交给同一行的「改键」
+          recorder.current?.focus();
+          void reset(action);
+        }}
       >
         重置
       </Button>
