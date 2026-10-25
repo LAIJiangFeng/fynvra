@@ -1,6 +1,6 @@
 import { providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
-import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,16 +9,16 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
-import { InlineMessage } from './common';
+import { InlineMessage, WarningList } from './common';
 import {
   defaultSelection,
+  duplicateBadge,
   duplicateReason,
   IMPORT_SOURCES,
   importSummary,
@@ -130,10 +130,6 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
         <DialogTitle>从本机导入模型服务</DialogTitle>
-        <DialogDescription>
-          只读取 Claude Code、Codex 与 CC Switch 的配置，不会改动它们。API Key
-          只在本机读取，这里只显示末 4 位。
-        </DialogDescription>
       </DialogHeader>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -176,12 +172,7 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
       ) : scan.phase === 'failed' ? (
         <InlineMessage tone="error">{scan.error}</InlineMessage>
       ) : candidates.length === 0 ? (
-        <div className="py-6 text-center">
-          <p className="text-sm">没有找到可导入的配置</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            只有填写了 API Key 或自定义地址的配置才能导入；用官方账号登录的不行。
-          </p>
-        </div>
+        <p className="py-6 text-center text-sm">没有找到带 API Key 或自定义地址的配置</p>
       ) : (
         <div className="grid min-w-0 gap-2">
           <div className="flex items-center justify-between text-muted-foreground text-xs">
@@ -218,16 +209,7 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
         </div>
       )}
 
-      {scan.phase === 'done' && scan.warnings.length > 0 && (
-        <ul className="grid gap-1">
-          {scan.warnings.map((warning) => (
-            <li key={warning} className="flex items-start gap-1.5 text-muted-foreground text-xs">
-              <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-500" />
-              <span className="break-all">{warning}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {scan.phase === 'done' && <WarningList warnings={scan.warnings} />}
 
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
@@ -280,6 +262,7 @@ function CandidateRow({
             </Badge>
             <Badge variant="outline">{providerApiLabel(candidate.api)}</Badge>
             {candidate.isCurrent && <Badge>当前使用</Badge>}
+            {reason && <Badge title={reason}>{duplicateBadge(candidate)}</Badge>}
           </div>
           <p className="truncate text-muted-foreground text-xs">
             <span className="font-mono">
@@ -289,11 +272,10 @@ function CandidateRow({
             {candidate.hasApiKey ? (
               <span className="font-mono">••••{candidate.apiKeyHint ?? ''}</span>
             ) : (
-              <span className="text-destructive">没有 API Key，导入后需要填写</span>
+              <span className="text-destructive">没有 API Key</span>
             )}
           </p>
           <p className="truncate text-muted-foreground text-xs">{modelSummary(candidate)}</p>
-          {reason && <p className="text-muted-foreground text-xs">{reason}，不再导入</p>}
         </div>
       </label>
     </li>
