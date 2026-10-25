@@ -20,6 +20,12 @@ export const mainZhCN = {
   app: {
     startFailed: 'Fynvra 启动失败',
   },
+  files: {
+    unsavedTitle: '文件修改尚未保存',
+    unsavedMessage: '仍有未保存或正在保存的文件。',
+    unsavedDetail: '取消后可返回编辑器保存。继续离开会丢弃未保存的修改。',
+    discard: '放弃修改并离开',
+  },
   workspaces: {
     add: '挂入目录',
     addButton: '挂入',

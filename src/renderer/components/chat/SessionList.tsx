@@ -7,6 +7,7 @@ import { useNow } from '@/hooks/useNow';
 import { useT } from '@/i18n/I18nProvider';
 import { SessionSearchButton, SessionSearchInput, useFilteredSessions } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
+import { filesStoreFor } from '@/stores/files';
 import {
   isBusy,
   selectArchivedSessionsOf,
@@ -127,7 +128,10 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
       <button
         type="button"
         aria-current={active ? 'true' : undefined}
-        onClick={() => void select(session.id)}
+        onClick={() => {
+          filesStoreFor(session.workspaceId, window.fynvra.files).getState().showChat();
+          void select(session.id);
+        }}
         className={cn(
           'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
           active && 'bg-sidebar-accent text-sidebar-accent-foreground'

@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createFilesApi } from './domains/files';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
@@ -39,6 +40,7 @@ const api: FynvraApi = {
     onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, () => callback()),
   },
   orchestration: createOrchestrationApi(ipcRenderer),
+  files: createFilesApi(ipcRenderer),
   window: {
     platform: process.platform,
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),

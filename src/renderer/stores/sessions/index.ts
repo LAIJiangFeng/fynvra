@@ -1,5 +1,6 @@
 import { useSettingsViewStore } from '@/components/settings/settingsViewStore';
 import { getSessionsApi } from '@/lib/api/sessions';
+import { filesStoreFor } from '../files';
 import { useWorkspacesStore } from '../workspaces';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
@@ -21,16 +22,27 @@ window.fynvra.notifications.onFocusSession(({ workspaceId, sessionId }) => {
   useSessionsStore.getState().setWorkspace(workspaceId);
   useWorkspacesStore.getState().select(workspaceId);
   useSettingsViewStore.getState().close();
+  filesStoreFor(workspaceId, window.fynvra.files).getState().showChat();
   void useSessionsStore.getState().selectSession(sessionId);
 });
 
 // 屏幕上正看着的会话报给 Main（设置视图盖住时为 null）：窗口聚焦时不弹它的通知。
 // 启动时先报一次：页面重新加载后，Main 记着的还是加载前看的那个会话
 let viewing: string | null | undefined;
+let watchedWorkspace: string | null | undefined;
+let unwatchFiles: (() => void) | undefined;
 function reportViewing(): void {
-  const next = useSettingsViewStore.getState().open
-    ? null
-    : useSessionsStore.getState().activeSessionId;
+  const workspaceId = useWorkspacesStore.getState().selectedId;
+  const files = workspaceId ? filesStoreFor(workspaceId, window.fynvra.files) : undefined;
+  if (watchedWorkspace !== workspaceId) {
+    unwatchFiles?.();
+    unwatchFiles = files?.subscribe(reportViewing);
+    watchedWorkspace = workspaceId;
+  }
+  const next =
+    useSettingsViewStore.getState().open || files?.getState().selectedId
+      ? null
+      : useSessionsStore.getState().activeSessionId;
   if (next === viewing) return;
   viewing = next;
   void window.fynvra.notifications.setViewing(next);
@@ -38,3 +50,4 @@ function reportViewing(): void {
 reportViewing();
 useSessionsStore.subscribe(reportViewing);
 useSettingsViewStore.subscribe(reportViewing);
+useWorkspacesStore.subscribe(reportViewing);

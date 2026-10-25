@@ -9,6 +9,7 @@ import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { createAppWindow } from './windows/createAppWindow';
+import { createQuitGuard } from './windows/quitGuard';
 
 /** 退出时等 agent worker 关闭会话（MCP 连接、bash 进程组）的上限 */
 const AGENT_SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -24,6 +25,7 @@ if (!app.isPackaged) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let quitGuard: ReturnType<typeof createQuitGuard> | undefined;
 
 function showMainWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -32,6 +34,11 @@ function showMainWindow(): void {
     return;
   }
   mainWindow = createAppWindow({ width: 1280, height: 800, minWidth: 960, minHeight: 600 });
+  mainWindow.webContents.on('will-prevent-unload', (event) => {
+    if (!event.defaultPrevented) {
+      quitGuard?.cancel();
+    }
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -44,25 +51,23 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showMainWindow);
   // dev 下 F12 开关 DevTools；打包后屏蔽刷新快捷键
   app.on('browser-window-created', (_event, window) => optimizer.watchWindowShortcuts(window));
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) showMainWindow();
   });
   // Electron 退出时不给 utilityProcess 发 SIGTERM：先让 worker 关闭全部会话再退出，否则命令会成孤儿进程
-  let agentHostStopped = false;
-  app.on('before-quit', (event) => {
-    if (agentHostStopped) return;
-    agentHostStopped = true;
-    event.preventDefault();
-    void getAgentHost()
-      .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)
-      // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
-      .then(() => getOrchestrationRegistry().flushAll())
-      .catch((error: unknown) => console.error('[fynvra] 退出前收尾失败', error))
-      .finally(() => app.quit());
+  quitGuard = createQuitGuard({
+    windows: () => BrowserWindow.getAllWindows(),
+    quit: () => app.quit(),
+    mac: process.platform === 'darwin',
+    shutdown: () =>
+      getAgentHost()
+        .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)
+        // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
+        .then(() => getOrchestrationRegistry().flushAll())
+        .catch((error: unknown) => console.error('[fynvra] 退出前收尾失败', error)),
   });
+  app.on('before-quit', quitGuard.beforeQuit);
+  app.on('window-all-closed', quitGuard.allWindowsClosed);
 
   app
     .whenReady()

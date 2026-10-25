@@ -22,6 +22,12 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   app: {
     startFailed: 'Fynvra failed to start',
   },
+  files: {
+    unsavedTitle: 'Unsaved file changes',
+    unsavedMessage: 'Some files have unsaved changes or are still being saved.',
+    unsavedDetail: 'Cancel to return to the editor and save. Leaving will discard unsaved changes.',
+    discard: 'Discard changes and leave',
+  },
   workspaces: {
     add: 'Add folder',
     addButton: 'Add',

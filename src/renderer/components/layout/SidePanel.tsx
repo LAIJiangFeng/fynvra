@@ -16,7 +16,7 @@ function clampWidth(width: number, viewport: number): number {
   return Math.round(Math.min(Math.max(width, MIN_WIDTH), max));
 }
 
-/** 右栏：编排面板（任务看板、worker 输出、diff）。左边缘可拖动调宽，双击恢复默认宽度。 */
+/** 右栏：文件预览与编排面板。左边缘可拖动调宽，双击恢复默认宽度。 */
 export function SidePanel() {
   const [preferred, setPreferred] = useState(preferredWidth);
   const [viewport, setViewport] = useState(() => window.innerWidth);

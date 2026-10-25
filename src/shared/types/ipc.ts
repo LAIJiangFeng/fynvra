@@ -19,6 +19,13 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：工作区列表已变更 */
   WORKSPACES_CHANGED: 'workspaces:changed',
 
+  /** 按工作区 / 目录 id 列出一层条目，Renderer 不传路径 */
+  FILES_LIST: 'files:list',
+  /** 按 Main 签发的文件 id 只读预览内容 */
+  FILES_READ: 'files:read',
+  /** 按读取版本保存文本，冲突时不覆盖磁盘内容 */
+  FILES_WRITE: 'files:write',
+
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
   WINDOW_CLOSE: 'window:close',

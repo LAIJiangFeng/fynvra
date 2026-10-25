@@ -1,6 +1,7 @@
 import {
   CircleAlert,
   FlaskConical,
+  FolderOpen,
   GitCompareArrows,
   ListChecks,
   Loader2,
@@ -8,6 +9,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { FilesView } from '@/components/files/FilesView';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +21,7 @@ import {
   usingOrchestrationMock,
 } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
+import { filesStoreFor, ROOT_DIRECTORY_ID } from '@/stores/files';
 import { reviewCandidatesOf, runsOf, useOrchestrationStore } from '@/stores/orchestration';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { ChangesView } from './ChangesView';
@@ -31,9 +34,9 @@ const USING_MOCK = usingOrchestrationMock();
 /** 演示数据下没选工作区时用的占位 id：mock 对任何工作区都返回同一份数据。 */
 const DEMO_WORKSPACE_ID = 'demo';
 
-type PanelTab = 'tasks' | 'changes';
+type PanelTab = 'files' | 'tasks' | 'changes';
 
-/** 右侧编排面板：「任务」看板与「改动」diff。只读视图，不提供合并 / 打回。 */
+/** 右侧面板：文件目录、任务看板与改动 diff，文件内容在中央标签打开。 */
 export function OrchestrationPanel() {
   const selectedId = useWorkspacesStore((state) => state.selectedId);
   const workspaceId = selectedId ?? (USING_MOCK ? DEMO_WORKSPACE_ID : null);
@@ -60,6 +63,14 @@ export function OrchestrationPanel() {
 }
 
 function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
+  const useFilesStore = filesStoreFor(workspaceId, window.fynvra.files);
+  const filesLoading = useFilesStore(
+    (state) => state.directories[ROOT_DIRECTORY_ID]?.loading ?? false
+  );
+  const workspaceName = useWorkspacesStore(
+    (state) =>
+      state.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? workspaceId
+  );
   const watchWorkspace = useOrchestrationStore((state) => state.watchWorkspace);
   const refresh = useOrchestrationStore((state) => state.refresh);
   const view = useOrchestrationStore((state) => state.snapshots[workspaceId]?.view ?? null);
@@ -72,7 +83,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => watchWorkspace(workspaceId), [watchWorkspace, workspaceId]);
 
-  const [tab, setTab] = useState<PanelTab>('tasks');
+  const [tab, setTab] = useState<PanelTab>('files');
   const [runId, setRunId] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
@@ -112,12 +123,18 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <Tabs
         value={tab}
-        onValueChange={(value) => setTab(value === 'changes' ? 'changes' : 'tasks')}
+        onValueChange={(value) =>
+          setTab(value === 'changes' ? 'changes' : value === 'tasks' ? 'tasks' : 'files')
+        }
         className="flex min-h-0 flex-1 flex-col gap-0"
         inert={openTask !== undefined}
       >
         <PanelHeaderBar>
           <TabsList className="h-7">
+            <TabsTrigger value="files" className="px-2 text-xs">
+              <FolderOpen />
+              {t('files.title')}
+            </TabsTrigger>
             <TabsTrigger value="tasks" className="px-2 text-xs">
               <ListChecks />
               {t('orchestration.tabs.tasks')}
@@ -130,26 +147,36 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-0.5">
-            {USING_MOCK && (
+            {tab !== 'files' && USING_MOCK && (
               <Badge variant="outline" className="mr-1 text-[10px]">
                 {t('orchestration.demo')}
               </Badge>
             )}
-            {import.meta.env.DEV && <DemoToggle />}
+            {tab !== 'files' && import.meta.env.DEV && <DemoToggle />}
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button size="icon-xs" variant="ghost" aria-label={t('orchestration.refresh')} />
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={t(tab === 'files' ? 'files.refresh' : 'orchestration.refresh')}
+                  />
                 }
-                onClick={() => void refresh(workspaceId)}
+                onClick={() =>
+                  void (tab === 'files' ? useFilesStore.getState().refresh() : refresh(workspaceId))
+                }
               >
-                <RefreshCw className={cn(loading && 'animate-spin')} />
+                <RefreshCw
+                  className={cn((tab === 'files' ? filesLoading : loading) && 'animate-spin')}
+                />
               </TooltipTrigger>
-              <TooltipContent side="bottom">{t('orchestration.refresh')}</TooltipContent>
+              <TooltipContent side="bottom">
+                {t(tab === 'files' ? 'files.refresh' : 'orchestration.refresh')}
+              </TooltipContent>
             </Tooltip>
           </div>
         </PanelHeaderBar>
-        {view && error && (
+        {tab !== 'files' && view && error && (
           <p
             role="alert"
             className="shrink-0 border-b bg-destructive/10 px-3 py-1 text-destructive text-xs"
@@ -158,6 +185,9 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
           </p>
         )}
 
+        <TabsContent value="files" className="flex min-h-0 flex-col overflow-hidden">
+          <FilesView store={useFilesStore} workspaceName={workspaceName} />
+        </TabsContent>
         <TabsContent value="tasks" className="flex min-h-0 flex-col overflow-y-auto">
           {notice ??
             (view && run && (

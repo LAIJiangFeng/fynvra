@@ -1,3 +1,4 @@
+import { registerFilesHandlers } from './files';
 import { registerMcpHandlers } from './mcp';
 import { registerNotificationHandlers } from './notifications';
 import { registerOrchestrationHandlers } from './orchestration';
@@ -13,6 +14,7 @@ import { registerWorkspaceHandlers } from './workspaces';
 export function registerIpcHandlers(): void {
   registerSettingsHandlers();
   registerWorkspaceHandlers();
+  registerFilesHandlers();
   registerOrchestrationHandlers();
   registerWindowHandlers();
   registerSessionHandlers();

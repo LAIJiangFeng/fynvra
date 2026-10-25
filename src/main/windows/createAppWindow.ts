@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BrowserWindow, type BrowserWindowConstructorOptions, nativeTheme, shell } from 'electron';
+import { registerFileUnloadGuard } from './fileUnloadGuard';
 
 /** 与 styles/globals.css 的 --background 一致，避免首帧闪白 / 闪黑。 */
 const BACKGROUND = { light: '#ffffff', dark: '#09090b' } as const;
@@ -32,6 +33,7 @@ export function createAppWindow(options: AppWindowOptions): BrowserWindow {
   });
 
   win.once('ready-to-show', () => win.show());
+  registerFileUnloadGuard(win);
   win.on('maximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, true));
   win.on('unmaximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, false));
 

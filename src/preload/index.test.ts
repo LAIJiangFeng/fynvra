@@ -26,6 +26,7 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld).toHaveBeenCalledTimes(1);
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
+      'files',
       'mcp',
       'notifications',
       'orchestration',
@@ -61,6 +62,19 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_ADD);
     await api.workspaces.remove('ws-1');
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_REMOVE, 'ws-1');
+  });
+
+  it('文件浏览出口完整接入，目录和预览只传工作区与条目 id', async () => {
+    expect(Object.keys(api.files).sort()).toEqual(['list', 'read', 'write']);
+    await api.files.list({ workspaceId: 'ws-1' });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_LIST, {
+      workspaceId: 'ws-1',
+    });
+    await api.files.read({ workspaceId: 'ws-1', fileId: 'file-1' });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_READ, {
+      workspaceId: 'ws-1',
+      fileId: 'file-1',
+    });
   });
 
   it('订阅回调拿不到 IpcRendererEvent，取消订阅移除同一个 listener', () => {

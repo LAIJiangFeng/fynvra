@@ -51,6 +51,7 @@ export interface WindowApi {
 export interface FynvraApi {
   settings: SettingsApi;
   workspaces: WorkspacesApi;
+  files: import('./domains/files').FilesApi;
   orchestration: OrchestrationApi;
   window: WindowApi;
   sessions: import('./domains/sessions').SessionsApi;
