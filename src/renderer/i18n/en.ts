@@ -11,6 +11,8 @@ export const en: MessagesShape<typeof zhCN> = {
     progress: 'Update download progress',
     development: 'Updates are disabled in development; use an installed release',
     unsupported: 'Automatic updates are not available for this platform yet',
+    manualInstall:
+      'This Mac build has no Apple Developer ID signature. Download new versions from GitHub Releases and install manually',
     automatic:
       'Installed releases check at startup and every 4 hours; updates download automatically and install after confirmation',
     status: {

@@ -7,8 +7,10 @@ import { useUpdatesStore } from '@/stores/useUpdates';
 import { InlineMessage, SectionHeader } from './common';
 
 export function updateStatusText(state: UpdateState, t: T): string {
-  if (state.status === 'disabled')
+  if (state.status === 'disabled') {
+    if (state.reason === 'manual-install') return t('updates.manualInstall');
     return t(state.reason === 'development' ? 'updates.development' : 'updates.unsupported');
+  }
   return t(`updates.status.${state.status}`, {
     version: state.version ?? '',
     percent: Math.floor(state.percent ?? 0),
@@ -66,7 +68,9 @@ export function UpdateSettings() {
             aria-label={t('updates.progress')}
           />
         )}
-        <p className="text-muted-foreground text-xs">{t('updates.automatic')}</p>
+        {state?.reason !== 'manual-install' && (
+          <p className="text-muted-foreground text-xs">{t('updates.automatic')}</p>
+        )}
         {(error || state?.error) && (
           <InlineMessage tone="error">{error || state?.error}</InlineMessage>
         )}

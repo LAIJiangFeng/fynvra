@@ -4,10 +4,36 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
-import { planRelease, verifyRelease } from '../../../../scripts/release';
+import { planRelease, selectMacSigningMode, verifyRelease } from '../../../../scripts/release';
 
 const sha = 'a'.repeat(40);
 const old = 'b'.repeat(40);
+
+describe('Mac 签名模式', () => {
+  const credentials = {
+    MAC_CSC_LINK: '测试证书',
+    MAC_CSC_KEY_PASSWORD: '测试密码',
+    APPLE_ID: 'test@example.com',
+    APPLE_APP_SPECIFIC_PASSWORD: '测试专用密码',
+    APPLE_TEAM_ID: '测试团队',
+  };
+  it('没有凭证也能打包，完整凭证才启用正式签名公证', () => {
+    expect(selectMacSigningMode({})).toBe('manual');
+    expect(selectMacSigningMode({ MAC_CSC_LINK: '  ' })).toBe('manual');
+    expect(selectMacSigningMode(credentials)).toBe('signed');
+  });
+  it('不将部分缺失的正式签名配置静默降级为手动包，也不泄露凭证值', () => {
+    for (const key of Object.keys(credentials)) {
+      expect(() => selectMacSigningMode({ ...credentials, [key]: '' })).toThrow(key);
+    }
+    expect(() => selectMacSigningMode({ MAC_CSC_LINK: '不应出现在日志的证书值' })).toThrow(
+      'MAC_CSC_KEY_PASSWORD'
+    );
+    expect(() => selectMacSigningMode({ MAC_CSC_LINK: '不应出现在日志的证书值' })).not.toThrow(
+      '不应出现在日志的证书值'
+    );
+  });
+});
 
 describe('自动发布版本规划', () => {
   it('首发高于当前客户端版本，后续按最高稳定标签递增补丁版本', () => {
@@ -96,6 +122,22 @@ describe('发布产物校验', () => {
     expect(files).toContain('SHA256SUMS-mac');
     expect(readFileSync(join(dir, 'SHA256SUMS'), 'utf8')).toBe('Windows 校验和');
     expect(readFileSync(join(dir, 'SHA256SUMS-mac'), 'utf8').trim().split('\n')).toHaveLength(7);
+  });
+  it('Mac 手动包只公布双架构安装文件与校验和，不发布自动更新元数据', async () => {
+    const { dir } = macFixture();
+    for (const arch of ['x64', 'arm64']) rmSync(join(dir, `Fynvra-0.1.1-mac-${arch}.zip.blockmap`));
+    const files = await verifyRelease(dir, '0.1.1', 'mac-manual');
+    expect(files).toEqual([
+      'Fynvra-0.1.1-mac-x64.zip',
+      'Fynvra-0.1.1-mac-x64.dmg',
+      'Fynvra-0.1.1-mac-arm64.zip',
+      'Fynvra-0.1.1-mac-arm64.dmg',
+      'SHA256SUMS-mac',
+    ]);
+    const sums = readFileSync(join(dir, 'SHA256SUMS-mac'), 'utf8');
+    expect(sums.trim().split('\n')).toHaveLength(4);
+    expect(sums).not.toContain('latest-mac.yml');
+    expect(sums).not.toContain('.blockmap');
   });
   it('Mac 缺少架构、ZIP、差分文件或包被损坏时拒绝发布', async () => {
     for (const name of ['Fynvra-0.1.1-mac-arm64.zip', 'Fynvra-0.1.1-mac-x64.zip.blockmap']) {

@@ -17,7 +17,7 @@ class FakeUpdater extends EventEmitter {
   quitAndInstall = vi.fn();
 }
 
-function setup(unavailableReason?: 'development' | 'unsupported') {
+function setup(unavailableReason?: 'development' | 'unsupported' | 'manual-install') {
   const updater = new FakeUpdater();
   const broadcast = vi.fn();
   const notify = vi.fn();
@@ -86,7 +86,7 @@ describe('应用更新服务', () => {
 
   it('开发环境和未支持的平台不请求网络，停止服务清理定时器', async () => {
     vi.useFakeTimers();
-    for (const reason of ['development', 'unsupported'] as const) {
+    for (const reason of ['development', 'unsupported', 'manual-install'] as const) {
       const { service, updater } = setup(reason);
       service.start();
       service.check();

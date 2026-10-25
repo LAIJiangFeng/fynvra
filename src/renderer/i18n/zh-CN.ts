@@ -12,6 +12,8 @@ export const zhCN = {
     progress: '更新下载进度',
     development: '开发模式不检查更新，请使用正式安装版',
     unsupported: '当前平台暂未提供自动更新安装包',
+    manualInstall:
+      '此 Mac 安装包未使用 Apple 开发者证书签名，请从 GitHub Releases 下载新版并手动安装',
     automatic: '正式版启动后自动检查，此后每 4 小时检查一次；自动下载，确认后重启安装',
     status: {
       idle: '将自动检查新版本',

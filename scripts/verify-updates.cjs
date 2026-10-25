@@ -57,7 +57,10 @@ if (!process.versions.electron) {
   const base = process.env.FYNVRA_TEST_BASE;
   app.setPath('userData', join(base, 'user-data'));
   app.getVersion = () => '0.1.0';
+  app.getAppPath = () => runtimeRoot;
   Object.defineProperty(app, 'isPackaged', { get: () => true });
+  const packageInfo = JSON.parse(readFileSync(join(runtimeRoot, 'package.json'), 'utf8'));
+  const manualMac = mac && packageInfo.fynvraMacUpdateMode !== 'signed';
   const { autoUpdater } = createRequire(join(runtimeRoot, 'package.json'))('electron-updater');
   autoUpdater.disableDifferentialDownload = true;
   Object.defineProperty(autoUpdater.app, 'baseCachePath', { get: () => join(base, 'cache') });
@@ -213,6 +216,50 @@ if (!process.versions.electron) {
         await click('button[aria-label="设置"]');
         await clickText('通用', '[role="tab"]');
         await waitFor(`document.body.innerText.includes('当前版本 0.1.0')`, '当前版本');
+        if (manualMac) {
+          await waitFor(stateIs('disabled'), '手动 Mac 安装包不启用自动更新');
+          const result = await evaluate('window.fynvra.updates.check()');
+          assert.equal(result.state.reason, 'manual-install');
+          await waitFor(`document.body.innerText.includes('手动安装')`, '手动安装说明可见');
+          await new Promise((resolve) => setTimeout(resolve, 11_000));
+          assert.equal(requests.length, 0, '手动包不能后台请求原生更新');
+          assert.equal(installCalls, 0);
+          checks.push(
+            '打包后的 Mac 手动版可启动，设置明确提示手动安装，自动与手动检查均不请求更新源'
+          );
+          app.once('will-quit', () => {
+            try {
+              assert.equal(BrowserWindow.getAllWindows().length, 0);
+              assert.equal(activeWorkers.size, 0);
+              assert.equal(errors.length, 0, errors.join('\n'));
+              checks.push('正常退出等待窗口和 agent 收尾');
+              writeFileSync(
+                join(base, 'report.json'),
+                JSON.stringify(
+                  {
+                    ok: true,
+                    platform: process.platform,
+                    arch: process.arch,
+                    runtimeRoot,
+                    mode: 'manual',
+                    checks,
+                    requests,
+                    installCalls,
+                    rendererErrors: errors,
+                  },
+                  null,
+                  2
+                )
+              );
+              clearTimeout(deadline);
+              server.close();
+            } catch (error) {
+              fail(error);
+            }
+          });
+          app.quit();
+          return;
+        }
         await waitFor(stateIs('error'), '自动检查返回服务端故障');
         assert(requests.includes(metadataPath));
         await waitFor(`document.body.innerText.includes('更新失败，请重试')`, '错误可见');

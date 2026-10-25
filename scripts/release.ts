@@ -7,6 +7,22 @@ import { pathToFileURL } from 'node:url';
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 type Version = [number, number, number];
 
+export function selectMacSigningMode(
+  credentials: Record<string, string | undefined>
+): 'manual' | 'signed' {
+  const names = [
+    'MAC_CSC_LINK',
+    'MAC_CSC_KEY_PASSWORD',
+    'APPLE_ID',
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'APPLE_TEAM_ID',
+  ];
+  const missing = names.filter((name) => !credentials[name]?.trim());
+  if (missing.length === names.length) return 'manual';
+  if (missing.length > 0) throw new Error(`Mac 正式签名配置不完整，缺少: ${missing.join(', ')}`);
+  return 'signed';
+}
+
 function parseVersion(value: string): Version {
   if (!STABLE_VERSION.test(value)) throw new Error(`无效的稳定版本: ${value}`);
   const parts = value.split('.').map(Number);
@@ -68,15 +84,16 @@ function record(value: unknown): Record<string, unknown> {
 export async function verifyRelease(
   directory: string,
   version: string,
-  platform: 'win' | 'mac' = 'win'
+  platform: 'win' | 'mac' | 'mac-manual' = 'win'
 ): Promise<string[]> {
   parseVersion(version);
-  if (platform !== 'win' && platform !== 'mac') throw new Error('未知的发布平台');
+  if (platform !== 'win' && platform !== 'mac' && platform !== 'mac-manual')
+    throw new Error('未知的发布平台');
   const { parse } = await import('yaml');
-  const metadataName = platform === 'mac' ? 'latest-mac.yml' : 'latest.yml';
-  const sumsName = platform === 'mac' ? 'SHA256SUMS-mac' : 'SHA256SUMS';
+  const metadataName = platform !== 'win' ? 'latest-mac.yml' : 'latest.yml';
+  const sumsName = platform !== 'win' ? 'SHA256SUMS-mac' : 'SHA256SUMS';
   const installers =
-    platform === 'mac'
+    platform !== 'win'
       ? ['x64', 'arm64'].flatMap((arch) =>
           ['zip', 'dmg'].map((extension) => `Fynvra-${version}-mac-${arch}.${extension}`)
         )
@@ -106,7 +123,13 @@ export async function verifyRelease(
     if (file.sha512 !== sha512 || (metadata.path === file.url && metadata.sha512 !== sha512))
       throw new Error('安装包 SHA512 不匹配');
   }
-  const files = [...installers, ...updatePackages.map((name) => `${name}.blockmap`), metadataName];
+  // 手动安装包可公开下载，但不能被原生更新器当作正式签名更新。
+  const files = [
+    ...installers,
+    ...(platform === 'mac-manual'
+      ? []
+      : [...updatePackages.map((name) => `${name}.blockmap`), metadataName]),
+  ];
   const sums: string[] = [];
   for (const name of files) {
     const path = join(directory, name);
@@ -119,10 +142,20 @@ export async function verifyRelease(
 }
 
 async function main() {
+  if (process.argv[2] === 'mac-mode') {
+    const output = `signing_mode=${selectMacSigningMode(process.env)}\n`;
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
+    process.stdout.write(output);
+    return;
+  }
   if (process.argv[2] === 'verify') {
     const [, , , directory, version, platform = 'win'] = process.argv;
-    if (!directory || !version || (platform !== 'win' && platform !== 'mac'))
-      throw new Error('用法: node scripts/release.ts verify <目录> <版本> [win|mac]');
+    if (
+      !directory ||
+      !version ||
+      (platform !== 'win' && platform !== 'mac' && platform !== 'mac-manual')
+    )
+      throw new Error('用法: node scripts/release.ts verify <目录> <版本> [win|mac|mac-manual]');
     process.stdout.write(`${(await verifyRelease(directory, version, platform)).join('\n')}\n`);
     return;
   }

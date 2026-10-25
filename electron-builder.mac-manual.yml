@@ -1,0 +1,9 @@
+extends: ./electron-builder.yml
+extraMetadata:
+  fynvraMacUpdateMode: manual
+mac:
+  # ad-hoc 签名不需要 Apple 证书，但不提供开发者身份、公证或原生自动更新。
+  identity: '-'
+  forceCodeSigning: false
+  hardenedRuntime: false
+  notarize: false

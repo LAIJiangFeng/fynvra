@@ -24,10 +24,10 @@ Fynvra 是一个开源的本地桌面 AI 编程工作台，基于 Electron、Rea
 | 平台 | 安装包 | 状态 |
 | --- | --- | --- |
 | Windows x64 | NSIS `.exe` | 已接入打包和自动更新，本地打包及隔离更新联调已验证 |
-| macOS Intel / Apple Silicon | 分架构 `.dmg` 与更新用 `.zip` | 已接入双架构流程，正式发布需要 Apple 签名、公证；真机升级仍需验证 |
+| macOS Intel / Apple Silicon | 分架构 `.dmg` 与 `.zip` | 无 Apple 凭证也能打包和手动安装；正式签名、公证版可启用自动更新 |
 | Linux | 现有 AppImage 构建配置 | 尚未纳入自动发布与更新支持 |
 
-Mac 首次安装应将应用从 DMG 拖入「应用程序」后运行，不要直接从只读磁盘映像内使用自动更新。Mac 正式发布的凭证要求见 [发布文档](docs/RELEASE.md)。
+Mac 首次安装应将应用从 DMG 拖入「应用程序」后运行。无 Apple 凭证的包使用 ad-hoc 签名，macOS 可能提示无法验证开发者或拦截启动；确认来源可信后，可按系统提示在「系统设置 → 隐私与安全性」中针对该应用选择「仍要打开」。具体行为取决于 macOS 版本与管理策略，不需要全局关闭系统安全检查。这类包只能手动下载新版并覆盖安装。详见 [发布文档](docs/RELEASE.md)。
 
 ## 从源码启动
 
@@ -77,7 +77,8 @@ pnpm dev
 | `pnpm preview` | 预览已有构建 |
 | `pnpm test:updates` | 在 Windows / Mac 上运行隔离更新联调，须先构建 |
 | `pnpm package:win` | 构建 Windows x64 安装包到 `dist/`，不上传 |
-| `pnpm package:mac` | 在 macOS 上构建双架构签名、公证包，需提供凭证，不上传 |
+| `pnpm package:mac` | 在 macOS 上构建无需 Apple 凭证的双架构手动安装包，不上传 |
+| `pnpm package:mac:signed` | 在 macOS 上构建 Developer ID 签名、公证包，需提供凭证，不上传 |
 
 提交前执行：
 
@@ -92,11 +93,11 @@ pnpm build
 
 ## 自动发布
 
-[Release 工作流](.github/workflows/release.yml) 在 PR 合并到 `main` 后检查代码、计算递增版本、构建 Windows 和 Mac 包，并在全部产物校验通过后公开同一个 GitHub Release。
+[Release 工作流](.github/workflows/release.yml) 在每次推送到 `main` 后检查代码、计算递增版本、构建 Windows 和 Mac 包，并在全部产物校验通过后公开同一个 GitHub Release。PR 合并同样会触发。
 
-- 普通直接 push 不发布；首次发布可以在 Actions 中手动运行 Release 工作流。
+- 普通直接 push 和 PR 合并都会打包发布；也可以在 Actions 中手动运行 Release 工作流。下载入口是 Releases 页的 Assets，不是仅上传源码。
 - 版本写入构建产物与标签，不让发布机器人回写版本提交。
-- Mac 必须配置 Developer ID Application 证书与 Apple 公证凭证；凭证缺失或任一平台失败时，整个 Release 都不会公开。
+- 没有 Apple 凭证时，Mac 仍会生成并上传手动安装包，不阻止 Windows 自动更新；凭证齐全时自动切换为签名、公证模式。部分凭证缺失会明确报错，任何构建或校验失败都不会公开不完整 Release。
 - 客户端只使用正式 Release，开发模式不联网更新；首次使用需要手动安装一个包含更新功能的版本。
 
 签名 Secrets、打包命令、产物校验和首次发布步骤见 [docs/RELEASE.md](docs/RELEASE.md)。

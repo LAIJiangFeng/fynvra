@@ -194,14 +194,17 @@ export interface Message {
 
 ### 7.2 应用更新与发布
 
-- Main 独占 `electron-updater`，正式 Windows x64、macOS x64 / arm64 安装版启动后及每 4 小时检查公开的 `LAIJiangFeng/fynvra` GitHub Releases，发现稳定新版本后自动下载。开发模式和未发布的平台明确显示不可用，不请求更新源。
+- Main 独占 `electron-updater`，Windows x64 和正式签名的 macOS x64 / arm64 安装版启动后及每 4 小时检查公开的 `LAIJiangFeng/fynvra` GitHub Releases，发现稳定新版本后自动下载。开发模式、Mac 手动安装版和未发布的平台明确显示原因，不请求更新源。
 - `updates:state`、`updates:check`、`updates:install` 均无参，Renderer 不传版本、URL、路径或命令；`updates:changed` 只推送带递增序号的状态快照。更新源由打包配置固定，禁止降级和预发行版本。
 - Renderer 的通用设置提供当前版本、检查按钮和进度；全局更新条在下载及下载完成时提醒。下载完成的状态不会被定时检查覆盖，失败可重试。
 - 默认只后台下载，不强制重启、不在退出时偷偷安装。点击安装先确认，再走现有未保存文件确认、agent 关闭和编排落盘，最后调用安装器；取消退出回到待安装状态，不能提前停止服务。
-- 发布工作流只对合并到 main 的 PR（通过 main push 的关联 PR 校验）或 main 上的手动触发执行。检查通过后，以该提交和已有稳定版本标签计算下一版本，打包、校验安装文件与更新元数据，全部上传到草稿 Release 后才公开。重跑不覆盖已公开的版本，不向 main 回写版本提交。
+- 发布工作流对 main push（包括 PR 合并）或 main 上的手动触发执行。检查通过后，以该提交和已有稳定版本标签计算下一版本，打包、校验安装文件与适用的更新元数据，全部上传到草稿 Release 后才公开。重跑不覆盖已公开的版本，不向 main 回写版本提交。
 - 必改层：shared 更新快照与通道、Main 更新服务/退出接线、preload typed 出口、Renderer 更新状态/设置/提醒、electron-builder 与 GitHub Actions。不会修改 agent 协议、角色配置、文件编辑器，也不引入自建更新服务器或客户端 GitHub token。
-- macOS 扩展只改 Main 的平台判断与异步安装失败处理、`electron-builder.yml` / entitlements、`scripts/release.ts` 与更新联调脚本、发布工作流及相关测试文档，不新增 IPC 或改界面交互。分别生成 x64 / arm64 的 DMG、ZIP、ZIP blockmap，单一构建任务汇总 `latest-mac.yml`，签名、公证、双架构文件和 Windows 产物全部校验通过后才公开同一 Release。
+- macOS 分别生成 x64 / arm64 的 DMG、ZIP；签名版还公布 ZIP blockmap 和汇总的 `latest-mac.yml`。两种模式都校验包的架构与文件完整性，正式签名模式额外校验 Apple 团队和公证票据；双架构文件和 Windows 产物全部校验通过后才公开同一 Release。
 - macOS 原生更新器的安装错误可能延迟到窗口和 agent 关闭之后；此时必须提示错误并正常退出，不能留下无窗口进程。用户仅关闭 Mac 窗口不视为退出，不停止 agent 或安装更新。
+- 无证书打包修正：main push（包含 PR 合并）或 main 手动触发都打包并发布下载文件。没有任何 Apple 凭证时生成 ad-hoc 签名的 Mac 手动安装包，不公证；凭证齐全时走 Developer ID 签名、公证，部分配置缺失时明确失败而不静默降级。
+- Mac 包通过受 Main 读取的打包元数据区分手动安装与签名更新；手动版不请求更新源、不启用自动安装，界面说明须手动下载新版。手动版的公开产物不含 `latest-mac.yml` 或 ZIP blockmap，避免被签名版客户端误认作可自动安装更新；Windows 仍正常发布更新元数据。
+- 此修正只涉及打包配置、发布脚本与工作流、Main 更新可用性判断、shared 原因枚举、现有更新提示文案和对应测试文档，不新增 IPC，不改变文件编辑、角色或 Agent 协议。
 
 ## 8. 分阶段
 

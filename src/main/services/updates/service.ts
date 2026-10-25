@@ -18,7 +18,7 @@ export interface UpdaterDriver extends Pick<EventEmitter, 'on' | 'removeListener
 export interface UpdateServiceOptions {
   updater: UpdaterDriver;
   currentVersion: string;
-  unavailableReason?: 'development' | 'unsupported';
+  unavailableReason?: UpdateState['reason'];
   broadcast(state: UpdateState): void;
   notify(version: string): void;
   requestQuit(): void;

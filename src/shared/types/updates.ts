@@ -19,7 +19,7 @@ export interface UpdateState {
   version?: string;
   percent?: number;
   checkedAt?: number;
-  reason?: 'development' | 'unsupported';
+  reason?: 'development' | 'unsupported' | 'manual-install';
   error?: string;
 }
 

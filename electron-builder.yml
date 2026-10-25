@@ -1,5 +1,7 @@
 appId: com.fynvra.app
 productName: Fynvra
+extraMetadata:
+  fynvraMacUpdateMode: signed
 directories:
   # 图标等打包资源；resources/icon.png 为 512x512 占位图
   buildResources: resources
