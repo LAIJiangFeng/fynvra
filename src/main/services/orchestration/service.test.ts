@@ -21,7 +21,13 @@ import {
   type FakeLauncher,
 } from './testing';
 
-const WORKSPACE = { id: 'ws_1', name: 'demo', repoPath: '/repo', defaultBranch: 'main' };
+const WORKSPACE = {
+  id: 'ws_1',
+  name: 'demo',
+  repoPath: '/repo',
+  vcs: 'git' as const,
+  defaultBranch: 'main',
+};
 const TASK: DispatchTaskInput = { title: 'Add toggle', spec: 'S', roleId: 'worker', dependsOn: [] };
 
 let dir: string;

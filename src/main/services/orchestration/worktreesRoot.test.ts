@@ -31,7 +31,7 @@ let base: string;
 let userData: string;
 
 function workspace(id: string, repoPath: string): Workspace {
-  return { id, name: id, repoPath, defaultBranch: 'main' };
+  return { id, name: id, repoPath, vcs: 'git', defaultBranch: 'main' };
 }
 
 /** 父目录是个文件：在它下面建目录必然失败，跨平台模拟「仓库父目录不可写」。 */

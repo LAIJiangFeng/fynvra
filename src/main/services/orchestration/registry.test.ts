@@ -35,8 +35,8 @@ function make(overrides: Partial<OrchestrationRegistryOptions> = {}) {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'fynvra-orchestration-registry-'));
   fake = createFakeExec();
-  WS1 = { id: 'ws_1', name: 'one', repoPath: join(dir, 'repos', 'one'), defaultBranch: 'main' };
-  WS2 = { id: 'ws_2', name: 'two', repoPath: join(dir, 'repos', 'two'), defaultBranch: 'main' };
+  WS1 = { id: 'ws_1', name: 'one', repoPath: join(dir, 'repos', 'one'), vcs: 'git' };
+  WS2 = { id: 'ws_2', name: 'two', repoPath: join(dir, 'repos', 'two'), vcs: 'git' };
 });
 
 afterEach(() => {

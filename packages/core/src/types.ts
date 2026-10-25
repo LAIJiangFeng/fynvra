@@ -39,15 +39,22 @@ export interface Role {
   approvalMode: ApprovalMode;
 }
 
-/** 挂入的本地仓库。 */
+/**
+ * 工作区的版本控制：`git` 是仓库根目录，编排用 worktree；`none` 是普通目录（不是 git 仓库，
+ * 或按普通目录挂入的仓库子目录），worker 直接在目录里改（{@link Dispatch.mode} 为 `in-place`）。
+ */
+export type WorkspaceVcs = 'git' | 'none';
+
+/** 挂入的本地目录。 */
 export interface Workspace {
   id: string;
   /** 展示名。 */
   name: string;
-  /** 仓库根目录绝对路径。 */
+  /** 目录绝对路径（git 工作区是仓库根目录）。 */
   repoPath: string;
-  /** 默认分支（如 `main`）。 */
-  defaultBranch: string;
+  vcs: WorkspaceVcs;
+  /** 默认分支（如 `main`）；普通目录没有。 */
+  defaultBranch?: string;
 }
 
 /** agent 会话的元数据引用；会话正文的权威源是 pi jsonl。 */
@@ -98,13 +105,19 @@ export interface Task {
   dependsOn: string[];
 }
 
-/** 一次权威的任务尝试：一个 worker 会话 + 一个 worktree。`settledAt` 有值即已结算。 */
+/**
+ * 一次权威的任务尝试：一个 worker 会话 + 一个 worktree。`settledAt` 有值即已结算。
+ * 普通目录工作区（`vcs: 'none'`）的尝试 `mode` 为 `in-place`：worker 直接在工作区目录里干活，
+ * 没有 worktree 和分支，`worktreeId` 与 `branch` 为空串。
+ */
 export interface Dispatch {
   id: string;
   taskId: string;
   workerSessionId: string;
   worktreeId: string;
   branch: string;
+  /** 缺省是 worktree 模式。 */
+  mode?: 'in-place';
   /** 开始时间（epoch ms）。 */
   startedAt: number;
   /** 结算时间（epoch ms）；缺省表示仍在进行。 */

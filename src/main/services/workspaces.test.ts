@@ -48,13 +48,20 @@ describe('createWorkspaceService', () => {
         id: 'ws-1',
         name: 'fynvra',
         displayPath: '~/code/fynvra',
+        vcs: 'git',
         defaultBranch: 'main',
       },
     });
     expect(workspaces.list()).toEqual([result.ok && result.workspace]);
     expect(workspaces.list()[0]).not.toHaveProperty('repoPath');
     expect(settings.read().workspaces).toEqual([
-      { id: 'ws-1', name: 'fynvra', repoPath: '/home/dev/code/fynvra', defaultBranch: 'main' },
+      {
+        id: 'ws-1',
+        name: 'fynvra',
+        repoPath: '/home/dev/code/fynvra',
+        vcs: 'git',
+        defaultBranch: 'main',
+      },
     ]);
     expect(workspaces.get('ws-1')?.repoPath).toBe('/home/dev/code/fynvra');
   });

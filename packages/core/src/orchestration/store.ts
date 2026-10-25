@@ -350,6 +350,7 @@ const DISPATCH_SCHEMA: Schema<Dispatch> = {
   workerSessionId: isString,
   worktreeId: isString,
   branch: isString,
+  mode: { optional: (value) => value === 'in-place' },
   startedAt: isNumber,
   settledAt: { optional: isNumber },
   outcome: { optional: isDispatchOutcome },

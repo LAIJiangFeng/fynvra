@@ -106,6 +106,7 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
       'displayPath',
       'id',
       'name',
+      'vcs',
     ]);
   });
 

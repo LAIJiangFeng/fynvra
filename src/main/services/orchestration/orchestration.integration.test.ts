@@ -57,7 +57,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
 
     launcher = createFakeLauncher();
     service = createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, defaultBranch: 'main' },
+      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
       statePath,
       resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
       launcher,
@@ -265,7 +265,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
 
   it('默认位置：worktree 建在仓库同级的 <仓库目录名>-worktrees 下，cleanup 照记录的路径删除', async () => {
     const sibling = createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, defaultBranch: 'main' },
+      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
       statePath: join(root, 'userData', 'orchestration', 'sibling.json'),
       resolveWorktreesRoot: createWorktreesRootResolver({
         fallbackRoot: join(root, 'userData', 'worktrees'),

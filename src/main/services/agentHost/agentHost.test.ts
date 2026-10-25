@@ -84,6 +84,7 @@ function setup(overrides: Partial<AgentHostDeps> = {}) {
     id: 'ws-1',
     name: 'demo',
     repoPath: join(dir, 'repo'),
+    vcs: 'git' as const,
     defaultBranch: 'main',
   };
   const processes: FakeProcess[] = [];

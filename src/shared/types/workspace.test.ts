@@ -22,16 +22,36 @@ describe('parseWorkspaceId（IPC 入参收窄）', () => {
 });
 
 describe('parseWorkspace', () => {
-  const valid = { id: 'ws-1', name: 'fynvra', repoPath: '/repos/fynvra', defaultBranch: 'main' };
+  const valid = {
+    id: 'ws-1',
+    name: 'fynvra',
+    repoPath: '/repos/fynvra',
+    vcs: 'git',
+    defaultBranch: 'main',
+  };
 
   it('只保留契约字段', () => {
     expect(parseWorkspace({ ...valid, extra: 'dropped' })).toEqual(valid);
+  });
+
+  it('没有 vcs 的旧记录是 git 仓库', () => {
+    const { vcs: _vcs, ...legacy } = valid;
+    expect(parseWorkspace(legacy)).toEqual(valid);
+  });
+
+  it('普通目录没有默认分支', () => {
+    const plain = { id: 'ws-2', name: 'notes', repoPath: '/notes', vcs: 'none' };
+    expect(parseWorkspace(plain)).toEqual(plain);
   });
 
   it.each([
     ['缺 repoPath', { ...valid, repoPath: undefined }],
     ['空名称', { ...valid, name: '' }],
     ['非法 id', { ...valid, id: 'a/b' }],
+    ['未知 vcs', { ...valid, vcs: 'hg' }],
+    ['vcs 大小写不同', { ...valid, vcs: 'Git' }],
+    ['默认分支不是字符串', { ...valid, defaultBranch: 7 }],
+    ['默认分支为空串', { ...valid, defaultBranch: '' }],
     ['非对象', 'ws-1'],
   ])('拒绝 %s', (_label, raw) => {
     expect(parseWorkspace(raw)).toBeNull();

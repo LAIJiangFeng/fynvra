@@ -24,7 +24,8 @@ export function createWorkspaceService({
     id: workspace.id,
     name: workspace.name,
     displayPath: toDisplayPath(workspace.repoPath, home, platform),
-    defaultBranch: workspace.defaultBranch,
+    vcs: workspace.vcs,
+    ...(workspace.defaultBranch ? { defaultBranch: workspace.defaultBranch } : {}),
   });
 
   return {
@@ -50,6 +51,7 @@ export function createWorkspaceService({
         id: newId(),
         name: inspection.name,
         repoPath: inspection.root,
+        vcs: 'git',
         defaultBranch: inspection.defaultBranch,
       };
       settings.update((current) => ({

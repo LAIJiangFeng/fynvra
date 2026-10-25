@@ -19,7 +19,13 @@ import {
 import { createWorkerHost } from './workerHost';
 
 const COORDINATOR = 'session_coord';
-const WORKSPACE = { id: 'ws_1', name: 'demo', repoPath: '/repo', defaultBranch: 'main' };
+const WORKSPACE = {
+  id: 'ws_1',
+  name: 'demo',
+  repoPath: '/repo',
+  vcs: 'git' as const,
+  defaultBranch: 'main',
+};
 const ROOT = '/data/worktrees';
 const WORKTREE_PATH = `${ROOT}/ws_1/add-toggle`;
 
