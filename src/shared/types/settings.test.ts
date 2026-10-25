@@ -4,6 +4,7 @@ import {
   createDefaultSettings,
   DEFAULT_PREFERENCES,
   DELETE_ARCHIVED_DAYS,
+  languageOf,
   parsePickWorktreesRootInput,
   parsePreferences,
   parsePreferencesPatch,
@@ -386,5 +387,33 @@ describe('preferences.keybindings（快捷键覆盖表）', () => {
     ['有一条不合法', { 'new-session': 'ctrl+alt+n', send: 7 }],
   ])('parsePreferencesPatch 拒绝 %s', (_label, keybindings) => {
     expect(parsePreferencesPatch({ keybindings })).toBeNull();
+  });
+});
+
+// --- language ---
+describe('preferences.language（界面语言）', () => {
+  it('parsePreferences 保留跟随系统 / 简体中文 / English，没写过时不出现（按跟随系统）', () => {
+    for (const language of ['system', 'zh-CN', 'en'] as const) {
+      expect(parsePreferences({ language })).toEqual({ ...DEFAULT_PREFERENCES, language });
+    }
+    expect(parsePreferences({})).not.toHaveProperty('language');
+    expect(languageOf(parsePreferences({}))).toBe('system');
+    expect(languageOf(parsePreferences({ language: 'en' }))).toBe('en');
+  });
+
+  it('parsePreferences 丢弃不认识的语言', () => {
+    for (const language of ['zh', 'en-US', 'fr', '', null, 1]) {
+      expect(parsePreferences({ language })).not.toHaveProperty('language');
+    }
+  });
+
+  it('parsePreferencesPatch 接受合法的语言，拒绝不认识的', () => {
+    expect(parsePreferencesPatch({ language: 'en' })).toEqual({ language: 'en' });
+    expect(parsePreferencesPatch({ theme: 'dark', language: 'system' })).toEqual({
+      theme: 'dark',
+      language: 'system',
+    });
+    expect(parsePreferencesPatch({ language: 'en-US' })).toBeNull();
+    expect(parsePreferencesPatch({ language: null })).toBeNull();
   });
 });
