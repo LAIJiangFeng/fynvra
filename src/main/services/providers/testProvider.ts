@@ -107,8 +107,10 @@ export async function testProvider(
 /** 非 2xx 的可读错误：状态提示 + 状态码 + 服务端说明（拉取模型列表也用它）。 */
 export function describeHttpError(status: number, body: string): string {
   const detail = serverMessage(body);
-  const suffix = detail ? `：${detail}` : '';
-  return `${statusHint(status)}（HTTP ${status}）${suffix}`;
+  const hint = statusHint(status);
+  return detail
+    ? translate('test.httpErrorDetail', { hint, status, detail })
+    : translate('test.httpError', { hint, status });
 }
 
 function statusHint(status: number): string {

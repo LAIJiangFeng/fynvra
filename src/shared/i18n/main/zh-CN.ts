@@ -82,6 +82,7 @@ export const mainZhCN = {
     errorTitle: '{title} · 出错',
     approvalTitle: '{title} · 待审批',
     labeledTitle: '{title} · {label}',
+    approvalBody: '{title}：{detail}',
     done: '完成',
     failed: '失败',
     question: '提问',
@@ -203,6 +204,7 @@ export const mainZhCN = {
     filtered: '已略过 {count} 个不支持 generateContent 的模型（如嵌入、图像模型）',
     more: '服务端还有更多模型没有返回，这里只列出了第一页',
     tooMany: '模型太多，只列出前 {max} 个',
+    networkReason: '{reason}（{cause}）',
   },
   test: {
     notJson: '返回的不是 JSON，请检查 Base URL 是否指向 API 地址',
@@ -212,6 +214,8 @@ export const mainZhCN = {
     rateLimited: '请求过多或额度不足',
     serverError: '服务端错误，请稍后重试',
     failed: '请求失败',
+    httpError: '{hint}（HTTP {status}）',
+    httpErrorDetail: '{hint}（HTTP {status}）：{detail}',
   },
   importers: {
     scanFailed: '扫描本机配置失败：{error}',

@@ -157,7 +157,9 @@ export function approvalCandidate(
     'approval',
     session,
     translate('notifications.approvalTitle', { title: session.title }),
-    excerpt(`${request.title}：${request.detail}`)
+    excerpt(
+      translate('notifications.approvalBody', { title: request.title, detail: request.detail })
+    )
   );
 }
 

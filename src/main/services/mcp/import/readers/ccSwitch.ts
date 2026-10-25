@@ -53,7 +53,10 @@ export function readCcSwitch(rows: readonly Record<string, unknown>[]): ReaderRe
     servers.push({
       ...server,
       source: 'cc-switch',
-      sourceLabel: apps.length > 0 ? `CC Switch · ${apps.join('、')}` : 'CC Switch',
+      sourceLabel:
+        apps.length > 0
+          ? `CC Switch · ${apps.join(translate('importers.listSeparator'))}`
+          : 'CC Switch',
       enabledInSource: apps.length > 0,
     });
   }

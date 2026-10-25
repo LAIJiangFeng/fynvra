@@ -313,5 +313,7 @@ function endpointOf(url: string): string {
 function networkReason(error: unknown): string {
   const reason = errorMessage(error);
   const cause = error instanceof Error ? error.cause : undefined;
-  return cause instanceof Error ? `${reason}（${cause.message}）` : reason;
+  return cause instanceof Error
+    ? translate('remote.networkReason', { reason, cause: cause.message })
+    : reason;
 }

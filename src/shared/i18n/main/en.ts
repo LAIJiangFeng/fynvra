@@ -88,6 +88,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     errorTitle: '{title} · Error',
     approvalTitle: '{title} · Approval needed',
     labeledTitle: '{title} · {label}',
+    approvalBody: '{title}: {detail}',
     done: 'Done',
     failed: 'Failed',
     question: 'Question',
@@ -209,6 +210,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     filtered: 'Left out {count} models without generateContent (e.g. embedding, image models)',
     more: 'The server has more models; only the first page is listed',
     tooMany: 'Too many models; showing the first {max}',
+    networkReason: '{reason} ({cause})',
   },
   test: {
     notJson: 'The response is not JSON; check that the Base URL points to the API',
@@ -218,6 +220,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     rateLimited: 'Too many requests or quota exceeded',
     serverError: 'Server error; try again later',
     failed: 'Request failed',
+    httpError: '{hint} (HTTP {status})',
+    httpErrorDetail: '{hint} (HTTP {status}): {detail}',
   },
   importers: {
     scanFailed: 'Failed to scan local configs: {error}',
