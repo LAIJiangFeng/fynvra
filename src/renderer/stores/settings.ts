@@ -1,8 +1,12 @@
 import { errorMessage } from '@shared/guards';
-import type {
-  PickWorktreesRootResult,
-  WorktreesRootInfo,
-  WorktreesUsage,
+import {
+  type PickWorktreesRootResult,
+  type SessionPreferences,
+  sessionPreferencesOf,
+  type TimelinePreferences,
+  timelinePreferencesOf,
+  type WorktreesRootInfo,
+  type WorktreesUsage,
 } from '@shared/types/settings';
 import { create } from 'zustand';
 import { createSettingsStore } from './createSettingsStore';
@@ -114,3 +118,63 @@ window.fynvra.settings.onChanged(() => {
     void useWorktreesRootStore.getState().refresh();
   }
 });
+
+// --- sessions / timeline ---
+type GeneralPatch = Partial<SessionPreferences & TimelinePreferences>;
+
+export interface GeneralPreferencesState {
+  /** 生效值：没写过的取默认值；读到 Main 的值之前也是默认值 */
+  sessions: SessionPreferences;
+  timeline: TimelinePreferences;
+  /** 最近一次保存失败的原因 */
+  error: string | null;
+  load(): Promise<void>;
+  /** 先在界面上换上；保存失败时按 Main 重读并记下原因。改了归档天数时让 Main 立即按新设置扫一次 */
+  update(patch: GeneralPatch): Promise<void>;
+}
+
+function resolveGeneral(preferences: GeneralPatch) {
+  return {
+    sessions: sessionPreferencesOf(preferences),
+    timeline: timelinePreferencesOf(preferences),
+  };
+}
+
+/**
+ * 通用页「会话」「时间线」两组偏好：只读写自己的字段（settings:update 按字段合并），
+ * 不经 useSettingsStore 的整块落盘。时间线组件按字段订阅。
+ */
+export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set, get) => {
+  // 只认最新一次读取；保存开始时作废在途的读取（它读到的是改之前的值）
+  let readRequest = 0;
+  let writeRequest = 0;
+  return {
+    ...resolveGeneral({}),
+    error: null,
+
+    async load() {
+      const request = ++readRequest;
+      const result = await safely(() => api.get());
+      if (request === readRequest && result.ok) set(resolveGeneral(result.preferences));
+    },
+
+    async update(patch) {
+      const request = ++writeRequest;
+      readRequest += 1;
+      set((state) => resolveGeneral({ ...state.sessions, ...state.timeline, ...patch }));
+      const result = await safely(() => api.update(patch));
+      if (!result.ok) {
+        set({ error: `保存失败：${result.error}` });
+        await get().load();
+        return;
+      }
+      if (request === writeRequest) set({ ...resolveGeneral(result.preferences), error: null });
+      if (patch.archiveIdleDays !== undefined || patch.deleteArchivedDays !== undefined) {
+        void window.fynvra.sessions.sweep().catch(() => undefined);
+      }
+    },
+  };
+});
+
+void useGeneralPreferencesStore.getState().load();
+window.fynvra.settings.onChanged(() => void useGeneralPreferencesStore.getState().load());

@@ -1,10 +1,26 @@
-import type { WorkspaceWorktreesInfo, WorktreesRootInfo } from '@shared/types/settings';
+import {
+  ARCHIVE_IDLE_DAYS,
+  DELETE_ARCHIVED_DAYS,
+  isArchiveIdleDays,
+  isDeleteArchivedDays,
+  type TimelinePreferences,
+  type WorkspaceWorktreesInfo,
+  type WorktreesRootInfo,
+} from '@shared/types/settings';
 import { FolderOpen, FolderTree, RefreshCw, RotateCcw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { useWorktreesRootStore } from '@/stores/settings';
+import { useGeneralPreferencesStore, useWorktreesRootStore } from '@/stores/settings';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -22,7 +38,10 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(unit === 0 || value >= 10 ? 0 : 1)} ${BYTE_UNITS[unit]}`;
 }
 
-/** 通用：worktree 放在哪（Main 弹框选择并校验，Renderer 不传路径），以及各工作区登记的 worktree 占用。 */
+/**
+ * 通用：worktree 放在哪（Main 弹框选择并校验，Renderer 不传路径）、各工作区登记的 worktree 占用，
+ * 会话的归档与清理，时间线的显示偏好。
+ */
 export function GeneralSettings() {
   const info = useWorktreesRootStore((state) => state.info);
   const measuring = useWorktreesRootStore((state) => state.measuring);
@@ -110,7 +129,156 @@ export function GeneralSettings() {
           </ul>
         )}
       </section>
+
+      <SessionsSection />
+      <TimelineSection />
     </div>
+  );
+}
+
+// --- sessions ---
+const ARCHIVE_IDLE_ITEMS = ARCHIVE_IDLE_DAYS.map((days) => ({
+  value: String(days),
+  label: days === 0 ? '关闭' : `${days} 天`,
+}));
+const DELETE_ARCHIVED_ITEMS = DELETE_ARCHIVED_DAYS.map((days) => ({
+  value: String(days),
+  label: days === 0 ? '永不' : `${days} 天`,
+}));
+
+function SessionsSection() {
+  const sessions = useGeneralPreferencesStore((state) => state.sessions);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const error = useGeneralPreferencesStore((state) => state.error);
+  return (
+    <section>
+      <SectionHeader title="会话" />
+      <ul className="divide-y rounded-lg border">
+        <PreferenceRow label="归档闲置会话" hint="超过天数没有更新的会话移入已归档">
+          {(id) => (
+            <DaysSelect
+              id={id}
+              items={ARCHIVE_IDLE_ITEMS}
+              value={sessions.archiveIdleDays}
+              onChange={(days) => {
+                if (isArchiveIdleDays(days)) void update({ archiveIdleDays: days });
+              }}
+            />
+          )}
+        </PreferenceRow>
+        <PreferenceRow label="归档时清理 worktree" hint="只删已合并且干净的">
+          {(id) => (
+            <Switch
+              id={id}
+              aria-label="归档时清理 worktree"
+              checked={sessions.cleanupWorktreeOnArchive}
+              onCheckedChange={(checked) => void update({ cleanupWorktreeOnArchive: checked })}
+            />
+          )}
+        </PreferenceRow>
+        <PreferenceRow label="删除归档会话" hint="归档超过天数后删除记录，pi 会话文件保留">
+          {(id) => (
+            <DaysSelect
+              id={id}
+              items={DELETE_ARCHIVED_ITEMS}
+              value={sessions.deleteArchivedDays}
+              onChange={(days) => {
+                if (isDeleteArchivedDays(days)) void update({ deleteArchivedDays: days });
+              }}
+            />
+          )}
+        </PreferenceRow>
+      </ul>
+      {error && (
+        <InlineMessage tone="error" className="mt-2">
+          {error}
+        </InlineMessage>
+      )}
+    </section>
+  );
+}
+
+function DaysSelect({
+  id,
+  items,
+  value,
+  onChange,
+}: {
+  id: string;
+  items: { value: string; label: string }[];
+  value: number;
+  onChange: (days: number) => void;
+}) {
+  return (
+    <Select items={items} value={String(value)} onValueChange={(next) => onChange(Number(next))}>
+      <SelectTrigger id={id} size="sm" className="w-28">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// --- timeline ---
+const TIMELINE_ROWS: { key: keyof TimelinePreferences; label: string; hint: string }[] = [
+  {
+    key: 'compactReadonlyTools',
+    label: '精简只读工具',
+    hint: 'read / grep / find / ls 单行显示，连续的合成一条',
+  },
+  { key: 'autoExpandEdits', label: '运行中展开文件改动', hint: 'edit / write 的 diff 与写入内容' },
+  { key: 'autoExpandThinking', label: '思考时展开', hint: '思考结束后收起' },
+  { key: 'foldHistoryTurns', label: '折叠历史轮次', hint: '发送新消息后，之前的轮次折叠成一行' },
+];
+
+function TimelineSection() {
+  const timeline = useGeneralPreferencesStore((state) => state.timeline);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  return (
+    <section>
+      <SectionHeader title="时间线" />
+      <ul className="divide-y rounded-lg border">
+        {TIMELINE_ROWS.map(({ key, label, hint }) => (
+          <PreferenceRow key={key} label={label} hint={hint}>
+            {(id) => (
+              <Switch
+                id={id}
+                aria-label={label}
+                checked={timeline[key]}
+                onCheckedChange={(checked) => void update({ [key]: checked })}
+              />
+            )}
+          </PreferenceRow>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** 一行设置：左边是控件名（说明在悬停提示里），右边是控件；标签经 htmlFor 关联到控件 */
+function PreferenceRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint: string;
+  children: (id: string) => ReactNode;
+}) {
+  const id = useId();
+  return (
+    <li className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
+      <label htmlFor={id} title={hint} className="min-w-0 text-sm">
+        {label}
+      </label>
+      {children(id)}
+    </li>
   );
 }
 
