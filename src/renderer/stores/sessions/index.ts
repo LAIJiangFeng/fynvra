@@ -24,8 +24,9 @@ window.fynvra.notifications.onFocusSession(({ workspaceId, sessionId }) => {
   void useSessionsStore.getState().selectSession(sessionId);
 });
 
-// 屏幕上正看着的会话报给 Main（设置视图盖住时为 null）：窗口聚焦时不弹它的通知
-let viewing: string | null = null;
+// 屏幕上正看着的会话报给 Main（设置视图盖住时为 null）：窗口聚焦时不弹它的通知。
+// 启动时先报一次：页面重新加载后，Main 记着的还是加载前看的那个会话
+let viewing: string | null | undefined;
 function reportViewing(): void {
   const next = useSettingsViewStore.getState().open
     ? null
@@ -34,5 +35,6 @@ function reportViewing(): void {
   viewing = next;
   void window.fynvra.notifications.setViewing(next);
 }
+reportViewing();
 useSessionsStore.subscribe(reportViewing);
 useSettingsViewStore.subscribe(reportViewing);
