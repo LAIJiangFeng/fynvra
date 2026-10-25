@@ -253,6 +253,51 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(existsSync(join(worktree.path, 'base.txt'))).toBe(true);
   });
 
+  it('归档时清理：只删合并过且干净的 worktree（被忽略的 node_modules 不挡），分支一起删', async () => {
+    commitFile(repo, '.gitignore', 'node_modules/\n', 'ignore node_modules');
+    const merged = await dispatch('Merged work');
+    commitFile(merged.worktree.path, 'merged.txt', 'm\n', 'merged work');
+    mkdirSync(join(merged.worktree.path, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(merged.worktree.path, 'node_modules', 'pkg', 'index.js'), 'x');
+    await report(merged.dispatch.workerSessionId);
+    expect(await host.mergeWorktree({ dispatchId: merged.dispatch.id })).toMatchObject({
+      merged: true,
+    });
+
+    const pending = await dispatch('Pending work');
+    commitFile(pending.worktree.path, 'pending.txt', 'p\n', 'pending work');
+    await report(pending.dispatch.workerSessionId);
+    expect(await service.cleanupMergedWorktree(pending.dispatch.workerSessionId)).toEqual({
+      removed: false,
+      reason: 'not-merged',
+    });
+
+    // 合并之后 worker 又提交了一次：保留；撤掉那次提交后才删
+    commitFile(merged.worktree.path, 'late.txt', 'late\n', 'after the merge');
+    expect(await service.cleanupMergedWorktree(merged.dispatch.workerSessionId)).toEqual({
+      removed: false,
+      reason: 'unmerged-commits',
+    });
+    git(merged.worktree.path, 'reset', '-q', '--hard', 'HEAD~1');
+    writeFileSync(join(merged.worktree.path, 'notes.md'), 'scratch');
+    expect(await service.cleanupMergedWorktree(merged.dispatch.workerSessionId)).toEqual({
+      removed: false,
+      reason: 'dirty',
+    });
+    rmSync(join(merged.worktree.path, 'notes.md'));
+
+    expect(await service.cleanupMergedWorktree(merged.dispatch.workerSessionId)).toEqual({
+      removed: true,
+    });
+    expect(existsSync(merged.worktree.path)).toBe(false);
+    expect(git(repo, 'branch', '--list', 'fynvra/merged-work')).toBe('');
+    expect(existsSync(pending.worktree.path)).toBe(true);
+    expect(git(repo, 'branch', '--list', 'fynvra/pending-work')).toContain('fynvra/pending-work');
+    expect((await service.snapshot()).worktrees.map((worktree) => worktree.id)).toEqual([
+      pending.worktree.id,
+    ]);
+  });
+
   it('worker 会话起不来：真实的 worktree 与分支都被回滚', async () => {
     launcher.createWorkerSession.mockResolvedValueOnce({ ok: false, error: 'no model' });
     expect(
