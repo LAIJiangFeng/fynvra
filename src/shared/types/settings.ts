@@ -30,6 +30,9 @@ export interface Preferences {
    * Main 在新建会话、切换模型时写入，`settings:update` 不接受这个字段。
    */
   lastModelByWorkspace?: Record<string, SessionModelRef>;
+  // --- notifications ---
+  /** 桌面通知开关；没配置过时按 {@link DEFAULT_NOTIFICATION_PREFERENCES}（读取用 notificationPreferencesOf） */
+  notifications?: NotificationPreferences;
 }
 
 /**
@@ -131,6 +134,7 @@ export function parsePreferences(raw: unknown): Preferences {
   const worktreesRoot =
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
   const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
+  const notifications = parseNotificationPreferences(record?.notifications);
   return {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
@@ -138,6 +142,7 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(shellPath ? { shellPath } : {}),
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
+    ...(notifications ? { notifications } : {}),
   };
 }
 
@@ -181,6 +186,12 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         if (typeof value !== 'boolean') return null;
         patch.sidePanelOpen = value;
         break;
+      case 'notifications': {
+        const notifications = parseNotificationPreferencesPatch(value);
+        if (!notifications) return null;
+        patch.notifications = notifications;
+        break;
+      }
       default:
         return null;
     }
@@ -211,4 +222,57 @@ export function parsePickWorktreesRootInput(raw: unknown): { reset: boolean } | 
 export function parseWorktreesRootInfoInput(raw: unknown): { usage: boolean } | null {
   const usage = parseFlagInput(raw, 'usage', true);
   return usage === null ? null : { usage };
+}
+
+// --- notifications ---
+
+/** 桌面通知（Task 24）。 */
+export interface NotificationPreferences {
+  /** 总开关 */
+  enabled: boolean;
+  /** 完成 / 失败只弹主 agent 的：worker 的完成、失败不弹，提问与审批照弹 */
+  mainAgentOnly: boolean;
+  /** worker 提问、上报，以及任何会话的审批请求 */
+  askAndApproval: boolean;
+  /** 系统默认提示音 */
+  sound: boolean;
+}
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: Readonly<NotificationPreferences> = Object.freeze({
+  enabled: true,
+  mainAgentOnly: true,
+  askAndApproval: true,
+  sound: true,
+});
+
+const NOTIFICATION_KEYS = Object.keys(
+  DEFAULT_NOTIFICATION_PREFERENCES
+) as (keyof NotificationPreferences)[];
+
+/** 生效的通知设置（副本）：settings.json 里没有这一块时为默认值。 */
+export function notificationPreferencesOf(preferences: Preferences): NotificationPreferences {
+  return { ...(preferences.notifications ?? DEFAULT_NOTIFICATION_PREFERENCES) };
+}
+
+/** 宽松收窄：不是对象时 null；逐项取布尔值，缺失或非法的项用默认值，未知键丢弃。 */
+function parseNotificationPreferences(raw: unknown): NotificationPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const parsed = { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  for (const key of NOTIFICATION_KEYS) {
+    const value = record[key];
+    if (typeof value === 'boolean') parsed[key] = value;
+  }
+  return parsed;
+}
+
+/** `settings:update` 里的 notifications：整块替换，所以四项都得是布尔值，有未知键就作废。 */
+function parseNotificationPreferencesPatch(raw: unknown): NotificationPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const keys = Object.keys(record);
+  if (keys.length !== NOTIFICATION_KEYS.length) return null;
+  if (!keys.every((key) => (NOTIFICATION_KEYS as string[]).includes(key))) return null;
+  if (!NOTIFICATION_KEYS.every((key) => typeof record[key] === 'boolean')) return null;
+  return parseNotificationPreferences(record);
 }

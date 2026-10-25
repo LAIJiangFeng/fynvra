@@ -5,6 +5,7 @@ import type {
   WorktreesUsage,
 } from '@shared/types/settings';
 import { create } from 'zustand';
+import { createNotificationSettingsStore } from './createNotificationSettingsStore';
 import { createSettingsStore } from './createSettingsStore';
 
 export type { SettingsState } from './createSettingsStore';
@@ -112,5 +113,16 @@ window.fynvra.settings.onChanged(() => {
   void useSettingsStore.persist.rehydrate();
   if (useWorktreesRootStore.getState().info !== null) {
     void useWorktreesRootStore.getState().refresh();
+  }
+});
+
+// --- notifications ---
+
+/** 设置页「通知」：总开关、仅主 agent 完成、提问与审批、声音，与测试通知。 */
+export const useNotificationSettingsStore = createNotificationSettingsStore(window.fynvra);
+
+window.fynvra.settings.onChanged(() => {
+  if (useNotificationSettingsStore.getState().preferences !== null) {
+    void useNotificationSettingsStore.getState().refresh();
   }
 });

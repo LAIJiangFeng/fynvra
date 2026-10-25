@@ -1,4 +1,5 @@
 import {
+  Bell,
   Boxes,
   type LucideIcon,
   Palette,
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { McpSettings } from './McpSettings';
+import { NotificationSettings } from './NotificationSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
@@ -33,6 +35,7 @@ interface SectionSpec {
 
 const SECTIONS: SectionSpec[] = [
   { value: 'general', label: '通用', icon: SlidersHorizontal, Component: GeneralSettings },
+  { value: 'notifications', label: '通知', icon: Bell, Component: NotificationSettings },
   { value: 'providers', label: '模型服务', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', label: '角色', icon: UserCog, Component: RolesSettings, wide: true },
   { value: 'skills', label: '技能', icon: Sparkles, Component: SkillsSettings },

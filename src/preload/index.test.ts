@@ -27,6 +27,7 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
       'mcp',
+      'notifications',
       'orchestration',
       'providers',
       'roles',
