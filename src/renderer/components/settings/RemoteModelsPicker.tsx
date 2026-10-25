@@ -300,7 +300,7 @@ function RemoteModelRow({
       {/* 整行都是标签：点哪里都能勾选；Checkbox 的 onClick 会 preventDefault，不会被标签再触发一次 */}
       <label
         htmlFor={id}
-        title={named ? `${model.id} (${model.name})` : model.id}
+        title={named ? t('common.withNote', { text: model.id, note: model.name }) : model.id}
         className={cn(
           'flex items-center gap-2.5 px-3 py-1.5',
           model.alreadyAdded ? 'cursor-default opacity-60' : 'cursor-pointer hover:bg-accent/50'

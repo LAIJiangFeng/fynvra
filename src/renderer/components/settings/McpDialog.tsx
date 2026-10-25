@@ -160,6 +160,8 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
           </Field>
           <SecretRowsEditor
             label="settings.mcp.env"
+            item="settings.mcp.envItem"
+            empty="settings.mcp.noEnv"
             keyPlaceholder="GITHUB_TOKEN"
             rows={draft.env}
             onChange={(env) => update({ env })}
@@ -179,6 +181,8 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
           </Field>
           <SecretRowsEditor
             label="settings.mcp.header"
+            item="settings.mcp.headerItem"
+            empty="settings.mcp.noHeaders"
             keyPlaceholder="Authorization"
             rows={draft.headers}
             onChange={(headers) => update({ headers })}
@@ -212,24 +216,29 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
 /** 键值行编辑器。已保存的键名只读（改名请删除后新增），值输入框留空表示沿用。 */
 function SecretRowsEditor({
   label,
+  item,
+  empty,
   keyPlaceholder,
   rows,
   onChange,
 }: {
+  /** 分组标题、单项的叫法（读屏标签）、空态 */
   label: MessageId;
+  item: MessageId;
+  empty: MessageId;
   keyPlaceholder: string;
   rows: SecretRow[];
   onChange: (rows: SecretRow[]) => void;
 }) {
   const t = useT();
-  const name = t(label);
+  const name = t(item);
   const patch = (rowId: number, changes: Partial<SecretRow>) =>
     onChange(rows.map((row) => (row.rowId === rowId ? { ...row, ...changes } : row)));
 
   return (
     <div className="grid min-w-0 gap-2">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">{name}</span>
+        <span className="font-medium text-sm">{t(label)}</span>
         <Button
           type="button"
           variant="ghost"
@@ -240,9 +249,7 @@ function SecretRowsEditor({
           {t('common.add')}
         </Button>
       </div>
-      {rows.length === 0 && (
-        <p className="text-muted-foreground text-xs">{t('settings.mcp.none', { label: name })}</p>
-      )}
+      {rows.length === 0 && <p className="text-muted-foreground text-xs">{t(empty)}</p>}
       {rows.map((row) => (
         <div key={row.rowId} className="flex min-w-0 gap-2">
           <Input

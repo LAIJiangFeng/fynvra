@@ -89,7 +89,7 @@ export function draftToMcpInput(draft: McpDraft): FormResult<{ input: McpUpsertI
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
-    const env = rowsToFields(draft.env, translate('settings.mcp.env'));
+    const env = rowsToFields(draft.env, translate('settings.mcp.envItem'));
     if (typeof env === 'string') return { ok: false, error: env };
     return {
       ok: true,
@@ -106,7 +106,7 @@ export function draftToMcpInput(draft: McpDraft): FormResult<{ input: McpUpsertI
 
   const url = draft.url.trim();
   if (!url) return { ok: false, error: translate('settings.mcp.urlRequired') };
-  const headers = rowsToFields(draft.headers, translate('settings.mcp.header'));
+  const headers = rowsToFields(draft.headers, translate('settings.mcp.headerItem'));
   if (typeof headers === 'string') return { ok: false, error: headers };
   return {
     ok: true,
