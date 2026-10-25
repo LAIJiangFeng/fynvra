@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createMcpApi } from './domains/mcp';
+import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
 import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
@@ -55,6 +56,7 @@ const api: FynvraApi = {
   roles: createRolesApi(ipcRenderer, subscribe),
   skills: createSkillsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
+  notifications: createNotificationsApi(ipcRenderer, subscribe),
 };
 
 contextBridge.exposeInMainWorld('fynvra', api);

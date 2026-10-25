@@ -1,4 +1,5 @@
 import { registerMcpHandlers } from './mcp';
+import { registerNotificationHandlers } from './notifications';
 import { registerOrchestrationHandlers } from './orchestration';
 import { registerProviderHandlers } from './providers';
 import { registerRoleHandlers } from './roles';
@@ -19,4 +20,5 @@ export function registerIpcHandlers(): void {
   registerRoleHandlers();
   registerSkillHandlers();
   registerMcpHandlers();
+  registerNotificationHandlers();
 }

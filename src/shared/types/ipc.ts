@@ -109,6 +109,14 @@ export const IPC_CHANNELS = {
   MCP_IMPORT: 'mcp:import',
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
+
+  // --- notifications ---
+  /** 立即弹一条测试通知（不看聚焦与启动静默期），无参 */
+  NOTIFICATIONS_TEST: 'notifications:test',
+  /** Renderer 报告窗口里正看着的会话（`{ sessionId: string | null }`）：窗口聚焦时这个会话的通知不弹 */
+  NOTIFICATIONS_SET_VIEWING: 'notifications:set-viewing',
+  /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
+  SESSIONS_FOCUS: 'sessions:focus',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
