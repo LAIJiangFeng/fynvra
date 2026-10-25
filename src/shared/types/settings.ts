@@ -138,7 +138,7 @@ export function isDeleteArchivedDays(value: unknown): value is DeleteArchivedDay
 }
 
 /** 生效的会话偏好：没写过的取默认值 */
-export function sessionPreferencesOf(preferences: Preferences): SessionPreferences {
+export function sessionPreferencesOf(preferences: Partial<SessionPreferences>): SessionPreferences {
   const defaults = DEFAULT_SESSION_PREFERENCES;
   return {
     archiveIdleDays: preferences.archiveIdleDays ?? defaults.archiveIdleDays,
@@ -177,7 +177,9 @@ export const DEFAULT_TIMELINE_PREFERENCES: Readonly<TimelinePreferences> = Objec
 });
 
 /** 生效的时间线偏好：没写过的取默认值 */
-export function timelinePreferencesOf(preferences: Preferences): TimelinePreferences {
+export function timelinePreferencesOf(
+  preferences: Partial<TimelinePreferences>
+): TimelinePreferences {
   const resolved = { ...DEFAULT_TIMELINE_PREFERENCES };
   for (const flag of TIMELINE_FLAGS) resolved[flag] = preferences[flag] ?? resolved[flag];
   return resolved;
