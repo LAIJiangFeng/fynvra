@@ -1,5 +1,10 @@
 import { isThinkingLevel } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
+import {
+  type KeybindingOverrides,
+  parseKeybindingOverrides,
+  parseKeybindingPatch,
+} from '../keybindings';
 import type { SessionModelRef } from './chat';
 import type { IpcResult } from './ipc';
 import { parseWorkspace, parseWorkspaceId, type Workspace } from './workspace';
@@ -30,6 +35,9 @@ export interface Preferences {
    * Main 在新建会话、切换模型时写入，`settings:update` 不接受这个字段。
    */
   lastModelByWorkspace?: Record<string, SessionModelRef>;
+  // --- keybindings ---
+  /** 快捷键覆盖表：只存改过的动作，值是规整过的按键串（`mod` 原样保留，Renderer 按平台展开） */
+  keybindings?: KeybindingOverrides;
 }
 
 /**
@@ -131,6 +139,8 @@ export function parsePreferences(raw: unknown): Preferences {
   const worktreesRoot =
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
   const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
+  // --- keybindings ---
+  const keybindings = parseKeybindingOverrides(record?.keybindings);
   return {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
@@ -138,6 +148,8 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(shellPath ? { shellPath } : {}),
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
+    // --- keybindings ---
+    ...(keybindings ? { keybindings } : {}),
   };
 }
 
@@ -181,6 +193,13 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         if (typeof value !== 'boolean') return null;
         patch.sidePanelOpen = value;
         break;
+      // --- keybindings ---：整张覆盖表一起换，空表是全部重置
+      case 'keybindings': {
+        const keybindings = parseKeybindingPatch(value);
+        if (!keybindings) return null;
+        patch.keybindings = keybindings;
+        break;
+      }
       default:
         return null;
     }
