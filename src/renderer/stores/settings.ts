@@ -5,6 +5,8 @@ import type {
   WorktreesUsage,
 } from '@shared/types/settings';
 import { create } from 'zustand';
+import { KEY_PLATFORM } from '@/lib/keybindings/platform';
+import { createKeybindingsStore } from '@/lib/keybindings/store';
 import { createSettingsStore } from './createSettingsStore';
 
 export type { SettingsState } from './createSettingsStore';
@@ -113,4 +115,12 @@ window.fynvra.settings.onChanged(() => {
   if (useWorktreesRootStore.getState().info !== null) {
     void useWorktreesRootStore.getState().refresh();
   }
+});
+
+// --- keybindings ---
+/** 快捷键：覆盖表在 preferences.keybindings，改键立即生效 */
+export const useKeybindingsStore = createKeybindingsStore(window.fynvra.settings, KEY_PLATFORM);
+void useKeybindingsStore.getState().load();
+window.fynvra.settings.onChanged(() => {
+  void useKeybindingsStore.getState().load();
 });

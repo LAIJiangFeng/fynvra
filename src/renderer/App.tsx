@@ -5,6 +5,7 @@ import { SidePanel } from '@/components/layout/SidePanel';
 import { TitleBar } from '@/components/layout/TitleBar';
 import { SettingsView } from '@/components/settings/SettingsView';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { KeybindingProvider } from '@/lib/keybindings';
 import { useSettingsStore } from '@/stores/settings';
 
 /** 应用壳：自绘标题栏 + 三栏（工作区 / 会话侧栏、主区域、可折叠右侧面板）。 */
@@ -23,6 +24,7 @@ export function App() {
       </div>
       <NoticeDialog />
       <SettingsView />
+      <KeybindingProvider />
     </TooltipProvider>
   );
 }
