@@ -1,23 +1,14 @@
-import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, type LucideIcon, TriangleAlert } from 'lucide-react';
 import type * as React from 'react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { INLINE_WARNING_LIMIT, warningLine } from './warnings';
 
-/** 设置页里一组内容的标题：标题 + 说明，右侧放操作按钮。 */
-export function SectionHeader({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
+/** 设置页里一组内容的标题，右侧放操作按钮。只有标题，不加说明。 */
+export function SectionHeader({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div className="min-w-0">
-        <h3 className="font-medium">{title}</h3>
-        {description && <p className="text-muted-foreground text-sm">{description}</p>}
-      </div>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h3 className="min-w-0 font-medium">{title}</h3>
       {children && <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>}
     </div>
   );
@@ -67,6 +58,39 @@ export function InlineMessage({
     >
       {children}
     </p>
+  );
+}
+
+/**
+ * 导入弹窗与拉取模型列表底部的告警：一行一条「主体：原因」，整句在悬停提示里；
+ * 超过 {@link INLINE_WARNING_LIMIT} 条时折叠成「N 条提示」，默认收起。
+ */
+export function WarningList({ warnings }: { warnings: readonly string[] }) {
+  if (warnings.length === 0) return null;
+  const list = (
+    <ul className="grid gap-1">
+      {warnings.map((warning) => (
+        <li
+          key={warning}
+          title={warning}
+          className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs"
+        >
+          <TriangleAlert className="size-3.5 shrink-0 text-amber-500" />
+          <span className="min-w-0 truncate">{warningLine(warning)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+  if (warnings.length <= INLINE_WARNING_LIMIT) return list;
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="group flex items-center gap-1.5 rounded text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
+        <TriangleAlert className="size-3.5 shrink-0 text-amber-500" />
+        {warnings.length} 条提示
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1 max-h-32 overflow-y-auto">{list}</CollapsibleContent>
+    </Collapsible>
   );
 }
 

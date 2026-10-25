@@ -43,10 +43,7 @@ export function ProvidersSettings() {
 
   return (
     <section>
-      <SectionHeader
-        title="模型服务"
-        description="角色与会话从这里选用模型。API Key 只保存在本机，界面上只显示末 4 位。"
-      >
+      <SectionHeader title="模型服务">
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button size="sm" />}>
             <Plus />
@@ -76,11 +73,7 @@ export function ProvidersSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && providers.length === 0 ? (
-        <EmptyState
-          icon={Boxes}
-          title="还没有模型服务"
-          description="从本机的 Claude Code、Codex、CC Switch 导入，或添加 Anthropic、OpenAI、Google、任意 OpenAI 兼容服务，角色和会话才能选用模型。"
-        >
+        <EmptyState icon={Boxes} title="还没有模型服务">
           <Button size="sm" onClick={openImport}>
             <HardDriveDownload />
             从本机导入
@@ -193,7 +186,7 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {provider.models.length === 0 ? (
-          <span className="text-muted-foreground text-xs">还没有模型，点「编辑」添加</span>
+          <span className="text-muted-foreground text-xs">还没有模型</span>
         ) : (
           provider.models.slice(0, MAX_MODEL_BADGES).map((model) => (
             <Badge key={model.id} variant="outline" title={model.id}>
@@ -220,7 +213,7 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
         </Button>
         {confirmingRemove ? (
           <>
-            <span className="text-muted-foreground text-xs">引用它的角色需要重新选择模型。</span>
+            <span className="text-muted-foreground text-xs">引用它的角色需重选模型</span>
             <Button size="sm" variant="destructive" onClick={() => void confirmRemove()}>
               确认删除
             </Button>

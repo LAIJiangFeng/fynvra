@@ -9,13 +9,14 @@ import {
   type ToolPolicy,
 } from '@fynvra/core';
 import {
+  APPROVAL_MODE_LABELS,
   type ModelProviderOption,
   THINKING_LEVEL_HINTS,
   THINKING_LEVEL_LABELS,
-  thinkingSourceNote,
 } from '@shared/types/chat';
 import { Copy, Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
+import { ThinkingSourceBadge } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,24 +46,21 @@ import {
 import { roleToJson } from './roleTransfer';
 import { maskSecrets } from './secretMask';
 
+/** 选项只留名称 */
 const TOOL_POLICY_LABELS: Record<ToolPolicy, string> = {
-  all: '全部工具（读写文件、执行命令）',
-  readonly: '只读（读文件、搜索、git 只读）',
-  orchestrator: '编排（只读 + 派活工具）',
+  all: '全部工具',
+  readonly: '只读',
+  orchestrator: '编排',
 };
-const APPROVAL_LABELS: Record<ApprovalMode, string> = {
-  supervised: '每次工具调用都确认',
-  'auto-edits': '自动放行文件编辑',
-  full: '全部自动放行',
-};
-const toItems = <T extends string>(labels: Record<T, string>) =>
+const toItems = <T extends string>(labels: Readonly<Record<T, string>>) =>
   (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
 const TOOL_POLICY_ITEMS = toItems(TOOL_POLICY_LABELS);
-const APPROVAL_ITEMS = toItems(APPROVAL_LABELS);
+/** 与输入框的审批胶囊同名 */
+const APPROVAL_ITEMS = toItems<ApprovalMode>(APPROVAL_MODE_LABELS);
 const FOLLOW_SESSION = '跟随会话模型';
 const UNKNOWN_THINKING_HINTS = {
-  loading: '正在读取这个模型的思考档位…',
-  unavailable: '服务已停用、没填 API Key 或模型已删除，读不到这个模型的思考档位',
+  loading: '读取中…',
+  unavailable: <span title="服务已停用、没填 API Key 或模型已删除">读不到这个模型的档位</span>,
 } as const;
 
 /** 模型下拉的值：`<服务 id>:<模型 id>`（服务 id 是 slug，不含冒号）；空串表示不固定模型。 */
@@ -156,7 +154,7 @@ export function RoleEditor({
     >
       {readOnly && (
         <InlineMessage className="rounded-md border bg-muted/50 px-3 py-2">
-          内置角色只读。需要调整时点「复制为新角色」，在副本上修改。
+          内置角色只读
         </InlineMessage>
       )}
 
@@ -169,11 +167,7 @@ export function RoleEditor({
             onChange={(event) => update({ ...draft, name: event.target.value })}
           />
         </Field>
-        <Field
-          label="ID"
-          htmlFor={`${id}-role-id`}
-          hint={isNew ? `保存为 roles/${draft.id || '<id>'}.json，之后不可修改` : undefined}
-        >
+        <Field label="ID" htmlFor={`${id}-role-id`} hint={isNew ? '保存后不可修改' : undefined}>
           <Input
             id={`${id}-role-id`}
             value={draft.id}
@@ -195,11 +189,7 @@ export function RoleEditor({
         />
       </Field>
 
-      <Field
-        label="系统提示词"
-        htmlFor={`${id}-prompt`}
-        hint="追加在默认系统提示词之后；随角色文件保存，不进 settings.json。"
-      >
+      <Field label="系统提示词" htmlFor={`${id}-prompt`} hint="追加在默认系统提示词之后">
         <Textarea
           id={`${id}-prompt`}
           rows={10}
@@ -414,7 +404,7 @@ function ModelField({
         providers.length === 0
           ? '先在「模型服务」里添加服务'
           : unsupported
-            ? '这个模型不支持推理，不设思考档位'
+            ? '不支持推理'
             : undefined
       }
     >
@@ -461,7 +451,7 @@ function ModelField({
 }
 
 /**
- * 思考档位：只列所选模型自己的档位（官方等级名，悬停显示中文说明），推断来的在下方注明按哪个模型推断；
+ * 思考档位：只列所选模型自己的档位（官方等级名，悬停显示中文叫法），推断 / 兜底来的在标签旁标徽标；
  * 没选模型时跟随会话模型，读不到档位时只显示不能选
  */
 function ThinkingField({
@@ -492,7 +482,7 @@ function ThinkingField({
       state.kind === 'follow-session'
         ? undefined
         : state.reason === 'failed'
-          ? `读取思考档位失败：${error ?? ''}`
+          ? `读取档位失败：${error ?? ''}`
           : UNKNOWN_THINKING_HINTS[state.reason];
     return (
       <Field label="思考档位" htmlFor={id} hint={hint}>
@@ -507,7 +497,15 @@ function ThinkingField({
 
   const items = thinkingOptions(state.levels, state.defaultThinking);
   return (
-    <Field label="思考档位" htmlFor={id} hint={thinkingSourceNote(state.source)}>
+    <Field
+      label={
+        <span className="inline-flex items-center gap-1.5">
+          思考档位
+          <ThinkingSourceBadge source={state.source} />
+        </span>
+      }
+      htmlFor={id}
+    >
       <Select
         items={items}
         value={state.value}
@@ -555,14 +553,7 @@ function SkillToggles(props: {
     ...(skill.description ? { description: skill.description } : {}),
     inactive: !skill.enabled,
   }));
-  return (
-    <ToggleList
-      label="技能"
-      emptyHint="还没有登记技能：在「技能」里扫描或添加"
-      items={items}
-      {...props}
-    />
-  );
+  return <ToggleList label="技能" emptyHint="还没有技能" items={items} {...props} />;
 }
 
 function McpToggles(props: {
@@ -577,17 +568,10 @@ function McpToggles(props: {
     description: maskSecrets(server.url ?? [server.command, ...(server.args ?? [])].join(' ')),
     inactive: !server.enabled,
   }));
-  return (
-    <ToggleList
-      label="MCP 服务器"
-      emptyHint="还没有 MCP 服务器：在「MCP」里添加或导入"
-      items={items}
-      {...props}
-    />
-  );
+  return <ToggleList label="MCP 服务器" emptyHint="还没有 MCP 服务器" items={items} {...props} />;
 }
 
-/** 多选列表：每项一个开关。角色引用了但注册表里已没有的 id 也列出来，方便取消。 */
+/** 多选列表：每项一个开关。角色引用了但注册表里已没有的 id 也列出来（标「已移除」），方便取消。 */
 function ToggleList({
   label,
   emptyHint,
@@ -606,9 +590,7 @@ function ToggleList({
   const known = new Set(items.map((item) => item.id));
   const rows: ToggleItem[] = [
     ...items,
-    ...selected
-      .filter((id) => !known.has(id))
-      .map((id) => ({ id, name: id, description: '已从注册表移除', missing: true })),
+    ...selected.filter((id) => !known.has(id)).map((id) => ({ id, name: id, missing: true })),
   ];
   const toggle = (id: string, on: boolean) =>
     onChange(on ? [...selected, id] : selected.filter((existing) => existing !== id));

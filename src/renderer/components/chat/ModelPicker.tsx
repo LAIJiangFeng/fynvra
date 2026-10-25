@@ -4,12 +4,13 @@ import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
 import {
   type ModelProviderOption,
   type SessionModelRef,
-  THINKING_LEVEL_HINTS,
   type ThinkingSource,
+  thinkingSourceBadge,
   thinkingSourceNote,
 } from '@shared/types/chat';
 import { Check, ChevronsUpDown, Cpu, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select,
@@ -60,6 +61,12 @@ export function useSessionModel(sessionId: string) {
     label: modelLabel(providers, session?.model, thinking),
   };
 }
+
+/** 运行中点开模型胶囊时的提示 */
+const BUSY_HINT = '运行中不能切换模型';
+/** 没有可用服务时只写一句，怎么补放在悬停提示里；新建会话弹层同用 */
+export const NO_PROVIDERS = '还没有可用的模型服务';
+export const NO_PROVIDERS_HINT = '在「设置 → 模型服务」里启用一个填写了 API Key 的服务';
 
 /**
  * 输入框左下角的模型胶囊：「服务 · 模型 · 思考档位」，点开是可搜索的模型列表和当前模型自己的档位。
@@ -112,13 +119,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         render={
           <button
             type="button"
-            title={
-              busy
-                ? '会话正在运行，等本轮结束再切换模型'
-                : thinking
-                  ? `切换模型（思考档位 ${thinking}：${THINKING_LEVEL_HINTS[thinking]}）`
-                  : '切换模型'
-            }
+            title={busy ? BUSY_HINT : '切换模型'}
             className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground"
           />
         }
@@ -185,31 +186,33 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
               })}
             </div>
           ))}
-          {shown.length === 0 && (
-            <p className="px-2 py-6 text-center text-muted-foreground text-xs">
-              {providers.length === 0
-                ? '还没有可用的模型服务：在「设置 → 模型服务」里启用一个填写了 API Key 的服务'
-                : '没有匹配的模型'}
-            </p>
-          )}
+          {shown.length === 0 &&
+            (providers.length === 0 ? (
+              <p
+                title={NO_PROVIDERS_HINT}
+                className="px-2 py-6 text-center text-muted-foreground text-xs"
+              >
+                {NO_PROVIDERS}
+              </p>
+            ) : (
+              <p className="px-2 py-6 text-center text-muted-foreground text-xs">没有匹配的模型</p>
+            ))}
         </div>
         {current && current.model.thinkingLevels.length > 0 && (
-          <div className="grid shrink-0 gap-1 border-t px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className="shrink-0 text-muted-foreground text-xs">思考档位</span>
-              <ThinkingLevelPicker
-                levels={current.model.thinkingLevels}
-                value={thinking}
-                disabled={busy}
-                onChange={(level) => pick(chooseModel(current, level))}
-              />
-            </div>
-            <ThinkingSourceNote source={current.model.source} />
+          <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
+            <span className="shrink-0 text-muted-foreground text-xs">思考档位</span>
+            <ThinkingSourceBadge source={current.model.source} />
+            <ThinkingLevelPicker
+              levels={current.model.thinkingLevels}
+              value={thinking}
+              disabled={busy}
+              onChange={(level) => pick(chooseModel(current, level))}
+            />
           </div>
         )}
         {(busy || optionsError) && (
           <p className="shrink-0 border-t px-3 py-2 text-muted-foreground text-xs">
-            {busy ? '会话正在运行，等本轮结束再切换模型' : `读取可选模型失败：${optionsError}`}
+            {busy ? BUSY_HINT : `读取模型失败：${optionsError}`}
           </p>
         )}
       </PopoverContent>
@@ -217,13 +220,17 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** 档位旁的小字：推断来的写「按 <id> 推断」，兜底的说明目录里没有；目录里有的不显示 */
-export function ThinkingSourceNote({ source }: { source: ThinkingSource | undefined }) {
-  const note = thinkingSourceNote(source);
-  return note ? <p className="text-[11px] text-muted-foreground">{note}</p> : null;
+/** 档位旁的徽标：推断来的标「推断」、兜底的标「兜底」，悬停写明按什么得来；目录里有的不显示 */
+export function ThinkingSourceBadge({ source }: { source: ThinkingSource | undefined }) {
+  const badge = thinkingSourceBadge(source);
+  return badge ? (
+    <Badge variant="outline" title={thinkingSourceNote(source)}>
+      {badge}
+    </Badge>
+  ) : null;
 }
 
-/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels），官方等级名，悬停显示中文说明 */
+/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels），官方等级名，悬停显示中文叫法 */
 export function ThinkingLevelPicker({
   levels,
   value,

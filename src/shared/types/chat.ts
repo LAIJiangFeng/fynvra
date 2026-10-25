@@ -70,18 +70,11 @@ export interface SessionEventEnvelope {
   event: FynvraSessionEvent;
 }
 
-/** 审批档位的显示名：输入框胶囊、档位列表与状态栏共用 */
+/** 审批档位的显示名：输入框胶囊、档位列表、状态栏与角色编辑器共用 */
 export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
   supervised: '全程审批',
   'auto-edits': '自动接受编辑',
   full: '完全放行',
-};
-
-/** 审批档位的说明：档位列表里每项的第二行（规则同 agent-runtime 的审批门） */
-export const APPROVAL_MODE_HINTS: Readonly<Record<ApprovalMode, string>> = {
-  supervised: '执行命令、写入 / 编辑文件、调用 MCP 工具前都先问你',
-  'auto-edits': '写入 / 编辑文件直接放行；执行命令、调用 MCP 工具前仍先问你',
-  full: '不再询问；rm -rf、git push、git reset --hard、publish 等保护底线仍要你确认',
 };
 
 /** 输入框里 Shift+Tab 的下一档：supervised → auto-edits → full → supervised */
@@ -119,7 +112,7 @@ export interface ModelThinkingCapability {
   thinkingLevels: ThinkingLevel[];
   /** 模型的默认档位（pi 的默认 medium 按模型能力 clamp），thinkingLevels 非空时才有 */
   defaultThinking?: ThinkingLevel;
-  /** 档位的来源；推断与兜底的，界面在档位旁用小字说明（{@link thinkingSourceNote}） */
+  /** 档位的来源；推断与兜底的，界面在档位旁标徽标（{@link thinkingSourceBadge}），悬停显示 {@link thinkingSourceNote} */
   source?: ThinkingSource;
 }
 
@@ -149,18 +142,25 @@ export const THINKING_LEVEL_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   max: 'max',
 };
 
-/** 档位的中文说明：悬停时显示 */
+/** 档位的中文叫法：悬停时显示，几个字，不写成句子 */
 export const THINKING_LEVEL_HINTS: Readonly<Record<ThinkingLevel, string>> = {
-  off: '关闭思考：不推理，直接回答',
-  minimal: '极少思考：只做必要的推理',
-  low: '少量思考：回答更快',
-  medium: '适中：速度与深度折中',
+  off: '关闭思考',
+  minimal: '极少思考',
+  low: '少量思考',
+  medium: '适中',
   high: '深入思考',
-  xhigh: '更深入的思考：更慢、更费 token',
-  max: '最大思考：不设上限，最慢、最费 token',
+  xhigh: '更深入思考',
+  max: '最大思考',
 };
 
-/** 档位旁的小字：推断来的写明按哪个目录模型推断，兜底的说明目录里没有；目录里有的不写 */
+/** 档位旁的徽标：推断来的标「推断」，兜底的标「兜底」；目录里有的不标 */
+export function thinkingSourceBadge(source: ThinkingSource | undefined): string | undefined {
+  if (source === 'fallback') return '兜底';
+  if (source?.startsWith(INFERRED_PREFIX)) return '推断';
+  return undefined;
+}
+
+/** 徽标的悬停提示：推断来的写明按哪个目录模型推断，兜底的说明目录里没有；目录里有的没有 */
 export function thinkingSourceNote(source: ThinkingSource | undefined): string | undefined {
   if (source === 'fallback') return '目录里没有这个模型，按协议兜底';
   if (source?.startsWith(INFERRED_PREFIX)) return `按 ${source.slice(INFERRED_PREFIX.length)} 推断`;

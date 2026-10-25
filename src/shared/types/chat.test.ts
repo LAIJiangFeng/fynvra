@@ -1,7 +1,6 @@
 import { APPROVAL_MODES, THINKING_LEVELS } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import {
-  APPROVAL_MODE_HINTS,
   APPROVAL_MODE_LABELS,
   isThinkingSource,
   type ModelThinkingCapability,
@@ -9,6 +8,7 @@ import {
   pickThinkingLevel,
   THINKING_LEVEL_HINTS,
   THINKING_LEVEL_LABELS,
+  thinkingSourceBadge,
   thinkingSourceNote,
 } from './chat';
 
@@ -93,9 +93,12 @@ describe('thinking level labels', () => {
     ]);
   });
 
-  it('explains every level in Chinese for the hover text', () => {
+  it('names every level in a few Chinese words for the hover text, not a sentence', () => {
     for (const level of THINKING_LEVELS) {
-      expect(THINKING_LEVEL_HINTS[level]).toMatch(/[一-鿿]/);
+      const hint = THINKING_LEVEL_HINTS[level];
+      expect(hint).toMatch(/[一-鿿]/);
+      expect(hint).not.toMatch(/[：，、；]/);
+      expect(hint.length).toBeLessThanOrEqual(6);
     }
     expect(new Set(THINKING_LEVELS.map((level) => THINKING_LEVEL_HINTS[level])).size).toBe(
       THINKING_LEVELS.length
@@ -117,15 +120,6 @@ describe('approval modes', () => {
       '完全放行',
     ]);
   });
-
-  it('explains what each mode asks about, and that full still asks about the protected floor', () => {
-    expect(APPROVAL_MODE_HINTS.supervised).toContain('命令');
-    expect(APPROVAL_MODE_HINTS.supervised).toContain('文件');
-    expect(APPROVAL_MODE_HINTS['auto-edits']).toContain('命令');
-    expect(APPROVAL_MODE_HINTS.full).toContain('保护底线');
-    expect(APPROVAL_MODE_HINTS.full).toContain('git push');
-    expect(new Set(APPROVAL_MODES.map((mode) => APPROVAL_MODE_HINTS[mode])).size).toBe(3);
-  });
 });
 
 describe('thinking source', () => {
@@ -138,7 +132,14 @@ describe('thinking source', () => {
     }
   });
 
-  it('notes beside the levels which catalog model they were inferred from', () => {
+  it('marks inferred and fallback levels with a short badge beside the levels', () => {
+    expect(thinkingSourceBadge('inferred:gpt-5.6-sol')).toBe('推断');
+    expect(thinkingSourceBadge('fallback')).toBe('兜底');
+    expect(thinkingSourceBadge('catalog')).toBeUndefined();
+    expect(thinkingSourceBadge(undefined)).toBeUndefined();
+  });
+
+  it("notes in the badge's hover text which catalog model the levels were inferred from", () => {
     expect(thinkingSourceNote('inferred:gpt-5.6-sol')).toBe('按 gpt-5.6-sol 推断');
     expect(thinkingSourceNote('fallback')).toBe('目录里没有这个模型，按协议兜底');
     expect(thinkingSourceNote('catalog')).toBeUndefined();

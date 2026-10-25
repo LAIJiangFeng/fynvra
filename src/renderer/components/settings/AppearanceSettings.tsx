@@ -17,7 +17,7 @@ export function AppearanceSettings() {
 
   return (
     <section>
-      <SectionHeader title="主题" description="浅色、深色，或跟随系统的明暗设置。" />
+      <SectionHeader title="主题" />
       <div className="grid grid-cols-3 gap-3">
         {THEMES.map(({ value, label, icon: Icon }) => (
           <button

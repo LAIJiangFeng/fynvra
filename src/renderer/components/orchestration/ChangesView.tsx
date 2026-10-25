@@ -64,13 +64,7 @@ export function ChangesView({
   onSelect: (dispatchId: string) => void;
 }) {
   if (candidates.length === 0) {
-    return (
-      <PanelMessage
-        icon={GitCompareArrows}
-        title="还没有待验收或已完成的改动"
-        description="worker 汇报完成后，它的改动会出现在这里。"
-      />
-    );
+    return <PanelMessage icon={GitCompareArrows} title="还没有待验收或已完成的改动" />;
   }
   const selected =
     candidates.find((candidate) => candidate.dispatch.id === selectedId) ?? candidates[0];
@@ -127,13 +121,7 @@ function DispatchDiff({
   }, [dispatchId, worktreeAlive, loadDiff]);
 
   if (!worktreeAlive && entry?.status !== 'ready') {
-    return (
-      <PanelMessage
-        icon={GitCompareArrows}
-        title="worktree 已清理"
-        description="主 agent 合并后会删除 worker 的 worktree，之后就读不到这次尝试的 diff 了；已合并的改动请在主分支的提交里查看。"
-      />
-    );
+    return <PanelMessage icon={GitCompareArrows} title="worktree 已清理" />;
   }
   if (!entry || entry.status === 'loading') {
     return <PanelMessage icon={Loader2} spin title="正在读取改动…" />;
@@ -230,7 +218,7 @@ function DiffContent({
         </p>
         {stale && (
           <p className="mt-1 text-amber-700 dark:text-amber-300">
-            worktree 已清理，这是清理前读到的改动。
+            worktree 已清理，这是清理前的改动
           </p>
         )}
         {data.stat && (
@@ -249,9 +237,7 @@ function DiffContent({
       </div>
 
       {files.length === 0 && extra.length === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-xs">
-          这次尝试还没有提交任何改动（只统计已提交的内容）
-        </p>
+        <p className="py-6 text-center text-muted-foreground text-xs">还没有提交的改动</p>
       ) : (
         <>
           <FileList files={files} onReveal={reveal} />

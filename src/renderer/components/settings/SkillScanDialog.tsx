@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -115,9 +114,6 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
         <DialogTitle>扫描本机技能</DialogTitle>
-        <DialogDescription>
-          来自 ~/.claude/skills、~/.codex/skills 与 ~/.pi/agent/skills；同名技能只保留先出现的来源。
-        </DialogDescription>
       </DialogHeader>
 
       {!result && !error && (

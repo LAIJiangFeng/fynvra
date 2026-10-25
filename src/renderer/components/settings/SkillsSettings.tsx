@@ -43,10 +43,7 @@ export function SkillsSettings() {
 
   return (
     <section>
-      <SectionHeader
-        title="技能"
-        description="按引用登记技能目录（含 SKILL.md），文件留在原处，不复制内容。角色从这里挑选技能。"
-      >
+      <SectionHeader title="技能">
         <Button size="sm" variant="outline" onClick={openScan}>
           <ScanSearch />
           扫描本机
@@ -65,11 +62,7 @@ export function SkillsSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && skills.length === 0 ? (
-        <EmptyState
-          icon={Sparkles}
-          title="还没有登记技能"
-          description="扫描本机 Claude Code、Codex、pi 的技能目录，或手动添加一个含 SKILL.md 的目录。"
-        >
+        <EmptyState icon={Sparkles} title="还没有登记技能">
           <Button size="sm" variant="outline" onClick={openScan}>
             <ScanSearch />
             扫描本机

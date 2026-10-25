@@ -35,10 +35,7 @@ export function McpSettings() {
 
   return (
     <section>
-      <SectionHeader
-        title="MCP 服务器"
-        description="角色从这里挑选 MCP 服务器。环境变量与 Header 的值只保存在本机，界面上只显示键名。"
-      >
+      <SectionHeader title="MCP 服务器">
         <Button size="sm" variant="outline" onClick={openImport}>
           <HardDriveDownload />
           从本机导入…
@@ -57,11 +54,7 @@ export function McpSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && servers.length === 0 ? (
-        <EmptyState
-          icon={Plug}
-          title="还没有 MCP 服务器"
-          description="手动添加，或从本机的 Claude Code、Codex、Grok CLI、Gemini CLI、Cursor、VS Code、OpenCode、CC Switch 导入（按命令 + 参数 / URL 去重）。"
-        >
+        <EmptyState icon={Plug} title="还没有 MCP 服务器">
           <Button size="sm" variant="outline" onClick={openImport}>
             <HardDriveDownload />
             从本机导入
@@ -134,7 +127,7 @@ function McpRow({
         )}
         {confirmingRemove && (
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">删除后引用它的角色将不再加载它。</span>
+            <span className="text-muted-foreground text-xs">引用它的角色将不再加载它</span>
             <Button
               size="sm"
               variant="destructive"

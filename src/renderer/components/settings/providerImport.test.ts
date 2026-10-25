@@ -2,6 +2,7 @@ import type { ProviderImportCandidate } from '@shared/types/llm';
 import { describe, expect, it } from 'vitest';
 import {
   defaultSelection,
+  duplicateBadge,
   duplicateReason,
   importSummary,
   invertSelection,
@@ -68,14 +69,18 @@ describe('providerImport', () => {
     );
   });
 
-  it('模型摘要：列出前 3 个；没有模型时说明导入后用什么', () => {
+  it('重复项在行里只是一个徽标：与已有服务相同是「已有」，与上面的候选相同是「重复」', () => {
+    expect(duplicateBadge(list[0] as ProviderImportCandidate)).toBeNull();
+    expect(duplicateBadge(list[1] as ProviderImportCandidate)).toBe('重复');
+    expect(duplicateBadge(list[3] as ProviderImportCandidate)).toBe('已有');
+  });
+
+  it('模型摘要：列出前 3 个；没有模型时注明会不会用预置模型，不写导入后怎么做', () => {
     const models = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, name: id.toUpperCase() }));
     expect(modelSummary(candidate('x', { models }))).toBe('模型：A、B、C 等 5 个');
     expect(modelSummary(candidate('x', { models: models.slice(0, 1) }))).toBe('模型：A');
-    expect(modelSummary(candidate('x'))).toBe('未写模型：导入时使用内置的预置模型');
-    expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe(
-      '未写模型：导入后在「编辑」里添加'
-    );
+    expect(modelSummary(candidate('x'))).toBe('未写模型（用预置模型）');
+    expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('未写模型');
   });
 
   it('导入结果的提示：导入数量，以及跳过了哪些、为什么', () => {

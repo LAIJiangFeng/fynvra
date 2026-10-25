@@ -21,10 +21,10 @@ import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 
+/** 页头只有页名，不加副标题 */
 interface SectionSpec {
   value: SettingsSection;
   label: string;
-  description: string;
   icon: LucideIcon;
   Component: ComponentType;
   /** 双栏内容（角色编辑器）用更宽的版心 */
@@ -32,50 +32,12 @@ interface SectionSpec {
 }
 
 const SECTIONS: SectionSpec[] = [
-  {
-    value: 'general',
-    label: '通用',
-    description: 'worktree 的存放位置，以及它们占用的磁盘空间。',
-    icon: SlidersHorizontal,
-    Component: GeneralSettings,
-  },
-  {
-    value: 'providers',
-    label: '模型服务',
-    description: 'Anthropic、OpenAI、Google 与 OpenAI 兼容服务的地址、API Key 和模型。',
-    icon: Boxes,
-    Component: ProvidersSettings,
-  },
-  {
-    value: 'roles',
-    label: '角色',
-    description:
-      '系统提示词、模型、工具策略、审批档位、技能与 MCP 的组合；每个角色保存为 roles/<id>.json。',
-    icon: UserCog,
-    Component: RolesSettings,
-    wide: true,
-  },
-  {
-    value: 'skills',
-    label: '技能',
-    description: '技能目录的引用注册表：扫描本机 Claude Code / Codex / pi 的技能，或手动添加目录。',
-    icon: Sparkles,
-    Component: SkillsSettings,
-  },
-  {
-    value: 'mcp',
-    label: 'MCP',
-    description: 'MCP 服务器：手动添加，或导入本机 Claude Code 的配置。',
-    icon: Plug,
-    Component: McpSettings,
-  },
-  {
-    value: 'appearance',
-    label: '外观',
-    description: '界面主题。',
-    icon: Palette,
-    Component: AppearanceSettings,
-  },
+  { value: 'general', label: '通用', icon: SlidersHorizontal, Component: GeneralSettings },
+  { value: 'providers', label: '模型服务', icon: Boxes, Component: ProvidersSettings },
+  { value: 'roles', label: '角色', icon: UserCog, Component: RolesSettings, wide: true },
+  { value: 'skills', label: '技能', icon: Sparkles, Component: SkillsSettings },
+  { value: 'mcp', label: 'MCP', icon: Plug, Component: McpSettings },
+  { value: 'appearance', label: '外观', icon: Palette, Component: AppearanceSettings },
 ];
 
 /**
@@ -139,10 +101,9 @@ function SettingsPanel() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center gap-4 border-b px-6">
-            <div className="min-w-0 flex-1">
-              <h2 className="font-semibold leading-tight">{current?.label}</h2>
-              <p className="truncate text-muted-foreground text-xs">{current?.description}</p>
-            </div>
+            <h2 className="min-w-0 flex-1 truncate font-semibold leading-tight">
+              {current?.label}
+            </h2>
             <Button variant="ghost" size="icon-sm" aria-label="关闭设置" onClick={close}>
               <X />
             </Button>

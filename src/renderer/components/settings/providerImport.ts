@@ -74,6 +74,13 @@ export function duplicateReason(candidate: ProviderImportCandidate): string | nu
   return null;
 }
 
+/** 重复项在行里的徽标，原因（{@link duplicateReason}）悬停显示：与已有服务相同是「已有」，与上面的候选相同是「重复」 */
+export function duplicateBadge(candidate: ProviderImportCandidate): string | null {
+  if (candidate.duplicate === 'existing') return '已有';
+  if (candidate.duplicate === 'candidate') return '重复';
+  return null;
+}
+
 const MAX_LISTED_MODELS = 3;
 
 export function modelSummary(candidate: ProviderImportCandidate): string {
@@ -82,7 +89,7 @@ export function modelSummary(candidate: ProviderImportCandidate): string {
     const hasPreset = MODEL_CATALOG.some(
       (entry) => entry.api === candidate.api && entry.models.length > 0
     );
-    return hasPreset ? '未写模型：导入时使用内置的预置模型' : '未写模型：导入后在「编辑」里添加';
+    return hasPreset ? '未写模型（用预置模型）' : '未写模型';
   }
   const names = models
     .slice(0, MAX_LISTED_MODELS)

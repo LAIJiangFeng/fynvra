@@ -1,4 +1,3 @@
-import { THINKING_LEVEL_HINTS } from '@shared/types/chat';
 import { GitBranch } from 'lucide-react';
 import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
 import { ApprovalModeStatus } from './ApprovalModePicker';
@@ -16,9 +15,8 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const cwd = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.cwd);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
-  const { label, thinking } = useSessionModel(sessionId);
+  const { label } = useSessionModel(sessionId);
   const model = label ? [label.model, label.thinking].filter(Boolean).join(' · ') : reportedModel;
-  const hint = thinking ? `（${THINKING_LEVEL_HINTS[thinking]}）` : '';
 
   return (
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t px-4 text-muted-foreground text-xs">
@@ -44,7 +42,7 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
         {model && (
           <button
             type="button"
-            title={label ? `${label.provider} · ${model}${hint}，点击切换模型` : '切换模型'}
+            title={label ? `切换模型（${label.provider} · ${model}）` : '切换模型'}
             className="min-w-0 truncate rounded-sm font-mono outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
             onClick={() => openModelPicker(sessionId)}
           >
