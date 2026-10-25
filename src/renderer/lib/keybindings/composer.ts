@@ -5,7 +5,8 @@ import {
   type ResolvedKeybindings,
   toAriaKeyShortcuts,
 } from '@shared/keybindings';
-import type { KeyboardEvent } from 'react';
+
+// 输入框作用域的纯函数；用到 DOM 的派发见 ./useKeybindings
 
 /** 输入框的悬停提示，以及 aria-keyshortcuts（切换审批档位占了 Shift+Tab 的反向移焦点，要告诉读屏） */
 export function composerHints(
@@ -27,14 +28,4 @@ export function browserInsertsNewline(event: {
   metaKey: boolean;
 }): boolean {
   return event.key === 'Enter' && !event.ctrlKey && !event.altKey && !event.metaKey;
-}
-
-/**
- * 「换行」动作：浏览器自己会换行时交给它；否则自己插入一个换行。
- * execCommand 走原生编辑：撤销照样能用，也会触发 React 的 onChange。
- */
-export function insertNewline(event: KeyboardEvent<HTMLTextAreaElement>): void {
-  if (browserInsertsNewline(event)) return;
-  event.preventDefault();
-  document.execCommand('insertText', false, '\n');
 }

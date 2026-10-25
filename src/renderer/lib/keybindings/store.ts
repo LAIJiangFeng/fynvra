@@ -9,7 +9,7 @@ import {
 } from '@shared/keybindings';
 import type { PreferencesResult } from '@shared/types/settings';
 import { create } from 'zustand';
-import type { PreferencesBridge } from '@/stores/createSettingsStore';
+import type { PreferencesBridge } from '../../stores/createSettingsStore';
 
 export interface KeybindingsState {
   /** settings.json 里的覆盖表（只含改过的动作） */

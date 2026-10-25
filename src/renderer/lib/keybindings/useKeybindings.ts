@@ -1,7 +1,7 @@
 import { type ActionId, chordFromEvent, formatChord, type KeyEventLike } from '@shared/keybindings';
-import { useEffect, useMemo } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo } from 'react';
 import { useKeybindingsStore } from '@/stores/settings';
-import { composerHints } from './composer';
+import { browserInsertsNewline, composerHints } from './composer';
 import { runAction } from './handlers';
 import { KEY_PLATFORM } from './platform';
 import { globalActionOf } from './scope';
@@ -24,6 +24,16 @@ export function useKeybindings(): void {
 /** 输入框作用域的派发：这次按键是不是这个动作。按当前生效的键判断，改键后立即生效 */
 export function matchAction(event: KeyEventLike, action: ActionId): boolean {
   return chordFromEvent(event) === useKeybindingsStore.getState().bindings[action];
+}
+
+/**
+ * 「换行」动作：浏览器自己会换行时交给它；否则（如改成了 Ctrl+Enter）自己插入一个换行。
+ * execCommand 走原生编辑：撤销照样能用，也会触发 React 的 onChange。
+ */
+export function insertNewline(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
+  if (browserInsertsNewline(event)) return;
+  event.preventDefault();
+  document.execCommand('insertText', false, '\n');
 }
 
 /** 动作当前生效的键，按平台显示（Ctrl+B / ⌘B），改键后跟着变 */

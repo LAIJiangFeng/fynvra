@@ -4,7 +4,7 @@ import {
   type PreferencesResult,
 } from '@shared/types/settings';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PreferencesBridge } from '@/stores/createSettingsStore';
+import type { PreferencesBridge } from '../../stores/createSettingsStore';
 import { createKeybindingsStore } from './store';
 
 function deferred<T>() {
