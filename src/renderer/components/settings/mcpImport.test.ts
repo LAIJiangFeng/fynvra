@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   commandSummary,
   defaultSelection,
+  duplicateBadge,
   duplicateReason,
   importSummary,
   invertSelection,
@@ -91,6 +92,12 @@ describe('mcpImport', () => {
         })
       )
     ).toBe('已有 URL 相同的服务器「A」');
+  });
+
+  it('重复项在行里只是一个徽标：与已有服务器相同是「已有」，与上面的候选相同是「重复」', () => {
+    expect(duplicateBadge(list[0] as McpImportCandidate)).toBeNull();
+    expect(duplicateBadge(list[1] as McpImportCandidate)).toBe('重复');
+    expect(duplicateBadge(list[3] as McpImportCandidate)).toBe('已有');
   });
 
   it('命令摘要：stdio 是命令加参数，远程是 URL', () => {

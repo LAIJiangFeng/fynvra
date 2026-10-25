@@ -83,6 +83,13 @@ export function duplicateReason(candidate: McpImportCandidate): string | null {
   return null;
 }
 
+/** 重复项在行里的徽标，原因（{@link duplicateReason}）悬停显示：与已有服务器相同是「已有」，与上面的候选相同是「重复」 */
+export function duplicateBadge(candidate: McpImportCandidate): string | null {
+  if (candidate.duplicate === 'existing') return '已有';
+  if (candidate.duplicate === 'candidate') return '重复';
+  return null;
+}
+
 /** 一行摘要：stdio 是命令加参数，远程是 URL。 */
 export function commandSummary(candidate: McpImportCandidate): string {
   return candidate.url ?? [candidate.command ?? '', ...(candidate.args ?? [])].join(' ');

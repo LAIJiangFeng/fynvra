@@ -1,5 +1,5 @@
 import type { McpImportCandidate, McpImportSource } from '@shared/types/llm';
-import { KeyRound, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
+import { KeyRound, Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,18 +8,18 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useMcpStore } from '@/stores/mcp';
-import { InlineMessage } from './common';
+import { InlineMessage, WarningList } from './common';
 import { TRANSPORT_LABELS } from './McpDialog';
 import {
   commandSummary,
   defaultSelection,
+  duplicateBadge,
   duplicateReason,
   importSummary,
   invertSelection,
@@ -131,10 +131,6 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
         <DialogTitle>从本机导入 MCP 服务器</DialogTitle>
-        <DialogDescription>
-          只读取下面这些工具的配置，不会改动它们。环境变量与 Header
-          的值只在本机读取，这里只显示键名。
-        </DialogDescription>
       </DialogHeader>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -177,13 +173,7 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
       ) : scan.phase === 'failed' ? (
         <InlineMessage tone="error">{scan.error}</InlineMessage>
       ) : candidates.length === 0 ? (
-        <div className="py-6 text-center">
-          <p className="text-sm">没有找到可导入的 MCP 服务器</p>
-          <p className="mt-1 text-muted-foreground text-xs">
-            只读这些工具的用户级配置（Claude Code 还包括 ~/.claude.json
-            里各项目的配置），项目目录里的 .mcp.json 不读。
-          </p>
-        </div>
+        <p className="py-6 text-center text-sm">没有找到可导入的 MCP 服务器</p>
       ) : (
         <div className="grid min-w-0 gap-2">
           <div className="flex items-center justify-between text-muted-foreground text-xs">
@@ -220,16 +210,7 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
         </div>
       )}
 
-      {scan.phase === 'done' && scan.warnings.length > 0 && (
-        <ul className="grid max-h-32 gap-1 overflow-y-auto">
-          {scan.warnings.map((warning) => (
-            <li key={warning} className="flex items-start gap-1.5 text-muted-foreground text-xs">
-              <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-500" />
-              <span className="break-all">{warning}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {scan.phase === 'done' && <WarningList warnings={scan.warnings} />}
 
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
@@ -284,6 +265,7 @@ function CandidateRow({
             </Badge>
             <Badge variant="outline">{TRANSPORT_LABELS[candidate.transport]}</Badge>
             {candidate.enabledInSource && <Badge>来源中已启用</Badge>}
+            {reason && <Badge title={reason}>{duplicateBadge(candidate)}</Badge>}
           </div>
           <p className="truncate font-mono text-muted-foreground text-xs" title={summary}>
             {summary}
@@ -303,7 +285,6 @@ function CandidateRow({
               ))}
             </div>
           )}
-          {reason && <p className="text-muted-foreground text-xs">{reason}，不再导入</p>}
         </div>
       </label>
     </li>
