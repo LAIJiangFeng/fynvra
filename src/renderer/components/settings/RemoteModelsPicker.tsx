@@ -1,6 +1,6 @@
 import { type ModelOption, thinkingSourceNote } from '@shared/types/chat';
 import type { ModelEntry, RemoteModelEntry } from '@shared/types/llm';
-import { Loader2, RefreshCw, Search, TriangleAlert, X } from 'lucide-react';
+import { Loader2, RefreshCw, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
 import { describedThinking } from '@/stores/sessions/modelChoice';
-import { InlineMessage } from './common';
+import { InlineMessage, WarningList } from './common';
 import {
   filterRemoteModels,
   invertVisible,
@@ -130,7 +130,7 @@ export function RemoteModelsPicker({
             variant="ghost"
             size="icon-xs"
             aria-label="重新拉取"
-            title="按表单当前的协议、地址与 API Key 重新拉取"
+            title="重新拉取"
             disabled={load.phase === 'loading'}
             onClick={onReload}
           >
@@ -235,19 +235,7 @@ export function RemoteModelsPicker({
 
           {notice && <InlineMessage tone={notice.tone}>{notice.text}</InlineMessage>}
 
-          {load.warnings.length > 0 && (
-            <ul className="grid gap-1">
-              {load.warnings.map((warning) => (
-                <li
-                  key={warning}
-                  className="flex items-start gap-1.5 text-muted-foreground text-xs"
-                >
-                  <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-500" />
-                  <span className="break-all">{warning}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <WarningList warnings={load.warnings} />
         </>
       )}
     </section>
