@@ -47,7 +47,7 @@ const BLOCK_HEADER = /^([|>])[+-]?\d*\s*(?:#.*)?$/;
  * 不引入 YAML 依赖：根 package.json 不在本卡范围内。
  */
 export function parseSkillFrontmatter(text: string): { name?: string; description?: string } {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
   if (lines[0]?.trimEnd() !== '---') return {};
   const end = lines.findIndex((line, index) => index > 0 && /^(?:---|\.\.\.)\s*$/.test(line));
   if (end < 0) return {};
