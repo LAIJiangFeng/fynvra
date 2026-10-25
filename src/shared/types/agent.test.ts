@@ -78,6 +78,7 @@ describe('parseAgentCommand', () => {
       identity,
       spec: { ...spec, shellPath: 'D:\\Software\\Git\\bin\\bash.exe' },
     },
+    { type: 'spawn-session', identity, spec: { ...spec, inPlace: true } },
     { type: 'prompt', identity, text: 'Fix the build' },
     { type: 'steer', identity, text: 'Also update the docs' },
     { type: 'abort', identity },
@@ -156,6 +157,11 @@ describe('parseAgentCommand', () => {
     ).toEqual({ type: 'set-approval-mode', identity, mode: 'full' });
   });
 
+  it('keeps inPlace only when it is true (false is the default)', () => {
+    const parsed = parseAgentCommand(withSpec({ inPlace: false }));
+    expect(parsed?.type === 'spawn-session' && parsed.spec).not.toHaveProperty('inPlace');
+  });
+
   it('normalizes the none alias of off in a model spec', () => {
     const parsed = parseAgentCommand(withModel({ thinking: 'none' }));
     expect(parsed?.type === 'spawn-session' && parsed.spec.model.thinking).toBe('off');
@@ -197,6 +203,7 @@ describe('parseAgentCommand', () => {
     ['a non-boolean worker flag', withSpec({ worker: 'yes' })],
     ['an empty shell path', withSpec({ shellPath: '' })],
     ['a shell path that is not a string', withSpec({ shellPath: ['bash.exe'] })],
+    ['a non-boolean inPlace flag', withSpec({ inPlace: 'none' })],
     ['a role option without a name', withSpec({ roles: [{ id: 'worker' }] })],
     [
       'an unknown approval decision',

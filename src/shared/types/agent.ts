@@ -101,6 +101,11 @@ export interface SpawnSessionSpec {
    * 缺省时由 pi 自己找，Windows 上可能取到 PATH 上的 WSL bash.exe
    */
   shellPath?: string;
+  /**
+   * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
+   * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
+   */
+  inPlace?: boolean;
 }
 
 /** host-invoke 的目标：编排工具背后的 OrchestrationHost，或 worker 工具背后的 WorkerHost。 */
@@ -523,12 +528,12 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const skills = parseStringList(record.skills);
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
-  const { cwd, sessionFile, worker, shellPath } = record;
+  const { cwd, sessionFile, worker, shellPath, inPlace } = record;
   if (!role.ok || !model || !skills || !mcpServers || !roles) return null;
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
   }
-  if (!isOptional(shellPath, isNonEmptyString)) return null;
+  if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
   return {
     role: role.role,
     cwd,
@@ -539,6 +544,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     worker,
     roles,
     ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
+    ...(inPlace === true ? { inPlace: true } : {}),
   };
 }
 

@@ -60,10 +60,20 @@ describe('createPiSessionFactory', () => {
     });
 
     expect(mocks.createRoleSession).toHaveBeenCalledTimes(1);
-    const { settingsManager } = mocks.createRoleSession.mock.calls[0]?.[0] ?? {};
+    const { settingsManager, inPlace } = mocks.createRoleSession.mock.calls[0]?.[0] ?? {};
     expect(settingsManager?.getShellPath()).toBe('D:\\Software\\Git\\bin\\bash.exe');
     // 仍是 agent-runtime 默认的隔离设置
     expect(settingsManager?.getEnableInstallTelemetry()).toBe(false);
+    expect(inPlace).toBeUndefined();
+
+    // 工作区没有 git：inPlace 原样交给 createRoleSession（提示词按它追加）
+    await open({
+      identity: { sessionId: 'session-2', generation: 1 },
+      spec: { ...spec, inPlace: true },
+      host: null,
+      workerHost: null,
+    });
+    expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({ inPlace: true });
   });
 });
 

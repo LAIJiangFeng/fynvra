@@ -346,6 +346,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       const shellPath = await resolveShellPath();
+      // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
+      const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
         ok: true,
         spec: {
@@ -359,6 +361,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           worker: stored.dispatchId !== undefined,
           roles,
           ...(shellPath ? { shellPath } : {}),
+          ...(inPlace ? { inPlace: true } : {}),
         },
       };
     } catch (error) {
@@ -778,7 +781,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         roleId: role.id,
         title: titleFrom(input.brief) || role.name,
         cwd: input.cwd,
-        worktreeId: input.worktreeId,
+        // 普通目录的尝试没有 worktree
+        ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
         ...(parentSessionId ? { parentSessionId } : {}),
         dispatchId: input.dispatchId,
         status: 'idle',

@@ -330,6 +330,45 @@ describe('createAgentHost sessions', () => {
     expect(spawned?.type === 'spawn-session' && spawned.spec).not.toHaveProperty('shellPath');
   });
 
+  it('spawns sessions of a workspace without git with inPlace, a dispatched one without a worktree', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-agent-host-plain-'));
+    dirs.push(dir);
+    const plain = { id: 'ws-1', name: 'notes', repoPath: join(dir, 'notes'), vcs: 'none' as const };
+    const env = setup({ workspaces: { get: (id) => (id === plain.id ? plain : undefined) } });
+    const coordinator = await createSession(env, 'orchestrator');
+    await env.host.prompt(coordinator.id, 'plan');
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn?.type === 'spawn-session' && spawn.spec).toMatchObject({
+      cwd: plain.repoPath,
+      inPlace: true,
+    });
+
+    env.host.setCoordinatorLookup(() => coordinator.id);
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: plain.repoPath,
+      brief: '# Create hello.txt',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const worker = env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    expect(worker).toMatchObject({ cwd: plain.repoPath, dispatchId: 'dsp_1' });
+    expect(worker).not.toHaveProperty('worktreeId');
+    const spawned = env.sent('spawn-session').at(-1);
+    expect(spawned?.type === 'spawn-session' && spawned.spec).toMatchObject({
+      worker: true,
+      inPlace: true,
+    });
+
+    // git 工作区的会话不带 inPlace
+    const git = setup();
+    await git.host.prompt((await createSession(git, 'orchestrator')).id, 'plan');
+    const gitSpawn = git.sent('spawn-session')[0];
+    expect(gitSpawn?.type === 'spawn-session' && gitSpawn.spec).not.toHaveProperty('inPlace');
+  });
+
   it('re-stamps worker events per session and drops stale generations and duplicate seqs', async () => {
     const env = setup();
     const session = await createSession(env);
