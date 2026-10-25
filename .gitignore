@@ -1,12 +1,72 @@
+# 依赖、构建输出和工具缓存
 node_modules/
+.pnpm-store/
 out/
 dist/
 coverage/
+.vite/
+.cache/
 *.tsbuildinfo
+
+# 日志、测试报告和临时文件
+logs/
 *.log
-.DS_Store
-Thumbs.db
+test-results/
+playwright-report/
+blob-report/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# 本地环境配置；示例文件只能包含占位值
 .env
 .env.*
+!.env.example
+!.env.*.example
+
+# 签名证书、私钥和本机认证文件
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+/secrets/
+/.codex/auth.json
+/.claude/settings.local.json
+
+# 本地用户数据和工作树，避免意外把凭证或会话提交到仓库根目录
+/.fynvra/
+/.fynvra-dev/
+/user-data/
+/userData/
+/fynvra-dev/
+/.worktrees/
+/worktrees/
+/settings.json
+/providers.json
+/mcp.json
+/skills.json
+/sessions.json
+/auth.json
+/agent/
+/roles/
+/orchestration/
+
+# 安装包应通过 Release 分发，不进入源码历史
+*.exe
+*.dmg
+*.pkg
+*.AppImage
+*.blockmap
+/Fynvra-*.zip
+
+# 系统与编辑器生成文件
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
