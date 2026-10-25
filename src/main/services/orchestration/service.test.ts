@@ -223,4 +223,25 @@ describe('createOrchestrationService', () => {
       readdirSync(dirname(statePath)).some((file) => file.startsWith('ws_1.json.unreadable-'))
     ).toBe(true);
   });
+
+  it('普通目录：不读分支（可能是仓库子目录，git 读得到外层仓库），派发原地进行，落盘后恢复出 in-place', async () => {
+    const service = make({
+      workspace: { id: 'ws_1', name: 'notes', repoPath: '/notes', vcs: 'none' },
+    });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.calls).toEqual([]);
+    await service.flush();
+
+    const restored = make({
+      workspace: { id: 'ws_1', name: 'notes', repoPath: '/notes', vcs: 'none' },
+    });
+    expect((await restored.snapshot()).dispatches).toEqual([dispatch]);
+    // 面板的「改动」不给 diff
+    expect(await restored.reviewDiff(dispatch.id)).toEqual({
+      ok: false,
+      error: `dispatch ${dispatch.id} has no diff: the workspace has no git`,
+    });
+    expect(fake.calls).toEqual([]);
+  });
 });

@@ -50,7 +50,10 @@ export interface OrchestrationService {
   readonly workspace: Workspace;
   /** 快照加载完成（读不了时以空状态开始并记日志）；从不 reject。 */
   readonly ready: Promise<void>;
-  /** 主 agent 会话的 OrchestrationHost；首次调用时确定它所在的分支（仓库当时检出的分支）。 */
+  /**
+   * 主 agent 会话的 OrchestrationHost；首次调用时确定它所在的分支（仓库当时检出的分支）。
+   * 普通目录（`vcs: 'none'`）不读分支，编排原地进行、不调用 git。
+   */
   hostFor(coordinatorSessionId: string): OrchestrationHost;
   /** worker 会话的 WorkerHost：按 `Dispatch.workerSessionId` 反查；不是 worker（或状态未加载）返回 null。 */
   workerHostFor(sessionId: string): WorkerHost | null;
@@ -181,7 +184,9 @@ export function createOrchestrationService(
     if (cached !== undefined) return cached;
     const lookup = (async (): HostLookup => {
       await ready;
-      const branch = await currentBranch(options.exec, workspace.repoPath);
+      // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
+      const branch =
+        workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
       if (branch === undefined) {
         return fail(
           `the workspace repository ${workspace.repoPath} is not on a branch (detached HEAD) or cannot be read; check out the branch the orchestrator should work on`
@@ -274,6 +279,9 @@ export function createOrchestrationService(
         await ready;
         const dispatch = store.dispatches.get(dispatchId);
         if (dispatch === undefined) return fail(`unknown dispatch ${dispatchId}`);
+        if (dispatch.mode === 'in-place') {
+          return fail(`dispatch ${dispatchId} has no diff: the workspace has no git`);
+        }
         const worktree = store.worktrees.get(dispatch.worktreeId);
         if (worktree === undefined) {
           return fail(`the worktree of dispatch ${dispatchId} was already cleaned up`);

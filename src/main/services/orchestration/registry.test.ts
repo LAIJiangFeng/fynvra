@@ -107,6 +107,19 @@ describe('createOrchestrationRegistry', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining(join(dir, 'userData', 'worktrees')));
   });
 
+  it('普通目录工作区：派发原地进行，不建仓库同级的 worktree 目录，也不跑 git；worker 照样反查得到', async () => {
+    WS2 = { id: 'ws_2', name: 'notes', repoPath: join(dir, 'notes'), vcs: 'none' };
+    const launcher = createFakeLauncher();
+    const registry = make({ launcher });
+
+    const result = await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK);
+    expect(result).toMatchObject({ ok: true, dispatch: { mode: 'in-place' } });
+    expect(launcher.created()[0]?.cwd).toBe(join(dir, 'notes'));
+    expect(existsSync(join(dir, 'notes-worktrees'))).toBe(false);
+    expect(fake.calls).toEqual([]);
+    expect(registry.workerHostFor('session_w1')).not.toBeNull();
+  });
+
   it('workerHostFor / serviceForDispatch 跨工作区查找', async () => {
     const launcher = createFakeLauncher();
     const registry = make({ launcher });

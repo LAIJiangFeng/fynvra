@@ -12,7 +12,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost } from '@fynvra/agent-runtime';
-import type { Worktree } from '@fynvra/core';
+import type { ExecFn, Worktree } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nodeExec } from './nodeExec';
 import { createOrchestrationService, type OrchestrationService } from './service';
@@ -300,5 +300,116 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
       removedWorktree: true,
     });
     expect(existsSync(path)).toBe(false);
+  });
+});
+
+// 不依赖 git：没装 git 的机器上也跑
+describe('编排全流程（普通目录，没有 git）', () => {
+  let root: string;
+  let notes: string;
+  let statePath: string;
+  let launcher: FakeLauncher;
+  let execCalls: string[];
+
+  beforeEach(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'fynvra-orchestration-plain-')));
+    notes = join(root, 'notes');
+    statePath = join(root, 'userData', 'orchestration', 'ws_plain.json');
+    mkdirSync(notes);
+    writeFileSync(join(notes, 'README.md'), 'notes\n');
+    // 验收命令：在 cwd 里读 hello.txt，证明 run_checks 跑在工作区目录里
+    writeFileSync(
+      join(notes, 'check.js'),
+      "process.stdout.write(require('node:fs').readFileSync('hello.txt', 'utf8'));\n"
+    );
+    launcher = createFakeLauncher();
+    execCalls = [];
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  function plainService(): OrchestrationService {
+    // 记下 Host / Service 经 exec 跑的每一条命令（git 都走它）
+    const exec: ExecFn = (cmd, args, cwd) => {
+      execCalls.push(`${cmd} ${args.join(' ')}`);
+      return nodeExec(cmd, args, cwd);
+    };
+    return createOrchestrationService({
+      workspace: { id: 'ws_plain', name: 'notes', repoPath: notes, vcs: 'none' },
+      statePath,
+      resolveWorktreesRoot: async () => {
+        throw new Error('a plain directory has no worktrees');
+      },
+      launcher,
+      roles: createFakeRoles(),
+      exec,
+      runChecks: createShellRunner(),
+      fs,
+      notifyChanged: () => {},
+      log: () => {},
+    });
+  }
+
+  it('派发 → worker 在目录里写文件 → report_done → review / run_checks → 验收 completed → cleanup，全程没有调用 git', async () => {
+    const service = plainService();
+    const host = service.hostFor('session_coord');
+    const dispatched = await host.dispatchTask({
+      title: 'Create hello',
+      spec: '## Change\nCreate hello.txt.',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!dispatched.ok || dispatched.dispatch === undefined) {
+      throw new Error(JSON.stringify(dispatched));
+    }
+    const attempt = dispatched.dispatch;
+    expect(attempt).toMatchObject({ mode: 'in-place', worktreeId: '', branch: '' });
+    expect(launcher.created()[0]).toMatchObject({ cwd: notes });
+
+    // 扮演 worker：直接在工作区目录里写文件，再经 Main 的 workerHostFor（真实接线的反查路径）汇报
+    writeFileSync(join(notes, 'hello.txt'), 'hello\n');
+    const worker = service.workerHostFor(attempt.workerSessionId);
+    expect(await worker?.reportDone('succeeded', 'Created hello.txt', ['hello.txt'])).toEqual({
+      ok: true,
+    });
+    const waited = await host.waitForWorkers({ timeoutMs: 5_000, until: 'all' });
+    expect(waited).toMatchObject({ ok: true, timedOut: false, pending: 0 });
+
+    expect(await host.reviewDiff({ dispatchId: attempt.id })).toMatchObject({
+      ok: true,
+      mode: 'in-place',
+      files: ['hello.txt'],
+    });
+    const checks = await host.runChecks({ dispatchId: attempt.id, command: 'node check.js' });
+    expect(checks).toMatchObject({ ok: true, exitCode: 0 });
+    expect(checks.ok && checks.output).toContain('hello');
+
+    expect(await host.mergeWorktree({ dispatchId: attempt.id })).toEqual({
+      ok: true,
+      merged: true,
+      targetBranch: '',
+      mode: 'in-place',
+    });
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({
+      ok: true,
+      mode: 'in-place',
+    });
+    expect(launcher.disposeSession).toHaveBeenCalledWith(attempt.workerSessionId);
+
+    // 改动原地留在目录里；目录旁边没有建出 worktree 目录，也没有 .git
+    expect(readFileSync(join(notes, 'hello.txt'), 'utf8')).toBe('hello\n');
+    expect(existsSync(join(notes, '.git'))).toBe(false);
+    expect(existsSync(join(root, 'notes-worktrees'))).toBe(false);
+    expect(execCalls).toEqual([]);
+
+    const snapshot = await service.snapshot();
+    expect(snapshot.tasks.map((task) => task.status)).toEqual(['completed']);
+    expect(snapshot.worktrees).toEqual([]);
+    await service.flush();
+    // 重启后从快照恢复：仍是 in-place 的尝试
+    expect((await plainService().snapshot()).dispatches).toEqual(snapshot.dispatches);
+    expect(snapshot.dispatches[0]).toMatchObject({ mode: 'in-place', outcome: 'succeeded' });
   });
 });
