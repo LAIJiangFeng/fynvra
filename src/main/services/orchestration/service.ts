@@ -14,6 +14,7 @@ import {
   Inbox,
   InMemoryOrchestrationStore,
   isDispatchSettled,
+  type Message,
   type OrchestrationStore,
   type RoleStore,
   type Workspace,
@@ -40,6 +41,8 @@ export interface OrchestrationServiceOptions {
   fs: CoreFs;
   /** 状态变更后调用（同一轮里的多次变更合并为一次）；ipc 层接 `orchestration:changed` 广播。 */
   notifyChanged: (workspaceId: string) => void;
+  /** 收件箱每投递一条消息（worker_done / question / escalation …）就同步调用；从快照恢复的不算。桌面通知用。 */
+  onMessagePosted?: (message: Message) => void;
   checkPolicy?: CheckCommandPolicy;
   log?: (message: string) => void;
   now?: () => number;
@@ -70,14 +73,19 @@ export interface OrchestrationService {
 
 function observe<T extends { id: string }>(
   table: EntityTable<T>,
-  changed: () => void
+  changed: () => void,
+  inserted?: (entity: T) => void
 ): EntityTable<T> {
   const notify = <R extends { ok: boolean }>(result: R): R => {
     if (result.ok) changed();
     return result;
   };
   return {
-    insert: (entity) => notify(table.insert(entity)),
+    insert: (entity) => {
+      const result = notify(table.insert(entity));
+      if (result.ok) inserted?.(result.value);
+      return result;
+    },
     get: (id) => table.get(id),
     update: (id, patch) => notify(table.update(id, patch)),
     delete: (id) => {
@@ -89,14 +97,21 @@ function observe<T extends { id: string }>(
   };
 }
 
-/** 包一层 store：经它的每次成功写入都触发 `changed`（Inbox 的 post / ack 也写 messages 表）。 */
-function observeStore(store: OrchestrationStore, changed: () => void): OrchestrationStore {
+/**
+ * 包一层 store：经它的每次成功写入都触发 `changed`（Inbox 的 post / ack 也写 messages 表）；
+ * 新插入的消息（即 Inbox 的 post）再交给 `messagePosted`。
+ */
+function observeStore(
+  store: OrchestrationStore,
+  changed: () => void,
+  messagePosted?: (message: Message) => void
+): OrchestrationStore {
   return {
     runs: observe(store.runs, changed),
     tasks: observe(store.tasks, changed),
     dispatches: observe(store.dispatches, changed),
     worktrees: observe(store.worktrees, changed),
-    messages: observe(store.messages, changed),
+    messages: observe(store.messages, changed, messagePosted),
     listTasks: (runId) => store.listTasks(runId),
     activeDispatch: (taskId) => store.activeDispatch(taskId),
     reclaimableDispatches: (runId) => store.reclaimableDispatches(runId),
@@ -156,7 +171,13 @@ export function createOrchestrationService(
     });
   };
 
-  const store = observeStore(inner, changed);
+  const store = observeStore(inner, changed, (message) => {
+    try {
+      options.onMessagePosted?.(message);
+    } catch (error) {
+      log(`message listener failed: ${errorMessage(error)}`);
+    }
+  });
   const inbox = new Inbox({ messages: store.messages, now });
   const git = new GitWorktreeManager({ exec: options.exec });
 

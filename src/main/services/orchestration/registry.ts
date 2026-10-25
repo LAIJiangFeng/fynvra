@@ -1,7 +1,8 @@
 import * as nodeFs from 'node:fs/promises';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import type { CoreFs, ExecFn, RoleStore, Workspace } from '@fynvra/core';
+import type { CoreFs, ExecFn, Message, RoleStore, Workspace } from '@fynvra/core';
+import { errorMessage } from '@shared/guards';
 import type { CheckCommandPolicy } from './checkCommand';
 import type { RunChecksFn } from './host';
 import type { WorkerSessionLauncher } from './launcher';
@@ -48,6 +49,11 @@ export interface OrchestrationRegistry {
   /** 持有该 dispatch 的服务（先打开全部工作区）。 */
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
   flushAll(): Promise<void>;
+  /**
+   * 订阅各工作区收件箱新投递的消息（含之后才打开的服务；从快照恢复的不算），桌面通知用。
+   * 监听器抛异常只记日志。返回取消订阅。
+   */
+  onMessage(listener: (workspaceId: string, message: Message) => void): () => void;
 }
 
 export const UNWIRED_LAUNCHER_ERROR =
@@ -81,6 +87,18 @@ export function createOrchestrationRegistry(
     log: options.log,
   });
   const services = new Map<string, OrchestrationService>();
+  const messageListeners = new Set<(workspaceId: string, message: Message) => void>();
+  const log = options.log ?? ((message: string) => console.warn(`[orchestration] ${message}`));
+
+  const announce = (workspaceId: string, message: Message): void => {
+    for (const listener of messageListeners) {
+      try {
+        listener(workspaceId, message);
+      } catch (error) {
+        log(`message listener failed: ${errorMessage(error)}`);
+      }
+    }
+  };
 
   const open = (workspace: Workspace): OrchestrationService => {
     const existing = services.get(workspace.id);
@@ -95,6 +113,7 @@ export function createOrchestrationRegistry(
       runChecks,
       fs,
       notifyChanged: options.notifyChanged,
+      onMessagePosted: (message) => announce(workspace.id, message),
       checkPolicy: options.checkPolicy,
       log: options.log,
     });
@@ -135,6 +154,12 @@ export function createOrchestrationRegistry(
     },
     async flushAll() {
       await Promise.all([...services.values()].map((service) => service.flush()));
+    },
+    onMessage(listener) {
+      messageListeners.add(listener);
+      return () => {
+        messageListeners.delete(listener);
+      };
     },
   };
 }
