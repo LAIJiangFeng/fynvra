@@ -41,7 +41,13 @@ async function dispatch(registry: ReturnType<typeof make>): Promise<string> {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'fynvra-orchestration-messages-'));
-  WS1 = { id: 'ws_1', name: 'one', repoPath: join(dir, 'repos', 'one'), defaultBranch: 'main' };
+  WS1 = {
+    id: 'ws_1',
+    name: 'one',
+    repoPath: join(dir, 'repos', 'one'),
+    defaultBranch: 'main',
+    vcs: 'git',
+  };
 });
 
 afterEach(() => {

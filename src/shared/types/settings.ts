@@ -324,6 +324,8 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         const notifications = parseNotificationPreferencesPatch(value);
         if (!notifications) return null;
         patch.notifications = notifications;
+        break;
+      }
       // --- keybindings ---：整张覆盖表一起换，空表是全部重置
       case 'keybindings': {
         const keybindings = parseKeybindingPatch(value);

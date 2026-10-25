@@ -21,7 +21,6 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useGeneralPreferencesStore, useWorktreesRootStore } from '@/stores/settings';
-import { useWorktreesRootStore } from '@/stores/settings';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 

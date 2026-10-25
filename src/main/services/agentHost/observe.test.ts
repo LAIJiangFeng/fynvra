@@ -38,6 +38,7 @@ function setup(openSession: OpenSession) {
     name: 'demo',
     repoPath: join(dir, 'repo'),
     defaultBranch: 'main',
+    vcs: 'git' as const,
   };
   const host = createAgentHost({
     fork: () => new InMemoryWorker(openSession),
