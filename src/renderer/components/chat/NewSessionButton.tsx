@@ -10,17 +10,21 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
 import { selectModelProviders, useSessionsStore } from '@/stores/sessions';
 import { chooseModel, defaultModelChoice, findModel } from '@/stores/sessions/modelChoice';
-import { ModelSelect, ThinkingLevelPicker, ThinkingSourceNote } from './ModelPicker';
+import {
+  ModelSelect,
+  NO_PROVIDERS,
+  NO_PROVIDERS_HINT,
+  ThinkingLevelPicker,
+  ThinkingSourceBadge,
+} from './ModelPicker';
 import { pickRole } from './roleChoices';
 import { isOrchestratorRole, useRoles } from './roles';
 
@@ -92,9 +96,6 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>
-          <DialogDescription>
-            选择会话使用的角色与模型。主 agent 负责拆任务、派 worker、验收合并，自己不改代码。
-          </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-2">
           <RadioGroup
@@ -113,11 +114,7 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
               />
             ))}
           </RadioGroup>
-          {loadError && (
-            <p className="text-muted-foreground text-xs">
-              角色列表读取失败，先显示内置角色（{loadError}）
-            </p>
-          )}
+          {loadError && <p className="text-muted-foreground text-xs">读取角色失败：{loadError}</p>}
           <div className="grid gap-1.5 pt-1">
             <label htmlFor={`${id}-model`} className="font-medium text-sm">
               模型
@@ -129,27 +126,27 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
               onChange={(next) => setPicked(chooseModel(next, model?.thinking))}
             />
             {optionsError ? (
-              <p className="text-muted-foreground text-xs">
-                读取可选模型失败（{optionsError}），创建时由默认模型服务决定
-              </p>
+              <p className="text-muted-foreground text-xs">读取模型失败：{optionsError}</p>
             ) : (
               optionsLoaded &&
               providers.length === 0 && (
-                <p className="text-muted-foreground text-xs">
-                  还没有可用的模型服务：在「设置 → 模型服务」里启用一个填写了 API Key 的服务
+                <p title={NO_PROVIDERS_HINT} className="text-muted-foreground text-xs">
+                  {NO_PROVIDERS}
                 </p>
               )
             )}
           </div>
           {found && found.model.thinkingLevels.length > 0 && (
             <div className="grid gap-1.5">
-              <span className="font-medium text-sm">思考档位</span>
+              <span className="flex items-center gap-1.5 font-medium text-sm">
+                思考档位
+                <ThinkingSourceBadge source={found.model.source} />
+              </span>
               <ThinkingLevelPicker
                 levels={found.model.thinkingLevels}
                 value={model?.thinking}
                 onChange={(level) => setPicked(chooseModel(found, level))}
               />
-              <ThinkingSourceNote source={found.model.source} />
             </div>
           )}
           {error && (
@@ -169,7 +166,7 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-/** 一个可选角色：名称（主 agent 带皇冠）、内置徽标、描述。 */
+/** 一个可选角色：名称（主 agent 带皇冠）、内置徽标、描述（有才显示）。 */
 function RoleOption({ role, orchestrator }: { role: Role; orchestrator: boolean }) {
   return (
     <Radio.Root
@@ -190,14 +187,11 @@ function RoleOption({ role, orchestrator }: { role: Role; orchestrator: boolean 
           <span className="truncate font-medium text-sm">{role.name}</span>
           {role.builtin && <Badge variant="outline">内置</Badge>}
         </span>
-        <span
-          className={cn(
-            'mt-0.5 line-clamp-2 text-muted-foreground text-xs',
-            !role.description && 'italic opacity-70'
-          )}
-        >
-          {role.description || '没有描述'}
-        </span>
+        {role.description && (
+          <span className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
+            {role.description}
+          </span>
+        )}
       </span>
     </Radio.Root>
   );
