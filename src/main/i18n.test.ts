@@ -4,7 +4,7 @@ import { mainZhCN } from '@shared/i18n/main/zh-CN';
 import { afterEach, describe, expect, it } from 'vitest';
 import { configureMainLocale, mainLocale, translate } from './i18n';
 
-const CJK = /[　-〿㐀-鿿＀-￯]/u;
+const CJK = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/u;
 
 function entries(messages: Messages, prefix = ''): [string, string][] {
   return Object.entries(messages).flatMap(([key, value]) => {

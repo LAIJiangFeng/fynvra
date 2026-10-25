@@ -4,7 +4,7 @@ import { en } from './en';
 import { currentLocale, setCurrentLocale, translate, translatorOf } from './index';
 import { zhCN } from './zh-CN';
 
-const CJK = /[　-〿㐀-鿿＀-￯]/u;
+const CJK = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/u;
 
 function entries(messages: Messages, prefix = ''): [string, string][] {
   return Object.entries(messages).flatMap(([key, value]) => {

@@ -250,7 +250,7 @@ describe('listRemoteModels', () => {
         fetch: fakeFetch(http(404), http(404)),
       });
       expect(failed.ok).toBe(false);
-      expect(errorOf(failed)).not.toMatch(/[一-鿿]/u);
+      expect(errorOf(failed)).not.toMatch(/[\u4e00-\u9fff]/u);
     } finally {
       configureMainLocale(null);
     }
