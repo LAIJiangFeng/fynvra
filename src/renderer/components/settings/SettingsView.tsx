@@ -1,5 +1,6 @@
 import {
   Boxes,
+  Keyboard,
   type LucideIcon,
   Palette,
   Plug,
@@ -15,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
@@ -38,6 +40,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'skills', label: '技能', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', label: 'MCP', icon: Plug, Component: McpSettings },
   { value: 'appearance', label: '外观', icon: Palette, Component: AppearanceSettings },
+  { value: 'keybindings', label: '快捷键', icon: Keyboard, Component: KeybindingsSettings },
 ];
 
 /**
