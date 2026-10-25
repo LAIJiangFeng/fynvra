@@ -11,7 +11,7 @@ import {
 import { ApprovalBar } from './ApprovalBar';
 import { Composer } from './Composer';
 import { NewSessionButton } from './NewSessionButton';
-import { RoleBadge, STATUS_LABEL, StatusDot } from './SessionBadges';
+import { RoleBadge, STATUS_LABEL, StatusDot, useSessionBranch } from './SessionBadges';
 import { StatusBar } from './StatusBar';
 import { Timeline } from './Timeline';
 
@@ -19,6 +19,7 @@ import { Timeline } from './Timeline';
 export function ChatView({ sessionId }: { sessionId: string }) {
   const session = useSessionsStore(selectSessionOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
+  const branch = useSessionBranch(sessionId);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
@@ -26,7 +27,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <StatusDot status={status} />
         <h1 className="min-w-0 truncate font-medium">{session?.title ?? '会话'}</h1>
         {session && <RoleBadge roleId={session.roleId} />}
-        {session?.branch && <BranchBadge branch={session.branch} cwd={session.cwd} />}
+        {branch && <BranchBadge branch={branch.branch} cwd={branch.cwd} />}
         <span className="ml-auto shrink-0 text-muted-foreground text-xs">
           {STATUS_LABEL[status]}
         </span>

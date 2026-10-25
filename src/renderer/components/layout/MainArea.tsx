@@ -20,7 +20,7 @@ export function MainArea() {
         {!hasWorkspaces && (
           <Button disabled={adding} onClick={() => void add()}>
             <Plus />
-            挂入仓库
+            挂入目录
           </Button>
         )}
       </main>
@@ -37,10 +37,12 @@ export function MainArea() {
           <span className="truncate" title={workspace.displayPath}>
             {workspace.displayPath}
           </span>
-          <span className="flex shrink-0 items-center gap-1">
-            <GitBranch className="size-3.5" />
-            {workspace.defaultBranch}
-          </span>
+          {workspace.defaultBranch && (
+            <span className="flex shrink-0 items-center gap-1">
+              <GitBranch className="size-3.5" />
+              {workspace.defaultBranch}
+            </span>
+          )}
         </p>
       </header>
       <ChatPlaceholder workspaceId={workspace.id} />
