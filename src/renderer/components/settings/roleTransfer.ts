@@ -1,4 +1,5 @@
 import { parseRole, type Role } from '@fynvra/core';
+import { translate } from '../../i18n';
 
 // 角色的新建 / 复制 / 导入 / 导出（纯逻辑，可在 node 下测试）。
 // 导入导出在 Renderer 完成：读文件用 <input type="file">，写文件走浏览器下载，路径不经过 IPC。
@@ -33,7 +34,7 @@ export function suggestRoleId(name: string, taken: Iterable<string>): string {
 export function newRole(taken: Iterable<string>): Role {
   return {
     id: suggestRoleId('', taken),
-    name: '新角色',
+    name: translate('settings.roles.newRole'),
     skillIds: [],
     mcpServerIds: [],
     tools: 'all',
@@ -47,7 +48,7 @@ export function copyRole(role: Role, taken: Iterable<string>): Role {
   return {
     ...rest,
     id: uniqueRoleId(toSlug(`${role.id}-copy`), taken),
-    name: `${role.name} 副本`,
+    name: translate('settings.roles.copyName', { name: role.name }),
   };
 }
 
@@ -69,10 +70,10 @@ export function parseRoleImport(
   try {
     data = JSON.parse(text);
   } catch {
-    return { ok: false, error: '文件不是合法的 JSON' };
+    return { ok: false, error: translate('settings.roles.notJson') };
   }
   const items: unknown[] = Array.isArray(data) ? data : [data];
-  if (items.length === 0) return { ok: false, error: '文件里没有角色' };
+  if (items.length === 0) return { ok: false, error: translate('settings.roles.noRoles') };
 
   const used = new Set(taken);
   const roles: Role[] = [];
@@ -80,8 +81,11 @@ export function parseRoleImport(
   for (const [index, item] of items.entries()) {
     const parsed = parseRole(item);
     if (!parsed.ok) {
-      const which = items.length > 1 ? `第 ${index + 1} 个角色` : '角色';
-      return { ok: false, error: `${which}无效：${parsed.error}` };
+      const error =
+        items.length > 1
+          ? translate('settings.roles.invalidNth', { index: index + 1, error: parsed.error })
+          : translate('settings.roles.invalid', { error: parsed.error });
+      return { ok: false, error };
     }
     const { builtin: _builtin, ...role } = parsed.role;
     const id = uniqueRoleId(role.id, used);

@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { ModelEntry } from '@shared/types/llm';
+import { translate } from '../../../../i18n';
 import { baseUrlOf, modelEntries, parseJsonObject, type ReaderResult, text } from './common';
 
 /** Claude Code 的模型别名（可带 `[1m]` 后缀）：实际指向哪个模型取决于端点，导入时忽略。 */
@@ -50,7 +51,12 @@ export function readClaudeCode(source: string): ReaderResult {
   if (!settings) {
     return {
       providers: [],
-      warnings: ['Claude Code：~/.claude/settings.json 不是有效的 JSON，已跳过'],
+      warnings: [
+        translate('importers.invalidJson', {
+          subject: 'Claude Code',
+          file: '~/.claude/settings.json',
+        }),
+      ],
     };
   }
   const found = readAnthropicSettings(settings);

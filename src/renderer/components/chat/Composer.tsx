@@ -3,6 +3,7 @@ import { CircleStop, SendHorizontal } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useT } from '@/i18n/I18nProvider';
 import { insertNewline, matchAction, useActionHandler, useComposerHints } from '@/lib/keybindings';
 import {
   isBusy,
@@ -23,7 +24,6 @@ import {
   up,
 } from './inputHistory';
 import { ModelPicker } from './ModelPicker';
-import { STATUS_LABEL } from './SessionBadges';
 
 type Caret = 'start' | 'end';
 
@@ -57,6 +57,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   const hints = useComposerHints();
+  const t = useT();
   const input = useRef<HTMLTextAreaElement>(null);
   useActionHandler('focus-composer', () => input.current?.focus());
   /** 正在翻的历史；null 表示没在浏览（输入框里是草稿） */
@@ -173,10 +174,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
           ref={input}
           value={draft}
           rows={1}
-          aria-label="消息"
+          aria-label={t('chat.message')}
           aria-keyshortcuts={hints.ariaKeyShortcuts}
           title={hints.title}
-          placeholder="输入消息"
+          placeholder={t('chat.placeholder')}
           className="field-sizing-content max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
           onChange={(event) => {
             // 翻到的内容一经编辑就成为新的草稿，不再处于浏览状态
@@ -190,18 +191,20 @@ export function Composer({ sessionId }: { sessionId: string }) {
             <ModelPicker sessionId={sessionId} />
             <ApprovalModePicker sessionId={sessionId} />
             {busy && (
-              <span className="shrink-0 text-muted-foreground text-xs">{STATUS_LABEL[status]}</span>
+              <span className="shrink-0 text-muted-foreground text-xs">
+                {t(`sessions.status.${status}`)}
+              </span>
             )}
           </div>
           {busy ? (
             <Button size="sm" variant="secondary" onClick={() => void abort()}>
               <CircleStop />
-              停止
+              {t('chat.stop')}
             </Button>
           ) : (
             <Button size="sm" disabled={!canSend} onClick={submit}>
               <SendHorizontal />
-              发送
+              {t('chat.send')}
             </Button>
           )}
         </div>

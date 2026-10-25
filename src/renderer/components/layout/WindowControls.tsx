@@ -1,25 +1,27 @@
 import { Copy, Minus, Square, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useWindowMaximized } from '@/hooks/useWindowMaximized';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 
 /** Windows / Linux 的自绘窗口按钮（主进程以 titleBarStyle: 'hidden' 隐藏了系统按钮）。 */
 export function WindowControls() {
   const maximized = useWindowMaximized();
+  const t = useT();
   const api = window.fynvra.window;
 
   return (
     <div className="no-drag flex h-full">
-      <CaptionButton label="最小化" onClick={() => void api.minimize()}>
+      <CaptionButton label={t('app.minimize')} onClick={() => void api.minimize()}>
         <Minus />
       </CaptionButton>
       <CaptionButton
-        label={maximized ? '向下还原' : '最大化'}
+        label={t(maximized ? 'app.restore' : 'app.maximize')}
         onClick={() => void api.toggleMaximize()}
       >
         {maximized ? <Copy className="size-3.5" /> : <Square className="size-3.5" />}
       </CaptionButton>
-      <CaptionButton label="关闭" danger onClick={() => void api.close()}>
+      <CaptionButton label={t('common.close')} danger onClick={() => void api.close()}>
         <X />
       </CaptionButton>
     </div>

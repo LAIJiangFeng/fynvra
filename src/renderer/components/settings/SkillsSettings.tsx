@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/i18n/I18nProvider';
 import { useSkillsStore } from '@/stores/skills';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { SkillScanDialog } from './SkillScanDialog';
@@ -20,6 +21,7 @@ export function SkillsSettings() {
   const [adding, setAdding] = useState(false);
   const [scanSession, setScanSession] = useState<number | null>(null);
   const sessions = useRef(0);
+  const t = useT();
 
   const openScan = () => {
     sessions.current += 1;
@@ -34,7 +36,9 @@ export function SkillsSettings() {
     if (result.ok) {
       setStatus({
         tone: 'success',
-        text: `已登记 ${result.skills.map((skill) => skill.name).join('、')}`,
+        text: t('settings.skills.registered', {
+          names: result.skills.map((skill) => skill.name).join(t('settings.import.itemSeparator')),
+        }),
       });
     } else if (result.code !== 'canceled') {
       setStatus({ tone: 'error', text: result.error });
@@ -43,14 +47,14 @@ export function SkillsSettings() {
 
   return (
     <section>
-      <SectionHeader title="技能">
+      <SectionHeader title={t('settings.skills.title')}>
         <Button size="sm" variant="outline" onClick={openScan}>
           <ScanSearch />
-          扫描本机
+          {t('settings.skills.scan')}
         </Button>
         <Button size="sm" disabled={adding} onClick={() => void addDirectory()}>
           <FolderPlus />
-          添加目录
+          {t('settings.skills.addDir')}
         </Button>
       </SectionHeader>
 
@@ -62,10 +66,10 @@ export function SkillsSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && skills.length === 0 ? (
-        <EmptyState icon={Sparkles} title="还没有登记技能">
+        <EmptyState icon={Sparkles} title={t('settings.skills.empty')}>
           <Button size="sm" variant="outline" onClick={openScan}>
             <ScanSearch />
-            扫描本机
+            {t('settings.skills.scan')}
           </Button>
         </EmptyState>
       ) : (
@@ -92,13 +96,14 @@ export function SkillsSettings() {
 function SkillRow({ skill, onError }: { skill: SkillEntry; onError: (message: string) => void }) {
   const toggle = useSkillsStore((state) => state.toggle);
   const remove = useSkillsStore((state) => state.remove);
+  const t = useT();
 
   return (
     <li className="flex items-start gap-3 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-sm">{skill.name}</span>
-          {!skill.enabled && <Badge>已停用</Badge>}
+          {!skill.enabled && <Badge>{t('common.disabled')}</Badge>}
         </div>
         {skill.description && (
           <p className="line-clamp-2 text-muted-foreground text-xs">{skill.description}</p>
@@ -110,7 +115,7 @@ function SkillRow({ skill, onError }: { skill: SkillEntry; onError: (message: st
       <Switch
         className="mt-1"
         checked={skill.enabled}
-        aria-label={`启用 ${skill.name}`}
+        aria-label={t('common.enableItem', { name: skill.name })}
         onCheckedChange={async (enabled) => {
           const result = await toggle(skill.id, enabled);
           if (!result.ok) onError(result.error);
@@ -118,7 +123,13 @@ function SkillRow({ skill, onError }: { skill: SkillEntry; onError: (message: st
       />
       <Tooltip>
         <TooltipTrigger
-          render={<Button variant="ghost" size="icon-xs" aria-label={`移除 ${skill.name}`} />}
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t('common.removeItem', { name: skill.name })}
+            />
+          }
           onClick={async () => {
             const result = await remove(skill.id);
             if (!result.ok) onError(result.error);
@@ -126,7 +137,7 @@ function SkillRow({ skill, onError }: { skill: SkillEntry; onError: (message: st
         >
           <Trash2 />
         </TooltipTrigger>
-        <TooltipContent>从注册表移除（不删除文件）</TooltipContent>
+        <TooltipContent>{t('settings.skills.removeHint')}</TooltipContent>
       </Tooltip>
     </li>
   );

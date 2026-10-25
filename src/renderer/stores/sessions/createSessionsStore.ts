@@ -10,6 +10,7 @@ import type {
 } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
 import { create, type StoreApi } from 'zustand';
+import { translate } from '../../i18n';
 import type { SessionsApi } from '../../lib/api/sessions';
 import {
   addOptimisticMessage,
@@ -106,8 +107,6 @@ export interface SessionsStoreOptions {
 }
 
 const EVENT_BATCH_MS = 16;
-const SWITCH_WHILE_BUSY = '会话正在运行，等本轮结束再切换模型';
-const ARCHIVE_WHILE_BUSY = '会话正在运行，结束后再归档';
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -252,9 +251,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       archived: boolean
     ): Promise<IpcResult<{ session: SessionSummary }>> {
       const session = findSession(get(), sessionId);
-      if (!session) return { ok: false, error: '会话不存在' };
+      if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
       if (archived && (sending.has(sessionId) || isBusy(statusOf(get(), sessionId)))) {
-        return { ok: false, error: ARCHIVE_WHILE_BUSY };
+        return { ok: false, error: translate('sessions.errors.archiveWhileBusy') };
       }
       const { workspaceId, archivedAt: previous } = session;
       const mark = (archivedAt: number | undefined, updatedAt?: number) =>
@@ -275,7 +274,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return result;
       }
       mark(previous);
-      set({ notice: `${archived ? '归档' : '恢复'}失败：${result.error}` });
+      set({
+        notice: translate(
+          archived ? 'sessions.errors.archiveFailed' : 'sessions.errors.unarchiveFailed',
+          { error: result.error }
+        ),
+      });
       void get().loadSessions(workspaceId);
       return result;
     }
@@ -343,7 +347,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async createSession(roleId, model) {
         const workspaceId = get().workspaceId;
-        if (!workspaceId) return { ok: false, error: '请先选择一个工作区' };
+        if (!workspaceId) return { ok: false, error: translate('sessions.errors.noWorkspace') };
         const result = await safely(() =>
           api.create({ workspaceId, roleId, ...(model ? { model } : {}) })
         );
@@ -386,7 +390,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set((state) => {
           const loadingHistory = omitKey(state.loadingHistory, sessionId);
           if (!result.ok) {
-            return { loadingHistory, notice: `读取会话记录失败：${result.error}` };
+            return {
+              loadingHistory,
+              notice: translate('sessions.errors.historyFailed', { error: result.error }),
+            };
           }
           return { ...applyHistory(state, sessionId, result.messages), loadingHistory };
         });
@@ -426,7 +433,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const sessionId = get().activeSessionId;
         if (!sessionId) return;
         const result = await safely(() => api.abort(sessionId));
-        if (!result.ok) set({ notice: `停止失败：${result.error}` });
+        if (!result.ok)
+          set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
       },
 
       async respondApproval(requestId, decision) {
@@ -439,8 +447,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set((state) =>
           // 会话已经结束（审批随之作废）就不再放回队列
           isBusy(statusOf(state, sessionId))
-            ? { ...enqueueApproval(state, request), notice: `审批答复没有送达：${result.error}` }
-            : { notice: `审批答复没有送达：${result.error}` }
+            ? {
+                ...enqueueApproval(state, request),
+                notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }),
+              }
+            : { notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }) }
         );
       },
 
@@ -479,9 +490,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async setSessionModel(sessionId, model) {
         const session = findSession(get(), sessionId);
-        if (!session) return { ok: false, error: '会话不存在' };
+        if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
         if (sending.has(sessionId) || isBusy(statusOf(get(), sessionId))) {
-          return { ok: false, error: SWITCH_WHILE_BUSY };
+          return { ok: false, error: translate('sessions.errors.switchWhileBusy') };
         }
         const request = ++requestSeq;
         const previous = session.model;
@@ -508,7 +519,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }
         set((state) => ({
           ...mapLists(state, sessionId, (item) => withModel(item, previous)),
-          notice: `切换模型失败：${result.error}`,
+          notice: translate('sessions.errors.setModelFailed', { error: result.error }),
         }));
         // 换回的是发起前看到的模型；以 Main 的记录为准再拉一次
         void get().loadSessions(session.workspaceId);
@@ -517,7 +528,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async setApprovalMode(sessionId, mode) {
         const session = findSession(get(), sessionId);
-        if (!session) return { ok: false, error: '会话不存在' };
+        if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
         const request = ++requestSeq;
         const previous = session.approvalMode;
         approvalSwitches.set(sessionId, { request, mode });
@@ -540,7 +551,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           return result;
         }
         switchTo(previous);
-        set({ notice: `切换审批档位失败：${result.error}` });
+        set({
+          notice: translate('sessions.errors.setApprovalModeFailed', { error: result.error }),
+        });
         // 换回的是发起前看到的档位；以 Main 的记录为准再拉一次
         void get().loadSessions(session.workspaceId);
         return result;

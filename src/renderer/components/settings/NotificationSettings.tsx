@@ -3,16 +3,26 @@ import { BellRing } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import type { MessageId } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useNotificationSettingsStore } from '@/stores/settings';
 import { InlineMessage } from './common';
 
 /** 页上的开关：控件名说明不了的放悬停提示 */
-const SWITCHES: { key: keyof NotificationPreferences; label: string; hint?: string }[] = [
-  { key: 'enabled', label: '桌面通知' },
-  { key: 'mainAgentOnly', label: '仅主 agent 完成', hint: 'worker 的完成与失败不弹' },
-  { key: 'askAndApproval', label: '提问与审批', hint: 'worker 提问、上报与审批请求' },
-  { key: 'sound', label: '声音' },
+const SWITCHES: { key: keyof NotificationPreferences; label: MessageId; hint?: MessageId }[] = [
+  { key: 'enabled', label: 'settings.notifications.enabled' },
+  {
+    key: 'mainAgentOnly',
+    label: 'settings.notifications.mainAgentOnly',
+    hint: 'settings.notifications.mainAgentOnlyHint',
+  },
+  {
+    key: 'askAndApproval',
+    label: 'settings.notifications.askAndApproval',
+    hint: 'settings.notifications.askAndApprovalHint',
+  },
+  { key: 'sound', label: 'settings.notifications.sound' },
 ];
 
 /** 通知：总开关关掉时其余开关与测试按钮不可用。设置由 Main 持有，改了立即生效。 */
@@ -24,6 +34,7 @@ export function NotificationSettings() {
   const test = useNotificationSettingsStore((state) => state.test);
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const t = useT();
 
   useEffect(() => {
     void refresh();
@@ -32,7 +43,7 @@ export function NotificationSettings() {
   if (preferences === null) {
     return (
       <p className="rounded-lg border px-4 py-3 text-muted-foreground text-sm">
-        {error ? `读取失败：${error}` : '读取中…'}
+        {error ? t('settings.notifications.loadFailed', { error }) : t('common.loading')}
       </p>
     );
   }
@@ -51,8 +62,8 @@ export function NotificationSettings() {
         {SWITCHES.map(({ key, label, hint }) => (
           <SwitchRow
             key={key}
-            label={label}
-            hint={hint}
+            label={t(label)}
+            hint={hint && t(hint)}
             checked={preferences[key]}
             disabled={key !== 'enabled' && off}
             onChange={(checked) => void update({ [key]: checked })}
@@ -72,7 +83,7 @@ export function NotificationSettings() {
           onClick={() => void sendTest()}
         >
           <BellRing />
-          发送测试通知
+          {t('settings.notifications.test')}
         </Button>
         {testError && <InlineMessage tone="error">{testError}</InlineMessage>}
       </div>

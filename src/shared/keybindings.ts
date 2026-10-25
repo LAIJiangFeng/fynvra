@@ -6,6 +6,7 @@ import { asRecord } from './guards';
  * 按键串（chord）形如 `ctrl+shift+k`：小写，修饰键按 ctrl、alt、shift、meta 排在前，最后是键。
  * 默认键里的 `mod` 在 macOS 是 ⌘（meta），其他平台是 Ctrl；settings.json 里的覆盖项不知道平台，
  * `mod` 原样保留，Renderer 按平台展开（{@link normalizeChord} 传平台）后再匹配与显示。
+ * 动作与保留键的显示名在 Renderer 的字典里（keys.actions.<动作 id>、keys.reserved.<保留键 id>）。
  */
 
 /** 全局：窗口上监听；输入框：由 Composer 自己派发 */
@@ -14,7 +15,6 @@ export type KeyScope = 'global' | 'composer';
 export type KeyPlatform = 'mac' | 'windows' | 'linux';
 
 export interface KeyActionSpec {
-  label: string;
   scope: KeyScope;
   /** 默认键 */
   chord: string;
@@ -24,35 +24,20 @@ export interface KeyActionSpec {
 
 /** 动作表：顺序即设置页的顺序 */
 const ACTIONS = {
-  'new-session': { label: '新建会话', scope: 'global', chord: 'mod+n', allowInInput: true },
-  'open-settings': { label: '打开设置', scope: 'global', chord: 'mod+,', allowInInput: true },
-  'toggle-side-panel': {
-    label: '切换右侧面板',
-    scope: 'global',
-    chord: 'mod+b',
-    allowInInput: true,
-  },
-  'focus-composer': { label: '聚焦输入框', scope: 'global', chord: 'mod+l', allowInInput: true },
-  'prev-session': {
-    label: '上一个会话',
-    scope: 'global',
-    chord: 'mod+shift+[',
-    allowInInput: true,
-  },
-  'next-session': {
-    label: '下一个会话',
-    scope: 'global',
-    chord: 'mod+shift+]',
-    allowInInput: true,
-  },
-  'search-sessions': { label: '搜索会话', scope: 'global', chord: 'mod+k', allowInInput: true },
-  send: { label: '发送', scope: 'composer', chord: 'enter' },
-  newline: { label: '换行', scope: 'composer', chord: 'shift+enter' },
-  'cycle-approval': { label: '切换审批档位', scope: 'composer', chord: 'shift+tab' },
-  'stop-turn': { label: '停止当前回合', scope: 'composer', chord: 'escape' },
-  'open-model-picker': { label: '打开模型选择器', scope: 'composer', chord: 'mod+m' },
-  'history-prev': { label: '上一条历史消息', scope: 'composer', chord: 'arrowup' },
-  'history-next': { label: '下一条历史消息', scope: 'composer', chord: 'arrowdown' },
+  'new-session': { scope: 'global', chord: 'mod+n', allowInInput: true },
+  'open-settings': { scope: 'global', chord: 'mod+,', allowInInput: true },
+  'toggle-side-panel': { scope: 'global', chord: 'mod+b', allowInInput: true },
+  'focus-composer': { scope: 'global', chord: 'mod+l', allowInInput: true },
+  'prev-session': { scope: 'global', chord: 'mod+shift+[', allowInInput: true },
+  'next-session': { scope: 'global', chord: 'mod+shift+]', allowInInput: true },
+  'search-sessions': { scope: 'global', chord: 'mod+k', allowInInput: true },
+  send: { scope: 'composer', chord: 'enter' },
+  newline: { scope: 'composer', chord: 'shift+enter' },
+  'cycle-approval': { scope: 'composer', chord: 'shift+tab' },
+  'stop-turn': { scope: 'composer', chord: 'escape' },
+  'open-model-picker': { scope: 'composer', chord: 'mod+m' },
+  'history-prev': { scope: 'composer', chord: 'arrowup' },
+  'history-next': { scope: 'composer', chord: 'arrowdown' },
 } satisfies Record<string, KeyActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;
@@ -385,17 +370,20 @@ export function scopesOverlap(a: KeyActionSpec, b: KeyActionSpec): boolean {
 }
 
 /** 编辑文本的键：绑给全局动作会在输入框里吞掉复制粘贴 */
-const RESERVED_CHORDS: Record<string, string> = {
-  'mod+a': '全选',
-  'mod+c': '复制',
-  'mod+v': '粘贴',
-  'mod+x': '剪切',
-  'mod+z': '撤销',
-  'mod+shift+z': '重做',
-  'mod+y': '重做',
-};
+const RESERVED_CHORDS = {
+  'mod+a': 'select-all',
+  'mod+c': 'copy',
+  'mod+v': 'paste',
+  'mod+x': 'cut',
+  'mod+z': 'undo',
+  'mod+shift+z': 'redo',
+  'mod+y': 'redo',
+} as const;
 
-export type KeyConflict = { action: ActionId } | { reserved: string };
+/** 保留的编辑键是哪个编辑动作 */
+export type ReservedKey = (typeof RESERVED_CHORDS)[keyof typeof RESERVED_CHORDS];
+
+export type KeyConflict = { action: ActionId } | { reserved: ReservedKey };
 
 /** 把 `chord` 绑给 `action` 会和谁冲突：保留的编辑键，或作用域重叠、键相同的其他动作 */
 export function findConflict(
@@ -404,18 +392,14 @@ export function findConflict(
   bindings: ResolvedKeybindings,
   platform: KeyPlatform
 ): KeyConflict | null {
-  for (const [reserved, label] of Object.entries(RESERVED_CHORDS)) {
-    if (normalizeChord(reserved, platform) === chord) return { reserved: label };
+  for (const [reserved, key] of Object.entries(RESERVED_CHORDS)) {
+    if (normalizeChord(reserved, platform) === chord) return { reserved: key };
   }
   const spec = KEY_ACTIONS[action];
   const other = ACTION_IDS.find(
     (id) => id !== action && bindings[id] === chord && scopesOverlap(spec, KEY_ACTIONS[id])
   );
   return other ? { action: other } : null;
-}
-
-export function conflictLabel(conflict: KeyConflict): string {
-  return 'action' in conflict ? KEY_ACTIONS[conflict.action].label : conflict.reserved;
 }
 
 // ---------------------------------------------------------------------------

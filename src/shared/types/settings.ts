@@ -1,5 +1,6 @@
 import { isThinkingLevel } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
+import { DEFAULT_LANGUAGE, isLanguage, type Language } from '../i18n';
 import {
   type KeybindingOverrides,
   parseKeybindingOverrides,
@@ -64,6 +65,9 @@ export interface Preferences {
   // --- keybindings ---
   /** 快捷键覆盖表：只存改过的动作，值是规整过的按键串（`mod` 原样保留，Renderer 按平台展开） */
   keybindings?: KeybindingOverrides;
+  // --- language ---
+  /** 界面语言（Renderer 与 Main 的文案）；没写过时跟随系统（读取用 {@link languageOf}） */
+  language?: Language;
 }
 
 /**
@@ -126,6 +130,11 @@ export function createDefaultSettings(): Settings {
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return typeof value === 'string' && (THEME_MODES as readonly string[]).includes(value);
+}
+
+/** 生效的界面语言设置：没写过时跟随系统 */
+export function languageOf(preferences: Pick<Preferences, 'language'>): Language {
+  return preferences.language ?? DEFAULT_LANGUAGE;
 }
 
 // --- sessions ---
@@ -247,6 +256,8 @@ export function parsePreferences(raw: unknown): Preferences {
   const notifications = parseNotificationPreferences(record?.notifications);
   // --- keybindings ---
   const keybindings = parseKeybindingOverrides(record?.keybindings);
+  // --- language ---
+  const language = record?.language;
   return {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
@@ -259,6 +270,8 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(notifications ? { notifications } : {}),
     // --- keybindings ---
     ...(keybindings ? { keybindings } : {}),
+    // --- language ---
+    ...(isLanguage(language) ? { language } : {}),
   };
 }
 
@@ -333,6 +346,11 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         patch.keybindings = keybindings;
         break;
       }
+      // --- language ---
+      case 'language':
+        if (!isLanguage(value)) return null;
+        patch.language = value;
+        break;
       default:
         return null;
     }

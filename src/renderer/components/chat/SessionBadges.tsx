@@ -1,17 +1,11 @@
 import type { SessionStatus } from '@shared/types/chat';
 import { Crown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { isOrchestratorRole, useRoles } from './roles';
-
-export const STATUS_LABEL: Record<SessionStatus, string> = {
-  idle: '空闲',
-  running: '运行中',
-  'waiting-approval': '等待审批',
-  error: '出错',
-};
 
 const STATUS_DOT: Record<SessionStatus, string> = {
   idle: 'bg-muted-foreground/40',
@@ -22,10 +16,12 @@ const STATUS_DOT: Record<SessionStatus, string> = {
 
 /** 会话状态点：空闲灰、运行中蓝、等待审批琥珀、出错红。 */
 export function StatusDot({ status, className }: { status: SessionStatus; className?: string }) {
+  const t = useT();
+  const label = t(`sessions.status.${status}`);
   return (
-    <span className={cn('relative inline-flex shrink-0', className)} title={STATUS_LABEL[status]}>
+    <span className={cn('relative inline-flex shrink-0', className)} title={label}>
       <span aria-hidden className={cn('size-2 rounded-full', STATUS_DOT[status])} />
-      <span className="sr-only">{STATUS_LABEL[status]}</span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }

@@ -12,10 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useMcpStore } from '@/stores/mcp';
 import { InlineMessage, WarningList } from './common';
-import { TRANSPORT_LABELS } from './McpDialog';
 import {
   commandSummary,
   defaultSelection,
@@ -25,6 +25,7 @@ import {
   invertSelection,
   MCP_IMPORT_SOURCES,
   mcpSourceLabel,
+  mcpSourcePath,
   orderedSelection,
   selectAll,
   toggleMcpSource,
@@ -87,6 +88,7 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
   const [selected, setSelected] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const t = useT();
 
   // 只认最后一次扫描的返回；Main 也按顺序扫，它缓存的正是这一次的结果。
   // 切换来源会重新扫描：重复关系取决于扫了哪些来源，只在已有结果里过滤会留下指向隐藏候选的「重复」
@@ -130,7 +132,7 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
   return (
     <div className="grid min-w-0 gap-4">
       <DialogHeader>
-        <DialogTitle>从本机导入 MCP 服务器</DialogTitle>
+        <DialogTitle>{t('settings.mcp.importTitle')}</DialogTitle>
       </DialogHeader>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -139,7 +141,7 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
             key={source.id}
             htmlFor={`${idPrefix}-${source.id}`}
             className="flex cursor-pointer items-center gap-2 text-sm"
-            title={source.path}
+            title={mcpSourcePath(source, t)}
           >
             <Checkbox
               id={`${idPrefix}-${source.id}`}
@@ -159,37 +161,42 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
           onClick={() => setSources((current) => [...current])}
         >
           <RefreshCw />
-          重新扫描
+          {t('settings.import.rescan')}
         </Button>
       </div>
 
       {sources.length === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-sm">至少选择一个来源</p>
+        <p className="py-6 text-center text-muted-foreground text-sm">
+          {t('settings.import.pickSource')}
+        </p>
       ) : scan.phase === 'scanning' ? (
         <p className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
           <Loader2 className="size-4 animate-spin" />
-          正在扫描本机配置…
+          {t('settings.import.scanning')}
         </p>
       ) : scan.phase === 'failed' ? (
         <InlineMessage tone="error">{scan.error}</InlineMessage>
       ) : candidates.length === 0 ? (
-        <p className="py-6 text-center text-sm">没有找到可导入的 MCP 服务器</p>
+        <p className="py-6 text-center text-sm">{t('settings.mcp.importNone')}</p>
       ) : (
         <div className="grid min-w-0 gap-2">
           <div className="flex items-center justify-between text-muted-foreground text-xs">
             <span>
-              共 {candidates.length} 个，已选 {selected.length}
+              {t('settings.import.selectedOf', {
+                total: candidates.length,
+                selected: selected.length,
+              })}
             </span>
             <span className="flex gap-1">
               <Button variant="ghost" size="sm" onClick={() => setSelected(selectAll(candidates))}>
-                全选
+                {t('common.selectAll')}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setSelected(invertSelection(candidates, selected))}
               >
-                反选
+                {t('common.invertSelection')}
               </Button>
             </span>
           </div>
@@ -215,12 +222,14 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>取消</DialogClose>
+        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
         <Button
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >
-          {importing ? '导入中…' : `导入所选（${selected.length}）`}
+          {importing
+            ? t('settings.import.importing')
+            : t('settings.import.importPicked', { count: selected.length })}
         </Button>
       </DialogFooter>
     </div>
@@ -240,6 +249,7 @@ function CandidateRow({
   const summary = maskSecrets(commandSummary(candidate));
   const secretKeys = [...candidate.envKeys, ...candidate.headerKeys];
   const id = useId();
+  const t = useT();
   return (
     <li>
       {/* 整行都是标签：点哪里都能勾选；Checkbox 的 onClick 会 preventDefault，不会被标签再触发一次 */}
@@ -263,8 +273,8 @@ function CandidateRow({
             <Badge variant="outline" title={candidate.sourceLabel}>
               {mcpSourceLabel(candidate.source)}
             </Badge>
-            <Badge variant="outline">{TRANSPORT_LABELS[candidate.transport]}</Badge>
-            {candidate.enabledInSource && <Badge>来源中已启用</Badge>}
+            <Badge variant="outline">{t(`settings.mcp.transports.${candidate.transport}`)}</Badge>
+            {candidate.enabledInSource && <Badge>{t('settings.mcp.enabledInSource')}</Badge>}
             {reason && <Badge title={reason}>{duplicateBadge(candidate)}</Badge>}
           </div>
           <p className="truncate font-mono text-muted-foreground text-xs" title={summary}>
@@ -277,7 +287,7 @@ function CandidateRow({
                   key={key}
                   variant="outline"
                   className="font-mono"
-                  title="值只在本机读取，不在界面显示"
+                  title={t('settings.import.keyLocalOnly')}
                 >
                   <KeyRound />
                   {key}

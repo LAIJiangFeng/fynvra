@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import {
@@ -33,7 +34,7 @@ import {
   parseUnifiedDiff,
   statSummary,
 } from './diff';
-import { oneLine, shortSha, TASK_STATUS_LABEL } from './format';
+import { oneLine, shortSha, taskStatusLabel } from './format';
 import { useSeenOnce } from './hooks';
 
 /** 默认展开的文件：单个不超过这么多行，且累计不超过 {@link OPEN_BUDGET}。 */
@@ -43,12 +44,13 @@ const OPEN_BUDGET = 1_500;
 const LINE_CHUNK = 400;
 const LINE_HEIGHT_PX = 18;
 
-const STATUS_MARK: Record<DiffFileStatus, { letter: string; className: string; label: string }> = {
-  added: { letter: 'A', className: 'text-emerald-600 dark:text-emerald-400', label: '新增' },
-  deleted: { letter: 'D', className: 'text-red-600 dark:text-red-400', label: '删除' },
-  modified: { letter: 'M', className: 'text-amber-600 dark:text-amber-400', label: '修改' },
-  renamed: { letter: 'R', className: 'text-sky-600 dark:text-sky-400', label: '重命名' },
-  copied: { letter: 'C', className: 'text-sky-600 dark:text-sky-400', label: '复制' },
+/** 状态字母与配色；读屏与悬停的名称在字典 orchestration.fileStatus */
+const STATUS_MARK: Record<DiffFileStatus, { letter: string; className: string }> = {
+  added: { letter: 'A', className: 'text-emerald-600 dark:text-emerald-400' },
+  deleted: { letter: 'D', className: 'text-red-600 dark:text-red-400' },
+  modified: { letter: 'M', className: 'text-amber-600 dark:text-amber-400' },
+  renamed: { letter: 'R', className: 'text-sky-600 dark:text-sky-400' },
+  copied: { letter: 'C', className: 'text-sky-600 dark:text-sky-400' },
 };
 
 /** 「改动」tab：选一个待验收 / 已完成任务的当前尝试，看它的 diff。 */
@@ -63,15 +65,19 @@ export function ChangesView({
   selectedId: string | null;
   onSelect: (dispatchId: string) => void;
 }) {
+  const t = useT();
   if (candidates.length === 0) {
-    return <PanelMessage icon={GitCompareArrows} title="还没有待验收或已完成的改动" />;
+    return <PanelMessage icon={GitCompareArrows} title={t('orchestration.noChanges')} />;
   }
   const selected =
     candidates.find((candidate) => candidate.dispatch.id === selectedId) ?? candidates[0];
   if (!selected) return null;
   const items = candidates.map(({ task, dispatch }) => ({
     value: dispatch.id,
-    label: `[${TASK_STATUS_LABEL[task.status]}] ${oneLine(task.title, 48)}`,
+    label: t('orchestration.candidate', {
+      status: taskStatusLabel(task.status, t),
+      title: oneLine(task.title, 48),
+    }),
   }));
   const worktreeAlive = view.worktrees.some(
     (worktree) => worktree.id === selected.dispatch.worktreeId
@@ -86,7 +92,7 @@ export function ChangesView({
           if (typeof value === 'string') onSelect(value);
         }}
       >
-        <SelectTrigger size="sm" className="text-xs" aria-label="选择要查看的尝试">
+        <SelectTrigger size="sm" className="text-xs" aria-label={t('orchestration.pickAttempt')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -98,7 +104,7 @@ export function ChangesView({
         </SelectContent>
       </Select>
       {selected.dispatch.mode === 'in-place' ? (
-        <PanelMessage icon={GitCompareArrows} title="无 git" />
+        <PanelMessage icon={GitCompareArrows} title={t('common.noGit')} />
       ) : (
         <DispatchDiff
           key={selected.dispatch.id}
@@ -119,27 +125,32 @@ function DispatchDiff({
 }) {
   const entry = useOrchestrationStore((state) => state.diffs[dispatchId]);
   const loadDiff = useOrchestrationStore((state) => state.loadDiff);
+  const t = useT();
 
   useEffect(() => {
     if (worktreeAlive) void loadDiff(dispatchId);
   }, [dispatchId, worktreeAlive, loadDiff]);
 
   if (!worktreeAlive && entry?.status !== 'ready') {
-    return <PanelMessage icon={GitCompareArrows} title="worktree 已清理" />;
+    return <PanelMessage icon={GitCompareArrows} title={t('orchestration.worktreeCleaned')} />;
   }
   if (!entry || entry.status === 'loading') {
-    return <PanelMessage icon={Loader2} spin title="正在读取改动…" />;
+    return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
   }
   if (entry.status === 'error') {
     return (
-      <PanelMessage icon={CircleAlert} title="读取改动失败" description={entry.error}>
+      <PanelMessage
+        icon={CircleAlert}
+        title={t('orchestration.diffFailed')}
+        description={entry.error}
+      >
         <Button
           size="sm"
           variant="outline"
           onClick={() => void loadDiff(dispatchId, { force: true })}
         >
           <RefreshCw />
-          重试
+          {t('common.retry')}
         </Button>
       </PanelMessage>
     );
@@ -174,6 +185,7 @@ function DiffContent({
   const [open, setOpen] = useState<ReadonlySet<string>>(() => defaultOpenFiles(files));
   const sectionRefs = useRef(new Map<string, HTMLElement>());
   const summary = statSummary(data.stat);
+  const t = useT();
 
   const toggle = (key: string, next: boolean) =>
     setOpen((current) => {
@@ -200,8 +212,8 @@ function DiffContent({
             <Button
               size="icon-xs"
               variant="ghost"
-              aria-label="重新读取改动"
-              title="重新读取改动"
+              aria-label={t('orchestration.reloadDiff')}
+              title={t('orchestration.reloadDiff')}
               disabled={refreshing}
               onClick={onRefresh}
             >
@@ -212,7 +224,7 @@ function DiffContent({
         <p className="mt-1 flex items-center gap-1.5 text-muted-foreground">
           <GitCommitHorizontal className="size-3.5 shrink-0" />
           <span className="shrink-0">
-            相对 <span className="font-mono">{shortSha(data.baseCommit)}</span>
+            {t('orchestration.base')} <span className="font-mono">{shortSha(data.baseCommit)}</span>
           </span>
           {summary && (
             <span className="min-w-0 truncate" title={summary}>
@@ -221,9 +233,7 @@ function DiffContent({
           )}
         </p>
         {stale && (
-          <p className="mt-1 text-amber-700 dark:text-amber-300">
-            worktree 已清理，这是清理前的改动
-          </p>
+          <p className="mt-1 text-amber-700 dark:text-amber-300">{t('orchestration.staleDiff')}</p>
         )}
         {data.stat && (
           <Collapsible className="mt-1.5">
@@ -241,7 +251,9 @@ function DiffContent({
       </div>
 
       {files.length === 0 && extra.length === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-xs">还没有提交的改动</p>
+        <p className="py-6 text-center text-muted-foreground text-xs">
+          {t('orchestration.noCommits')}
+        </p>
       ) : (
         <>
           <FileList files={files} onReveal={reveal} />
@@ -263,7 +275,10 @@ function DiffContent({
             })}
             {extra.map((path) => (
               <p key={path} className="rounded-md border px-2 py-1.5 font-mono text-[11px]">
-                {path} <span className="font-sans text-muted-foreground">（没有文本 diff）</span>
+                {path}{' '}
+                <span className="font-sans text-muted-foreground">
+                  {t('orchestration.noTextDiff')}
+                </span>
               </p>
             ))}
           </div>
@@ -291,8 +306,12 @@ function defaultOpenFiles(files: DiffFile[]): Set<string> {
 }
 
 function FileList({ files, onReveal }: { files: DiffFile[]; onReveal: (key: string) => void }) {
+  const t = useT();
   return (
-    <ul className="flex flex-col rounded-md border py-1" aria-label="改动文件">
+    <ul
+      className="flex flex-col rounded-md border py-1"
+      aria-label={t('orchestration.changedFiles')}
+    >
       {files.map((file) => {
         const mark = STATUS_MARK[file.status];
         return (
@@ -305,7 +324,7 @@ function FileList({ files, onReveal }: { files: DiffFile[]; onReveal: (key: stri
             >
               <span className={cn('w-3 shrink-0 font-mono font-semibold', mark.className)}>
                 <span aria-hidden>{mark.letter}</span>
-                <span className="sr-only">{mark.label}</span>
+                <span className="sr-only">{t(`orchestration.fileStatus.${file.status}`)}</span>
               </span>
               <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
                 <bdi>{file.path}</bdi>
@@ -320,7 +339,10 @@ function FileList({ files, onReveal }: { files: DiffFile[]; onReveal: (key: stri
 }
 
 function LineCounts({ file }: { file: DiffFile }) {
-  if (file.binary) return <span className="shrink-0 text-muted-foreground">二进制</span>;
+  const t = useT();
+  if (file.binary) {
+    return <span className="shrink-0 text-muted-foreground">{t('orchestration.binary')}</span>;
+  }
   return (
     <span className="shrink-0 font-mono tabular-nums">
       <span className="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>{' '}
@@ -341,6 +363,7 @@ function DiffFileSection({
   sectionRef: (element: HTMLElement | null) => void;
 }) {
   const mark = STATUS_MARK[file.status];
+  const t = useT();
   return (
     <section ref={sectionRef} aria-label={file.path} className="scroll-mt-2 rounded-md border">
       <Collapsible open={open} onOpenChange={onOpenChange}>
@@ -348,7 +371,7 @@ function DiffFileSection({
           <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
           <span
             className={cn('shrink-0 font-mono font-semibold', mark.className)}
-            title={mark.label}
+            title={t(`orchestration.fileStatus.${file.status}`)}
           >
             {mark.letter}
           </span>
@@ -392,17 +415,20 @@ function LazyDiffBody({ file }: { file: DiffFile }) {
   const seen = useSeenOnce(placeholderRef);
   const [limit, setLimit] = useState(LINE_CHUNK);
   const total = diffLineCount(file);
+  const t = useT();
 
   if (file.binary) {
-    return <p className="px-3 py-2 text-muted-foreground text-xs">二进制文件，不显示内容</p>;
+    return (
+      <p className="px-3 py-2 text-muted-foreground text-xs">{t('orchestration.binaryFile')}</p>
+    );
   }
   if (total === 0) {
     const detail =
       file.meta.length > 0
         ? file.meta.join(' · ')
         : file.status === 'renamed'
-          ? '仅重命名，内容没有变化'
-          : '没有文本改动';
+          ? t('orchestration.renameOnly')
+          : t('orchestration.noTextChanges');
     return <p className="px-3 py-2 text-muted-foreground text-xs">{detail}</p>;
   }
   if (!seen) {
@@ -431,7 +457,7 @@ function LazyDiffBody({ file }: { file: DiffFile }) {
             className="h-7 text-xs"
             onClick={() => setLimit((current) => current + LINE_CHUNK)}
           >
-            再显示 {Math.min(LINE_CHUNK, rest)} 行（还有 {rest} 行）
+            {t('orchestration.showMore', { count: Math.min(LINE_CHUNK, rest), rest })}
           </Button>
         </div>
       )}

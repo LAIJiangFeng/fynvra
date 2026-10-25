@@ -4,6 +4,7 @@ import {
   pickThinkingLevel,
   type ThinkingSource,
 } from '@shared/types/chat';
+import type { T } from '../../i18n';
 import { findModel, type ThinkingChoice, thinkingChoices } from '../../stores/sessions/modelChoice';
 
 // 角色编辑器里模型与思考档位的规则（纯函数，在 node 下测试）。档位来自 sessions:model-options：
@@ -89,12 +90,15 @@ export function normalizeRoleThinking(
   return { ...role, model };
 }
 
-/** 档位下拉的选项：官方等级名与会话里一致，模型的默认档位标「默认」，悬停显示中文说明 */
+/** 档位下拉的选项：官方等级名与会话里一致，模型的默认档位标「默认」，悬停显示几个字的说明 */
 export function thinkingOptions(
   levels: readonly ThinkingLevel[],
-  defaultThinking?: ThinkingLevel
+  defaultThinking: ThinkingLevel | undefined,
+  t: T
 ): ThinkingChoice[] {
-  return thinkingChoices(levels).map((choice) =>
-    choice.value === defaultThinking ? { ...choice, label: `${choice.label}（默认）` } : choice
+  return thinkingChoices(levels, t).map((choice) =>
+    choice.value === defaultThinking
+      ? { ...choice, label: t('thinking.withDefault', { level: choice.label }) }
+      : choice
   );
 }

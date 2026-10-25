@@ -5,17 +5,24 @@ import {
   type ResolvedKeybindings,
   toAriaKeyShortcuts,
 } from '@shared/keybindings';
+import type { T } from '../../i18n';
 
 // 输入框作用域的纯函数；用到 DOM 的派发见 ./useKeybindings
 
 /** 输入框的悬停提示，以及 aria-keyshortcuts（切换审批档位占了 Shift+Tab 的反向移焦点，要告诉读屏） */
 export function composerHints(
   bindings: ResolvedKeybindings,
-  platform: KeyPlatform
+  platform: KeyPlatform,
+  t: T
 ): { title: string; ariaKeyShortcuts: string } {
   const label = (action: ActionId) => formatChord(bindings[action], platform);
   return {
-    title: `${label('send')} 发送，${label('newline')} 换行，${label('history-prev')} / ${label('history-next')} 翻历史消息`,
+    title: t('chat.composerHint', {
+      send: label('send'),
+      newline: label('newline'),
+      prev: label('history-prev'),
+      next: label('history-next'),
+    }),
     ariaKeyShortcuts: toAriaKeyShortcuts(bindings['cycle-approval']),
   };
 }

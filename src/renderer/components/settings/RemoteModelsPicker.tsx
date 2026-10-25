@@ -1,11 +1,14 @@
-import { type ModelOption, thinkingSourceNote } from '@shared/types/chat';
+import type { ModelOption } from '@shared/types/chat';
 import type { ModelEntry, RemoteModelEntry } from '@shared/types/llm';
 import { Loader2, RefreshCw, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
+import { thinkingSourceNote } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import type { T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
 import { describedThinking } from '@/stores/sessions/modelChoice';
@@ -59,6 +62,7 @@ export function RemoteModelsPicker({
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const t = useT();
 
   // request 每次挂载固定不变：只请求一次；关掉弹窗或重新拉取后，迟到的回答丢弃
   useEffect(() => {
@@ -112,11 +116,11 @@ export function RemoteModelsPicker({
 
   return (
     <section
-      aria-label="服务端的模型列表"
+      aria-label={t('settings.remoteModels.region')}
       className="grid min-w-0 gap-2 rounded-md border bg-muted/30 p-3"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 font-medium text-sm">服务端的模型</span>
+        <span className="shrink-0 font-medium text-sm">{t('settings.remoteModels.title')}</span>
         {load.phase === 'done' && (
           <span
             className="min-w-0 truncate font-mono text-muted-foreground text-xs"
@@ -129,14 +133,19 @@ export function RemoteModelsPicker({
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label="重新拉取"
-            title="重新拉取"
+            aria-label={t('settings.remoteModels.reload')}
+            title={t('settings.remoteModels.reload')}
             disabled={load.phase === 'loading'}
             onClick={onReload}
           >
             <RefreshCw />
           </Button>
-          <Button variant="ghost" size="icon-xs" aria-label="收起模型列表" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('settings.remoteModels.collapse')}
+            onClick={onClose}
+          >
             <X />
           </Button>
         </span>
@@ -145,7 +154,7 @@ export function RemoteModelsPicker({
       {load.phase === 'loading' && (
         <p className="flex items-center justify-center gap-2 py-6 text-muted-foreground text-sm">
           <Loader2 className="size-4 animate-spin" />
-          正在拉取模型列表…
+          {t('settings.remoteModels.loading')}
         </p>
       )}
 
@@ -155,7 +164,7 @@ export function RemoteModelsPicker({
             {load.error}
           </InlineMessage>
           <Button variant="outline" size="sm" onClick={onReload}>
-            重试
+            {t('common.retry')}
           </Button>
         </div>
       )}
@@ -166,8 +175,8 @@ export function RemoteModelsPicker({
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                aria-label="搜索服务端的模型"
-                placeholder="搜索模型 id 或名称"
+                aria-label={t('settings.remoteModels.search')}
+                placeholder={t('settings.remoteModels.searchPlaceholder')}
                 spellCheck={false}
                 className="h-8 pl-8"
                 value={query}
@@ -184,7 +193,7 @@ export function RemoteModelsPicker({
               disabled={visibleNew.length === 0}
               onClick={() => setSelected((ids) => selectAllVisible(ids, visible))}
             >
-              全选
+              {t('common.selectAll')}
             </Button>
             <Button
               variant="ghost"
@@ -192,7 +201,7 @@ export function RemoteModelsPicker({
               disabled={visibleNew.length === 0}
               onClick={() => setSelected((ids) => invertVisible(ids, visible))}
             >
-              反选
+              {t('common.invertSelection')}
             </Button>
           </div>
 
@@ -208,27 +217,35 @@ export function RemoteModelsPicker({
             ))}
             {visible.length === 0 && (
               <li className="px-3 py-4 text-center text-muted-foreground text-xs">
-                {models.length === 0 ? '服务端没有返回模型' : '没有匹配的模型'}
+                {t(models.length === 0 ? 'settings.remoteModels.none' : 'model.noMatch')}
               </li>
             )}
           </ul>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-muted-foreground text-xs">
-              共 {models.length} 个 · 已添加 {addedCount} · 已选 {picked.length}
+              {t('settings.remoteModels.counts', {
+                total: models.length,
+                added: addedCount,
+                selected: picked.length,
+              })}
             </span>
             <span className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                title={query.trim() ? '加入搜索结果里所有未添加的模型' : '加入所有未添加的模型'}
+                title={t(
+                  query.trim()
+                    ? 'settings.remoteModels.addAllFilteredHint'
+                    : 'settings.remoteModels.addAllHint'
+                )}
                 disabled={visibleNew.length === 0}
                 onClick={() => add(visibleNew)}
               >
-                全部加入（{visibleNew.length}）
+                {t('settings.remoteModels.addAll', { count: visibleNew.length })}
               </Button>
               <Button size="sm" disabled={picked.length === 0} onClick={() => add(picked)}>
-                加入所选（{picked.length}）
+                {t('settings.remoteModels.addPicked', { count: picked.length })}
               </Button>
             </span>
           </div>
@@ -248,14 +265,18 @@ export function RemoteModelsPicker({
  */
 function reasoningBadgeTitle(
   model: RemoteModelEntry,
-  thinking: ModelOption | undefined
+  thinking: ModelOption | undefined,
+  t: T
 ): string | null {
   if (thinking) {
     if (thinking.thinkingLevels.length === 0) return null;
-    const from = thinkingSourceNote(thinking.source) ?? 'pi 目录';
-    return `思考档位（${from}）：${thinking.thinkingLevels.join(' / ')}`;
+    const from = thinkingSourceNote(thinking.source, t) ?? t('settings.remoteModels.catalog');
+    return t('settings.remoteModels.levels', {
+      from,
+      levels: thinking.thinkingLevels.join(' / '),
+    });
   }
-  return model.reasoning ? '内置目录里是推理模型' : null;
+  return model.reasoning ? t('settings.remoteModels.catalogReasoning') : null;
 }
 
 function RemoteModelRow({
@@ -271,14 +292,15 @@ function RemoteModelRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   const id = useId();
+  const t = useT();
   const named = model.name !== model.id;
-  const reasoningTitle = reasoningBadgeTitle(model, thinking);
+  const reasoningTitle = reasoningBadgeTitle(model, thinking, t);
   return (
     <li>
       {/* 整行都是标签：点哪里都能勾选；Checkbox 的 onClick 会 preventDefault，不会被标签再触发一次 */}
       <label
         htmlFor={id}
-        title={named ? `${model.id}（${model.name}）` : model.id}
+        title={named ? t('common.withNote', { text: model.id, note: model.name }) : model.id}
         className={cn(
           'flex items-center gap-2.5 px-3 py-1.5',
           model.alreadyAdded ? 'cursor-default opacity-60' : 'cursor-pointer hover:bg-accent/50'
@@ -296,10 +318,10 @@ function RemoteModelRow({
         </span>
         {reasoningTitle && (
           <Badge variant="outline" title={reasoningTitle}>
-            推理
+            {t('settings.remoteModels.reasoning')}
           </Badge>
         )}
-        {model.alreadyAdded && <Badge>已添加</Badge>}
+        {model.alreadyAdded && <Badge>{t('common.added')}</Badge>}
       </label>
     </li>
   );

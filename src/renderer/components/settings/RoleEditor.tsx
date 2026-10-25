@@ -8,15 +8,11 @@ import {
   type Role,
   type ToolPolicy,
 } from '@fynvra/core';
-import {
-  APPROVAL_MODE_LABELS,
-  type ModelProviderOption,
-  THINKING_LEVEL_HINTS,
-  THINKING_LEVEL_LABELS,
-} from '@shared/types/chat';
+import type { ModelProviderOption } from '@shared/types/chat';
 import { Copy, Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { ThinkingSourceBadge } from '@/components/chat/ModelPicker';
+import { roleDescription } from '@/components/chat/roles';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +27,8 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import type { MessageId, T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { useMcpStore } from '@/stores/mcp';
 import { useProvidersStore } from '@/stores/providers';
 import { useRolesStore } from '@/stores/roles';
@@ -47,21 +45,11 @@ import { roleToJson } from './roleTransfer';
 import { maskSecrets } from './secretMask';
 
 /** 选项只留名称 */
-const TOOL_POLICY_LABELS: Record<ToolPolicy, string> = {
-  all: '全部工具',
-  readonly: '只读',
-  orchestrator: '编排',
-};
-const toItems = <T extends string>(labels: Readonly<Record<T, string>>) =>
-  (Object.keys(labels) as T[]).map((value) => ({ value, label: labels[value] }));
-const TOOL_POLICY_ITEMS = toItems(TOOL_POLICY_LABELS);
+const TOOL_POLICIES: readonly ToolPolicy[] = ['all', 'readonly', 'orchestrator'];
 /** 与输入框的审批胶囊同名 */
-const APPROVAL_ITEMS = toItems<ApprovalMode>(APPROVAL_MODE_LABELS);
-const FOLLOW_SESSION = '跟随会话模型';
-const UNKNOWN_THINKING_HINTS = {
-  loading: '读取中…',
-  unavailable: <span title="服务已停用、没填 API Key 或模型已删除">读不到这个模型的档位</span>,
-} as const;
+const APPROVAL_MODES: readonly ApprovalMode[] = ['supervised', 'auto-edits', 'full'];
+const toItems = <V extends string>(values: readonly V[], label: (value: V) => string) =>
+  values.map((value) => ({ value, label: label(value) }));
 
 /** 模型下拉的值：`<服务 id>:<模型 id>`（服务 id 是 slug，不含冒号）；空串表示不固定模型。 */
 const modelValue = (model: Role['model']) => (model ? `${model.providerId}:${model.modelId}` : '');
@@ -94,6 +82,11 @@ export function RoleEditor({
   const [saving, setSaving] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const id = useId();
+  const t = useT();
+  const toolPolicyItems = toItems(TOOL_POLICIES, (policy) =>
+    t(`settings.roles.toolPolicies.${policy}`)
+  );
+  const approvalItems = toItems(APPROVAL_MODES, (mode) => t(`approval.modes.${mode}`));
   const readOnly = initial.builtin === true;
   const dirty = isNew || JSON.stringify(draft) !== JSON.stringify(initial);
   const options = modelOptions?.options ?? null;
@@ -116,11 +109,11 @@ export function RoleEditor({
 
   const submit = async () => {
     if (isNew && !isValidRoleId(draft.id)) {
-      setError('ID 只能包含小写字母、数字和 -，且不能以 - 开头或结尾');
+      setError(t('settings.roles.idInvalid'));
       return;
     }
     if (isNew && takenIds.includes(draft.id)) {
-      setError(`已经有 id 为 ${draft.id} 的角色`);
+      setError(t('settings.roles.idTaken', { id: draft.id }));
       return;
     }
     const parsed = parseRole(normalizeRoleThinking(normalize(draft), options));
@@ -154,12 +147,12 @@ export function RoleEditor({
     >
       {readOnly && (
         <InlineMessage className="rounded-md border bg-muted/50 px-3 py-2">
-          内置角色只读
+          {t('settings.roles.readOnly')}
         </InlineMessage>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="名称" htmlFor={`${id}-name`}>
+        <Field label={t('settings.roles.name')} htmlFor={`${id}-name`}>
           <Input
             id={`${id}-name`}
             value={draft.name}
@@ -167,7 +160,11 @@ export function RoleEditor({
             onChange={(event) => update({ ...draft, name: event.target.value })}
           />
         </Field>
-        <Field label="ID" htmlFor={`${id}-role-id`} hint={isNew ? '保存后不可修改' : undefined}>
+        <Field
+          label="ID"
+          htmlFor={`${id}-role-id`}
+          hint={isNew ? t('settings.roles.idHint') : undefined}
+        >
           <Input
             id={`${id}-role-id`}
             value={draft.id}
@@ -179,17 +176,21 @@ export function RoleEditor({
         </Field>
       </div>
 
-      <Field label="描述" htmlFor={`${id}-description`}>
+      <Field label={t('settings.roles.description')} htmlFor={`${id}-description`}>
         <Input
           id={`${id}-description`}
-          value={draft.description ?? ''}
+          value={(readOnly ? roleDescription(draft, t) : draft.description) ?? ''}
           disabled={readOnly}
-          placeholder="一句话说明这个角色做什么"
+          placeholder={t('settings.roles.descriptionPlaceholder')}
           onChange={(event) => setText('description', event.target.value)}
         />
       </Field>
 
-      <Field label="系统提示词" htmlFor={`${id}-prompt`} hint="追加在默认系统提示词之后">
+      <Field
+        label={t('settings.roles.systemPrompt')}
+        htmlFor={`${id}-prompt`}
+        hint={t('settings.roles.systemPromptHint')}
+      >
         <Textarea
           id={`${id}-prompt`}
           rows={10}
@@ -220,9 +221,9 @@ export function RoleEditor({
             onChange={update}
           />
         )}
-        <Field label="工具策略" htmlFor={`${id}-tools`}>
+        <Field label={t('settings.roles.toolPolicy')} htmlFor={`${id}-tools`}>
           <Select
-            items={TOOL_POLICY_ITEMS}
+            items={toolPolicyItems}
             value={draft.tools}
             disabled={readOnly}
             onValueChange={(value) => {
@@ -233,7 +234,7 @@ export function RoleEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TOOL_POLICY_ITEMS.map((item) => (
+              {toolPolicyItems.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
@@ -241,9 +242,9 @@ export function RoleEditor({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="审批档位" htmlFor={`${id}-approval`}>
+        <Field label={t('settings.roles.approvalMode')} htmlFor={`${id}-approval`}>
           <Select
-            items={APPROVAL_ITEMS}
+            items={approvalItems}
             value={draft.approvalMode}
             disabled={readOnly}
             onValueChange={(value) => {
@@ -254,7 +255,7 @@ export function RoleEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {APPROVAL_ITEMS.map((item) => (
+              {approvalItems.map((item) => (
                 <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
@@ -283,18 +284,18 @@ export function RoleEditor({
         {!readOnly && (
           <Button type="submit" disabled={saving || !dirty}>
             <Save />
-            {saving ? '保存中…' : '保存'}
+            {t(saving ? 'common.saving' : 'common.save')}
           </Button>
         )}
         {!isNew && (
           <>
             <Button type="button" variant="outline" onClick={() => onCopy(initial)}>
               <Copy />
-              复制为新角色
+              {t('settings.roles.copyAsNew')}
             </Button>
             <Button type="button" variant="outline" onClick={() => downloadRole(initial)}>
               <Download />
-              导出 JSON
+              {t('settings.roles.exportJson')}
             </Button>
           </>
         )}
@@ -303,7 +304,7 @@ export function RoleEditor({
             {confirmingRemove ? (
               <>
                 <span className="text-muted-foreground text-xs">
-                  删除 roles/{initial.id}.json？
+                  {t('settings.roles.confirmDeleteFile', { id: initial.id })}
                 </span>
                 <Button
                   type="button"
@@ -311,7 +312,7 @@ export function RoleEditor({
                   size="sm"
                   onClick={() => void confirmRemove()}
                 >
-                  确认删除
+                  {t('common.confirmDelete')}
                 </Button>
                 <Button
                   type="button"
@@ -319,7 +320,7 @@ export function RoleEditor({
                   size="sm"
                   onClick={() => setConfirmingRemove(false)}
                 >
-                  取消
+                  {t('common.cancel')}
                 </Button>
               </>
             ) : (
@@ -330,7 +331,7 @@ export function RoleEditor({
                 onClick={() => setConfirmingRemove(true)}
               >
                 <Trash2 />
-                删除
+                {t('common.delete')}
               </Button>
             )}
           </div>
@@ -382,7 +383,9 @@ function ModelField({
   onChange: (role: Role) => void;
 }) {
   const providers = useProvidersStore((state) => state.providers);
+  const t = useT();
   const current = modelValue(role.model);
+  const followSession = t('settings.roles.followSession');
   const choices = providers.flatMap((provider) =>
     provider.models.map((model) => ({
       value: `${provider.id}:${model.id}`,
@@ -392,19 +395,24 @@ function ModelField({
   // 角色引用的服务或模型已被删除：保留为一个「不可用」选项，避免下拉显示成空白
   const missing =
     role.model && !choices.some((choice) => choice.value === current)
-      ? { value: current, label: `${role.model.providerId} / ${role.model.modelId}（不可用）` }
+      ? {
+          value: current,
+          label: t('settings.roles.unavailableModel', {
+            model: `${role.model.providerId} / ${role.model.modelId}`,
+          }),
+        }
       : null;
-  const items = [{ value: '', label: FOLLOW_SESSION }, ...(missing ? [missing] : []), ...choices];
+  const items = [{ value: '', label: followSession }, ...(missing ? [missing] : []), ...choices];
 
   return (
     <Field
-      label="模型"
+      label={t('settings.roles.model')}
       htmlFor={id}
       hint={
         providers.length === 0
-          ? '先在「模型服务」里添加服务'
+          ? t('settings.roles.addProviderFirst')
           : unsupported
-            ? '不支持推理'
+            ? t('settings.roles.noReasoning')
             : undefined
       }
     >
@@ -429,13 +437,14 @@ function ModelField({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">{FOLLOW_SESSION}</SelectItem>
+          <SelectItem value="">{followSession}</SelectItem>
           {missing && <SelectItem value={missing.value}>{missing.label}</SelectItem>}
           {providers.map((provider) => (
             <SelectGroup key={provider.id}>
               <SelectGroupLabel>
-                {provider.name}
-                {!provider.enabled && '（已停用）'}
+                {provider.enabled
+                  ? provider.name
+                  : t('settings.roles.providerDisabled', { name: provider.name })}
               </SelectGroupLabel>
               {provider.models.map((model) => (
                 <SelectItem key={model.id} value={`${provider.id}:${model.id}`}>
@@ -470,22 +479,17 @@ function ThinkingField({
   disabled: boolean;
   onChange: (role: Role) => void;
 }) {
+  const t = useT();
   if (state.kind !== 'levels') {
     const current = role.model?.thinking;
     const shown =
       state.kind === 'follow-session'
-        ? FOLLOW_SESSION
+        ? t('settings.roles.followSession')
         : current
-          ? THINKING_LEVEL_LABELS[current]
-          : '默认';
-    const hint =
-      state.kind === 'follow-session'
-        ? undefined
-        : state.reason === 'failed'
-          ? `读取档位失败：${error ?? ''}`
-          : UNKNOWN_THINKING_HINTS[state.reason];
+          ? t(`thinking.levels.${current}`)
+          : t('common.default');
     return (
-      <Field label="思考档位" htmlFor={id} hint={hint}>
+      <Field label={t('thinking.title')} htmlFor={id} hint={unknownThinkingHint(state, error, t)}>
         <Select value={null} disabled>
           <SelectTrigger id={id}>
             <SelectValue placeholder={shown} />
@@ -495,12 +499,12 @@ function ThinkingField({
     );
   }
 
-  const items = thinkingOptions(state.levels, state.defaultThinking);
+  const items = thinkingOptions(state.levels, state.defaultThinking, t);
   return (
     <Field
       label={
         <span className="inline-flex items-center gap-1.5">
-          思考档位
+          {t('thinking.title')}
           <ThinkingSourceBadge source={state.source} />
         </span>
       }
@@ -516,7 +520,7 @@ function ThinkingField({
           }
         }}
       >
-        <SelectTrigger id={id} title={THINKING_LEVEL_HINTS[state.value]}>
+        <SelectTrigger id={id} title={t(`thinking.hints.${state.value}`)}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -528,6 +532,22 @@ function ThinkingField({
         </SelectContent>
       </Select>
     </Field>
+  );
+}
+
+/** 读不到档位时下拉下方的提示：读取中、读取失败（带原因）、读不到（原因悬停） */
+function unknownThinkingHint(
+  state: Exclude<RoleThinking, { kind: 'unsupported' | 'levels' }>,
+  error: string | null,
+  t: T
+) {
+  if (state.kind === 'follow-session') return undefined;
+  if (state.reason === 'failed') return t('settings.roles.levelsFailed', { error: error ?? '' });
+  if (state.reason === 'loading') return t('common.loading');
+  return (
+    <span title={t('settings.roles.levelsUnavailableHint')}>
+      {t('settings.roles.levelsUnavailable')}
+    </span>
   );
 }
 
@@ -553,7 +573,14 @@ function SkillToggles(props: {
     ...(skill.description ? { description: skill.description } : {}),
     inactive: !skill.enabled,
   }));
-  return <ToggleList label="技能" emptyHint="还没有技能" items={items} {...props} />;
+  return (
+    <ToggleList
+      label="settings.roles.skills"
+      emptyHint="settings.roles.noSkills"
+      items={items}
+      {...props}
+    />
+  );
 }
 
 function McpToggles(props: {
@@ -568,7 +595,14 @@ function McpToggles(props: {
     description: maskSecrets(server.url ?? [server.command, ...(server.args ?? [])].join(' ')),
     inactive: !server.enabled,
   }));
-  return <ToggleList label="MCP 服务器" emptyHint="还没有 MCP 服务器" items={items} {...props} />;
+  return (
+    <ToggleList
+      label="settings.roles.mcpServers"
+      emptyHint="settings.roles.noMcpServers"
+      items={items}
+      {...props}
+    />
+  );
 }
 
 /** 多选列表：每项一个开关。角色引用了但注册表里已没有的 id 也列出来（标「已移除」），方便取消。 */
@@ -580,13 +614,14 @@ function ToggleList({
   disabled,
   onChange,
 }: {
-  label: string;
-  emptyHint: string;
+  label: MessageId;
+  emptyHint: MessageId;
   items: ToggleItem[];
   selected: string[];
   disabled: boolean;
   onChange: (ids: string[]) => void;
 }) {
+  const t = useT();
   const known = new Set(items.map((item) => item.id));
   const rows: ToggleItem[] = [
     ...items,
@@ -598,20 +633,24 @@ function ToggleList({
   return (
     <div className="grid min-w-0 content-start gap-2">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">{label}</span>
-        <span className="text-muted-foreground text-xs">已选 {selected.length}</span>
+        <span className="font-medium text-sm">{t(label)}</span>
+        <span className="text-muted-foreground text-xs">
+          {t('settings.roles.selected', { count: selected.length })}
+        </span>
       </div>
       <ul className="max-h-56 divide-y overflow-y-auto rounded-md border">
         {rows.length === 0 && (
-          <li className="px-3 py-4 text-center text-muted-foreground text-xs">{emptyHint}</li>
+          <li className="px-3 py-4 text-center text-muted-foreground text-xs">{t(emptyHint)}</li>
         )}
         {rows.map((item) => (
           <li key={item.id} className="flex items-center gap-3 px-3 py-2">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 text-sm">
                 <span className="truncate">{item.name}</span>
-                {item.inactive && <Badge variant="outline">已停用</Badge>}
-                {item.missing && <Badge variant="destructive">已移除</Badge>}
+                {item.inactive && <Badge variant="outline">{t('common.disabled')}</Badge>}
+                {item.missing && (
+                  <Badge variant="destructive">{t('settings.roles.removedEntry')}</Badge>
+                )}
               </div>
               {item.description && (
                 <p className="truncate text-muted-foreground text-xs" title={item.description}>
@@ -622,7 +661,7 @@ function ToggleList({
             <Switch
               checked={selected.includes(item.id)}
               disabled={disabled}
-              aria-label={`${label}：${item.name}`}
+              aria-label={t('common.labeled', { label: t(label), text: item.name })}
               onCheckedChange={(on) => toggle(item.id, on)}
             />
           </li>

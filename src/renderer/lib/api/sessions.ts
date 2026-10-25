@@ -12,6 +12,7 @@ import type {
 } from '@shared/types/chat';
 import type { SessionsApi } from '../../../preload/domains/sessions';
 import type { FynvraApi } from '../../../preload/types';
+import { translate } from '../../i18n';
 
 // §9.3 的 SessionsApi 由 preload 定义；Renderer 统一从这里取
 export type { SessionsApi };
@@ -429,7 +430,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
     }
   }
 
-  const missing = () => ({ ok: false, error: '会话不存在' }) as const;
+  const missing = () => ({ ok: false, error: translate('sessions.errors.notFound') }) as const;
 
   return {
     async list(workspaceId, options = {}) {
@@ -444,7 +445,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
     async archive(sessionId) {
       const session = sessions.get(sessionId);
       if (!session) return missing();
-      if (session.run) return { ok: false, error: '会话正在运行，结束后再归档' };
+      if (session.run) return { ok: false, error: translate('sessions.errors.archiveWhileBusy') };
       // 与 Main 相同：归档不算一次更新
       session.summary = { ...session.summary, archivedAt: now() };
       for (const listener of changedListeners) listener(session.summary.workspaceId);
@@ -470,7 +471,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         id: nextId('mock-session'),
         workspaceId: input.workspaceId,
         roleId: input.roleId,
-        title: '新会话',
+        title: translate('sessions.untitled'),
         cwd: '(mock)',
         status: 'idle',
         createdAt: time,
@@ -496,7 +497,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
     async setModel({ sessionId, model }) {
       const session = sessions.get(sessionId);
       if (!session) return missing();
-      if (session.run) return { ok: false, error: '会话正在运行，等本轮结束再切换模型' };
+      if (session.run) return { ok: false, error: translate('sessions.errors.switchWhileBusy') };
       session.summary = { ...session.summary, model };
       lastModels.set(session.summary.workspaceId, model);
       changed(session);
@@ -533,8 +534,8 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
     async prompt({ sessionId, text }) {
       const session = sessions.get(sessionId);
       if (!session) return missing();
-      if (!text.trim()) return { ok: false, error: '消息不能为空' };
-      if (session.run) return { ok: false, error: '会话正在运行' };
+      if (!text.trim()) return { ok: false, error: translate('sessions.errors.emptyMessage') };
+      if (session.run) return { ok: false, error: translate('sessions.errors.busy') };
       const run = new AbortController();
       session.run = run;
       if (session.history.length === 0) {
@@ -562,7 +563,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
 
     async respondApproval({ sessionId, requestId, decision }) {
       const resolve = sessions.get(sessionId)?.approvals.get(requestId);
-      if (!resolve) return { ok: false, error: '审批请求不存在或已过期' };
+      if (!resolve) return { ok: false, error: translate('sessions.errors.approvalGone') };
       resolve(decision);
       return { ok: true };
     },

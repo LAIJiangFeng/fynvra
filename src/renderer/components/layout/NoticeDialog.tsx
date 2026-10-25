@@ -9,12 +9,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useT } from '@/i18n/I18nProvider';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 /** 展示工作区操作的失败原因（如所选目录不是 git 仓库），确认后清除。 */
 export function NoticeDialog() {
   const notice = useWorkspacesStore((state) => state.notice);
   const dismiss = useWorkspacesStore((state) => state.dismissNotice);
+  const t = useT();
   // 关闭动画期间 notice 已清空，沿用上一条内容避免弹窗闪成空白
   const [shown, setShown] = useState(notice);
   if (notice && notice !== shown) setShown(notice);
@@ -32,7 +34,7 @@ export function NoticeDialog() {
           <DialogDescription className="break-all">{shown?.message}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <DialogClose render={<Button />}>知道了</DialogClose>
+          <DialogClose render={<Button />}>{t('common.gotIt')}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

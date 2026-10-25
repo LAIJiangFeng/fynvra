@@ -12,6 +12,7 @@ import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { sessionPreferencesOf } from '@shared/types/settings';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
+import { translate } from '../i18n';
 import {
   type AgentHostService,
   type CreateSessionInput,
@@ -137,7 +138,7 @@ export function registerSessionHandlers(
     IPC_CHANNELS.SESSIONS_LIST,
     (_event, raw: unknown): IpcResult<{ sessions: SessionSummary[] }> => {
       const input = parseListSessionsInput(raw);
-      if (!input) return { ok: false, error: '无效的工作区 id' };
+      if (!input) return { ok: false, error: translate('common.invalidWorkspaceId') };
       try {
         const sessions = host().list(input.workspaceId);
         return {
@@ -166,12 +167,12 @@ export function registerSessionHandlers(
     (_event, raw: unknown): Promise<IpcResult<ArchiveSweepResult>> =>
       raw === undefined
         ? guard(async () => ({ ok: true, ...(await sweeper().sweep()) }))
-        : invalid('无效的参数')
+        : invalid(translate('common.invalidArgs'))
   );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_CREATE, (_event, raw: unknown) => {
     const input = parseCreateSessionInput(raw);
-    return input ? guard(() => host().create(input)) : invalid('无效的会话参数');
+    return input ? guard(() => host().create(input)) : invalid(translate('sessions.invalidCreate'));
   });
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_REMOVE, (_event, raw: unknown) =>
@@ -180,7 +181,9 @@ export function registerSessionHandlers(
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
-    return input ? guard(() => host().prompt(input.sessionId, input.text)) : invalid('无效的消息');
+    return input
+      ? guard(() => host().prompt(input.sessionId, input.text))
+      : invalid(translate('sessions.invalidPrompt'));
   });
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>
@@ -195,14 +198,18 @@ export function registerSessionHandlers(
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, (_event, raw: unknown) => {
     const input = parseRespondApprovalInput(raw);
-    return input ? guard(() => host().respondApproval(input)) : invalid('无效的审批结果');
+    return input
+      ? guard(() => host().respondApproval(input))
+      : invalid(translate('sessions.invalidApproval'));
   });
 
   ipcMain.handle(
     IPC_CHANNELS.SESSIONS_SET_MODEL,
     (_event, raw: unknown): Promise<IpcResult<{ session: SessionSummary }>> => {
       const input = parseSetModelInput(raw);
-      return input ? guard(() => host().setModel(input)) : invalid('无效的模型参数');
+      return input
+        ? guard(() => host().setModel(input))
+        : invalid(translate('sessions.invalidModel'));
     }
   );
 
@@ -210,7 +217,9 @@ export function registerSessionHandlers(
     IPC_CHANNELS.SESSIONS_MODEL_OPTIONS,
     (_event, raw: unknown): Promise<IpcResult<ModelOptions>> => {
       const input = parseModelOptionsInput(raw);
-      return input ? guard(() => host().modelOptions(input)) : invalid('无效的参数');
+      return input
+        ? guard(() => host().modelOptions(input))
+        : invalid(translate('common.invalidArgs'));
     }
   );
 
@@ -218,7 +227,9 @@ export function registerSessionHandlers(
     IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE,
     (_event, raw: unknown): Promise<IpcResult<{ session: SessionSummary }>> => {
       const input = parseSetApprovalModeInput(raw);
-      return input ? guard(() => host().setApprovalMode(input)) : invalid('无效的审批档位');
+      return input
+        ? guard(() => host().setApprovalMode(input))
+        : invalid(translate('sessions.invalidApprovalMode'));
     }
   );
 
@@ -343,7 +354,7 @@ function withSessionId<T extends object>(
   const sessionId = parseSessionId(raw);
   return sessionId
     ? guard(() => run(sessionId))
-    : Promise.resolve({ ok: false, error: '无效的会话 id' });
+    : Promise.resolve({ ok: false, error: translate('common.invalidSessionId') });
 }
 
 /** handler 不跨边界抛异常 */

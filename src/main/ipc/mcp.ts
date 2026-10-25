@@ -10,6 +10,7 @@ import type {
   McpSaveResult,
   McpScanImportsResult,
 } from '../../preload/domains/mcp';
+import { translate } from '../i18n';
 import { importClaudeMcp } from '../services/mcp/claudeImport';
 import { createMcpImporter, type McpImporter } from '../services/mcp/import/mcpImporter';
 import { createMcpRegistry, type McpRegistry, toMcpServerView } from '../services/mcp/mcpRegistry';
@@ -39,7 +40,7 @@ export function registerMcpHandlers(): void {
     try {
       return { ok: true, servers: (await getMcpRegistry().list()).map(toMcpServerView) };
     } catch (error) {
-      return { ok: false, error: `读取 MCP 服务器失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('mcp.readFailed', { error: errorMessage(error) }) };
     }
   });
 
@@ -52,32 +53,32 @@ export function registerMcpHandlers(): void {
       sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
       return { ok: true, server: toMcpServerView(result.server) };
     } catch (error) {
-      return { ok: false, error: `保存 MCP 服务器失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('mcp.saveFailed', { error: errorMessage(error) }) };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.MCP_REMOVE, async (_event, rawId: unknown): Promise<IpcResult> => {
-    if (!isRegistryId(rawId)) return { ok: false, error: '无效的 MCP 服务器 id' };
+    if (!isRegistryId(rawId)) return { ok: false, error: translate('mcp.invalidId') };
     try {
       const removed = await getMcpRegistry().remove(rawId);
-      if (!removed) return { ok: false, error: 'MCP 服务器不存在' };
+      if (!removed) return { ok: false, error: translate('mcp.notFound') };
       sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: `删除 MCP 服务器失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('mcp.removeFailed', { error: errorMessage(error) }) };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.MCP_TOGGLE, async (_event, raw: unknown): Promise<McpSaveResult> => {
     const input = parseToggle(raw);
-    if (!input) return { ok: false, error: '无效的参数' };
+    if (!input) return { ok: false, error: translate('common.invalidArgs') };
     try {
       const server = await getMcpRegistry().setEnabled(input.id, input.enabled);
-      if (!server) return { ok: false, error: 'MCP 服务器不存在' };
+      if (!server) return { ok: false, error: translate('mcp.notFound') };
       sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
       return { ok: true, server: toMcpServerView(server) };
     } catch (error) {
-      return { ok: false, error: `更新 MCP 服务器失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('mcp.updateFailed', { error: errorMessage(error) }) };
     }
   });
 
@@ -108,7 +109,7 @@ export function registerMcpHandlers(): void {
       if (added.length > 0) sendToAllWindows(IPC_CHANNELS.MCP_CHANGED);
       return { ok: true, added, skipped: outcomes.length - added.length, sources };
     } catch (error) {
-      return { ok: false, error: `导入失败：${errorMessage(error)}` };
+      return { ok: false, error: translate('common.importFailed', { error: errorMessage(error) }) };
     }
   });
 }

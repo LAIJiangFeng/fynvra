@@ -1,7 +1,20 @@
 import { MODEL_CATALOG } from '@shared/modelCatalog';
 import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
+import { translate } from '../../i18n';
 
 // 「从本机导入」弹窗的纯逻辑：不碰 DOM 与 window.fynvra，在 node 下测试。
+
+/** 导入结果一行：导入了几个，有跳过的再列出「名称（原因）」；MCP 导入共用 */
+export function skippedSummary(
+  done: string,
+  skipped: ReadonlyArray<{ name: string; reason: string }>
+): string {
+  if (skipped.length === 0) return done;
+  const items = skipped
+    .map((item) => translate('settings.import.skippedItem', item))
+    .join(translate('settings.import.itemSeparator'));
+  return translate('settings.import.skipped', { done, count: skipped.length, items });
+}
 
 /** 来源开关的顺序与 Main 的去重优先级一致：重复的候选保留排在前面的。 */
 export const IMPORT_SOURCES: ReadonlyArray<{
@@ -66,18 +79,20 @@ export function orderedSelection(
 
 export function duplicateReason(candidate: ProviderImportCandidate): string | null {
   if (candidate.duplicate === 'existing') {
-    return `已有地址和 API Key 都相同的服务「${candidate.duplicateOf ?? ''}」`;
+    return translate('settings.providers.duplicateExisting', { name: candidate.duplicateOf ?? '' });
   }
   if (candidate.duplicate === 'candidate') {
-    return `与上面的「${candidate.duplicateOf ?? ''}」地址和 API Key 都相同`;
+    return translate('settings.providers.duplicateCandidate', {
+      name: candidate.duplicateOf ?? '',
+    });
   }
   return null;
 }
 
 /** 重复项在行里的徽标，原因（{@link duplicateReason}）悬停显示：与已有服务相同是「已有」，与上面的候选相同是「重复」 */
 export function duplicateBadge(candidate: ProviderImportCandidate): string | null {
-  if (candidate.duplicate === 'existing') return '已有';
-  if (candidate.duplicate === 'candidate') return '重复';
+  if (candidate.duplicate === 'existing') return translate('settings.import.existing');
+  if (candidate.duplicate === 'candidate') return translate('settings.import.duplicate');
   return null;
 }
 
@@ -89,23 +104,23 @@ export function modelSummary(candidate: ProviderImportCandidate): string {
     const hasPreset = MODEL_CATALOG.some(
       (entry) => entry.api === candidate.api && entry.models.length > 0
     );
-    return hasPreset ? '未写模型（用预置模型）' : '未写模型';
+    return translate(
+      hasPreset ? 'settings.providers.noModelsPreset' : 'settings.providers.noModelsListed'
+    );
   }
   const names = models
     .slice(0, MAX_LISTED_MODELS)
     .map((model) => model.name)
-    .join('、');
+    .join(translate('settings.import.itemSeparator'));
   return models.length > MAX_LISTED_MODELS
-    ? `模型：${names} 等 ${models.length} 个`
-    : `模型：${names}`;
+    ? translate('settings.providers.modelsMore', { names, count: models.length })
+    : translate('settings.providers.modelsList', { names });
 }
 
 export function importSummary(result: {
   imported: ReadonlyArray<{ name: string }>;
   skipped: ReadonlyArray<{ name: string; reason: string }>;
 }): string {
-  const done = `已导入 ${result.imported.length} 个模型服务`;
-  if (result.skipped.length === 0) return done;
-  const skipped = result.skipped.map((item) => `${item.name}（${item.reason}）`).join('、');
-  return `${done}；跳过 ${result.skipped.length} 个：${skipped}`;
+  const done = translate('settings.providers.imported', { count: result.imported.length });
+  return skippedSummary(done, result.skipped);
 }

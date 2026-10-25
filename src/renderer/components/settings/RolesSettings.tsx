@@ -2,8 +2,10 @@ import type { Role } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { FileUp, Plus, UserCog } from 'lucide-react';
 import { type ChangeEvent, useRef, useState } from 'react';
+import { roleDescription } from '@/components/chat/roles';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
 import { EmptyState, InlineMessage } from './common';
@@ -25,6 +27,7 @@ export function RolesSettings() {
   const [status, setStatus] = useState<Status | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const drafts = useRef(0);
+  const t = useT();
 
   const takenIds = roles.map((role) => role.id);
   const fallback = roles[0];
@@ -35,7 +38,7 @@ export function RolesSettings() {
 
   /** 切换编辑目标前确认放弃未保存的修改。 */
   const go = (next: Editing) => {
-    if (dirty && !window.confirm('当前角色有未保存的修改，放弃这些修改？')) return;
+    if (dirty && !window.confirm(t('settings.roles.discardConfirm'))) return;
     setDirty(false);
     setStatus(null);
     setEditing(next);
@@ -53,7 +56,10 @@ export function RolesSettings() {
     try {
       text = await file.text();
     } catch (readError) {
-      setStatus({ tone: 'error', text: `读取文件失败：${errorMessage(readError)}` });
+      setStatus({
+        tone: 'error',
+        text: t('settings.roles.readFileFailed', { error: errorMessage(readError) }),
+      });
       return;
     }
     const parsed = parseRoleImport(text, takenIds);
@@ -64,24 +70,39 @@ export function RolesSettings() {
     const failures: string[] = [];
     for (const role of parsed.roles) {
       const result = await save(role);
-      if (!result.ok) failures.push(`${role.id}：${result.error}`);
+      if (!result.ok) failures.push(t('common.labeled', { label: role.id, text: result.error }));
     }
     const imported = parsed.roles.length - failures.length;
-    const renamed = parsed.renamed > 0 ? `，其中 ${parsed.renamed} 个因 id 冲突已改名` : '';
     setStatus(
       failures.length > 0
         ? {
             tone: 'error',
-            text: `导入 ${imported} 个，失败 ${failures.length} 个：${failures.join('；')}`,
+            text: t('settings.roles.importPartly', {
+              imported,
+              failed: failures.length,
+              failures: failures.join(t('common.listSeparator')),
+            }),
           }
-        : { tone: 'success', text: `已导入 ${imported} 个角色${renamed}` }
+        : {
+            tone: 'success',
+            text:
+              parsed.renamed > 0
+                ? t('settings.roles.importedRenamed', { count: imported, renamed: parsed.renamed })
+                : t('settings.roles.imported', { count: imported }),
+          }
     );
     const first = parsed.roles[0];
     if (imported > 0 && first && !dirty) setEditing({ kind: 'existing', id: first.id });
   };
 
   if (loaded && roles.length === 0) {
-    return <EmptyState icon={UserCog} title="读取角色失败" description={error ?? undefined} />;
+    return (
+      <EmptyState
+        icon={UserCog}
+        title={t('settings.roles.loadFailed')}
+        description={error ?? undefined}
+      />
+    );
   }
 
   return (
@@ -90,7 +111,7 @@ export function RolesSettings() {
         <div className="flex gap-2">
           <Button size="sm" className="flex-1" onClick={() => openDraft(newRole(takenIds))}>
             <Plus />
-            新建
+            {t('settings.roles.new')}
           </Button>
           <Button
             size="sm"
@@ -99,7 +120,7 @@ export function RolesSettings() {
             onClick={() => fileInput.current?.click()}
           >
             <FileUp />
-            导入
+            {t('settings.roles.import')}
           </Button>
           <input
             ref={fileInput}
@@ -114,7 +135,11 @@ export function RolesSettings() {
         <ul className="grid gap-0.5">
           {target?.kind === 'draft' && (
             <li>
-              <RoleListItem title={target.role.name || '新角色'} subtitle="未保存" active />
+              <RoleListItem
+                title={target.role.name || t('settings.roles.newRole')}
+                subtitle={t('settings.roles.unsaved')}
+                active
+              />
             </li>
           )}
           {roles.map((role) => (
@@ -147,7 +172,7 @@ export function RolesSettings() {
             onDirtyChange={setDirty}
             onSaved={(role) => {
               setDirty(false);
-              setStatus({ tone: 'success', text: `已保存到 roles/${role.id}.json` });
+              setStatus({ tone: 'success', text: t('settings.roles.savedTo', { id: role.id }) });
               setEditing({ kind: 'existing', id: role.id });
             }}
             onCopy={openDraft}
@@ -163,12 +188,21 @@ export function RolesSettings() {
             onDirtyChange={setDirty}
             onSaved={() => {
               setDirty(false);
-              setStatus({ tone: 'success', text: `已保存到 roles/${selectedRole.id}.json` });
+              setStatus({
+                tone: 'success',
+                text: t('settings.roles.savedTo', { id: selectedRole.id }),
+              });
             }}
-            onCopy={(role) => openDraft(copyRole(role, takenIds))}
+            // 副本带上界面上看到的描述（内置角色的描述按界面语言）
+            onCopy={(role) =>
+              openDraft(copyRole({ ...role, description: roleDescription(role, t) }, takenIds))
+            }
             onRemoved={() => {
               setDirty(false);
-              setStatus({ tone: 'success', text: `已删除 ${selectedRole.name}` });
+              setStatus({
+                tone: 'success',
+                text: t('settings.roles.removed', { name: selectedRole.name }),
+              });
               setEditing(null);
             }}
           />
@@ -191,6 +225,7 @@ function RoleListItem({
   active: boolean;
   onSelect?: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -205,7 +240,7 @@ function RoleListItem({
         <span className="block truncate font-medium text-sm">{title}</span>
         <span className="block truncate font-mono text-muted-foreground text-xs">{subtitle}</span>
       </span>
-      {builtin && <Badge variant="outline">内置</Badge>}
+      {builtin && <Badge variant="outline">{t('sessions.builtin')}</Badge>}
     </button>
   );
 }

@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import {
@@ -24,9 +25,9 @@ import {
   formatRelative,
   messageSummary,
   oneLine,
-  TASK_STATUS_LABEL,
   TASK_STATUS_ORDER,
   TASK_STATUS_TONE,
+  taskStatusLabel,
 } from './format';
 import { useNow } from './hooks';
 
@@ -47,6 +48,7 @@ export function TasksView({
   const groups = tasksByStatus(view, run.id);
   const total = TASK_STATUS_ORDER.reduce((sum, status) => sum + groups[status].length, 0);
   const now = useNow(30_000);
+  const t = useT();
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -59,7 +61,9 @@ export function TasksView({
         now={now}
       />
       {total === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-xs">这次编排还没有任务</p>
+        <p className="py-6 text-center text-muted-foreground text-xs">
+          {t('orchestration.emptyRun')}
+        </p>
       ) : (
         TASK_STATUS_ORDER.filter((status) => groups[status].length > 0).map((status) => (
           <TaskGroup
@@ -91,6 +95,7 @@ function RunHeader({
   total: number;
   now: number;
 }) {
+  const t = useT();
   const items = runs.map((candidate) => ({
     value: candidate.id,
     label: oneLine(candidate.objective, 40) || candidate.id,
@@ -100,21 +105,19 @@ function RunHeader({
       <div className="flex min-w-0 items-center gap-1.5">
         <Target className="size-3.5 shrink-0 text-muted-foreground" />
         <p className="min-w-0 flex-1 truncate font-medium text-sm" title={run.objective}>
-          {run.objective || '（未命名的编排）'}
+          {run.objective || t('orchestration.untitledRun')}
         </p>
         <span className="shrink-0 text-[11px] text-muted-foreground">
-          {formatRelative(run.createdAt, now)}
+          {formatRelative(run.createdAt, now, t)}
         </span>
       </div>
       <Progress
         className="mt-2"
         value={total === 0 ? 0 : (completed / total) * 100}
-        aria-label="任务完成进度"
+        aria-label={t('orchestration.progress')}
         indicatorClassName="bg-emerald-500"
       >
-        <ProgressLabel>
-          已完成 {completed} / {total}
-        </ProgressLabel>
+        <ProgressLabel>{t('orchestration.completedOf', { completed, total })}</ProgressLabel>
       </Progress>
       {runs.length > 1 && (
         <Select
@@ -124,7 +127,11 @@ function RunHeader({
             if (typeof value === 'string') onSelectRun(value);
           }}
         >
-          <SelectTrigger size="sm" className="mt-2 h-7 text-xs" aria-label="切换编排">
+          <SelectTrigger
+            size="sm"
+            className="mt-2 h-7 text-xs"
+            aria-label={t('orchestration.switchRun')}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -153,12 +160,13 @@ function TaskGroup({
   now: number;
   onOpenTask: (taskId: string, trigger: HTMLElement) => void;
 }) {
+  const t = useT();
   return (
     <Collapsible defaultOpen={status !== 'abandoned'}>
       <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-medium text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]:rotate-90" />
         <StatusDot status={status} />
-        {TASK_STATUS_LABEL[status]}
+        {taskStatusLabel(status, t)}
         <span className="ml-auto tabular-nums">{tasks.length}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -190,6 +198,7 @@ function TaskCard({
   const attempts = dispatchesOf(view, task.id).length;
   const message = latestMessageOfTask(view, task.id);
   const tick = useNow(1_000, running !== undefined);
+  const t = useT();
   const dependencies = task.dependsOn.map(
     (id) => view.tasks.find((candidate) => candidate.id === id) ?? { id, title: id, missing: true }
   );
@@ -220,17 +229,17 @@ function TaskCard({
         {running && (
           <span className="flex items-center gap-1 text-sky-700 tabular-nums dark:text-sky-300">
             <Loader2 className="size-3 animate-spin" />
-            {formatDuration(tick - running.startedAt)}
+            {formatDuration(tick - running.startedAt, t)}
           </span>
         )}
-        {attempts > 1 && <span>第 {attempts} 次尝试</span>}
+        {attempts > 1 && <span>{t('orchestration.attemptNth', { count: attempts })}</span>}
       </div>
 
       {dependencies.length > 0 && (
         <p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
           <Link2 className="size-3 shrink-0" />
           <span className="truncate">
-            依赖：
+            {t('orchestration.dependsOn')}
             {dependencies.map((dependency, index) => (
               <span
                 key={dependency.id}
@@ -240,7 +249,7 @@ function TaskCard({
                     : 'text-amber-700 dark:text-amber-300'
                 )}
               >
-                {index > 0 && '、'}
+                {index > 0 && t('orchestration.nameSeparator')}
                 {dependency.title}
               </span>
             ))}
@@ -251,8 +260,8 @@ function TaskCard({
       {message && (
         <p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
           <MessageSquare className="size-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{messageSummary(message)}</span>
-          <span className="shrink-0">{formatRelative(message.createdAt, now)}</span>
+          <span className="min-w-0 flex-1 truncate">{messageSummary(message, t)}</span>
+          <span className="shrink-0">{formatRelative(message.createdAt, now, t)}</span>
         </p>
       )}
     </button>

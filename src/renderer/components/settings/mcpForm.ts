@@ -1,5 +1,6 @@
 import type { McpServerEntry, McpServerEntryView } from '@shared/types/llm';
 import type { McpUpsertInput, SecretFieldInput } from '../../../preload/domains/mcp';
+import { translate } from '../../i18n';
 
 // MCP 服务器表单的纯逻辑（不碰 DOM，可在 node 下测试）。
 
@@ -77,18 +78,18 @@ export function draftFromServer(server: McpServerEntryView): McpDraft {
  */
 export function draftToMcpInput(draft: McpDraft): FormResult<{ input: McpUpsertInput }> {
   const name = draft.name.trim();
-  if (!name) return { ok: false, error: '请填写名称' };
+  if (!name) return { ok: false, error: translate('settings.providers.nameRequired') };
   const common = { ...(draft.id ? { id: draft.id } : {}), name };
   const includeFields = (fields: SecretFieldInput[]) => fields.length > 0 || draft.id !== undefined;
 
   if (draft.transport === 'stdio') {
     const command = draft.command.trim();
-    if (!command) return { ok: false, error: '请填写启动命令' };
+    if (!command) return { ok: false, error: translate('settings.mcp.commandRequired') };
     const args = draft.argsText
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
-    const env = rowsToFields(draft.env, '环境变量');
+    const env = rowsToFields(draft.env, translate('settings.mcp.envItem'));
     if (typeof env === 'string') return { ok: false, error: env };
     return {
       ok: true,
@@ -104,8 +105,8 @@ export function draftToMcpInput(draft: McpDraft): FormResult<{ input: McpUpsertI
   }
 
   const url = draft.url.trim();
-  if (!url) return { ok: false, error: '请填写 URL' };
-  const headers = rowsToFields(draft.headers, 'Header');
+  if (!url) return { ok: false, error: translate('settings.mcp.urlRequired') };
+  const headers = rowsToFields(draft.headers, translate('settings.mcp.headerItem'));
   if (typeof headers === 'string') return { ok: false, error: headers };
   return {
     ok: true,
@@ -126,13 +127,13 @@ function rowsToFields(rows: readonly SecretRow[], label: string): SecretFieldInp
   for (const row of rows) {
     const key = row.key.trim();
     if (!key && !row.value && !row.saved) continue;
-    if (!key) return `${label}的键不能为空`;
-    if (/\s/.test(key)) return `${label} ${key} 的键不能包含空白`;
-    if (seen.has(key)) return `${label} ${key} 重复`;
+    if (!key) return translate('settings.mcp.keyEmpty', { label });
+    if (/\s/.test(key)) return translate('settings.mcp.keyWhitespace', { label, key });
+    if (seen.has(key)) return translate('settings.mcp.keyDuplicate', { label, key });
     seen.add(key);
     if (row.value !== '') fields.push({ key, value: row.value });
     else if (row.saved) fields.push({ key });
-    else return `${label} ${key} 需要填写值`;
+    else return translate('settings.mcp.valueRequired', { label, key });
   }
   return fields;
 }

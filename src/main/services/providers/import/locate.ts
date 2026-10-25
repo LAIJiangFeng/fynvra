@@ -1,6 +1,7 @@
 import { copyFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { translate } from '../../../i18n';
 
 // 来源定位：各来源在本机的位置，以及把原始内容（文件文本 / 数据库行）读出来。只做 IO，不解释内容。
 // 文件不存在返回 null（没装这个工具不算问题）；其它读错误照常抛出，由 scan 记成该来源的 warning。
@@ -64,7 +65,7 @@ export async function readCcSwitchRows(
       const table = db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'providers'")
         .get();
-      if (!table) throw new Error('数据库里没有 providers 表');
+      if (!table) throw new Error(translate('importers.noTable', { table: 'providers' }));
       return db.prepare('SELECT * FROM providers').all();
     } finally {
       db.close();

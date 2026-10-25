@@ -3,6 +3,7 @@ import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
 import { parseWorkspaceId, type Workspace } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
+import { translate } from '../i18n';
 import {
   createOrchestrationRegistry,
   type OrchestrationRegistry,
@@ -59,10 +60,10 @@ export function registerOrchestrationHandlers(): void {
     IPC_CHANNELS.ORCHESTRATION_SNAPSHOT,
     async (_event, raw: unknown): Promise<IpcResult<OrchestrationSnapshotView>> => {
       const workspaceId = parseWorkspaceId(raw);
-      if (!workspaceId) return { ok: false, error: '无效的工作区 id' };
+      if (!workspaceId) return { ok: false, error: translate('common.invalidWorkspaceId') };
       try {
         const service = getOrchestrationRegistry().serviceFor(workspaceId);
-        if (!service) return { ok: false, error: '工作区不存在' };
+        if (!service) return { ok: false, error: translate('common.workspaceNotFound') };
         return { ok: true, ...(await service.snapshot()) };
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
@@ -78,10 +79,10 @@ export function registerOrchestrationHandlers(): void {
       raw: unknown
     ): Promise<IpcResult<{ text: string; total: number; done: boolean }>> => {
       const input = parseOutputRequest(raw);
-      if (!input) return { ok: false, error: '无效的 dispatch id 或 cursor' };
+      if (!input) return { ok: false, error: translate('orchestration.invalidOutputInput') };
       try {
         const service = await getOrchestrationRegistry().serviceForDispatch(input.dispatchId);
-        if (!service) return { ok: false, error: 'dispatch 不存在' };
+        if (!service) return { ok: false, error: translate('orchestration.dispatchNotFound') };
         return await service.readWorkerOutput(input);
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
@@ -98,10 +99,10 @@ export function registerOrchestrationHandlers(): void {
       IpcResult<{ branch: string; baseCommit: string; files: string[]; stat: string; diff: string }>
     > => {
       const dispatchId = parseDispatchId(raw);
-      if (!dispatchId) return { ok: false, error: '无效的 dispatch id' };
+      if (!dispatchId) return { ok: false, error: translate('orchestration.invalidDispatchId') };
       try {
         const service = await getOrchestrationRegistry().serviceForDispatch(dispatchId);
-        if (!service) return { ok: false, error: 'dispatch 不存在' };
+        if (!service) return { ok: false, error: translate('orchestration.dispatchNotFound') };
         return await service.reviewDiff(dispatchId);
       } catch (error) {
         return { ok: false, error: errorMessage(error) };

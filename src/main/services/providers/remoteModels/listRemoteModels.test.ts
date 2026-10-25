@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { configureMainLocale } from '../../../i18n';
 import type { FetchLike } from '../testProvider';
 import {
   ANTHROPIC_MODELS,
@@ -228,6 +229,32 @@ describe('listRemoteModels', () => {
       expect(errorOf(result)).toContain('https://relay.example.com/v1/models');
     }
   );
+
+  it('提示按界面语言：英文不在地址后多加空格，后续动作接在「; 」之后', async () => {
+    configureMainLocale({ language: () => 'en', systemLanguages: () => [] });
+    try {
+      const result = await listRemoteModels(
+        {
+          api: 'openai-responses',
+          baseUrl: 'http://relay.example.com/',
+          apiKey: KEY,
+          savedModelIds: [],
+        },
+        { fetch: fakeFetch(http(404), ok(OPENAI_RELAY_MODELS)) }
+      );
+      if (!result.ok) throw new Error(result.error);
+      expect(result.warnings).toEqual([
+        'http://relay.example.com/v1/models unavailable (HTTP 404); using http://relay.example.com/models',
+      ]);
+      const failed = await listRemoteModels(anthropic(), {
+        fetch: fakeFetch(http(404), http(404)),
+      });
+      expect(failed.ok).toBe(false);
+      expect(errorOf(failed)).not.toMatch(/[\u4e00-\u9fff]/u);
+    } finally {
+      configureMainLocale(null);
+    }
+  });
 
   it('OpenAI：/v1/models 404 后改用 <base>/models', async () => {
     const fetch = fakeFetch(http(404), ok(OPENAI_RELAY_MODELS));

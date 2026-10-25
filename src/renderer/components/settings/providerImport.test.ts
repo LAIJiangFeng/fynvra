@@ -1,5 +1,6 @@
 import type { ProviderImportCandidate } from '@shared/types/llm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setCurrentLocale } from '../../i18n';
 import {
   defaultSelection,
   duplicateBadge,
@@ -93,5 +94,20 @@ describe('providerImport', () => {
         skipped: [{ name: 'C', reason: '与「A」的地址和 API Key 都相同' }],
       })
     ).toBe('已导入 1 个模型服务；跳过 1 个：C（与「A」的地址和 API Key 都相同）');
+  });
+});
+
+describe('界面语言', () => {
+  afterEach(() => setCurrentLocale('zh-CN'));
+
+  it('徽标、原因、模型摘要与导入结果按当前的界面语言', () => {
+    setCurrentLocale('en');
+    const duplicate = candidate('b', { duplicate: 'existing', duplicateOf: 'Relay' });
+    expect(duplicateBadge(duplicate)).toBe('Exists');
+    expect(duplicateReason(duplicate)).toBe('Same URL and API key as existing provider "Relay"');
+    expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('No models listed');
+    expect(
+      importSummary({ imported: [{ name: 'A' }], skipped: [{ name: 'C', reason: 'duplicate' }] })
+    ).toBe('Imported 1 provider; skipped 1: C (duplicate)');
   });
 });

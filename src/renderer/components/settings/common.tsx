@@ -1,6 +1,7 @@
 import { ChevronRight, type LucideIcon, TriangleAlert } from 'lucide-react';
 import type * as React from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { INLINE_WARNING_LIMIT, warningLine } from './warnings';
 
@@ -66,6 +67,7 @@ export function InlineMessage({
  * 超过 {@link INLINE_WARNING_LIMIT} 条时折叠成「N 条提示」，默认收起。
  */
 export function WarningList({ warnings }: { warnings: readonly string[] }) {
+  const t = useT();
   if (warnings.length === 0) return null;
   const list = (
     <ul className="grid gap-1">
@@ -87,7 +89,7 @@ export function WarningList({ warnings }: { warnings: readonly string[] }) {
       <CollapsibleTrigger className="group flex items-center gap-1.5 rounded text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
         <TriangleAlert className="size-3.5 shrink-0 text-amber-500" />
-        {warnings.length} 条提示
+        {t('settings.import.warnings', { count: warnings.length })}
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1 max-h-32 overflow-y-auto">{list}</CollapsibleContent>
     </Collapsible>

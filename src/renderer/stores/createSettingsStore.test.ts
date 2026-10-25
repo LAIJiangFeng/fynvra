@@ -76,6 +76,33 @@ describe('createSettingsStore', () => {
     expect(store.getState().theme).toBe('dark');
   });
 
+  it('界面语言：没写过时不落盘这个字段；切换后连同主题一起写入，重新水合读回', async () => {
+    let disk: PreferencesResult = {
+      ok: true,
+      preferences: { theme: 'system', sidePanelOpen: true },
+    };
+    const { api, update } = bridge(async () => disk);
+    const store = createSettingsStore(api);
+    await settle();
+    expect(store.getState().language).toBeUndefined();
+
+    store.getState().toggleSidePanel();
+    await settle();
+    expect(update).toHaveBeenLastCalledWith({ theme: 'system', sidePanelOpen: false });
+
+    store.getState().setLanguage('en');
+    await settle();
+    expect(update).toHaveBeenLastCalledWith({
+      theme: 'system',
+      sidePanelOpen: false,
+      language: 'en',
+    });
+
+    disk = { ok: true, preferences: { theme: 'system', sidePanelOpen: true, language: 'zh-CN' } };
+    await store.persist.rehydrate();
+    expect(store.getState().language).toBe('zh-CN');
+  });
+
   it('合并时收窄非法值，动作函数保留', async () => {
     const corrupted = { theme: 'neon', sidePanelOpen: 'yes' } as unknown as Preferences;
     const store = createSettingsStore(

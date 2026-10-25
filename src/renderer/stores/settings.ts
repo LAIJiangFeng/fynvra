@@ -9,6 +9,7 @@ import {
   type WorktreesUsage,
 } from '@shared/types/settings';
 import { create } from 'zustand';
+import { translate } from '@/i18n';
 import { KEY_PLATFORM } from '@/lib/keybindings/platform';
 import { createKeybindingsStore } from '@/lib/keybindings/store';
 import { createNotificationSettingsStore } from './createNotificationSettingsStore';
@@ -185,7 +186,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
       set((state) => resolveGeneral({ ...state.sessions, ...state.timeline, ...patch }));
       const result = await safely(() => api.update(patch));
       if (!result.ok) {
-        set({ error: `保存失败：${result.error}` });
+        set({ error: translate('common.saveFailed', { error: result.error }) });
         await get().load();
         return;
       }

@@ -5,10 +5,12 @@
 export const INLINE_WARNING_LIMIT = 2;
 
 /**
- * 句末的后续动作与建议（Main 的告警用「，」接在原因后面）：已跳过、已忽略其中的 key、已改用 …、
- * 导入后需要在编辑里补上、fynvra 不会展开 …、这里只列出了第一页。只认这几种开头，原因里的逗号不受影响。
+ * 句末的后续动作与建议（Main 的告警用「，」接在原因后面，英文用「; 」）：已跳过、已忽略其中的 key、已改用 …、
+ * 导入后需要在编辑里补上、fynvra 不会展开 …、这里只列出了第一页（英文 skipped / ignored … / using … /
+ * fill it in / set the API key / fynvra won't … / only the first page）。只认这几种开头，原因里的逗号不受影响。
  */
-const FOLLOW_UP = /，(?:已跳过|已忽略|已改用|导入后|fynvra 不会展开|这里只列出).*$/u;
+const FOLLOW_UP =
+  /(?:，(?:已跳过|已忽略|已改用|导入后|fynvra 不会展开|这里只列出)|; (?:skipped|ignored|using |fill it in|set the API key|fynvra won't|only the first page)).*$/u;
 
 /** 告警的一行写法：去掉句末的后续动作与建议；没有可去的原样返回，也不会去成空串 */
 export function warningLine(warning: string): string {

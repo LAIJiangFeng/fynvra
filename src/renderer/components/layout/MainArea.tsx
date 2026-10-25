@@ -1,6 +1,7 @@
 import { FolderGit2, GitBranch, Plus } from 'lucide-react';
 import { ChatPlaceholder, ChatView } from '@/components/chat/ChatView';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { selectActiveSessionId, useSessionsStore } from '@/stores/sessions';
 import { selectSelectedWorkspace, useWorkspacesStore } from '@/stores/workspaces';
 
@@ -11,16 +12,17 @@ export function MainArea() {
   const adding = useWorkspacesStore((state) => state.adding);
   const add = useWorkspacesStore((state) => state.add);
   const activeSessionId = useSessionsStore(selectActiveSessionId);
+  const t = useT();
 
   if (!workspace) {
     return (
       <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <FolderGit2 className="size-10 text-muted-foreground/60" />
-        <p className="text-muted-foreground">选择一个工作区开始</p>
+        <p className="text-muted-foreground">{t('workspaces.pickToStart')}</p>
         {!hasWorkspaces && (
           <Button disabled={adding} onClick={() => void add()}>
             <Plus />
-            挂入目录
+            {t('workspaces.add')}
           </Button>
         )}
       </main>

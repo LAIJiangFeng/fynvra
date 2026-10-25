@@ -1,7 +1,6 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { APPROVAL_MODES, type ApprovalMode, isApprovalMode } from '@fynvra/core';
-import { APPROVAL_MODE_LABELS } from '@shared/types/chat';
 import {
   Check,
   ChevronsUpDown,
@@ -12,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
 
@@ -45,12 +45,9 @@ function useFlash(value: unknown): boolean {
   return flashing;
 }
 
-/** 快捷键只放在悬停提示里：输入框里 Shift+Tab 循环切换（见 Composer） */
-const SHORTCUT_HINT = 'Shift+Tab 切换';
-
 /**
  * 输入框左下角、模型胶囊旁的审批胶囊：全程审批 / 自动接受编辑 / 完全放行。
- * 点开是三项单选列表，每项只有名称与档位 id；输入框里 Shift+Tab 循环切换（见 Composer）。
+ * 点开是三项单选列表，每项只有名称与档位 id；输入框里 Shift+Tab 循环切换（见 Composer），快捷键只放在悬停提示里。
  * 运行中也能切，下一次需要审批的工具调用起生效。
  */
 export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
@@ -58,6 +55,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
   const [open, setOpen] = useState(false);
   const flashing = useFlash(mode);
+  const t = useT();
   if (!mode) return null;
   const Icon = MODE_ICON[mode];
 
@@ -67,7 +65,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
         render={
           <button
             type="button"
-            title={SHORTCUT_HINT}
+            title={t('approval.cycleHint')}
             data-flash={flashing ? '' : undefined}
             className={cn(
               'flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[flash]:ring-2 data-[flash]:ring-primary/60 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground',
@@ -77,12 +75,12 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
         }
       >
         <Icon aria-hidden className="size-3.5 shrink-0" />
-        <span>{APPROVAL_MODE_LABELS[mode]}</span>
+        <span>{t(`approval.modes.${mode}`)}</span>
         <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-60" />
       </PopoverTrigger>
       <PopoverContent side="top" className="w-64 p-1">
         <RadioGroup
-          aria-label="审批档位"
+          aria-label={t('approval.title')}
           value={mode}
           onValueChange={(next) => {
             if (!isApprovalMode(next)) return;
@@ -101,7 +99,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
               >
                 <OptionIcon aria-hidden className="size-4 shrink-0" />
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5 font-medium text-sm">
-                  {APPROVAL_MODE_LABELS[option]}
+                  {t(`approval.modes.${option}`)}
                   <span className="font-mono font-normal text-muted-foreground text-xs">
                     {option}
                   </span>
@@ -123,11 +121,12 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
 export function ApprovalModeStatus({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
   const flashing = useFlash(mode);
+  const t = useT();
   if (!mode) return null;
   const Icon = MODE_ICON[mode];
   return (
     <span
-      title={`审批档位（${SHORTCUT_HINT}）`}
+      title={t('approval.statusHint')}
       aria-live="polite"
       data-flash={flashing ? '' : undefined}
       className={cn(
@@ -136,7 +135,7 @@ export function ApprovalModeStatus({ sessionId }: { sessionId: string }) {
       )}
     >
       <Icon aria-hidden className="size-3 shrink-0" />
-      {APPROVAL_MODE_LABELS[mode]}
+      {t(`approval.modes.${mode}`)}
     </span>
   );
 }

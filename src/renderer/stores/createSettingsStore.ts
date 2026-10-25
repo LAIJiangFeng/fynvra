@@ -1,3 +1,4 @@
+import type { Language } from '@shared/i18n';
 import {
   DEFAULT_PREFERENCES,
   type Preferences,
@@ -13,6 +14,7 @@ export type PreferencesBridge = Pick<SettingsApi, 'get' | 'update'>;
 
 export interface SettingsState extends Preferences {
   setTheme(theme: ThemeMode): void;
+  setLanguage(language: Language): void;
   toggleSidePanel(): void;
 }
 
@@ -49,13 +51,19 @@ export function createSettingsStore(api: PreferencesBridge) {
       (set) => ({
         ...DEFAULT_PREFERENCES,
         setTheme: (theme) => set({ theme }),
+        setLanguage: (language) => set({ language }),
         toggleSidePanel: () => set((state) => ({ sidePanelOpen: !state.sidePanelOpen })),
       }),
       {
         name: 'preferences',
         version: SETTINGS_VERSION,
         storage,
-        partialize: ({ theme, sidePanelOpen }): Preferences => ({ theme, sidePanelOpen }),
+        // 语言没选过时不写（按跟随系统）
+        partialize: ({ theme, sidePanelOpen, language }): Preferences => ({
+          theme,
+          sidePanelOpen,
+          ...(language ? { language } : {}),
+        }),
         merge: (persisted, current) => ({ ...current, ...parsePreferences(persisted) }),
         onRehydrateStorage: () => (_state, error) => {
           if (error) {

@@ -1,6 +1,7 @@
 import { asRecord } from '@shared/guards';
+import type { T } from '../../i18n';
 
-// 工具调用卡片的展示信息（纯函数）：中文名、所属类别、标题行的参数摘要
+// 工具调用卡片的展示信息（纯函数）：显示名（字典 tools.labels.<工具名>）、所属类别、标题行的参数摘要
 
 /** builtin：pi 编程工具；orchestration：主 agent 的编排工具；worker：worker 的汇报 / 提问工具 */
 export type ToolFamily = 'builtin' | 'orchestration' | 'worker' | 'mcp' | 'other';
@@ -13,44 +14,49 @@ export interface ToolDisplay {
 }
 
 interface ToolSpec {
-  label: string;
   family: ToolFamily;
   /** 依次尝试作为摘要的参数名 */
   keys: string[];
 }
 
-const TOOLS: Record<string, ToolSpec> = {
-  read: { label: '读取', family: 'builtin', keys: ['path'] },
-  bash: { label: '命令', family: 'builtin', keys: ['command'] },
-  edit: { label: '编辑', family: 'builtin', keys: ['path'] },
-  write: { label: '写入', family: 'builtin', keys: ['path'] },
-  grep: { label: '搜索', family: 'builtin', keys: ['pattern'] },
-  find: { label: '查找文件', family: 'builtin', keys: ['pattern'] },
-  ls: { label: '列目录', family: 'builtin', keys: ['path'] },
-  git_readonly: { label: 'Git', family: 'builtin', keys: ['args'] },
-  dispatch_task: { label: '派发任务', family: 'orchestration', keys: ['title'] },
-  list_workers: { label: '查看 worker', family: 'orchestration', keys: [] },
-  wait_for_workers: { label: '等待 worker', family: 'orchestration', keys: ['until'] },
-  read_worker_output: { label: '读取 worker 输出', family: 'orchestration', keys: ['dispatch_id'] },
-  send_to_worker: { label: '发消息给 worker', family: 'orchestration', keys: ['body'] },
-  review_diff: { label: '审查改动', family: 'orchestration', keys: ['dispatch_id'] },
-  run_checks: { label: '运行检查', family: 'orchestration', keys: ['command'] },
-  merge_worktree: { label: '合并分支', family: 'orchestration', keys: ['dispatch_id'] },
-  reject_work: { label: '打回修改', family: 'orchestration', keys: ['feedback'] },
-  cleanup_worktree: { label: '清理 worktree', family: 'orchestration', keys: ['dispatch_id'] },
-  ask_coordinator: { label: '询问主 agent', family: 'worker', keys: ['question'] },
-  report_done: { label: '汇报结果', family: 'worker', keys: ['summary'] },
-};
+const TOOLS = {
+  read: { family: 'builtin', keys: ['path'] },
+  bash: { family: 'builtin', keys: ['command'] },
+  edit: { family: 'builtin', keys: ['path'] },
+  write: { family: 'builtin', keys: ['path'] },
+  grep: { family: 'builtin', keys: ['pattern'] },
+  find: { family: 'builtin', keys: ['pattern'] },
+  ls: { family: 'builtin', keys: ['path'] },
+  git_readonly: { family: 'builtin', keys: ['args'] },
+  dispatch_task: { family: 'orchestration', keys: ['title'] },
+  list_workers: { family: 'orchestration', keys: [] },
+  wait_for_workers: { family: 'orchestration', keys: ['until'] },
+  read_worker_output: { family: 'orchestration', keys: ['dispatch_id'] },
+  send_to_worker: { family: 'orchestration', keys: ['body'] },
+  review_diff: { family: 'orchestration', keys: ['dispatch_id'] },
+  run_checks: { family: 'orchestration', keys: ['command'] },
+  merge_worktree: { family: 'orchestration', keys: ['dispatch_id'] },
+  reject_work: { family: 'orchestration', keys: ['feedback'] },
+  cleanup_worktree: { family: 'orchestration', keys: ['dispatch_id'] },
+  ask_coordinator: { family: 'worker', keys: ['question'] },
+  report_done: { family: 'worker', keys: ['summary'] },
+} satisfies Record<string, ToolSpec>;
+
+type KnownTool = keyof typeof TOOLS;
+
+function isKnownTool(name: string): name is KnownTool {
+  return Object.hasOwn(TOOLS, name);
+}
 
 const SUMMARY_MAX_CHARS = 120;
 const MCP_PREFIX = 'mcp__';
 
-export function describeTool(name: string, args: unknown): ToolDisplay {
-  const spec = TOOLS[name];
-  if (spec) {
+export function describeTool(name: string, args: unknown, t: T): ToolDisplay {
+  if (isKnownTool(name)) {
+    const spec: ToolSpec = TOOLS[name];
     const record = asRecord(args);
     const value = spec.keys.map((key) => textOf(record?.[key])).find(Boolean) ?? '';
-    return { label: spec.label, family: spec.family, summary: oneLine(value) };
+    return { label: t(`tools.labels.${name}`), family: spec.family, summary: oneLine(value) };
   }
   if (name.startsWith(MCP_PREFIX)) {
     // pi 的 MCP 工具名为 mcp__<server>__<tool>

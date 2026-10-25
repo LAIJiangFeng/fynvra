@@ -2,6 +2,7 @@ import { asRecord, errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
 import type { ProviderApi } from '@shared/types/llm';
 import type { ProviderTestResult } from '../../../preload/domains/providers';
+import { translate } from '../../i18n';
 import type { StoredProvider } from './providerStore';
 
 /** fetch 的最小子集。Main 传入 Electron 的 net.fetch（走 Chromium 网络栈与系统代理），测试传假实现。 */
@@ -56,7 +57,7 @@ export async function testProvider(
   { fetch, timeoutMs = PROVIDER_TEST_TIMEOUT_MS, now = Date.now }: TestProviderOptions
 ): Promise<ProviderTestResult> {
   const { apiKey } = provider;
-  if (!apiKey) return { ok: false, error: '还没有填写 API Key' };
+  if (!apiKey) return { ok: false, error: translate('remote.noApiKey') };
   const { url, headers } = buildModelsRequest(provider.api, provider.baseUrl, apiKey);
   const redact = (text: string) => text.split(apiKey).join('***');
 
@@ -75,7 +76,7 @@ export async function testProvider(
     if (!response.ok) return { ok: false, error: redact(describeHttpError(response.status, body)) };
 
     const data = asRecord(parseJson(body));
-    if (!data) return { ok: false, error: '返回的不是 JSON，请检查 Base URL 是否指向 API 地址' };
+    if (!data) return { ok: false, error: translate('test.notJson') };
     const list = Array.isArray(data.data) ? data.data : data.models;
     return {
       ok: true,
@@ -84,9 +85,20 @@ export async function testProvider(
     };
   } catch (error) {
     if (controller.signal.aborted) {
-      return { ok: false, error: `请求超时（${Math.ceil(timeoutMs / 1000)} 秒）：${hostOf(url)}` };
+      return {
+        ok: false,
+        error: translate('remote.timeout', {
+          seconds: Math.ceil(timeoutMs / 1000),
+          host: hostOf(url),
+        }),
+      };
     }
-    return { ok: false, error: redact(`无法连接 ${hostOf(url)}：${errorMessage(error)}`) };
+    return {
+      ok: false,
+      error: redact(
+        translate('remote.unreachable', { host: hostOf(url), error: errorMessage(error) })
+      ),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -95,17 +107,19 @@ export async function testProvider(
 /** 非 2xx 的可读错误：状态提示 + 状态码 + 服务端说明（拉取模型列表也用它）。 */
 export function describeHttpError(status: number, body: string): string {
   const detail = serverMessage(body);
-  const suffix = detail ? `：${detail}` : '';
-  return `${statusHint(status)}（HTTP ${status}）${suffix}`;
+  const hint = statusHint(status);
+  return detail
+    ? translate('test.httpErrorDetail', { hint, status, detail })
+    : translate('test.httpError', { hint, status });
 }
 
 function statusHint(status: number): string {
-  if (status === 401) return 'API Key 无效或已失效';
-  if (status === 403) return '没有权限（key 无权访问，或所在地区不受支持）';
-  if (status === 404) return '接口不存在，请检查 Base URL';
-  if (status === 429) return '请求过多或额度不足';
-  if (status >= 500) return '服务端错误，请稍后重试';
-  return '请求失败';
+  if (status === 401) return translate('test.unauthorized');
+  if (status === 403) return translate('test.forbidden');
+  if (status === 404) return translate('test.notFound');
+  if (status === 429) return translate('test.rateLimited');
+  if (status >= 500) return translate('test.serverError');
+  return translate('test.failed');
 }
 
 /** 取服务端错误说明：JSON 的 error.message / error / message，或纯文本；HTML 错误页不回显。 */

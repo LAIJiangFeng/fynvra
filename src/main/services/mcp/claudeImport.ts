@@ -1,5 +1,6 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import type { McpImportFileStatus } from '../../../preload/domains/mcp';
+import { translate } from '../../i18n';
 import { parseJsonc } from './import/jsonc';
 import { locateMcpSources, readTextIfExists } from './import/locate';
 import { claudeConfigServers } from './import/readers/claudeCode';
@@ -27,7 +28,7 @@ export async function importClaudeMcp(options: {
       const parsed = parseJsonc(text);
       const config = parsed.ok ? asRecord(parsed.value) : null;
       // 不带解析器的原始信息：它会引用文件片段，而这个文件里可能有凭证
-      if (!config) throw new Error('不是合法的 JSON');
+      if (!config) throw new Error(translate('importers.notJson'));
       const found = claudeConfigServers(config);
       servers.push(...found);
       sources.push({ file, status: 'found', count: found.length });

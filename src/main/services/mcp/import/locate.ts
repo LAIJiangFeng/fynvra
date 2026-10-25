@@ -2,6 +2,7 @@ import { copyFile, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { McpImportSource } from '@shared/types/llm';
+import { translate } from '../../../i18n';
 import type { Env } from './readers/common';
 
 // 来源定位：各来源在本机的候选位置，以及把 CC Switch 的库读出来。只做 IO，不解释内容。
@@ -77,7 +78,7 @@ export async function readCcSwitchMcpRows(
       const table = db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'mcp_servers'")
         .get();
-      if (!table) throw new Error('数据库里没有 mcp_servers 表');
+      if (!table) throw new Error(translate('importers.noTable', { table: 'mcp_servers' }));
       return db.prepare('SELECT * FROM mcp_servers').all();
     } finally {
       db.close();

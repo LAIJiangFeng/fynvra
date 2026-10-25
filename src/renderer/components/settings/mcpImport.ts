@@ -1,4 +1,6 @@
 import type { McpImportCandidate, McpImportSource } from '@shared/types/llm';
+import { type T, translate } from '../../i18n';
+import { skippedSummary } from './providerImport';
 
 // 「从本机导入」MCP 服务器弹窗的纯逻辑：不碰 DOM 与 window.fynvra，在 node 下测试。
 
@@ -9,21 +11,24 @@ export const MCP_IMPORT_SOURCES: ReadonlyArray<{
   /** 读的是哪个文件，作为开关的提示 */
   path: string;
 }> = [
-  {
-    id: 'claude-code',
-    label: 'Claude Code',
-    path: '~/.claude.json（含各项目）、~/.claude/settings.json',
-  },
+  { id: 'claude-code', label: 'Claude Code', path: '~/.claude.json, ~/.claude/settings.json' },
   { id: 'codex', label: 'Codex', path: '~/.codex/config.toml' },
   { id: 'grok', label: 'Grok CLI', path: '~/.grok/config.toml' },
   { id: 'gemini', label: 'Gemini CLI', path: '~/.gemini/settings.json' },
   { id: 'cursor', label: 'Cursor', path: '~/.cursor/mcp.json' },
-  { id: 'vscode', label: 'VS Code', path: 'VS Code 用户目录里的 mcp.json（含 Insiders）' },
+  { id: 'vscode', label: 'VS Code', path: 'mcp.json' },
   { id: 'opencode', label: 'OpenCode', path: '~/.config/opencode/opencode.json' },
   { id: 'cc-switch', label: 'CC Switch', path: '~/.cc-switch/cc-switch.db' },
 ];
 
 const ALL_SOURCE_IDS = MCP_IMPORT_SOURCES.map((source) => source.id);
+
+/** 来源开关的悬停提示：读哪个文件；需要说明的两个按界面语言 */
+export function mcpSourcePath(source: (typeof MCP_IMPORT_SOURCES)[number], t: T): string {
+  if (source.id === 'claude-code') return t('settings.mcp.claudeCodePath');
+  if (source.id === 'vscode') return t('settings.mcp.vscodePath');
+  return source.path;
+}
 
 export function mcpSourceLabel(source: McpImportSource): string {
   return MCP_IMPORT_SOURCES.find((entry) => entry.id === source)?.label ?? source;
@@ -73,20 +78,24 @@ export function orderedSelection(
 }
 
 export function duplicateReason(candidate: McpImportCandidate): string | null {
-  const what = candidate.url ? ' URL ' : '命令和参数';
+  const name = candidate.duplicateOf ?? '';
   if (candidate.duplicate === 'existing') {
-    return `已有${what}相同的服务器「${candidate.duplicateOf ?? ''}」`;
+    return candidate.url
+      ? translate('settings.mcp.duplicateExistingUrl', { name })
+      : translate('settings.mcp.duplicateExistingCommand', { name });
   }
   if (candidate.duplicate === 'candidate') {
-    return `与上面的「${candidate.duplicateOf ?? ''}」${what}相同`;
+    return candidate.url
+      ? translate('settings.mcp.duplicateCandidateUrl', { name })
+      : translate('settings.mcp.duplicateCandidateCommand', { name });
   }
   return null;
 }
 
 /** 重复项在行里的徽标，原因（{@link duplicateReason}）悬停显示：与已有服务器相同是「已有」，与上面的候选相同是「重复」 */
 export function duplicateBadge(candidate: McpImportCandidate): string | null {
-  if (candidate.duplicate === 'existing') return '已有';
-  if (candidate.duplicate === 'candidate') return '重复';
+  if (candidate.duplicate === 'existing') return translate('settings.import.existing');
+  if (candidate.duplicate === 'candidate') return translate('settings.import.duplicate');
   return null;
 }
 
@@ -99,8 +108,6 @@ export function importSummary(result: {
   imported: ReadonlyArray<{ name: string }>;
   skipped: ReadonlyArray<{ name: string; reason: string }>;
 }): string {
-  const done = `已导入 ${result.imported.length} 个 MCP 服务器`;
-  if (result.skipped.length === 0) return done;
-  const skipped = result.skipped.map((item) => `${item.name}（${item.reason}）`).join('、');
-  return `${done}；跳过 ${result.skipped.length} 个：${skipped}`;
+  const done = translate('settings.mcp.imported', { count: result.imported.length });
+  return skippedSummary(done, result.skipped);
 }

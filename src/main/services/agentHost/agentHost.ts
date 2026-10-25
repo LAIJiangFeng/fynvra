@@ -36,6 +36,7 @@ import type {
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
 import type { Workspace } from '@shared/types/workspace';
+import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
 import { readHistory, sessionFilePath } from '../sessions/history';
 import type { LastModelStore } from '../sessions/lastModels';
@@ -186,12 +187,10 @@ interface PendingApproval {
 
 type Result<T extends object = object> = IpcResult<T>;
 
-const WORKER_UNAVAILABLE = 'agent worker 未就绪（正在重启或已停止），请稍后重试';
 const NO_ORCHESTRATION_HOST =
   'orchestration is not wired yet: this build has no OrchestrationHost for this session, so orchestration tools cannot run';
 const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
-const SWITCH_WHILE_RUNNING = '会话正在运行，等本轮结束再切换模型';
 const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
 
@@ -360,7 +359,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   async function buildSpec(stored: StoredSession): Promise<Result<{ spec: SpawnSessionSpec }>> {
     try {
       const role = await deps.roles.get(stored.roleId);
-      if (!role) return fail(`角色不存在：${stored.roleId}`);
+      if (!role) return fail(translate('agent.roleNotFound', { id: stored.roleId }));
       const resolved = await deps.models.resolve(stored.model ?? modelRefOf(role));
       if (!resolved.ok) return resolved;
       const model = withReasoning(resolved.model, await reasoningOf(resolved.ref));
@@ -387,7 +386,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         },
       };
     } catch (error) {
-      return fail(`无法启动会话：${errorMessage(error)}`);
+      return fail(translate('agent.startFailed', { error: errorMessage(error) }));
     }
   }
 
@@ -419,7 +418,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const answer = await askWorker(asked);
       if (!answer.ok) return answer;
       if (answer.models.length !== asked.length) {
-        return fail('agent worker 回答的模型数与查询不一致');
+        return fail(translate('agent.describeMismatch'));
       }
       asked.forEach((query, index) => {
         const capability = answer.models[index];
@@ -440,7 +439,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const requestId = `describe-${++describeSeq}`;
     return new Promise((resolve) => {
       const timer = setTimeout(
-        () => settle(fail('读取模型的思考档位超时：agent worker 没有回答，请稍后重试')),
+        () => settle(fail(translate('agent.describeTimeout'))),
         describeTimeoutMs
       );
       const settle = (result: ModelsDescribedResult) => {
@@ -449,7 +448,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         resolve(result);
       };
       describing.set(requestId, settle);
-      if (!send({ type: 'describe-models', requestId, models })) settle(fail(WORKER_UNAVAILABLE));
+      if (!send({ type: 'describe-models', requestId, models }))
+        settle(fail(translate('agent.workerUnavailable')));
     });
   }
 
@@ -487,13 +487,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const state = liveOf(stored.id);
     if (state.spawned) return { ok: true };
     if (client.state === 'stopped') client.start();
-    if (client.state !== 'starting' && client.state !== 'ready') return fail(WORKER_UNAVAILABLE);
+    if (client.state !== 'starting' && client.state !== 'ready')
+      return fail(translate('agent.workerUnavailable'));
     const built = await buildSpec(stored);
     if (!built.ok) return built;
     await ensureTranscript(stored, state);
-    if (!deps.store.get(stored.id)) return fail('会话不存在');
+    if (!deps.store.get(stored.id)) return fail(translate('common.sessionNotFound'));
     if (state.spawned) return { ok: true };
-    return spawnWith(stored.id, state, built.spec) ? { ok: true } : fail(WORKER_UNAVAILABLE);
+    return spawnWith(stored.id, state, built.spec)
+      ? { ok: true }
+      : fail(translate('agent.workerUnavailable'));
   }
 
   function handleEvent(event: Exclude<AgentWorkerEvent, { type: 'ready' }>): void {
@@ -598,7 +601,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       id: requestId,
       sessionId,
       kind,
-      title: protectedAction ? `${title}（保护底线：${protectedAction}）` : title,
+      title: protectedAction
+        ? translate('agent.protectedTitle', { title, action: protectedAction })
+        : title,
       detail,
       expiresAt,
     };
@@ -607,7 +612,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
-    failDescribes(`agent worker 进程意外退出（code ${code}），没能读到模型的思考档位，请重试`);
+    failDescribes(translate('agent.describeCrashed', { code }));
     for (const [sessionId, state] of live) {
       if (!state.spawned) continue;
       const wasRunning = state.running;
@@ -618,8 +623,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         type: 'error',
         source: 'host',
         message: willRestart
-          ? `agent worker 进程意外退出（code ${code}），正在重启；这一轮已中断，可以重新发送`
-          : `agent worker 进程意外退出（code ${code}），短时间内崩溃过多，已停止自动重启；再次发送消息会重新启动它`,
+          ? translate('agent.crashedRestarting', { code })
+          : translate('agent.crashedStopped', { code }),
       });
       deliver(sessionId, state, { type: 'agent_settled', aborted: true });
       setStatus(sessionId, 'error');
@@ -637,7 +642,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   async function prompt(sessionId: string, text: string): Promise<Result> {
     const stored = deps.store.get(sessionId);
-    if (!stored) return fail('会话不存在');
+    if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
     pending.prompting += 1;
     try {
@@ -645,7 +650,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
       if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
-        return fail(WORKER_UNAVAILABLE);
+        return fail(translate('agent.workerUnavailable'));
       }
       state.running = true;
       const current = deps.store.get(sessionId) ?? stored;
@@ -670,14 +675,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     model,
   }: SetModelInput): Promise<Result<{ session: SessionSummary }>> {
     const stored = deps.store.get(sessionId);
-    if (!stored) return fail('会话不存在');
-    if (isBusy(stored)) return fail(SWITCH_WHILE_RUNNING);
+    if (!stored) return fail(translate('common.sessionNotFound'));
+    if (isBusy(stored)) return fail(translate('agent.switchWhileRunning'));
     const resolved = await deps.models.resolve(bareRef(model));
     if (!resolved.ok) return resolved;
     const reasoning = await reasoningOf(resolved.ref);
     const current = deps.store.get(sessionId);
-    if (!current) return fail('会话不存在');
-    if (isBusy(current)) return fail(SWITCH_WHILE_RUNNING);
+    if (!current) return fail(translate('common.sessionNotFound'));
+    if (isBusy(current)) return fail(translate('agent.switchWhileRunning'));
 
     const next = sessionModelOf(resolved.ref, model.thinking);
     const updated =
@@ -711,7 +716,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     mode,
   }: SetApprovalModeInput): Promise<Result<{ session: SessionSummary }>> {
     const stored = deps.store.get(sessionId);
-    if (!stored) return fail('会话不存在');
+    if (!stored) return fail(translate('common.sessionNotFound'));
     if (stored.approvalMode === mode) return { ok: true, session: summaryOf(stored) };
     const updated =
       deps.store.update(sessionId, { approvalMode: mode, updatedAt: now() }) ?? stored;
@@ -737,7 +742,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     try {
       views = await providerViews();
     } catch (error) {
-      return fail(`读取模型服务失败：${errorMessage(error)}`);
+      return fail(translate('providers.readFailed', { error: errorMessage(error) }));
     }
     const usable = views.filter((view) => view.enabled && view.hasApiKey && view.models.length > 0);
     const queries = usable.flatMap((view) => view.models.map((entry) => queryOf(view, entry)));
@@ -772,7 +777,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   async function remove(sessionId: string): Promise<Result> {
     const stored = deps.store.get(sessionId);
-    if (!stored) return fail('会话不存在');
+    if (!stored) return fail(translate('common.sessionNotFound'));
     disposeLive(sessionId);
     live.delete(sessionId);
     // 只删注册表记录；pi jsonl 保留（会话正文的权威源，误删可从文件恢复）
@@ -783,14 +788,15 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   const launcher: WorkerSessionLauncher = {
     async createWorkerSession(input) {
-      if (!deps.workspaces.get(input.workspaceId)) return fail('工作区不存在');
+      if (!deps.workspaces.get(input.workspaceId))
+        return fail(translate('common.workspaceNotFound'));
       let role: Role | undefined;
       try {
         role = await deps.roles.get(input.roleId);
       } catch (error) {
         return fail(errorMessage(error));
       }
-      if (!role) return fail(`角色不存在：${input.roleId}`);
+      if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
       // 角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
       const requested =
@@ -831,7 +837,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     async readTranscript(sessionId, cursor) {
       const stored = deps.store.get(sessionId);
-      if (!stored) return fail('会话不存在');
+      if (!stored) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
       const { text, total } = (await ensureTranscript(stored, state)).read(cursor);
       return { ok: true, text, total, done: !state.running };
@@ -858,7 +864,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     async shutdown(timeoutMs) {
       deps.store.flush();
       await client.shutdown(timeoutMs);
-      failDescribes(WORKER_UNAVAILABLE);
+      failDescribes(translate('agent.workerUnavailable'));
       for (const [sessionId, state] of live) detach(sessionId, state);
       deps.store.flush();
     },
@@ -870,14 +876,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     async create(input) {
       const workspace = deps.workspaces.get(input.workspaceId);
-      if (!workspace) return fail('工作区不存在');
+      if (!workspace) return fail(translate('common.workspaceNotFound'));
       let role: Role | undefined;
       try {
         role = await deps.roles.get(input.roleId);
       } catch (error) {
         return fail(errorMessage(error));
       }
-      if (!role) return fail(`角色不存在：${input.roleId}`);
+      if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       // 没选模型时用角色的模型与思考档位，角色也没配就由解析器取默认模型
       const requested = input.model ?? modelRefOf(role);
       const resolved = await deps.models.resolve(requested && bareRef(requested));
@@ -905,16 +911,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     remove,
     prompt,
     async abort(sessionId) {
-      if (!deps.store.get(sessionId)) return fail('会话不存在');
+      if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = live.get(sessionId);
       if (!state?.spawned) return { ok: true };
       return send({ type: 'abort', identity: identityOf(sessionId, state) })
         ? { ok: true }
-        : fail(WORKER_UNAVAILABLE);
+        : fail(translate('agent.workerUnavailable'));
     },
     async history(sessionId) {
       const stored = deps.store.get(sessionId);
-      if (!stored) return fail('会话不存在');
+      if (!stored) return fail(translate('common.sessionNotFound'));
       rereadBranches([stored.cwd]);
       try {
         const messages = await readHistory(sessionFilePath(deps.agentDir, sessionId), sessionId, {
@@ -922,22 +928,23 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         });
         return { ok: true, messages };
       } catch (error) {
-        return fail(`读取会话记录失败：${errorMessage(error)}`);
+        return fail(translate('agent.historyFailed', { error: errorMessage(error) }));
       }
     },
     async respondApproval({ sessionId, requestId, decision }) {
       const pending = approvals.get(requestId);
-      if (!pending || pending.sessionId !== sessionId) return fail('审批请求不存在或已处理');
+      if (!pending || pending.sessionId !== sessionId)
+        return fail(translate('agent.approvalNotFound'));
       approvals.delete(requestId);
-      if (now() > pending.expiresAt) return fail('审批请求已过期');
+      if (now() > pending.expiresAt) return fail(translate('agent.approvalExpired'));
       const state = live.get(sessionId);
       if (!state?.spawned || state.generation !== pending.generation) {
-        return fail('会话已重启，审批请求已失效');
+        return fail(translate('agent.approvalStale'));
       }
       const identity = { sessionId, generation: pending.generation };
       return send({ type: 'respond-approval', identity, requestId, decision })
         ? { ok: true }
-        : fail(WORKER_UNAVAILABLE);
+        : fail(translate('agent.workerUnavailable'));
     },
     setModel,
     modelOptions,

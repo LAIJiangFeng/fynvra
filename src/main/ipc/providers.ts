@@ -10,6 +10,7 @@ import type {
   ProviderScanImportsResult,
   ProviderTestResult,
 } from '../../preload/domains/providers';
+import { translate } from '../i18n';
 import {
   createProviderImporter,
   type ProviderImporter,
@@ -54,7 +55,10 @@ export function registerProviderHandlers(): void {
     try {
       return { ok: true, providers: (await getProviderStore().list()).map(toProviderView) };
     } catch (error) {
-      return { ok: false, error: `读取模型服务失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: translate('providers.readFailed', { error: errorMessage(error) }),
+      };
     }
   });
 
@@ -69,7 +73,10 @@ export function registerProviderHandlers(): void {
         sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
         return { ok: true, provider: toProviderView(result.provider) };
       } catch (error) {
-        return { ok: false, error: `保存模型服务失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('providers.saveFailed', { error: errorMessage(error) }),
+        };
       }
     }
   );
@@ -77,14 +84,17 @@ export function registerProviderHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.PROVIDERS_REMOVE,
     async (_event, rawId: unknown): Promise<IpcResult> => {
-      if (!isRegistryId(rawId)) return { ok: false, error: '无效的模型服务 id' };
+      if (!isRegistryId(rawId)) return { ok: false, error: translate('providers.invalidId') };
       try {
         const removed = await getProviderStore().remove(rawId);
-        if (!removed) return { ok: false, error: '模型服务不存在' };
+        if (!removed) return { ok: false, error: translate('providers.notFound') };
         sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
         return { ok: true };
       } catch (error) {
-        return { ok: false, error: `删除模型服务失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('providers.removeFailed', { error: errorMessage(error) }),
+        };
       }
     }
   );
@@ -93,10 +103,10 @@ export function registerProviderHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.PROVIDERS_TEST,
     async (_event, rawId: unknown): Promise<ProviderTestResult> => {
-      if (!isRegistryId(rawId)) return { ok: false, error: '无效的模型服务 id' };
+      if (!isRegistryId(rawId)) return { ok: false, error: translate('providers.invalidId') };
       try {
         const provider = await getProviderStore().get(rawId);
-        if (!provider) return { ok: false, error: '模型服务不存在' };
+        if (!provider) return { ok: false, error: translate('providers.notFound') };
         return await testProvider(provider, { fetch: (url, init) => net.fetch(url, init) });
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
@@ -139,7 +149,10 @@ export function registerProviderHandlers(): void {
           fetch: (url, init) => net.fetch(url, init),
         });
       } catch (error) {
-        return { ok: false, error: `拉取模型列表失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('providers.listModelsFailed', { error: errorMessage(error) }),
+        };
       }
     }
   );

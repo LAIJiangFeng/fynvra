@@ -10,17 +10,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/i18n/I18nProvider';
 import { useSettingsStore } from '@/stores/settings';
 
-const THEME_OPTIONS: { value: ThemeMode; label: string; icon: LucideIcon }[] = [
-  { value: 'light', label: '浅色', icon: Sun },
-  { value: 'dark', label: '深色', icon: Moon },
-  { value: 'system', label: '跟随系统', icon: Monitor },
+const THEME_OPTIONS: { value: ThemeMode; icon: LucideIcon }[] = [
+  { value: 'light', icon: Sun },
+  { value: 'dark', icon: Moon },
+  { value: 'system', icon: Monitor },
 ];
 
 export function ThemeMenu() {
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
+  const t = useT();
   const current = THEME_OPTIONS.find((option) => option.value === theme);
   const CurrentIcon = current?.icon ?? Monitor;
 
@@ -34,7 +36,9 @@ export function ThemeMenu() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`主题：${current?.label ?? '跟随系统'}`}
+                  aria-label={t('app.themeCurrent', {
+                    theme: t(`app.themes.${current?.value ?? 'system'}`),
+                  })}
                 />
               }
             />
@@ -42,7 +46,7 @@ export function ThemeMenu() {
         >
           <CurrentIcon />
         </TooltipTrigger>
-        <TooltipContent side="bottom">切换主题</TooltipContent>
+        <TooltipContent side="bottom">{t('app.theme')}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuRadioGroup
@@ -51,12 +55,12 @@ export function ThemeMenu() {
             if (isThemeMode(value)) setTheme(value);
           }}
         >
-          <DropdownMenuLabel>主题</DropdownMenuLabel>
+          <DropdownMenuLabel>{t('app.theme')}</DropdownMenuLabel>
           {/* Base UI 的单选项默认点选后不关菜单；主题选完即生效，直接关闭 */}
-          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+          {THEME_OPTIONS.map(({ value, icon: Icon }) => (
             <DropdownMenuRadioItem key={value} value={value} closeOnClick>
               <Icon />
-              {label}
+              {t(`app.themes.${value}`)}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

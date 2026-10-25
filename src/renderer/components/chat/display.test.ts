@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { translatorOf } from '../../i18n';
 import { formatCost, formatDuration, formatRelativeTime, formatTokens } from './format';
 import { describeTool, dispatchTaskView, prettyArgs, reportDoneView } from './toolDisplay';
+
+const zh = translatorOf('zh-CN');
+const en = translatorOf('en');
 
 describe('format', () => {
   it('formatDuration', () => {
@@ -29,55 +33,73 @@ describe('format', () => {
 
   it('formatRelativeTime', () => {
     const now = new Date(2026, 9, 24, 15, 0).getTime();
-    expect(formatRelativeTime(now - 30_000, now)).toBe('刚刚');
-    expect(formatRelativeTime(now - 5 * 60_000, now)).toBe('5 分钟前');
-    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe('3 小时前');
-    expect(formatRelativeTime(new Date(2026, 9, 23, 22, 0).getTime(), now)).toBe('昨天');
-    expect(formatRelativeTime(new Date(2026, 8, 3).getTime(), now)).toBe('09-03');
-    expect(formatRelativeTime(new Date(2025, 11, 31).getTime(), now)).toBe('2025-12-31');
+    expect(formatRelativeTime(now - 30_000, now, zh)).toBe('刚刚');
+    expect(formatRelativeTime(now - 5 * 60_000, now, zh)).toBe('5 分钟前');
+    expect(formatRelativeTime(now - 3 * 3_600_000, now, zh)).toBe('3 小时前');
+    expect(formatRelativeTime(new Date(2026, 9, 23, 22, 0).getTime(), now, zh)).toBe('昨天');
+    expect(formatRelativeTime(new Date(2026, 8, 3).getTime(), now, zh)).toBe('09-03');
+    expect(formatRelativeTime(new Date(2025, 11, 31).getTime(), now, zh)).toBe('2025-12-31');
+  });
+
+  it('formatRelativeTime 按界面语言：英文同样简短', () => {
+    const now = new Date(2026, 9, 24, 15, 0).getTime();
+    expect(formatRelativeTime(now - 30_000, now, en)).toBe('just now');
+    expect(formatRelativeTime(now - 5 * 60_000, now, en)).toBe('5m ago');
+    expect(formatRelativeTime(now - 10 * 3_600_000, now, en)).toBe('10h ago');
+    expect(formatRelativeTime(new Date(2026, 9, 23, 22, 0).getTime(), now, en)).toBe('Yesterday');
+    expect(formatRelativeTime(new Date(2026, 8, 3).getTime(), now, en)).toBe('09-03');
   });
 });
 
 describe('describeTool', () => {
   it('内置工具取关键参数做一行摘要', () => {
-    expect(describeTool('bash', { command: 'pnpm test\n  --run' })).toEqual({
+    expect(describeTool('bash', { command: 'pnpm test\n  --run' }, zh)).toEqual({
       label: '命令',
       family: 'builtin',
       summary: 'pnpm test --run',
     });
-    expect(describeTool('read', { path: 'src/a.ts', offset: 10 }).summary).toBe('src/a.ts');
-    expect(describeTool('git_readonly', { args: ['log', '--oneline'] }).summary).toBe(
+    expect(describeTool('read', { path: 'src/a.ts', offset: 10 }, zh).summary).toBe('src/a.ts');
+    expect(describeTool('git_readonly', { args: ['log', '--oneline'] }, zh).summary).toBe(
       'log --oneline'
     );
-    expect(describeTool('list_workers', {})).toEqual({
+    expect(describeTool('list_workers', {}, zh)).toEqual({
       label: '查看 worker',
       family: 'orchestration',
       summary: '',
     });
   });
 
+  it('工具名按界面语言', () => {
+    expect(describeTool('bash', { command: 'ls' }, en).label).toBe('Command');
+    expect(describeTool('report_done', {}, en).label).toBe('Report result');
+  });
+
   it('编排工具与 worker 工具归类', () => {
-    expect(describeTool('dispatch_task', { title: '补测试', spec: '…' })).toMatchObject({
+    expect(describeTool('dispatch_task', { title: '补测试', spec: '…' }, zh)).toMatchObject({
       family: 'orchestration',
       summary: '补测试',
     });
-    expect(describeTool('report_done', { outcome: 'failed', summary: '卡住了' })).toMatchObject({
-      family: 'worker',
-      summary: '卡住了',
-    });
+    expect(describeTool('report_done', { outcome: 'failed', summary: '卡住了' }, zh)).toMatchObject(
+      {
+        family: 'worker',
+        summary: '卡住了',
+      }
+    );
   });
 
   it('MCP 与未知工具显示紧凑 JSON，过长截断', () => {
-    expect(describeTool('mcp__github__create_issue', { title: 'x' })).toEqual({
+    expect(describeTool('mcp__github__create_issue', { title: 'x' }, zh)).toEqual({
       label: 'MCP · github/create_issue',
       family: 'mcp',
       summary: '{"title":"x"}',
     });
-    const long = describeTool('custom', { text: 'a'.repeat(500) });
+    const long = describeTool('custom', { text: 'a'.repeat(500) }, zh);
     expect(long.family).toBe('other');
     expect(long.summary).toHaveLength(120);
     expect(long.summary.endsWith('…')).toBe(true);
-    expect(describeTool('custom', undefined).summary).toBe('');
+    expect(describeTool('custom', undefined, zh).summary).toBe('');
+    // 原型上的属性不是工具
+    expect(describeTool('toString', {}, zh)).toMatchObject({ label: 'toString', family: 'other' });
   });
 });
 

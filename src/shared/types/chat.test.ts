@@ -1,15 +1,10 @@
-import { APPROVAL_MODES, THINKING_LEVELS } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import {
-  APPROVAL_MODE_LABELS,
+  describeThinkingSource,
   isThinkingSource,
   type ModelThinkingCapability,
   nextApprovalMode,
   pickThinkingLevel,
-  THINKING_LEVEL_HINTS,
-  THINKING_LEVEL_LABELS,
-  thinkingSourceBadge,
-  thinkingSourceNote,
 } from './chat';
 
 // 档位集合取自 pi 1.4.0 内置目录（getSupportedThinkingLevels，含 max）
@@ -80,45 +75,11 @@ describe('pickThinkingLevel', () => {
   });
 });
 
-describe('thinking level labels', () => {
-  it('shows the official level names, with the Chinese meaning of off', () => {
-    expect(THINKING_LEVELS.map((level) => THINKING_LEVEL_LABELS[level])).toEqual([
-      'off · 关闭',
-      'minimal',
-      'low',
-      'medium',
-      'high',
-      'xhigh',
-      'max',
-    ]);
-  });
-
-  it('names every level in a few Chinese words for the hover text, not a sentence', () => {
-    for (const level of THINKING_LEVELS) {
-      const hint = THINKING_LEVEL_HINTS[level];
-      expect(hint).toMatch(/[一-鿿]/);
-      expect(hint).not.toMatch(/[：，、；]/);
-      expect(hint.length).toBeLessThanOrEqual(6);
-    }
-    expect(new Set(THINKING_LEVELS.map((level) => THINKING_LEVEL_HINTS[level])).size).toBe(
-      THINKING_LEVELS.length
-    );
-  });
-});
-
 describe('approval modes', () => {
   it('cycles supervised → auto-edits → full → supervised (Shift+Tab in the composer)', () => {
     expect(nextApprovalMode('supervised')).toBe('auto-edits');
     expect(nextApprovalMode('auto-edits')).toBe('full');
     expect(nextApprovalMode('full')).toBe('supervised');
-  });
-
-  it('names the three modes for the capsule and the status bar', () => {
-    expect(APPROVAL_MODES.map((mode) => APPROVAL_MODE_LABELS[mode])).toEqual([
-      '全程审批',
-      '自动接受编辑',
-      '完全放行',
-    ]);
   });
 });
 
@@ -132,17 +93,13 @@ describe('thinking source', () => {
     }
   });
 
-  it('marks inferred and fallback levels with a short badge beside the levels', () => {
-    expect(thinkingSourceBadge('inferred:gpt-5.6-sol')).toBe('推断');
-    expect(thinkingSourceBadge('fallback')).toBe('兜底');
-    expect(thinkingSourceBadge('catalog')).toBeUndefined();
-    expect(thinkingSourceBadge(undefined)).toBeUndefined();
-  });
-
-  it("notes in the badge's hover text which catalog model the levels were inferred from", () => {
-    expect(thinkingSourceNote('inferred:gpt-5.6-sol')).toBe('按 gpt-5.6-sol 推断');
-    expect(thinkingSourceNote('fallback')).toBe('目录里没有这个模型，按协议兜底');
-    expect(thinkingSourceNote('catalog')).toBeUndefined();
-    expect(thinkingSourceNote(undefined)).toBeUndefined();
+  it('marks inferred levels (with the catalog model they came from) and fallback levels', () => {
+    expect(describeThinkingSource('inferred:gpt-5.6-sol')).toEqual({
+      kind: 'inferred',
+      model: 'gpt-5.6-sol',
+    });
+    expect(describeThinkingSource('fallback')).toEqual({ kind: 'fallback' });
+    expect(describeThinkingSource('catalog')).toBeUndefined();
+    expect(describeThinkingSource(undefined)).toBeUndefined();
   });
 });

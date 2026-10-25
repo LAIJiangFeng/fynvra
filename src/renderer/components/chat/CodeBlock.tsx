@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useState } from 'react';
 import type { ThemedToken } from 'shiki/core';
+import { useT } from '@/i18n/I18nProvider';
 import { CopyButton } from './CopyButton';
 import { highlight, peekHighlighted } from './highlighter';
 
@@ -48,12 +49,13 @@ export function CodeBlock({
   highlight?: boolean;
 }) {
   const tokens = useHighlighted(code, lang, enabled);
+  const t = useT();
 
   return (
     <div className="my-3 overflow-hidden rounded-lg border bg-muted/30">
       <div className="flex h-8 items-center justify-between border-b bg-muted/50 pr-1 pl-3">
         <span className="font-mono text-muted-foreground text-xs">{lang || 'text'}</span>
-        <CopyButton text={code} label="复制代码" />
+        <CopyButton text={code} label={t('chat.copyCode')} />
       </div>
       <pre className="overflow-x-auto p-3 font-mono text-[13px] leading-relaxed [&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)">
         <code>

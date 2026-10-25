@@ -1,6 +1,7 @@
 import { errorMessage } from '@shared/guards';
 import type { SessionSummary } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
+import { translate } from '../../i18n';
 import { isBusyStatus } from './archiveSweeper';
 import { type SessionStore, type StoredSession, toSummary } from './sessionStore';
 
@@ -32,8 +33,6 @@ export interface SessionArchive {
   unarchive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
 }
 
-const BUSY = '会话正在运行，结束后再归档';
-
 /**
  * 会话的归档与恢复（sessions:archive / unarchive 与闲置扫描共用）。只改注册表里的 archivedAt：
  * 归档不算一次更新（最后更新时间不变），恢复算（闲置扫描不会马上又把它归档）。
@@ -54,9 +53,10 @@ export function createSessionArchive(deps: SessionArchiveDeps): SessionArchive {
   return {
     async archive(sessionId) {
       const stored = deps.store.get(sessionId);
-      if (!stored) return { ok: false, error: '会话不存在' };
+      if (!stored) return { ok: false, error: translate('common.sessionNotFound') };
       if (stored.archivedAt !== undefined) return { ok: true, session: toSummary(stored) };
-      if (isBusyStatus(stored.status)) return { ok: false, error: BUSY };
+      if (isBusyStatus(stored.status))
+        return { ok: false, error: translate('sessions.archiveBusy') };
       const archived = deps.store.update(sessionId, { archivedAt: now() }) ?? stored;
       deps.changed(stored.workspaceId);
       try {
@@ -72,7 +72,7 @@ export function createSessionArchive(deps: SessionArchiveDeps): SessionArchive {
 
     async unarchive(sessionId) {
       const stored = deps.store.get(sessionId);
-      if (!stored) return { ok: false, error: '会话不存在' };
+      if (!stored) return { ok: false, error: translate('common.sessionNotFound') };
       if (stored.archivedAt === undefined) return { ok: true, session: toSummary(stored) };
       const restored =
         deps.store.update(sessionId, { archivedAt: undefined, updatedAt: now() }) ?? stored;

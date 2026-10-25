@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
 import { useNow } from '@/hooks/useNow';
+import { useT } from '@/i18n/I18nProvider';
 import { SessionSearchButton, SessionSearchInput, useFilteredSessions } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import {
@@ -32,6 +33,7 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   const archived = useSessionsStore(selectArchivedSessionsOf(workspaceId));
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
+  const t = useT();
   const anchor = useCallback((node: HTMLElement | null) => {
     setScrollParent(node?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null);
   }, []);
@@ -48,17 +50,19 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   return (
     <li ref={anchor} className="pb-1 pl-6">
       <div className="flex h-7 items-center justify-between pr-1 pl-2">
-        <span className="text-muted-foreground text-xs">会话</span>
+        <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
         <span className="flex items-center">
           <SessionSearchButton />
           <NewSessionButton compact />
         </span>
       </div>
       <SessionSearchInput workspaceId={workspaceId} />
-      {error && <p className="px-2 py-1 text-destructive text-xs">读取会话失败：{error}</p>}
+      {error && (
+        <p className="px-2 py-1 text-destructive text-xs">{t('sessions.loadFailed', { error })}</p>
+      )}
       {sessions.length === 0 && (
         <p className="px-2 py-1 text-muted-foreground text-xs">
-          {all.length === 0 ? '暂无会话' : '没有匹配的会话'}
+          {t(all.length === 0 ? 'sessions.empty' : 'sessions.noMatch')}
         </p>
       )}
       {rows.length > 0 && scrollParent && (
@@ -92,6 +96,7 @@ function ArchivedToggle({
   open: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -100,7 +105,7 @@ function ArchivedToggle({
       className="mt-1 mb-0.5 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
-      已归档
+      {t('sessions.archived')}
       <span className="tabular-nums">{count}</span>
     </button>
   );
@@ -113,8 +118,9 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
   const archive = useSessionsStore((state) => state.archiveSession);
   const unarchive = useSessionsStore((state) => state.unarchiveSession);
   const now = useNow();
+  const t = useT();
   const archived = session.archivedAt !== undefined;
-  const action = archived ? '恢复' : '归档';
+  const action = t(archived ? 'sessions.unarchive' : 'sessions.archive');
 
   return (
     <div className="group/session relative mb-0.5">
@@ -134,7 +140,7 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
           </span>
           <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
             <RoleBadge roleId={session.roleId} className="max-w-28 truncate" />
-            <span className="truncate">{formatRelativeTime(session.updatedAt, now)}</span>
+            <span className="truncate">{formatRelativeTime(session.updatedAt, now, t)}</span>
           </span>
         </span>
       </button>

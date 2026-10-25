@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { messagesOf } from '@/stores/orchestration';
@@ -18,7 +19,7 @@ import {
   describeSubject,
   formatClock,
   isFromWorker,
-  MESSAGE_TYPE_LABEL,
+  messageTypeLabel,
   reportOutcome,
 } from './format';
 
@@ -61,6 +62,7 @@ export function MessageStream({
   view: OrchestrationSnapshotView;
   dispatches: Dispatch[];
 }) {
+  const t = useT();
   const items = useMemo(() => {
     const list: StreamItem[] = [];
     for (const [index, dispatch] of dispatches.entries()) {
@@ -81,7 +83,7 @@ export function MessageStream({
   }, [items]);
 
   if (items.length === 0) {
-    return <p className="text-muted-foreground text-xs">还没有消息</p>;
+    return <p className="text-muted-foreground text-xs">{t('orchestration.noMessages')}</p>;
   }
 
   const multiple = dispatches.length > 1;
@@ -93,7 +95,8 @@ export function MessageStream({
           <li key={message.id} className="flex flex-col gap-2">
             {separator && (
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="h-px flex-1 bg-border" />第 {attempt} 次尝试
+                <span className="h-px flex-1 bg-border" />
+                {t('orchestration.attemptNth', { count: attempt })}
                 <span className="h-px flex-1 bg-border" />
               </div>
             )}
@@ -122,24 +125,27 @@ function MessageBubble({
   dispatch: Dispatch;
   waiting: boolean;
 }) {
+  const t = useT();
   const fromWorker = isFromWorker(message, dispatch);
   const { icon: Icon, className } = bubbleStyle(message);
-  const subject = describeSubject(message);
+  const subject = describeSubject(message, t);
+  const sender = t(fromWorker ? 'orchestration.worker' : 'orchestration.coordinator');
+  const type = messageTypeLabel(message.type, t);
   return (
     <div className={cn('flex', fromWorker ? 'justify-start' : 'justify-end')}>
       <article
-        aria-label={`${fromWorker ? 'worker' : '主 agent'}的${MESSAGE_TYPE_LABEL[message.type]}`}
+        aria-label={t('orchestration.bubbleLabel', { sender, type })}
         className={cn('max-w-[90%] rounded-lg border px-2.5 py-1.5 text-xs', className)}
       >
         <header className="mb-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
           <Icon className="size-3.5 shrink-0" />
           <span className="font-medium">
-            {fromWorker ? 'worker' : '主 agent'} · {MESSAGE_TYPE_LABEL[message.type]}
+            {sender} · {type}
           </span>
           {subject && <span className="text-muted-foreground">{subject}</span>}
           {waiting && (
             <Badge className="border-transparent bg-amber-500/20 px-1 py-0 text-[10px] text-amber-800 dark:text-amber-200">
-              等待答复
+              {t('orchestration.awaitingReply')}
             </Badge>
           )}
           <time

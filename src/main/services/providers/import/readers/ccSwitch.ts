@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { ProviderApi } from '@shared/types/llm';
+import { translate } from '../../../../i18n';
 import { readAnthropicSettings } from './claudeCode';
 import { readCodexConfig } from './codex';
 import {
@@ -65,12 +66,14 @@ export function readCcSwitch(rows: readonly Record<string, unknown>[], env: Env)
     const sourceLabel = `CC Switch · ${name}`;
     const settings = parseJsonObject(text(row.settings_config));
     if (!settings) {
-      warnings.push(`${sourceLabel}：settings_config 不是有效的 JSON，已跳过`);
+      warnings.push(
+        translate('importers.configInvalidJson', { subject: sourceLabel, field: 'settings_config' })
+      );
       continue;
     }
     const format = apiFromFormat(parseJsonObject(text(row.meta))?.apiFormat);
     const found = readRow(app, settings, format, env, (warning) =>
-      warnings.push(`${sourceLabel}：${warning}`)
+      warnings.push(translate('importers.labeled', { subject: sourceLabel, text: warning }))
     );
     if (found) {
       providers.push({ source: 'cc-switch', sourceLabel, name, ...found, isCurrent: current });
@@ -98,13 +101,17 @@ function readRow(
       if (!toml && !text(auth?.OPENAI_API_KEY)) return null;
       const parsed = parseTomlObject(toml);
       if (!parsed.ok) {
-        warn(`Codex 配置${parsed.line ? `第 ${parsed.line} 行` : ''}不是有效的 TOML，已跳过`);
+        warn(
+          parsed.line
+            ? translate('importers.codexConfigInvalidAt', { line: parsed.line })
+            : translate('importers.codexConfigInvalid')
+        );
         return null;
       }
       const active = readCodexConfig(parsed.value, auth, env, format).find((p) => p.active);
       if (!active) return null;
       if (active.missingEnvKey) {
-        warn(`环境变量 ${active.missingEnvKey} 没有设置，导入后需要在编辑里填写 API Key`);
+        warn(translate('importers.envMissingInConfig', { key: active.missingEnvKey }));
       }
       const { api, baseUrl, apiKey, models } = active;
       return { api, ...(baseUrl ? { baseUrl } : {}), ...(apiKey ? { apiKey } : {}), models };

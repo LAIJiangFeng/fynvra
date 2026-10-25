@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import type { TimelineMessage } from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
@@ -29,6 +30,7 @@ export const MessageItem = memo(function MessageItem({
 });
 
 function UserMessage({ message }: { message: TimelineMessage }) {
+  const t = useT();
   return (
     <div className="flex flex-col items-end gap-1">
       <div
@@ -44,7 +46,7 @@ function UserMessage({ message }: { message: TimelineMessage }) {
         <span
           className={cn('text-xs', message.failed ? 'text-destructive' : 'text-muted-foreground')}
         >
-          {message.failed ? '未送达' : '发送中…'}
+          {t(message.failed ? 'chat.undelivered' : 'chat.sending')}
         </span>
       )}
     </div>
@@ -61,6 +63,7 @@ function AssistantMessage({
   live: boolean;
 }) {
   const { text, thinking, streaming } = message;
+  const t = useT();
   const items = tools ?? message.toolCalls.map((call): ToolItem => ({ kind: 'call', call }));
   return (
     <div className="group/assistant min-w-0 space-y-2">
@@ -79,7 +82,7 @@ function AssistantMessage({
       )}
       {text && !streaming && (
         <div className="flex opacity-0 transition-opacity focus-within:opacity-100 group-hover/assistant:opacity-100">
-          <CopyButton text={text} label="复制回复" />
+          <CopyButton text={text} label={t('chat.copyReply')} />
         </div>
       )}
     </div>

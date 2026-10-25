@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
+import { translate } from '../../i18n';
 import { getProviderStore } from '../../ipc/providers';
 import type { ModelRef, ModelResolver } from '../agentHost/types';
 import type { ProviderStore, StoredProvider } from './providerStore';
@@ -33,7 +34,10 @@ export function createModelResolver(source?: Pick<ProviderStore, 'list'>): Model
       try {
         providers = await (source ?? getProviderStore()).list();
       } catch (error) {
-        return { ok: false, error: `读取模型服务失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('providers.readFailed', { error: errorMessage(error) }),
+        };
       }
       return ref ? resolveRef(providers, ref) : resolveDefault(providers);
     },
@@ -43,11 +47,15 @@ export function createModelResolver(source?: Pick<ProviderStore, 'list'>): Model
 function resolveRef(providers: StoredProvider[], ref: RoleModelRef): ResolveResult {
   const provider = providers.find((candidate) => candidate.id === ref.providerId);
   if (!provider) {
-    return { ok: false, error: `模型服务 ${ref.providerId} 不存在，请在「设置 → 模型服务」中添加` };
+    return { ok: false, error: translate('providers.providerMissing', { id: ref.providerId }) };
   }
-  if (!provider.enabled) return { ok: false, error: `模型服务「${provider.name}」已停用` };
+  if (!provider.enabled)
+    return { ok: false, error: translate('providers.providerDisabled', { name: provider.name }) };
   if (!provider.models.some((model) => model.id === ref.modelId)) {
-    return { ok: false, error: `模型服务「${provider.name}」没有模型 ${ref.modelId}` };
+    return {
+      ok: false,
+      error: translate('providers.modelMissing', { name: provider.name, model: ref.modelId }),
+    };
   }
   return toSpec(provider, ref.modelId, ref.thinking);
 }
@@ -59,13 +67,14 @@ function resolveDefault(providers: StoredProvider[]): ResolveResult {
   }
   return {
     ok: false,
-    error: '还没有可用的模型服务：请在「设置 → 模型服务」中添加并启用一个填写了 API Key 的服务',
+    error: translate('providers.noProviders'),
   };
 }
 
 function toSpec(provider: StoredProvider, modelId: string, thinking?: unknown): ResolveResult {
   const { apiKey } = provider;
-  if (!apiKey) return { ok: false, error: `模型服务「${provider.name}」还没有填写 API Key` };
+  if (!apiKey)
+    return { ok: false, error: translate('providers.noApiKeyFor', { name: provider.name }) };
   const baseUrl = resolveBaseUrl(provider.api, provider.baseUrl);
   return {
     ok: true,

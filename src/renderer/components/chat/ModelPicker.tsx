@@ -2,11 +2,10 @@ import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
 import {
+  describeThinkingSource,
   type ModelProviderOption,
   type SessionModelRef,
   type ThinkingSource,
-  thinkingSourceBadge,
-  thinkingSourceNote,
 } from '@shared/types/chat';
 import { Check, ChevronsUpDown, Cpu, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -21,6 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import type { T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
 import {
@@ -62,11 +63,7 @@ export function useSessionModel(sessionId: string) {
   };
 }
 
-/** 运行中点开模型胶囊时的提示 */
-const BUSY_HINT = '运行中不能切换模型';
-/** 没有可用服务时只写一句，怎么补放在悬停提示里；新建会话弹层同用 */
-export const NO_PROVIDERS = '还没有可用的模型服务';
-export const NO_PROVIDERS_HINT = '在「设置 → 模型服务」里启用一个填写了 API Key 的服务';
+// 没有可用服务时只写一句（model.noProviders），怎么补放在悬停提示里（model.noProvidersHint）；新建会话弹层同用
 
 /**
  * 输入框左下角的模型胶囊：「服务 · 模型 · 思考档位」，点开是可搜索的模型列表和当前模型自己的档位。
@@ -84,6 +81,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
   const setSessionModel = useSessionsStore((state) => state.setSessionModel);
   const [query, setQuery] = useState('');
   const search = useRef<HTMLInputElement>(null);
+  const t = useT();
 
   const busy = isBusy(status);
   const shown = filterModelOptions(providers, query);
@@ -119,7 +117,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         render={
           <button
             type="button"
-            title={busy ? BUSY_HINT : '切换模型'}
+            title={t(busy ? 'model.busy' : 'model.switch')}
             className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground"
           />
         }
@@ -128,7 +126,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         <span className="min-w-0 truncate">
           {label
             ? [label.provider, label.model, label.thinking].filter(Boolean).join(' · ')
-            : '选择模型'}
+            : t('model.pick')}
         </span>
         <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-60" />
       </PopoverTrigger>
@@ -138,8 +136,8 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
           <input
             ref={search}
             value={query}
-            aria-label="搜索模型"
-            placeholder="搜索服务或模型"
+            aria-label={t('model.search')}
+            placeholder={t('model.searchPlaceholder')}
             spellCheck={false}
             className="h-9 w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             onChange={(event) => setQuery(event.target.value)}
@@ -189,18 +187,20 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
           {shown.length === 0 &&
             (providers.length === 0 ? (
               <p
-                title={NO_PROVIDERS_HINT}
+                title={t('model.noProvidersHint')}
                 className="px-2 py-6 text-center text-muted-foreground text-xs"
               >
-                {NO_PROVIDERS}
+                {t('model.noProviders')}
               </p>
             ) : (
-              <p className="px-2 py-6 text-center text-muted-foreground text-xs">没有匹配的模型</p>
+              <p className="px-2 py-6 text-center text-muted-foreground text-xs">
+                {t('model.noMatch')}
+              </p>
             ))}
         </div>
         {current && current.model.thinkingLevels.length > 0 && (
           <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
-            <span className="shrink-0 text-muted-foreground text-xs">思考档位</span>
+            <span className="shrink-0 text-muted-foreground text-xs">{t('thinking.title')}</span>
             <ThinkingSourceBadge source={current.model.source} />
             <ThinkingLevelPicker
               levels={current.model.thinkingLevels}
@@ -212,7 +212,7 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
         )}
         {(busy || optionsError) && (
           <p className="shrink-0 border-t px-3 py-2 text-muted-foreground text-xs">
-            {busy ? BUSY_HINT : `读取模型失败：${optionsError}`}
+            {busy ? t('model.busy') : t('model.loadFailed', { error: optionsError ?? '' })}
           </p>
         )}
       </PopoverContent>
@@ -220,17 +220,27 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
   );
 }
 
+/** 档位来源的悬停说明：推断来的写明按哪个目录模型推断，兜底的说明目录里没有；目录里有的没有 */
+export function thinkingSourceNote(source: ThinkingSource | undefined, t: T): string | undefined {
+  const info = describeThinkingSource(source);
+  if (!info) return undefined;
+  return info.kind === 'inferred'
+    ? t('thinking.sourceNote.inferred', { model: info.model })
+    : t('thinking.sourceNote.fallback');
+}
+
 /** 档位旁的徽标：推断来的标「推断」、兜底的标「兜底」，悬停写明按什么得来；目录里有的不显示 */
 export function ThinkingSourceBadge({ source }: { source: ThinkingSource | undefined }) {
-  const badge = thinkingSourceBadge(source);
-  return badge ? (
-    <Badge variant="outline" title={thinkingSourceNote(source)}>
-      {badge}
+  const t = useT();
+  const info = describeThinkingSource(source);
+  return info ? (
+    <Badge variant="outline" title={thinkingSourceNote(source, t)}>
+      {t(`thinking.source.${info.kind}`)}
     </Badge>
   ) : null;
 }
 
-/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels），官方等级名，悬停显示中文叫法 */
+/** 思考档位：只渲染这个模型自己的可选档位（sessions:model-options 给的 thinkingLevels），官方等级名，悬停显示几个字的说明 */
 export function ThinkingLevelPicker({
   levels,
   value,
@@ -242,9 +252,10 @@ export function ThinkingLevelPicker({
   disabled?: boolean;
   onChange: (level: ThinkingLevel) => void;
 }) {
+  const t = useT();
   return (
     <RadioGroup
-      aria-label="思考档位"
+      aria-label={t('thinking.title')}
       value={value ?? ''}
       disabled={disabled}
       onValueChange={(next) => {
@@ -252,7 +263,7 @@ export function ThinkingLevelPicker({
       }}
       className="flex min-w-0 flex-wrap gap-1"
     >
-      {thinkingChoices(levels).map((choice) => (
+      {thinkingChoices(levels, t).map((choice) => (
         <Radio.Root
           key={choice.value}
           value={choice.value}
@@ -278,6 +289,7 @@ export function ModelSelect({
   value: SessionModelRef | undefined;
   onChange: (found: FoundModel) => void;
 }) {
+  const t = useT();
   const items = providers.flatMap((provider) =>
     provider.models.map((model) => ({
       value: modelKey({ providerId: provider.providerId, modelId: model.id }),
@@ -302,7 +314,7 @@ export function ModelSelect({
       }}
     >
       <SelectTrigger id={id}>
-        <SelectValue placeholder="选择模型" />
+        <SelectValue placeholder={t('model.pick')} />
       </SelectTrigger>
       <SelectContent>
         {providers.map((provider) => (

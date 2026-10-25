@@ -2,6 +2,7 @@ import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare, TriangleAlert } 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Components, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import {
   isBusy,
@@ -34,12 +35,13 @@ const COMPONENTS: Components<TimelineRow, TimelineContext> = {
 };
 
 function TimelineFooter({ busy, streaming, error }: TimelineContext) {
+  const t = useT();
   return (
     <div className="mx-auto max-w-3xl px-6 pb-6">
       {busy && !streaming && (
         <div className="flex items-center gap-2 py-2 text-muted-foreground text-xs">
           <LoaderCircle className="size-3.5 animate-spin" />
-          agent 正在工作…
+          {t('chat.working')}
         </div>
       )}
       {error && (
@@ -70,6 +72,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const foldHistoryTurns = useGeneralPreferencesStore((state) => state.timeline.foldHistoryTurns);
   // 用户手动展开的历史轮次（按提问消息 id），会话内记住
   const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(() => new Set());
+  const t = useT();
 
   // 内容没变的行沿用上次的对象，流式输出时只重画变了的行
   const committedRows = useRef<TimelineRow[]>([]);
@@ -153,7 +156,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
         ) : (
           <>
             <MessagesSquare className="size-10 text-muted-foreground/60" />
-            发送第一条消息开始对话
+            {t('chat.startHint')}
           </>
         )}
       </div>
@@ -188,7 +191,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
         <Button
           variant="outline"
           size="icon-sm"
-          aria-label="回到底部"
+          aria-label={t('chat.scrollToBottom')}
           className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md"
           onClick={() => {
             follow.current = true;

@@ -1,5 +1,6 @@
 import { asRecord } from '@shared/guards';
 import type { ModelEntry, ProviderApi } from '@shared/types/llm';
+import { translate } from '../../../../i18n';
 import {
   baseUrlOf,
   type DiscoveredProvider,
@@ -101,10 +102,20 @@ export function readCodex(input: {
   if (input.config !== null) {
     const parsed = parseTomlObject(input.config);
     if (!parsed.ok) {
-      const at = parsed.line ? ` 第 ${parsed.line} 行` : '';
       return {
         providers: [],
-        warnings: [`Codex：~/.codex/config.toml${at}不是有效的 TOML，已跳过`],
+        warnings: [
+          parsed.line
+            ? translate('importers.invalidTomlAt', {
+                subject: 'Codex',
+                file: '~/.codex/config.toml',
+                line: parsed.line,
+              })
+            : translate('importers.invalidToml', {
+                subject: 'Codex',
+                file: '~/.codex/config.toml',
+              }),
+        ],
       };
     }
     config = parsed.value;
@@ -114,16 +125,18 @@ export function readCodex(input: {
   let auth: Record<string, unknown> | null = null;
   if (input.auth !== null) {
     auth = parseJsonObject(input.auth);
-    if (!auth) warnings.push('Codex：~/.codex/auth.json 不是有效的 JSON，已忽略其中的 key');
+    if (!auth) {
+      warnings.push(
+        translate('importers.authIgnored', { subject: 'Codex', file: '~/.codex/auth.json' })
+      );
+    }
   }
 
   const providers = readCodexConfig(config, auth, input.env).map(
     ({ key, name, active, missingEnvKey, ...rest }): DiscoveredProvider => {
       const label = active ? 'Codex' : `Codex · ${name}`;
       if (missingEnvKey) {
-        warnings.push(
-          `${label}：环境变量 ${missingEnvKey} 没有设置，导入后需要在编辑里填写 API Key`
-        );
+        warnings.push(translate('importers.envMissingKey', { subject: label, key: missingEnvKey }));
       }
       return {
         source: 'codex',

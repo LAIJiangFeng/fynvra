@@ -11,6 +11,7 @@ import {
   type WorktreesRootInfoResult,
 } from '@shared/types/settings';
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialogOptions } from 'electron';
+import { translate } from '../i18n';
 import {
   collectWorktreesRootInfo,
   fallbackWorktreesRoot,
@@ -61,7 +62,7 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE, (_event, raw: unknown): PreferencesResult => {
     const patch = parsePreferencesPatch(raw);
-    if (!patch) return { ok: false, error: '无效的设置项' };
+    if (!patch) return { ok: false, error: translate('settings.invalidPatch') };
     try {
       const { settings, changed } = getSettingsFile().update((current) => ({
         ...current,
@@ -82,7 +83,7 @@ export function registerSettingsHandlers(): void {
     IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT,
     async (event, raw: unknown): Promise<PickWorktreesRootResult> => {
       const input = parsePickWorktreesRootInput(raw);
-      if (!input) return { ok: false, code: 'invalid', error: '无效的参数' };
+      if (!input) return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
       try {
         if (input.reset) return saveWorktreesRoot(undefined);
         const before = getSettingsFile().read();
@@ -91,7 +92,7 @@ export function registerSettingsHandlers(): void {
           event.sender,
           before.preferences.worktreesRoot ?? (firstRepo && dirname(firstRepo))
         );
-        if (!dir) return { ok: false, code: 'canceled', error: '已取消选择' };
+        if (!dir) return { ok: false, code: 'canceled', error: translate('common.canceled') };
         // 弹框期间工作区可能有增减：按关闭时的列表校验
         const repoPaths = getSettingsFile()
           .read()
@@ -109,7 +110,7 @@ export function registerSettingsHandlers(): void {
     IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO,
     async (_event, raw: unknown): Promise<WorktreesRootInfoResult> => {
       const input = parseWorktreesRootInfoInput(raw);
-      if (!input) return { ok: false, error: '无效的参数' };
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
       // 只跑最新的一次占用统计：目录大得统计要好几秒，旧的结果已经没人要了
       const scan = input.usage ? new AbortController() : undefined;
       if (scan) {
@@ -133,7 +134,7 @@ export function registerSettingsHandlers(): void {
       } catch (error) {
         return {
           ok: false,
-          error: scan?.signal.aborted ? '占用统计已取消：有更新的统计请求' : errorMessage(error),
+          error: scan?.signal.aborted ? translate('settings.usageCanceled') : errorMessage(error),
         };
       } finally {
         if (scan !== undefined && usageScan === scan) usageScan = null;
@@ -151,8 +152,8 @@ async function pickDirectory(
   defaultPath: string | undefined
 ): Promise<string | null> {
   const options: OpenDialogOptions = {
-    title: '选择 worktree 根目录',
-    buttonLabel: '选择',
+    title: translate('settings.pickWorktreesRoot'),
+    buttonLabel: translate('common.choose'),
     properties: ['openDirectory', 'createDirectory'],
     ...(defaultPath ? { defaultPath } : {}),
   };

@@ -72,12 +72,7 @@ export interface SessionEventEnvelope {
   event: FynvraSessionEvent;
 }
 
-/** 审批档位的显示名：输入框胶囊、档位列表、状态栏与角色编辑器共用 */
-export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
-  supervised: '全程审批',
-  'auto-edits': '自动接受编辑',
-  full: '完全放行',
-};
+// 审批档位、思考档位的显示名在 Renderer 的字典里（approval.modes.<mode>、thinking.levels.<level>）
 
 /** 输入框里 Shift+Tab 的下一档：supervised → auto-edits → full → supervised */
 export function nextApprovalMode(mode: ApprovalMode): ApprovalMode {
@@ -114,7 +109,7 @@ export interface ModelThinkingCapability {
   thinkingLevels: ThinkingLevel[];
   /** 模型的默认档位（pi 的默认 medium 按模型能力 clamp），thinkingLevels 非空时才有 */
   defaultThinking?: ThinkingLevel;
-  /** 档位的来源；推断与兜底的，界面在档位旁标徽标（{@link thinkingSourceBadge}），悬停显示 {@link thinkingSourceNote} */
+  /** 档位的来源；推断与兜底的，界面在档位旁标徽标、悬停写明来历（{@link describeThinkingSource}） */
   source?: ThinkingSource;
 }
 
@@ -133,39 +128,20 @@ export function pickThinkingLevel(
   return thinkingLevels[Math.floor((thinkingLevels.length - 1) / 2)];
 }
 
-/** 档位的显示名：官方等级名（pi 与各家 API 的叫法），off 附上中文；选择器、新建弹层、角色编辑器共用 */
-export const THINKING_LEVEL_LABELS: Readonly<Record<ThinkingLevel, string>> = {
-  off: 'off · 关闭',
-  minimal: 'minimal',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max',
-};
+/** 要在档位旁标出来的来源：推断来的带上按哪个目录模型推断，兜底的只有类别 */
+export type ThinkingSourceInfo = { kind: 'fallback' } | { kind: 'inferred'; model: string };
 
-/** 档位的中文叫法：悬停时显示，几个字，不写成句子 */
-export const THINKING_LEVEL_HINTS: Readonly<Record<ThinkingLevel, string>> = {
-  off: '关闭思考',
-  minimal: '极少思考',
-  low: '少量思考',
-  medium: '适中',
-  high: '深入思考',
-  xhigh: '更深入思考',
-  max: '最大思考',
-};
-
-/** 档位旁的徽标：推断来的标「推断」，兜底的标「兜底」；目录里有的不标 */
-export function thinkingSourceBadge(source: ThinkingSource | undefined): string | undefined {
-  if (source === 'fallback') return '兜底';
-  if (source?.startsWith(INFERRED_PREFIX)) return '推断';
-  return undefined;
-}
-
-/** 徽标的悬停提示：推断来的写明按哪个目录模型推断，兜底的说明目录里没有；目录里有的没有 */
-export function thinkingSourceNote(source: ThinkingSource | undefined): string | undefined {
-  if (source === 'fallback') return '目录里没有这个模型，按协议兜底';
-  if (source?.startsWith(INFERRED_PREFIX)) return `按 ${source.slice(INFERRED_PREFIX.length)} 推断`;
+/**
+ * 档位旁徽标与悬停说明的依据（文案在 Renderer 字典的 thinking.source / thinking.sourceNote）：
+ * 推断来的与兜底的标出来，目录里有的不标（undefined）。
+ */
+export function describeThinkingSource(
+  source: ThinkingSource | undefined
+): ThinkingSourceInfo | undefined {
+  if (source === 'fallback') return { kind: 'fallback' };
+  if (source?.startsWith(INFERRED_PREFIX)) {
+    return { kind: 'inferred', model: source.slice(INFERRED_PREFIX.length) };
+  }
   return undefined;
 }
 

@@ -1,6 +1,7 @@
 import type { FynvraSessionEventBody, Message } from '@fynvra/core';
 import type { ApprovalRequest, SessionSummary } from '@shared/types/chat';
 import type { NotificationPreferences } from '@shared/types/settings';
+import { translate } from '../../i18n';
 
 /**
  * 桌面通知的规则（纯函数，Task 24）：哪些事件弹、受哪个开关管、标题与正文怎么写、什么时候按聚焦抑制。
@@ -122,7 +123,12 @@ export function createTurnTracker(): TurnTracker {
         case 'error': {
           turnOf(session.id).failed = true;
           const kind = isWorker(session) ? 'worker-failed' : 'turn-error';
-          return candidate(kind, session, `${session.title} · 出错`, excerpt(event.message));
+          return candidate(
+            kind,
+            session,
+            translate('notifications.errorTitle', { title: session.title }),
+            excerpt(event.message)
+          );
         }
         case 'agent_settled': {
           const turn = turns.get(session.id);
@@ -132,7 +138,7 @@ export function createTurnTracker(): TurnTracker {
             'turn-done',
             session,
             session.title,
-            excerpt(turn?.text ?? '') || '完成'
+            excerpt(turn?.text ?? '') || translate('notifications.done')
           );
         }
         default:
@@ -150,8 +156,10 @@ export function approvalCandidate(
   return candidate(
     'approval',
     session,
-    `${session.title} · 待审批`,
-    excerpt(`${request.title}：${request.detail}`)
+    translate('notifications.approvalTitle', { title: session.title }),
+    excerpt(
+      translate('notifications.approvalBody', { title: request.title, detail: request.detail })
+    )
   );
 }
 
@@ -167,7 +175,12 @@ export function messageCandidate(
   if (!label) return null;
   const session = lookup(message.from) ?? lookup(message.to);
   if (!session) return null;
-  return candidate(label.kind, session, `${session.title} · ${label.text}`, excerpt(message.body));
+  return candidate(
+    label.kind,
+    session,
+    translate('notifications.labeledTitle', { title: session.title, label: label.text }),
+    excerpt(message.body)
+  );
 }
 
 function messageLabel(message: Message): { kind: NotificationKind; text: string } | null {
@@ -175,12 +188,12 @@ function messageLabel(message: Message): { kind: NotificationKind; text: string 
     case 'worker_done':
       // subject 是 outcome，追加汇报带 ` (follow-up)`
       return message.subject?.startsWith('failed')
-        ? { kind: 'worker-failed', text: '失败' }
-        : { kind: 'worker-done', text: '完成' };
+        ? { kind: 'worker-failed', text: translate('notifications.failed') }
+        : { kind: 'worker-done', text: translate('notifications.done') };
     case 'question':
-      return { kind: 'question', text: '提问' };
+      return { kind: 'question', text: translate('notifications.question') };
     case 'escalation':
-      return { kind: 'escalation', text: '上报' };
+      return { kind: 'escalation', text: translate('notifications.escalation') };
     default:
       return null;
   }

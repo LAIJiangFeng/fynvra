@@ -1,12 +1,13 @@
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 
 /** 复制到剪贴板，成功后短暂显示对勾。 */
 export function CopyButton({
   text,
-  label = '复制',
+  label,
   className,
 }: {
   text: string;
@@ -14,6 +15,7 @@ export function CopyButton({
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const t = useT();
 
   useEffect(() => {
     if (!copied) return;
@@ -21,7 +23,7 @@ export function CopyButton({
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const title = copied ? '已复制' : label;
+  const title = copied ? t('chat.copied') : (label ?? t('chat.copy'));
   return (
     <Button
       variant="ghost"

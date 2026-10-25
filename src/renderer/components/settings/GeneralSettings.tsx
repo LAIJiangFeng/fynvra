@@ -1,8 +1,10 @@
+import { isLanguage, LANGUAGES, type Language, type Locale } from '@shared/i18n';
 import {
   ARCHIVE_IDLE_DAYS,
   DELETE_ARCHIVED_DAYS,
   isArchiveIdleDays,
   isDeleteArchivedDays,
+  languageOf,
   type TimelinePreferences,
   type WorkspaceWorktreesInfo,
   type WorktreesRootInfo,
@@ -19,8 +21,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import type { MessageId, T } from '@/i18n';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
-import { useGeneralPreferencesStore, useWorktreesRootStore } from '@/stores/settings';
+import {
+  useGeneralPreferencesStore,
+  useSettingsStore,
+  useWorktreesRootStore,
+} from '@/stores/settings';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 
@@ -40,7 +48,7 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * 通用：worktree 放在哪（Main 弹框选择并校验，Renderer 不传路径）、各工作区登记的 worktree 占用，
+ * 通用：界面语言，worktree 放在哪（Main 弹框选择并校验，Renderer 不传路径）、各工作区登记的 worktree 占用，
  * 会话的归档与清理，时间线的显示偏好。
  */
 export function GeneralSettings() {
@@ -50,6 +58,7 @@ export function GeneralSettings() {
   const refresh = useWorktreesRootStore((state) => state.refresh);
   const pick = useWorktreesRootStore((state) => state.pick);
   const workspaces = useWorkspacesStore((state) => state.workspaces);
+  const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -66,8 +75,8 @@ export function GeneralSettings() {
       setStatus({
         tone: 'success',
         text: root
-          ? `之后新建的 worktree 放在 ${root} 下`
-          : '已恢复默认：之后新建的 worktree 放在仓库同级目录',
+          ? t('settings.general.worktreesGoTo', { root })
+          : t('settings.general.worktreesReset'),
       });
     } else if (result.code !== 'canceled') {
       setStatus({ tone: 'error', text: result.error });
@@ -76,8 +85,10 @@ export function GeneralSettings() {
 
   return (
     <div className="grid gap-8">
+      <LanguageSection />
+
       <section>
-        <SectionHeader title="Worktree 位置">
+        <SectionHeader title={t('settings.general.worktreeLocation')}>
           <Button
             size="sm"
             variant="outline"
@@ -85,11 +96,11 @@ export function GeneralSettings() {
             onClick={() => void choose({ reset: true })}
           >
             <RotateCcw />
-            恢复默认
+            {t('settings.general.resetDefault')}
           </Button>
           <Button size="sm" disabled={busy} onClick={() => void choose()}>
             <FolderOpen />
-            选择目录…
+            {t('settings.general.chooseFolder')}
           </Button>
         </SectionHeader>
         <RootSummary info={info} failed={error !== null} />
@@ -101,7 +112,7 @@ export function GeneralSettings() {
       </section>
 
       <section>
-        <SectionHeader title="磁盘占用">
+        <SectionHeader title={t('settings.general.diskUsage')}>
           <Button
             size="sm"
             variant="outline"
@@ -109,7 +120,7 @@ export function GeneralSettings() {
             onClick={() => void refresh({ measure: true })}
           >
             <RefreshCw className={cn(measuring && 'animate-spin')} />
-            重新统计
+            {t('settings.general.remeasure')}
           </Button>
         </SectionHeader>
         {error && (
@@ -118,7 +129,7 @@ export function GeneralSettings() {
           </InlineMessage>
         )}
         {info === null ? null : info.workspaces.length === 0 ? (
-          <EmptyState icon={FolderTree} title="还没有挂入工作区" />
+          <EmptyState icon={FolderTree} title={t('settings.general.noWorkspaces')} />
         ) : (
           <ul className="divide-y rounded-lg border">
             {info.workspaces.map((workspace) => (
@@ -141,29 +152,69 @@ export function GeneralSettings() {
   );
 }
 
+// --- language ---
+/** 语言名用各自的写法、不随界面语言变：切错了也认得出回去的那一项 */
+const LANGUAGE_NAMES: Readonly<Record<Locale, string>> = { 'zh-CN': '简体中文', en: 'English' };
+
+function LanguageSection() {
+  const language = useSettingsStore((state) => languageOf(state));
+  const setLanguage = useSettingsStore((state) => state.setLanguage);
+  const t = useT();
+  const items = LANGUAGES.map((value: Language) => ({
+    value,
+    label: value === 'system' ? t('settings.general.followSystem') : LANGUAGE_NAMES[value],
+  }));
+  return (
+    <section>
+      <SectionHeader title={t('settings.general.language')}>
+        <Select
+          items={items}
+          value={language}
+          onValueChange={(next) => {
+            if (isLanguage(next)) setLanguage(next);
+          }}
+        >
+          <SelectTrigger size="sm" className="w-36" aria-label={t('settings.general.language')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </SectionHeader>
+    </section>
+  );
+}
+
 // --- sessions ---
-const ARCHIVE_IDLE_ITEMS = ARCHIVE_IDLE_DAYS.map((days) => ({
-  value: String(days),
-  label: days === 0 ? '关闭' : `${days} 天`,
-}));
-const DELETE_ARCHIVED_ITEMS = DELETE_ARCHIVED_DAYS.map((days) => ({
-  value: String(days),
-  label: days === 0 ? '永不' : `${days} 天`,
-}));
+function daysItems(days: readonly number[], zero: string, t: T) {
+  return days.map((value) => ({
+    value: String(value),
+    label: value === 0 ? zero : t('settings.general.days', { days: value }),
+  }));
+}
 
 function SessionsSection() {
   const sessions = useGeneralPreferencesStore((state) => state.sessions);
   const update = useGeneralPreferencesStore((state) => state.update);
   const error = useGeneralPreferencesStore((state) => state.error);
+  const t = useT();
   return (
     <section>
-      <SectionHeader title="会话" />
+      <SectionHeader title={t('settings.general.sessions')} />
       <ul className="divide-y rounded-lg border">
-        <PreferenceRow label="归档闲置会话" hint="超过天数没有更新的会话移入已归档">
+        <PreferenceRow
+          label={t('settings.general.archiveIdle')}
+          hint={t('settings.general.archiveIdleHint')}
+        >
           {(id) => (
             <DaysSelect
               id={id}
-              items={ARCHIVE_IDLE_ITEMS}
+              items={daysItems(ARCHIVE_IDLE_DAYS, t('settings.general.off'), t)}
               value={sessions.archiveIdleDays}
               onChange={(days) => {
                 if (isArchiveIdleDays(days)) void update({ archiveIdleDays: days });
@@ -171,21 +222,27 @@ function SessionsSection() {
             />
           )}
         </PreferenceRow>
-        <PreferenceRow label="归档时清理 worktree" hint="只删已合并且干净的">
+        <PreferenceRow
+          label={t('settings.general.cleanupOnArchive')}
+          hint={t('settings.general.cleanupOnArchiveHint')}
+        >
           {(id) => (
             <Switch
               id={id}
-              aria-label="归档时清理 worktree"
+              aria-label={t('settings.general.cleanupOnArchive')}
               checked={sessions.cleanupWorktreeOnArchive}
               onCheckedChange={(checked) => void update({ cleanupWorktreeOnArchive: checked })}
             />
           )}
         </PreferenceRow>
-        <PreferenceRow label="删除归档会话" hint="归档超过天数后删除记录，pi 会话文件保留">
+        <PreferenceRow
+          label={t('settings.general.deleteArchived')}
+          hint={t('settings.general.deleteArchivedHint')}
+        >
           {(id) => (
             <DaysSelect
               id={id}
-              items={DELETE_ARCHIVED_ITEMS}
+              items={daysItems(DELETE_ARCHIVED_DAYS, t('settings.general.never'), t)}
               value={sessions.deleteArchivedDays}
               onChange={(days) => {
                 if (isDeleteArchivedDays(days)) void update({ deleteArchivedDays: days });
@@ -231,30 +288,43 @@ function DaysSelect({
 }
 
 // --- timeline ---
-const TIMELINE_ROWS: { key: keyof TimelinePreferences; label: string; hint: string }[] = [
+const TIMELINE_ROWS: { key: keyof TimelinePreferences; label: MessageId; hint: MessageId }[] = [
   {
     key: 'compactReadonlyTools',
-    label: '精简只读工具',
-    hint: 'read / grep / find / ls 单行显示，连续的合成一条',
+    label: 'settings.general.compactReadonlyTools',
+    hint: 'settings.general.compactReadonlyToolsHint',
   },
-  { key: 'autoExpandEdits', label: '运行中展开文件改动', hint: 'edit / write 的 diff 与写入内容' },
-  { key: 'autoExpandThinking', label: '思考时展开', hint: '思考结束后收起' },
-  { key: 'foldHistoryTurns', label: '折叠历史轮次', hint: '发送新消息后，之前的轮次折叠成一行' },
+  {
+    key: 'autoExpandEdits',
+    label: 'settings.general.autoExpandEdits',
+    hint: 'settings.general.autoExpandEditsHint',
+  },
+  {
+    key: 'autoExpandThinking',
+    label: 'settings.general.autoExpandThinking',
+    hint: 'settings.general.autoExpandThinkingHint',
+  },
+  {
+    key: 'foldHistoryTurns',
+    label: 'settings.general.foldHistoryTurns',
+    hint: 'settings.general.foldHistoryTurnsHint',
+  },
 ];
 
 function TimelineSection() {
   const timeline = useGeneralPreferencesStore((state) => state.timeline);
   const update = useGeneralPreferencesStore((state) => state.update);
+  const t = useT();
   return (
     <section>
-      <SectionHeader title="时间线" />
+      <SectionHeader title={t('settings.general.timeline')} />
       <ul className="divide-y rounded-lg border">
         {TIMELINE_ROWS.map(({ key, label, hint }) => (
-          <PreferenceRow key={key} label={label} hint={hint}>
+          <PreferenceRow key={key} label={t(label)} hint={t(hint)}>
             {(id) => (
               <Switch
                 id={id}
-                aria-label={label}
+                aria-label={t(label)}
                 checked={timeline[key]}
                 onCheckedChange={(checked) => void update({ [key]: checked })}
               />
@@ -288,10 +358,11 @@ function PreferenceRow({
 }
 
 function RootSummary({ info, failed }: { info: WorktreesRootInfo | null; failed: boolean }) {
+  const t = useT();
   if (info === null) {
     return (
       <p className="rounded-lg border px-4 py-3 text-muted-foreground text-sm">
-        {failed ? '读取失败' : '读取中…'}
+        {t(failed ? 'common.loadFailed' : 'common.loading')}
       </p>
     );
   }
@@ -300,22 +371,22 @@ function RootSummary({ info, failed }: { info: WorktreesRootInfo | null; failed:
     return (
       <div className="grid gap-1 rounded-lg border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">仓库同级目录</span>
-          <Badge variant="outline">默认</Badge>
+          <span className="font-medium text-sm">{t('settings.general.besideRepo')}</span>
+          <Badge variant="outline">{t('common.default')}</Badge>
         </div>
         <p
           className="font-mono text-muted-foreground text-xs"
-          title={`仓库父目录不可写时退回 ${info.fallbackRoot}`}
+          title={t('settings.general.fallbackHint', { path: info.fallbackRoot })}
         >
-          {'<仓库目录名>-worktrees'}
+          {t('settings.general.besideRepoPattern')}
         </p>
       </div>
     );
   }
   return (
     <div className="grid gap-1 rounded-lg border px-4 py-3">
-      <span className="font-medium text-sm">自定义目录</span>
-      <p className="break-all font-mono text-xs" title="按仓库分子目录：<根目录>/<仓库目录名>/…">
+      <span className="font-medium text-sm">{t('settings.general.customFolder')}</span>
+      <p className="break-all font-mono text-xs" title={t('settings.general.customFolderHint')}>
         {info.worktreesRoot}
       </p>
     </div>
@@ -332,18 +403,19 @@ function WorkspaceRow({
   plain: boolean;
   measuring: boolean;
 }) {
+  const t = useT();
   if (plain) {
     return (
       <li className="flex items-center gap-2 px-4 py-3">
         <span className="font-medium text-sm">{workspace.name}</span>
-        <Badge variant="outline" title="不会使用 worktree">
-          无 git
+        <Badge variant="outline" title={t('common.noWorktrees')}>
+          {t('common.noGit')}
         </Badge>
       </li>
     );
   }
   const { usage } = workspace;
-  const size = usage ? formatBytes(usage.bytes) : measuring ? '统计中…' : '—';
+  const size = usage ? formatBytes(usage.bytes) : measuring ? t('settings.general.measuring') : '—';
   return (
     <li className="flex items-start gap-3 px-4 py-3">
       <div className="min-w-0 flex-1">
@@ -351,12 +423,12 @@ function WorkspaceRow({
           <span className="font-medium text-sm">{workspace.name}</span>
           {workspace.fallback && (
             <Badge variant="outline" title={workspace.fallback}>
-              已退回数据目录
+              {t('settings.general.fellBack')}
             </Badge>
           )}
         </div>
         <p className="truncate font-mono text-[11px] text-muted-foreground" title={workspace.root}>
-          新建：{workspace.root}
+          {t('settings.general.newWorktreesIn', { root: workspace.root })}
         </p>
       </div>
       <div className="shrink-0 text-right">
@@ -364,8 +436,10 @@ function WorkspaceRow({
           {size}
         </p>
         <p className="text-muted-foreground text-xs">
-          {workspace.count} 个 worktree
-          {usage && usage.missing > 0 ? `，${usage.missing} 个目录已不存在` : ''}
+          {t('settings.general.worktreeCount', { count: workspace.count })}
+          {usage && usage.missing > 0
+            ? t('settings.general.missingDirs', { count: usage.missing })
+            : ''}
         </p>
       </div>
     </li>

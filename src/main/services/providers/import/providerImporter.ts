@@ -7,6 +7,7 @@ import type {
   ProviderScanImportsResult,
   ProviderUpsertInput,
 } from '../../../../preload/domains/providers';
+import { translate } from '../../../i18n';
 import { type ProviderStore, type StoredProvider, toProviderView } from '../providerStore';
 import {
   isProviderImportSource,
@@ -60,14 +61,18 @@ export function createProviderImporter(deps: {
       };
       return { ok: true, candidates: candidates.map((candidate) => candidate.view), warnings };
     } catch (error) {
-      return { ok: false, error: `扫描本机配置失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: translate('importers.scanFailed', { error: errorMessage(error) }),
+      };
     }
   };
 
   return {
     scan(raw) {
       const sources = parseScanSources(raw);
-      if (!sources) return Promise.resolve({ ok: false, error: '无效的扫描参数' });
+      if (!sources)
+        return Promise.resolve({ ok: false, error: translate('importers.invalidScanArgs') });
       const run = tail.then(() => runScan(sources));
       tail = run;
       return run;
@@ -75,15 +80,15 @@ export function createProviderImporter(deps: {
 
     async import(raw) {
       const ids = parseCandidateIds(raw);
-      if (!ids) return { ok: false, error: '无效的导入参数' };
+      if (!ids) return { ok: false, error: translate('importers.invalidImportArgs') };
       if (!cache || now() >= cache.expiresAt) {
         cache = null;
-        return { ok: false, error: '扫描结果已过期，请重新扫描' };
+        return { ok: false, error: translate('importers.scanStale') };
       }
       const picked: ScannedCandidate[] = [];
       for (const id of ids) {
         const candidate = cache.byId.get(id);
-        if (!candidate) return { ok: false, error: '候选不在最近一次扫描结果里，请重新扫描' };
+        if (!candidate) return { ok: false, error: translate('importers.candidateMissing') };
         picked.push(candidate);
       }
 
@@ -91,7 +96,10 @@ export function createProviderImporter(deps: {
       try {
         outcomes = await store.addMany(picked.map(({ input }) => withDefaultModels(input)));
       } catch (error) {
-        return { ok: false, error: `导入失败：${errorMessage(error)}` };
+        return {
+          ok: false,
+          error: translate('common.importFailed', { error: errorMessage(error) }),
+        };
       }
       const imported: ModelProviderView[] = [];
       const skipped: ProviderImportSkipped[] = [];
