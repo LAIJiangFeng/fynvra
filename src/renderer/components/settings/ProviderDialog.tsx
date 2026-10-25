@@ -13,7 +13,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -142,9 +141,6 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
     <form onSubmit={submit} className="grid min-w-0 gap-4">
       <DialogHeader>
         <DialogTitle>{initial.id ? `编辑 ${initial.name}` : `添加 ${initial.name}`}</DialogTitle>
-        <DialogDescription>
-          API Key 只保存在本机的 providers.json，不会回显到界面。
-        </DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -180,11 +176,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       <Field
         label="Base URL"
         htmlFor={`${id}-base-url`}
-        hint={
-          draft.requiresBaseUrl
-            ? '必填：OpenAI 兼容接口的地址，通常以 /v1 结尾'
-            : `留空使用官方地址 ${DEFAULT_BASE_URLS[draft.api]}`
-        }
+        hint={draft.requiresBaseUrl ? '必填' : '留空使用官方地址'}
       >
         <Input
           id={`${id}-base-url`}
@@ -200,7 +192,7 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       <Field
         label="API Key"
         htmlFor={`${id}-api-key`}
-        hint={draft.clearApiKey ? '保存后将清除已保存的 key' : undefined}
+        hint={draft.clearApiKey ? '保存后清除 key' : undefined}
       >
         <div className="flex gap-2">
           <Input
@@ -272,7 +264,10 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
                     {control.reasoning ? '推理' : '不推理'}
                   </Badge>
                 ) : (
-                  <span className="flex shrink-0 items-center gap-1.5">
+                  <span
+                    className="flex shrink-0 items-center gap-1.5"
+                    title="打开后会话里可选思考档位"
+                  >
                     <Switch
                       id={switchId}
                       aria-label={`推理：${model.id}`}
@@ -299,16 +294,9 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
             );
           })}
           {draft.models.length === 0 && (
-            <li className="px-3 py-3 text-center text-muted-foreground text-xs">
-              还没有模型：在下面输入模型 id 添加
-            </li>
+            <li className="px-3 py-3 text-center text-muted-foreground text-xs">还没有模型</li>
           )}
         </ul>
-        {draft.models.length > 0 && (
-          <p className="text-muted-foreground text-xs">
-            带徽标的模型由内置目录决定是否推理；其他模型用「推理」开关标记，打开后会话里可选思考档位。
-          </p>
-        )}
         <div className="flex gap-2">
           <Input
             aria-label="要添加的模型 id"

@@ -6,7 +6,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -97,9 +96,6 @@ function McpForm({ initial, onDone }: { initial: McpDraft; onDone: () => void })
     <form onSubmit={submit} className="grid min-w-0 gap-4">
       <DialogHeader>
         <DialogTitle>{initial.id ? `编辑 ${initial.name}` : '添加 MCP 服务器'}</DialogTitle>
-        <DialogDescription>
-          环境变量与 Header 的值只保存在本机的 mcp.json，界面上只显示键名。
-        </DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-4 sm:grid-cols-2">
