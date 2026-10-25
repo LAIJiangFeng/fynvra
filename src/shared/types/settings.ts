@@ -14,11 +14,34 @@ export const SETTINGS_VERSION = 1;
 export const THEME_MODES = ['light', 'dark', 'system'] as const;
 export type ThemeMode = (typeof THEME_MODES)[number];
 
+/** 闲置多少天后归档；0 为关闭 */
+export const ARCHIVE_IDLE_DAYS = [0, 7, 14, 30, 90] as const;
+export type ArchiveIdleDays = (typeof ARCHIVE_IDLE_DAYS)[number];
+/** 归档多少天后删除记录；0 为永不 */
+export const DELETE_ARCHIVED_DAYS = [0, 30, 90] as const;
+export type DeleteArchivedDays = (typeof DELETE_ARCHIVED_DAYS)[number];
+
 /** Renderer 可读写的界面偏好，经 `settings:update` 合并落盘。 */
 export interface Preferences {
   theme: ThemeMode;
   /** 右侧面板是否展开 */
   sidePanelOpen: boolean;
+  // --- sessions ---（Main 的归档扫描按它执行；没写过时取 DEFAULT_SESSION_PREFERENCES）
+  /** 超过这么多天没有更新的会话移入「已归档」 */
+  archiveIdleDays?: ArchiveIdleDays;
+  /** 归档时删除会话绑定的 worktree：只删已合并且干净的 */
+  cleanupWorktreeOnArchive?: boolean;
+  /** 归档超过这么多天的会话删除记录（pi jsonl 保留） */
+  deleteArchivedDays?: DeleteArchivedDays;
+  // --- timeline ---（只影响时间线显示；没写过时取 DEFAULT_TIMELINE_PREFERENCES）
+  /** read / grep / find / ls 单行显示，连续的合成一条「N 次读取」 */
+  compactReadonlyTools?: boolean;
+  /** 运行中的文件修改工具自动展开 diff / 写入内容 */
+  autoExpandEdits?: boolean;
+  /** 流式思考时展开思考块，结束后收起 */
+  autoExpandThinking?: boolean;
+  /** 之前的轮次折叠成一行（提问 + 时间），只展开最后一轮 */
+  foldHistoryTurns?: boolean;
   /**
    * worker 会话 bash 工具用的 shell，覆盖 Main 的自动探测（Windows 上找 Git Bash）。
    * 只能手改 settings.json：`settings:update` 不接受这个字段（Renderer 不传路径）。
@@ -105,6 +128,85 @@ export function isThemeMode(value: unknown): value is ThemeMode {
   return typeof value === 'string' && (THEME_MODES as readonly string[]).includes(value);
 }
 
+// --- sessions ---
+export type SessionPreferences = Required<
+  Pick<Preferences, 'archiveIdleDays' | 'cleanupWorktreeOnArchive' | 'deleteArchivedDays'>
+>;
+
+/** 自动归档、清理与删除默认都不做：都是改动用户数据的动作，由用户打开 */
+export const DEFAULT_SESSION_PREFERENCES: Readonly<SessionPreferences> = Object.freeze({
+  archiveIdleDays: 0,
+  cleanupWorktreeOnArchive: false,
+  deleteArchivedDays: 0,
+});
+
+export function isArchiveIdleDays(value: unknown): value is ArchiveIdleDays {
+  return (ARCHIVE_IDLE_DAYS as readonly unknown[]).includes(value);
+}
+
+export function isDeleteArchivedDays(value: unknown): value is DeleteArchivedDays {
+  return (DELETE_ARCHIVED_DAYS as readonly unknown[]).includes(value);
+}
+
+/** 生效的会话偏好：没写过的取默认值 */
+export function sessionPreferencesOf(preferences: Partial<SessionPreferences>): SessionPreferences {
+  const defaults = DEFAULT_SESSION_PREFERENCES;
+  return {
+    archiveIdleDays: preferences.archiveIdleDays ?? defaults.archiveIdleDays,
+    cleanupWorktreeOnArchive:
+      preferences.cleanupWorktreeOnArchive ?? defaults.cleanupWorktreeOnArchive,
+    deleteArchivedDays: preferences.deleteArchivedDays ?? defaults.deleteArchivedDays,
+  };
+}
+
+function parseSessionPreferences(
+  record: Record<string, unknown> | null
+): Partial<SessionPreferences> {
+  const { archiveIdleDays, cleanupWorktreeOnArchive, deleteArchivedDays } = record ?? {};
+  return {
+    ...(isArchiveIdleDays(archiveIdleDays) ? { archiveIdleDays } : {}),
+    ...(typeof cleanupWorktreeOnArchive === 'boolean' ? { cleanupWorktreeOnArchive } : {}),
+    ...(isDeleteArchivedDays(deleteArchivedDays) ? { deleteArchivedDays } : {}),
+  };
+}
+
+// --- timeline ---
+const TIMELINE_FLAGS = [
+  'compactReadonlyTools',
+  'autoExpandEdits',
+  'autoExpandThinking',
+  'foldHistoryTurns',
+] as const;
+
+export type TimelinePreferences = Required<Pick<Preferences, (typeof TIMELINE_FLAGS)[number]>>;
+
+export const DEFAULT_TIMELINE_PREFERENCES: Readonly<TimelinePreferences> = Object.freeze({
+  compactReadonlyTools: true,
+  autoExpandEdits: true,
+  autoExpandThinking: true,
+  foldHistoryTurns: false,
+});
+
+/** 生效的时间线偏好：没写过的取默认值 */
+export function timelinePreferencesOf(
+  preferences: Partial<TimelinePreferences>
+): TimelinePreferences {
+  const resolved = { ...DEFAULT_TIMELINE_PREFERENCES };
+  for (const flag of TIMELINE_FLAGS) resolved[flag] = preferences[flag] ?? resolved[flag];
+  return resolved;
+}
+
+function parseTimelinePreferences(
+  record: Record<string, unknown> | null
+): Partial<TimelinePreferences> {
+  const parsed: Partial<TimelinePreferences> = {};
+  for (const flag of TIMELINE_FLAGS) {
+    const value = record?.[flag];
+    if (typeof value === 'boolean') parsed[flag] = value;
+  }
+  return parsed;
+}
+
 /** 形如绝对路径：`/…`、`\\server\share…`、`C:\…` / `C:/…`。src/shared 不能用 node:path，只看形状。 */
 function looksAbsolute(path: string): boolean {
   return /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path);
@@ -149,6 +251,8 @@ export function parsePreferences(raw: unknown): Preferences {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
+    ...parseSessionPreferences(record),
+    ...parseTimelinePreferences(record),
     ...(shellPath ? { shellPath } : {}),
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
@@ -190,6 +294,24 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
   for (const key of Object.keys(record)) {
     const value = record[key];
     switch (key) {
+      // --- sessions ---
+      case 'archiveIdleDays':
+        if (!isArchiveIdleDays(value)) return null;
+        patch.archiveIdleDays = value;
+        break;
+      case 'deleteArchivedDays':
+        if (!isDeleteArchivedDays(value)) return null;
+        patch.deleteArchivedDays = value;
+        break;
+      case 'cleanupWorktreeOnArchive':
+      // --- timeline ---
+      case 'compactReadonlyTools':
+      case 'autoExpandEdits':
+      case 'autoExpandThinking':
+      case 'foldHistoryTurns':
+        if (typeof value !== 'boolean') return null;
+        patch[key] = value;
+        break;
       case 'theme':
         if (!isThemeMode(value)) return null;
         patch.theme = value;

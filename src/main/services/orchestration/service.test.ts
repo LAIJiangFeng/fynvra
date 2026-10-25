@@ -199,6 +199,91 @@ describe('createOrchestrationService', () => {
     expect(await service.reviewDiff('dispatch_x')).toMatchObject({ ok: false });
   });
 
+  describe('cleanupMergedWorktree（归档会话时清理它的 worktree）', () => {
+    /** 派发 → 汇报 → 合并；合并之后基准分支包含 worker 的全部提交（ahead 为 0） */
+    async function mergedDispatch(service: ReturnType<typeof make>) {
+      const dispatch = await dispatchOn(service);
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+      const host = service.hostFor('session_coord');
+      expect(await host.mergeWorktree({ dispatchId: dispatch.id })).toMatchObject({ merged: true });
+      fake.respond(({ args }) => (args[0] === 'rev-list' ? { stdout: '2\t0\n' } : undefined));
+      return dispatch;
+    }
+
+    it('已合并且干净：停 worker，删 worktree（不加 --force）与分支（-d），记录随之删除', async () => {
+      const service = make();
+      const dispatch = await mergedDispatch(service);
+      const [worktree] = (await service.snapshot()).worktrees;
+      launcher.disposeSession.mockClear();
+      const before = fake.calls.length;
+
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: true,
+      });
+      const commands = fake.commands().slice(before);
+      expect(commands).toContain(`git worktree remove -- ${worktree?.path}`);
+      expect(commands).toContain('git branch -d fynvra/add-toggle');
+      expect(launcher.disposeSession).toHaveBeenCalledWith(dispatch.workerSessionId);
+      expect((await service.snapshot()).worktrees).toEqual([]);
+      // 再调一次：已经没有 worktree 了
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: false,
+        reason: 'no-worktree',
+      });
+    });
+
+    it('任务还没合并：不碰 worktree', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+      const before = fake.calls.length;
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: false,
+        reason: 'not-merged',
+      });
+      const after = fake.commands().slice(before);
+      expect(after.filter((line) => line.includes('remove'))).toEqual([]);
+      expect((await service.snapshot()).worktrees).toHaveLength(1);
+      expect(launcher.disposeSession).not.toHaveBeenCalled();
+    });
+
+    it('合并之后又有改动或新提交：保留', async () => {
+      const service = make();
+      const dispatch = await mergedDispatch(service);
+      fake.respond(({ args }) => (args[0] === 'rev-list' ? { stdout: '2\t1\n' } : undefined));
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: false,
+        reason: 'unmerged-commits',
+      });
+      fake.respond(({ args }) => (args[0] === 'status' ? { stdout: '?? notes.md\n' } : undefined));
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: false,
+        reason: 'dirty',
+      });
+      expect((await service.snapshot()).worktrees).toHaveLength(1);
+    });
+
+    it('git 拒绝删除时保留记录并带上原因；不是 worker 的会话没有可清理的', async () => {
+      const service = make();
+      const dispatch = await mergedDispatch(service);
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'remove'
+          ? { code: 128, stderr: 'fatal: contains modified or untracked files' }
+          : undefined
+      );
+      expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
+        removed: false,
+        reason: 'failed',
+        error: expect.stringContaining('untracked'),
+      });
+      expect((await service.snapshot()).worktrees).toHaveLength(1);
+      expect(await service.cleanupMergedWorktree('session_coord')).toEqual({
+        removed: false,
+        reason: 'no-worktree',
+      });
+    });
+  });
+
   it('快照文件读不懂：挪到一边，以空状态开始并记日志', async () => {
     mkdirSync(dirname(statePath), { recursive: true });
     writeFileSync(statePath, '{ not json');

@@ -8,12 +8,15 @@ const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const EMPTY_PROVIDERS: ModelProviderOption[] = [];
 
-type Lists = Pick<SessionsState, 'sessionsByWorkspace'>;
+type Lists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
 
+/** 按 id 找会话，归档的也找（打开归档的会话后照样能换模型、发消息） */
 export function findSession(state: Lists, sessionId: string): SessionSummary | undefined {
-  for (const sessions of Object.values(state.sessionsByWorkspace)) {
-    const found = sessions.find((session) => session.id === sessionId);
-    if (found) return found;
+  for (const lists of [state.sessionsByWorkspace, state.archivedByWorkspace]) {
+    for (const sessions of Object.values(lists)) {
+      const found = sessions.find((session) => session.id === sessionId);
+      if (found) return found;
+    }
   }
   return undefined;
 }
@@ -39,10 +42,17 @@ export const selectNotice = (state: SessionsState) => state.notice;
 export const selectModelProviders = (state: SessionsState): ModelProviderOption[] =>
   state.modelProviders ?? EMPTY_PROVIDERS;
 
+/** 侧栏的会话（不含归档的），最近更新的在前 */
 export const selectSessionsOf =
   (workspaceId: string) =>
   (state: SessionsState): SessionSummary[] =>
     state.sessionsByWorkspace[workspaceId] ?? EMPTY_SESSIONS;
+
+/** 侧栏底部「已归档」分组，最近归档的在前 */
+export const selectArchivedSessionsOf =
+  (workspaceId: string) =>
+  (state: SessionsState): SessionSummary[] =>
+    state.archivedByWorkspace[workspaceId] ?? EMPTY_SESSIONS;
 
 export const selectListErrorOf = (workspaceId: string) => (state: SessionsState) =>
   state.listErrors[workspaceId];

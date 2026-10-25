@@ -28,8 +28,10 @@ import { findSession, isBusy, statusOf } from './selectors';
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
   workspaceId: string | null;
-  /** 按工作区缓存的会话列表，最近更新的在前 */
+  /** 按工作区缓存的会话列表（不含归档的），最近更新的在前 */
   sessionsByWorkspace: Record<string, SessionSummary[]>;
+  /** 按工作区缓存的归档会话（侧栏底部「已归档」分组），最近归档的在前 */
+  archivedByWorkspace: Record<string, SessionSummary[]>;
   activeSessionId: string | null;
   /** 输入框草稿，按会话保存 */
   drafts: Record<string, string>;
@@ -84,6 +86,13 @@ export interface SessionsState extends ChatProjection {
     sessionId: string,
     mode: ApprovalMode
   ): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
+   * 归档会话：先在列表里标上（乐观更新），Main 回包后以它的归档时间为准；失败时换回、提示原因并重拉列表。
+   * 运行中、等审批或消息在途时直接拒绝。
+   */
+  archiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 恢复归档的会话：同上；恢复算一次更新，会话回到列表顶部 */
+  unarchiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -98,6 +107,7 @@ export interface SessionsStoreOptions {
 
 const EVENT_BATCH_MS = 16;
 const SWITCH_WHILE_BUSY = '会话正在运行，等本轮结束再切换模型';
+const ARCHIVE_WHILE_BUSY = '会话正在运行，结束后再归档';
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -133,9 +143,53 @@ function mapSession(
   return changed ? next : lists;
 }
 
+type SessionLists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
+
+/** 两份列表（会话 / 已归档）里都按 id 换掉：归档的会话打开后也能换模型、换审批档位 */
+function mapLists(
+  lists: SessionLists,
+  sessionId: string,
+  update: (session: SessionSummary) => SessionSummary
+): SessionLists {
+  return {
+    sessionsByWorkspace: mapSession(lists.sessionsByWorkspace, sessionId, update),
+    archivedByWorkspace: mapSession(lists.archivedByWorkspace, sessionId, update),
+  };
+}
+
+const byArchived = (a: SessionSummary, b: SessionSummary) =>
+  (b.archivedAt ?? 0) - (a.archivedAt ?? 0);
+
+/** 一个工作区的会话按是否归档放进两份列表：没归档的最近更新在前，归档的最近归档在前 */
+function placeSessions(
+  lists: SessionLists,
+  workspaceId: string,
+  sessions: readonly SessionSummary[]
+): SessionLists {
+  const active = sessions.filter((session) => session.archivedAt === undefined);
+  const archived = sessions.filter((session) => session.archivedAt !== undefined);
+  return {
+    sessionsByWorkspace: { ...lists.sessionsByWorkspace, [workspaceId]: active.sort(byRecent) },
+    archivedByWorkspace: { ...lists.archivedByWorkspace, [workspaceId]: archived.sort(byArchived) },
+  };
+}
+
+/** 工作区的全部会话（含归档的） */
+function allSessionsOf(lists: SessionLists, workspaceId: string): SessionSummary[] {
+  return [
+    ...(lists.sessionsByWorkspace[workspaceId] ?? []),
+    ...(lists.archivedByWorkspace[workspaceId] ?? []),
+  ];
+}
+
 function withModel(session: SessionSummary, model: SessionModelRef | undefined): SessionSummary {
   const { model: _previous, ...rest } = session;
   return model ? { ...rest, model } : rest;
+}
+
+function withArchivedAt(session: SessionSummary, archivedAt: number | undefined): SessionSummary {
+  const { archivedAt: _previous, ...rest } = session;
+  return archivedAt === undefined ? rest : { ...rest, archivedAt };
 }
 
 /** 去掉开头的空行与末尾空白，保留首行缩进（可能是代码） */
@@ -190,10 +244,47 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       return undefined;
     }
 
+    /**
+     * 归档 / 恢复：乐观地把会话挪到另一份列表，回包后取 Main 的 archivedAt 与 updatedAt（恢复会改最后更新）。
+     */
+    async function setArchived(
+      sessionId: string,
+      archived: boolean
+    ): Promise<IpcResult<{ session: SessionSummary }>> {
+      const session = findSession(get(), sessionId);
+      if (!session) return { ok: false, error: '会话不存在' };
+      if (archived && (sending.has(sessionId) || isBusy(statusOf(get(), sessionId)))) {
+        return { ok: false, error: ARCHIVE_WHILE_BUSY };
+      }
+      const { workspaceId, archivedAt: previous } = session;
+      const mark = (archivedAt: number | undefined, updatedAt?: number) =>
+        set((state) => {
+          const sessions = allSessionsOf(state, workspaceId).map((item) =>
+            item.id === sessionId
+              ? { ...withArchivedAt(item, archivedAt), updatedAt: updatedAt ?? item.updatedAt }
+              : item
+          );
+          return placeSessions(state, workspaceId, sessions);
+        });
+      mark(archived ? now() : undefined);
+      const result = await safely(() =>
+        archived ? api.archive(sessionId) : api.unarchive(sessionId)
+      );
+      if (result.ok) {
+        mark(result.session.archivedAt, result.session.updatedAt);
+        return result;
+      }
+      mark(previous);
+      set({ notice: `${archived ? '归档' : '恢复'}失败：${result.error}` });
+      void get().loadSessions(workspaceId);
+      return result;
+    }
+
     return {
       ...emptyProjection(),
       workspaceId: null,
       sessionsByWorkspace: {},
+      archivedByWorkspace: {},
       activeSessionId: null,
       drafts: {},
       loadingHistory: {},
@@ -211,7 +302,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const keep =
           active !== null &&
           workspaceId !== null &&
-          (state.sessionsByWorkspace[workspaceId] ?? []).some((session) => session.id === active);
+          allSessionsOf(state, workspaceId).some((session) => session.id === active);
         set({ workspaceId, activeSessionId: keep ? active : null });
         if (workspaceId) void get().loadSessions(workspaceId);
       },
@@ -219,7 +310,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       async loadSessions(workspaceId) {
         const request = ++requestSeq;
         listRequests.set(workspaceId, request);
-        const result = await safely(() => api.list(workspaceId));
+        // 归档的也拉：侧栏底部的「已归档」分组用
+        const result = await safely(() => api.list(workspaceId, { includeArchived: true }));
         if (listRequests.get(workspaceId) !== request) return;
         if (!result.ok) {
           set((state) => ({ listErrors: { ...state.listErrors, [workspaceId]: result.error } }));
@@ -235,15 +327,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         });
         set((state) => {
           const active = state.activeSessionId;
+          // 选中的会话被删了才取消选中；它被归档（挪到另一份列表）时照常开着
           const removed =
             active !== null &&
-            (state.sessionsByWorkspace[workspaceId] ?? []).some(
-              (session) => session.id === active
-            ) &&
+            allSessionsOf(state, workspaceId).some((session) => session.id === active) &&
             !sessions.some((session) => session.id === active);
           return {
             ...syncSessionStatuses(state, sessions, sending),
-            sessionsByWorkspace: { ...state.sessionsByWorkspace, [workspaceId]: sessions },
+            ...placeSessions(state, workspaceId, sessions),
             listErrors: omitKey(state.listErrors, workspaceId),
             ...(removed ? { activeSessionId: null } : {}),
           };
@@ -395,11 +486,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const request = ++requestSeq;
         const previous = session.model;
         modelSwitches.set(sessionId, { request, model });
-        set((state) => ({
-          sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
-            withModel(item, model)
-          ),
-        }));
+        set((state) => mapLists(state, sessionId, (item) => withModel(item, model)));
         const result = await safely(() => api.setModel({ sessionId, model }));
         // 用户连着点了几次：只认最近一次的回包，前面的结果由它覆盖
         if (modelSwitches.get(sessionId)?.request !== request) return result;
@@ -407,7 +494,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (result.ok) {
           const updated = result.session;
           set((state) => ({
-            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, () => updated),
+            ...mapLists(state, sessionId, () => updated),
             ...(updated.model && updated.dispatchId === undefined
               ? {
                   lastModelByWorkspace: {
@@ -420,9 +507,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           return result;
         }
         set((state) => ({
-          sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
-            withModel(item, previous)
-          ),
+          ...mapLists(state, sessionId, (item) => withModel(item, previous)),
           notice: `切换模型失败：${result.error}`,
         }));
         // 换回的是发起前看到的模型；以 Main 的记录为准再拉一次
@@ -437,11 +522,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const previous = session.approvalMode;
         approvalSwitches.set(sessionId, { request, mode });
         const switchTo = (approvalMode: ApprovalMode) =>
-          set((state) => ({
-            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) =>
+          set((state) =>
+            mapLists(state, sessionId, (item) =>
               item.approvalMode === approvalMode ? item : { ...item, approvalMode }
-            ),
-          }));
+            )
+          );
         switchTo(mode);
         const result = await safely(() => api.setApprovalMode({ sessionId, mode }));
         // Shift+Tab 连着按了几下：只认最近一次的回包，前面的结果由它覆盖
@@ -449,13 +534,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         approvalSwitches.delete(sessionId);
         if (result.ok) {
           const { approvalMode, updatedAt } = result.session;
-          set((state) => ({
-            sessionsByWorkspace: mapSession(state.sessionsByWorkspace, sessionId, (item) => ({
-              ...item,
-              approvalMode,
-              updatedAt,
-            })),
-          }));
+          set((state) =>
+            mapLists(state, sessionId, (item) => ({ ...item, approvalMode, updatedAt }))
+          );
           return result;
         }
         switchTo(previous);
@@ -464,6 +545,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         void get().loadSessions(session.workspaceId);
         return result;
       },
+
+      archiveSession: (sessionId) => setArchived(sessionId, true),
+
+      unarchiveSession: (sessionId) => setArchived(sessionId, false),
 
       openModelPicker(sessionId) {
         set({ modelPickerFor: sessionId });

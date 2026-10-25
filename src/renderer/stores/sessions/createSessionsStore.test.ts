@@ -12,7 +12,13 @@ import type { IpcResult } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionsApi } from '../../lib/api/sessions';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
-import { selectMessagesOf, selectStatusOf } from './selectors';
+import {
+  findSession,
+  selectArchivedSessionsOf,
+  selectMessagesOf,
+  selectSessionsOf,
+  selectStatusOf,
+} from './selectors';
 
 const WS = 'ws-1';
 
@@ -74,7 +80,7 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       };
     };
   const api = {
-    list: vi.fn(async (workspaceId: string) => ({
+    list: vi.fn(async (workspaceId: string, _options?: { includeArchived?: boolean }) => ({
       ok: true as const,
       sessions: sessions.filter((session) => session.workspaceId === workspaceId),
     })),
@@ -127,6 +133,28 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         return { ok: true, session };
       }
     ),
+    archive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const current = sessions.find((session) => session.id === sessionId);
+      if (!current) return { ok: false, error: '会话不存在' };
+      const session = { ...current, archivedAt: 50 };
+      sessions = sessions.map((item) => (item.id === session.id ? session : item));
+      return { ok: true, session };
+    }),
+    unarchive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const current = sessions.find((session) => session.id === sessionId);
+      if (!current) return { ok: false, error: '会话不存在' };
+      const { archivedAt: _archivedAt, ...rest } = current;
+      const session = { ...rest, updatedAt: 60 };
+      sessions = sessions.map((item) => (item.id === session.id ? session : item));
+      return { ok: true, session };
+    }),
+    sweep: vi.fn(
+      async (): Promise<IpcResult<{ archived: number; removed: number }>> => ({
+        ok: true,
+        archived: 0,
+        removed: 0,
+      })
+    ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),
     onApprovalRequest: on(listeners.approval),
@@ -173,7 +201,7 @@ describe('createSessionsStore · 列表与选择', () => {
       summary('other', { workspaceId: 'ws-2' }),
     ]);
 
-    expect(api.list).toHaveBeenCalledWith(WS);
+    expect(api.list).toHaveBeenCalledWith(WS, { includeArchived: true });
     expect(store.getState().sessionsByWorkspace[WS]?.map((session) => session.id)).toEqual([
       'new',
       'old',
@@ -259,6 +287,100 @@ describe('createSessionsStore · 列表与选择', () => {
 
     expect(store.getState().activeSessionId).toBeNull();
     expect(store.getState().workspaceId).toBe('ws-2');
+  });
+});
+
+describe('createSessionsStore · 归档', () => {
+  const ids = (sessions: SessionSummary[]) => sessions.map((session) => session.id);
+
+  it('列表连同归档的会话一起拉，分进两份列表：会话列表不含归档的，归档的按归档时间倒序', async () => {
+    const { store } = await setup([
+      summary('active-old', { updatedAt: 1 }),
+      summary('active-new', { updatedAt: 9 }),
+      summary('archived-early', { updatedAt: 8, archivedAt: 20 }),
+      summary('archived-late', { updatedAt: 2, archivedAt: 30 }),
+    ]);
+    const state = store.getState();
+    // sessionsByWorkspace 的含义不变（侧栏的会话），读它的地方（上一个 / 下一个会话等）不会碰到归档的
+    expect(ids(state.sessionsByWorkspace[WS] ?? [])).toEqual(['active-new', 'active-old']);
+    expect(ids(selectSessionsOf(WS)(state))).toEqual(['active-new', 'active-old']);
+    expect(ids(selectArchivedSessionsOf(WS)(state))).toEqual(['archived-late', 'archived-early']);
+    expect(selectArchivedSessionsOf('ws-other')(state)).toEqual([]);
+    expect(findSession(state, 'archived-early')?.archivedAt).toBe(20);
+  });
+
+  it('选中的会话被 Main 归档（闲置扫描）后照常开着；被删除才取消选中', async () => {
+    const { store, setSessions, emitChanged } = await setup([summary('s1'), summary('s2')]);
+    await store.getState().selectSession('s1');
+    setSessions([summary('s1', { archivedAt: 40 }), summary('s2')]);
+    emitChanged();
+    await settle();
+    expect(store.getState().activeSessionId).toBe('s1');
+    expect(ids(selectArchivedSessionsOf(WS)(store.getState()))).toEqual(['s1']);
+    setSessions([summary('s2')]);
+    emitChanged();
+    await settle();
+    expect(store.getState().activeSessionId).toBeNull();
+  });
+
+  it('打开归档的会话也能换审批档位，留在已归档里', async () => {
+    const { store, api } = await setup([summary('s1', { archivedAt: 30 })]);
+    expect(await store.getState().setApprovalMode('s1', 'full')).toMatchObject({ ok: true });
+    expect(api.setApprovalMode).toHaveBeenCalledWith({ sessionId: 's1', mode: 'full' });
+    expect(selectArchivedSessionsOf(WS)(store.getState())[0]?.approvalMode).toBe('full');
+    expect(selectSessionsOf(WS)(store.getState())).toEqual([]);
+  });
+
+  it('archiveSession：先在列表里标上，回包后以 Main 的归档时间为准', async () => {
+    const { store, api } = await setup([summary('s1'), summary('s2')]);
+    const pending = store.getState().archiveSession('s1');
+    expect(ids(selectArchivedSessionsOf(WS)(store.getState()))).toEqual(['s1']);
+    expect(await pending).toMatchObject({ ok: true });
+    expect(api.archive).toHaveBeenCalledWith('s1');
+    expect(findSession(store.getState(), 's1')?.archivedAt).toBe(50);
+    expect(ids(selectSessionsOf(WS)(store.getState()))).toEqual(['s2']);
+  });
+
+  it('archiveSession 失败：换回原样、提示原因并重拉列表', async () => {
+    const { store, api } = await setup([summary('s1')]);
+    api.archive.mockResolvedValueOnce({ ok: false, error: '会话正在运行，结束后再归档' });
+    api.list.mockClear();
+    expect(await store.getState().archiveSession('s1')).toMatchObject({ ok: false });
+    expect(findSession(store.getState(), 's1')).not.toHaveProperty('archivedAt');
+    expect(store.getState().notice).toBe('归档失败：会话正在运行，结束后再归档');
+    expect(api.list).toHaveBeenCalledWith(WS, { includeArchived: true });
+  });
+
+  it('运行中或消息在途的会话不归档，不调用 API', async () => {
+    const { store, api } = await setup([summary('s1', { status: 'running' }), summary('s2')]);
+    expect(await store.getState().archiveSession('s1')).toEqual({
+      ok: false,
+      error: '会话正在运行，结束后再归档',
+    });
+    store.getState().selectSession('s2');
+    api.prompt.mockReturnValueOnce(new Promise(() => {}));
+    void store.getState().send('hi');
+    expect(await store.getState().archiveSession('s2')).toMatchObject({ ok: false });
+    expect(api.archive).not.toHaveBeenCalled();
+  });
+
+  it('unarchiveSession：清掉归档，取 Main 的更新时间，回到列表顶部', async () => {
+    const { store, api } = await setup([
+      summary('a', { updatedAt: 9 }),
+      summary('s1', { updatedAt: 1, archivedAt: 30 }),
+    ]);
+    expect(await store.getState().unarchiveSession('s1')).toMatchObject({ ok: true });
+    expect(api.unarchive).toHaveBeenCalledWith('s1');
+    expect(ids(selectSessionsOf(WS)(store.getState()))).toEqual(['s1', 'a']);
+    expect(selectArchivedSessionsOf(WS)(store.getState())).toEqual([]);
+  });
+
+  it('unarchiveSession 失败：留在已归档里并提示', async () => {
+    const { store, api } = await setup([summary('s1', { archivedAt: 30 })]);
+    api.unarchive.mockResolvedValueOnce({ ok: false, error: '会话不存在' });
+    expect(await store.getState().unarchiveSession('s1')).toMatchObject({ ok: false });
+    expect(findSession(store.getState(), 's1')?.archivedAt).toBe(30);
+    expect(store.getState().notice).toBe('恢复失败：会话不存在');
   });
 });
 
@@ -502,7 +624,7 @@ describe('createSessionsStore · 模型选择', () => {
     expect(result).toEqual({ ok: false, error: '模型服务「OpenAI」已停用' });
     expect(store.getState().sessionsByWorkspace[WS]?.[0]?.model).toEqual(OPUS);
     expect(store.getState().notice).toBe('切换模型失败：模型服务「OpenAI」已停用');
-    expect(api.list).toHaveBeenCalledWith(WS);
+    expect(api.list).toHaveBeenCalledWith(WS, { includeArchived: true });
     expect(store.getState().lastModelByWorkspace[WS]).toBeUndefined();
   });
 
@@ -605,7 +727,7 @@ describe('createSessionsStore · 模型选择', () => {
     expect(result).toEqual({ ok: false, error: '会话不存在' });
     expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('supervised');
     expect(store.getState().notice).toBe('切换审批档位失败：会话不存在');
-    expect(api.list).toHaveBeenCalledWith(WS);
+    expect(api.list).toHaveBeenCalledWith(WS, { includeArchived: true });
 
     api.setApprovalMode.mockRejectedValueOnce(new Error('IPC 断开'));
     expect(await store.getState().setApprovalMode('s1', 'auto-edits')).toEqual({

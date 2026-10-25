@@ -1,6 +1,9 @@
+import type { SessionSummary } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentHostService } from '../services/agentHost/agentHost';
+import type { SessionArchive } from '../services/sessions/archive';
+import type { ArchiveSweeper } from '../services/sessions/archiveSweeper';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -25,7 +28,7 @@ vi.mock('electron', () => ({
 vi.mock('../services/agentHost/electronWorker', () => ({ forkAgentWorker: vi.fn() }));
 
 const host = {
-  list: vi.fn(() => []),
+  list: vi.fn((_workspaceId: string): SessionSummary[] => []),
   create: vi.fn(async () => ({ ok: true })),
   remove: vi.fn(async () => ({ ok: true })),
   prompt: vi.fn(async () => ({ ok: true })),
@@ -38,17 +41,49 @@ const host = {
   refreshBranches: vi.fn(),
 };
 
+const archive = {
+  archive: vi.fn(async () => ({ ok: true })),
+  unarchive: vi.fn(async () => ({ ok: true })),
+};
+
+const sweeper = {
+  sweep: vi.fn(async () => ({ archived: 2, removed: 1 })),
+  start: vi.fn(),
+  stop: vi.fn(),
+};
+
 const invoke = (channel: string, ...args: unknown[]) =>
   mocks.handlers.get(channel)?.({ sender: {} }, ...args);
 
 beforeAll(async () => {
   const { registerSessionHandlers } = await import('./sessions');
-  registerSessionHandlers(() => host as unknown as AgentHostService);
+  registerSessionHandlers(
+    () => host as unknown as AgentHostService,
+    () => archive as unknown as SessionArchive,
+    () => sweeper as unknown as ArchiveSweeper
+  );
 });
 
 beforeEach(() => {
-  for (const fn of Object.values(host)) fn.mockClear();
+  for (const fn of [...Object.values(host), ...Object.values(archive), sweeper.sweep]) {
+    fn.mockClear();
+  }
 });
+
+function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummary {
+  return {
+    id,
+    workspaceId: 'ws-1',
+    roleId: 'worker',
+    title: id,
+    cwd: '/repo',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    approvalMode: 'auto-edits',
+    ...patch,
+  };
+}
 
 describe('sessions IPC', () => {
   it('registers every sessions channel', () => {
@@ -59,6 +94,7 @@ describe('sessions IPC', () => {
     expect(channels.sort()).toEqual(
       [
         'sessions:abort',
+        'sessions:archive',
         'sessions:create',
         'sessions:history',
         'sessions:list',
@@ -68,8 +104,51 @@ describe('sessions IPC', () => {
         'sessions:respond-approval',
         'sessions:set-model',
         'sessions:set-approval-mode',
+        'sessions:sweep',
+        'sessions:unarchive',
       ].sort()
     );
+  });
+
+  it('starts the idle sweeper once at registration and stops it before quitting', () => {
+    expect(sweeper.start).toHaveBeenCalledTimes(1);
+    expect(sweeper.stop).not.toHaveBeenCalled();
+    mocks.appListeners.get('before-quit')?.({});
+    expect(sweeper.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists only sessions that are not archived unless includeArchived is set', async () => {
+    const sessions = [summary('active'), summary('archived', { archivedAt: 5 })];
+    for (let call = 0; call < 3; call++) host.list.mockReturnValueOnce(sessions);
+    expect(await invoke(IPC_CHANNELS.SESSIONS_LIST, 'ws-1')).toEqual({
+      ok: true,
+      sessions: [sessions[0]],
+    });
+    expect(await invoke(IPC_CHANNELS.SESSIONS_LIST, { workspaceId: 'ws-1' })).toEqual({
+      ok: true,
+      sessions: [sessions[0]],
+    });
+    expect(
+      await invoke(IPC_CHANNELS.SESSIONS_LIST, { workspaceId: 'ws-1', includeArchived: true })
+    ).toEqual({ ok: true, sessions });
+    expect(host.list.mock.calls).toEqual([['ws-1'], ['ws-1'], ['ws-1']]);
+  });
+
+  it('archives and restores by session id only', async () => {
+    await invoke(IPC_CHANNELS.SESSIONS_ARCHIVE, 's-1');
+    await invoke(IPC_CHANNELS.SESSIONS_UNARCHIVE, 's-1');
+    expect(archive.archive).toHaveBeenCalledWith('s-1');
+    expect(archive.unarchive).toHaveBeenCalledWith('s-1');
+  });
+
+  it('sweeps on demand and reports what it did', async () => {
+    expect(await invoke(IPC_CHANNELS.SESSIONS_SWEEP)).toEqual({
+      ok: true,
+      archived: 2,
+      removed: 1,
+    });
+    sweeper.sweep.mockRejectedValueOnce(new Error('disk'));
+    expect(await invoke(IPC_CHANNELS.SESSIONS_SWEEP)).toEqual({ ok: false, error: 'disk' });
   });
 
   it('re-reads the session branches when a window gets the focus (the user may have checked out outside)', () => {
@@ -221,9 +300,19 @@ describe('sessions IPC', () => {
     [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'yolo' }],
     [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'FULL' }],
     [IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, { sessionId: 's-1', mode: 'full', roleId: 'x' }],
+    [IPC_CHANNELS.SESSIONS_LIST, { workspaceId: 'ws-1', includeArchived: 'yes' }],
+    [IPC_CHANNELS.SESSIONS_LIST, { workspaceId: 'ws-1', includeArchived: true, cwd: '/' }],
+    [IPC_CHANNELS.SESSIONS_LIST, { includeArchived: true }],
+    [IPC_CHANNELS.SESSIONS_ARCHIVE, '../s'],
+    [IPC_CHANNELS.SESSIONS_ARCHIVE, { sessionId: 's-1' }],
+    [IPC_CHANNELS.SESSIONS_UNARCHIVE, 42],
+    [IPC_CHANNELS.SESSIONS_SWEEP, { archiveIdleDays: 7 }],
+    [IPC_CHANNELS.SESSIONS_SWEEP, 'ws-1'],
   ])('%s rejects %j without calling the host', async (channel, raw) => {
     expect(await invoke(channel, raw)).toMatchObject({ ok: false });
-    for (const fn of Object.values(host)) expect(fn).not.toHaveBeenCalled();
+    for (const fn of [...Object.values(host), ...Object.values(archive), sweeper.sweep]) {
+      expect(fn).not.toHaveBeenCalled();
+    }
   });
 
   it('turns a throwing host into an error result', async () => {

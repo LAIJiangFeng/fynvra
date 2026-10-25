@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ARCHIVE_IDLE_DAYS,
   createDefaultSettings,
   DEFAULT_PREFERENCES,
+  DELETE_ARCHIVED_DAYS,
   parsePickWorktreesRootInput,
   parsePreferences,
   parsePreferencesPatch,
   parseSettings,
   parseWorktreesRootInfoInput,
   SETTINGS_VERSION,
+  sessionPreferencesOf,
+  timelinePreferencesOf,
 } from './settings';
 
 const workspace = {
@@ -173,6 +177,94 @@ describe('parsePreferences', () => {
     ]) {
       expect(parsePreferences({ worktreesRoot })).not.toHaveProperty('worktreesRoot');
     }
+  });
+});
+
+describe('会话与时间线偏好', () => {
+  const sessions = { archiveIdleDays: 14, cleanupWorktreeOnArchive: true, deleteArchivedDays: 90 };
+  const timeline = {
+    compactReadonlyTools: false,
+    autoExpandEdits: false,
+    autoExpandThinking: false,
+    foldHistoryTurns: true,
+  };
+
+  it('parsePreferences 保留合法的天数与开关，没写过的字段不出现', () => {
+    expect(parsePreferences({ ...sessions, ...timeline })).toEqual({
+      ...DEFAULT_PREFERENCES,
+      ...sessions,
+      ...timeline,
+    });
+    expect(parsePreferences({})).toEqual(DEFAULT_PREFERENCES);
+    expect(parseSettings({ preferences: { archiveIdleDays: 0 } }).preferences).toEqual({
+      ...DEFAULT_PREFERENCES,
+      archiveIdleDays: 0,
+    });
+  });
+
+  it('parsePreferences 丢弃不在选项里的天数与非布尔开关', () => {
+    const parsed = parsePreferences({
+      archiveIdleDays: 10,
+      deleteArchivedDays: 7,
+      cleanupWorktreeOnArchive: 'yes',
+      compactReadonlyTools: 1,
+      autoExpandEdits: null,
+      autoExpandThinking: 'false',
+      foldHistoryTurns: [],
+    });
+    expect(parsed).toEqual(DEFAULT_PREFERENCES);
+    for (const days of [-7, 7.5, '7', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(parsePreferences({ archiveIdleDays: days })).not.toHaveProperty('archiveIdleDays');
+    }
+    expect(parsePreferences({ deleteArchivedDays: 14 })).not.toHaveProperty('deleteArchivedDays');
+  });
+
+  it('选项：闲置归档 关闭 / 7 / 14 / 30 / 90，过期删除 永不 / 30 / 90', () => {
+    expect(ARCHIVE_IDLE_DAYS).toEqual([0, 7, 14, 30, 90]);
+    expect(DELETE_ARCHIVED_DAYS).toEqual([0, 30, 90]);
+  });
+
+  it('生效值补默认：归档关闭、不清理、永不删除；精简只读、展开编辑与思考开，折叠历史轮次关', () => {
+    expect(sessionPreferencesOf(DEFAULT_PREFERENCES)).toEqual({
+      archiveIdleDays: 0,
+      cleanupWorktreeOnArchive: false,
+      deleteArchivedDays: 0,
+    });
+    expect(timelinePreferencesOf(DEFAULT_PREFERENCES)).toEqual({
+      compactReadonlyTools: true,
+      autoExpandEdits: true,
+      autoExpandThinking: true,
+      foldHistoryTurns: false,
+    });
+    const preferences = parsePreferences({ ...sessions, ...timeline });
+    expect(sessionPreferencesOf(preferences)).toEqual(sessions);
+    expect(timelinePreferencesOf(preferences)).toEqual(timeline);
+    expect(sessionPreferencesOf({ ...DEFAULT_PREFERENCES, deleteArchivedDays: 30 })).toEqual({
+      archiveIdleDays: 0,
+      cleanupWorktreeOnArchive: false,
+      deleteArchivedDays: 30,
+    });
+  });
+
+  it('parsePreferencesPatch 接受合法的天数与开关', () => {
+    expect(parsePreferencesPatch(sessions)).toEqual(sessions);
+    expect(parsePreferencesPatch(timeline)).toEqual(timeline);
+    expect(parsePreferencesPatch({ archiveIdleDays: 0, deleteArchivedDays: 0 })).toEqual({
+      archiveIdleDays: 0,
+      deleteArchivedDays: 0,
+    });
+  });
+
+  it.each([
+    ['不在选项里的闲置天数', { archiveIdleDays: 10 }],
+    ['字符串天数', { archiveIdleDays: '7' }],
+    ['不在选项里的删除天数', { deleteArchivedDays: 14 }],
+    ['负数', { deleteArchivedDays: -30 }],
+    ['非布尔的清理开关', { cleanupWorktreeOnArchive: 1 }],
+    ['非布尔的时间线开关', { foldHistoryTurns: 'true' }],
+    ['合法字段混着非法值', { compactReadonlyTools: true, autoExpandEdits: null }],
+  ])('parsePreferencesPatch 拒绝%s', (_label, raw) => {
+    expect(parsePreferencesPatch(raw)).toBeNull();
   });
 });
 

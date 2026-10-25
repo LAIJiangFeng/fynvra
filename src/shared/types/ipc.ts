@@ -36,6 +36,7 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：某工作区的编排状态已变更（参数：workspaceId） */
   ORCHESTRATION_CHANGED: 'orchestration:changed',
   // --- sessions ---
+  /** 参数为 workspaceId（不含归档的会话），或 `{ workspaceId, includeArchived: true }` */
   SESSIONS_LIST: 'sessions:list',
   /** Renderer 只传 workspaceId / roleId（/ 模型引用）；cwd 由 Main 从工作区记录推导 */
   SESSIONS_CREATE: 'sessions:create',
@@ -51,6 +52,12 @@ export const IPC_CHANNELS = {
   SESSIONS_MODEL_OPTIONS: 'sessions:model-options',
   /** 换会话的审批档位：Renderer 只传会话 id 与档位；运行中也可以切，即时生效 */
   SESSIONS_SET_APPROVAL_MODE: 'sessions:set-approval-mode',
+  /** 归档会话（只传会话 id）：运行中拒绝；按设置清理它绑定的、已合并且干净的 worktree */
+  SESSIONS_ARCHIVE: 'sessions:archive',
+  /** 恢复归档的会话（只传会话 id），闲置计时从现在重新开始 */
+  SESSIONS_UNARCHIVE: 'sessions:unarchive',
+  /** 按「通用 → 会话」的设置立即扫描一次：归档闲置会话、删除过期的归档记录（定时扫描也走它） */
+  SESSIONS_SWEEP: 'sessions:sweep',
   /** Main → Renderer：会话事件（SessionEventEnvelope） */
   SESSIONS_EVENT: 'sessions:event',
   /** Main → Renderer：某工作区的会话列表已变更（参数为 workspaceId） */

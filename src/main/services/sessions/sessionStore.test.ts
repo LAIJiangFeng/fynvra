@@ -145,6 +145,24 @@ describe('parseSessionsFile', () => {
     ]);
   });
 
+  it('keeps the archive time and drops only an invalid one', () => {
+    const parsed = parseSessionsFile({
+      sessions: [
+        session({ id: 'archived', archivedAt: 5_000 }),
+        { ...session({ id: 'bad-time' }), archivedAt: 'yesterday' },
+        { ...session({ id: 'nan' }), archivedAt: Number.NaN },
+        session({ id: 'active' }),
+      ],
+    });
+    expect(parsed.map((entry) => [entry.id, entry.archivedAt])).toEqual([
+      ['archived', 5_000],
+      ['bad-time', undefined],
+      ['nan', undefined],
+      ['active', undefined],
+    ]);
+    expect(parsed[1]).not.toHaveProperty('archivedAt');
+  });
+
   it('resets statuses that cannot outlive the previous app run', () => {
     const parsed = parseSessionsFile({
       sessions: [
@@ -182,6 +200,20 @@ describe('createSessionStore', () => {
     expect(store.remove('session-1')?.id).toBe('session-1');
     expect(store.remove('session-1')).toBeUndefined();
     expect(store.list('ws-1')).toEqual([]);
+  });
+
+  it('brings an archived session back to the list once it runs again', () => {
+    const store = createSessionStore({ filePath });
+    store.put(session({ archivedAt: 5_000 }));
+    // 归档的会话换模型、换审批档位、出错：仍在归档里
+    store.update('session-1', { approvalMode: 'full', updatedAt: 6_000 });
+    store.update('session-1', { status: 'error', updatedAt: 7_000 });
+    expect(store.get('session-1')?.archivedAt).toBe(5_000);
+    // 用户在归档的会话里发了消息，或主 agent 打回 / 发消息给它：回到会话列表
+    const running = store.update('session-1', { status: 'running', updatedAt: 8_000 });
+    expect(running).not.toHaveProperty('archivedAt');
+    expect(store.get('session-1')).not.toHaveProperty('archivedAt');
+    expect(store.list('ws-1')[0]).not.toHaveProperty('archivedAt');
   });
 
   it('loads what an earlier store wrote', () => {

@@ -33,6 +33,8 @@ export interface SessionSummary {
   approvalMode: ApprovalMode;
   /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
   branch?: string;
+  /** 归档时间（手动归档或闲置扫描）；恢复或会话再次运行时清除。`sessions:list` 默认不列归档的会话 */
+  archivedAt?: number;
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {

@@ -9,6 +9,7 @@ import type {
   SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import { sessionPreferencesOf } from '@shared/types/settings';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import {
@@ -24,11 +25,22 @@ import { createRoleResourceResolver } from '../services/agentHost/roleResources'
 import { createShellPathResolver } from '../services/agentHost/shell';
 import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
+import { createSessionArchive, type SessionArchive } from '../services/sessions/archive';
+import {
+  type ArchiveSweeper,
+  type ArchiveSweepResult,
+  createArchiveSweeper,
+} from '../services/sessions/archiveSweeper';
 import { createBranchTracker, readGitBranch } from '../services/sessions/branches';
 import { createLastModelStore } from '../services/sessions/lastModels';
-import { createSessionStore, parseSessionId } from '../services/sessions/sessionStore';
+import {
+  createSessionStore,
+  parseSessionId,
+  type SessionStore,
+} from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getMcpRegistry } from './mcp';
+import { getOrchestrationRegistry } from './orchestration';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -40,11 +52,54 @@ export const MAX_PROMPT_CHARS = 1_000_000;
 const MAX_REF_CHARS = 200;
 
 let agentHost: AgentHostService | null = null;
+let sessionStore: SessionStore | null = null;
+let sessionArchive: SessionArchive | null = null;
+let archiveSweeper: ArchiveSweeper | null = null;
 
 /** Main 内唯一的会话 / agent worker 管理者；userData 路径在启动早期才确定，所以延迟创建 */
 export function getAgentHost(): AgentHostService {
   agentHost ??= createAppAgentHost();
   return agentHost;
+}
+
+/** 会话注册表 sessions.json：agent host 与归档共用同一份 */
+function getSessionStore(): SessionStore {
+  sessionStore ??= createSessionStore({
+    filePath: join(app.getPath('userData'), 'sessions.json'),
+  });
+  return sessionStore;
+}
+
+/** 「通用 → 会话」的设置，每次用时现读 */
+function sessionPreferences() {
+  return sessionPreferencesOf(getSettingsFile().read().preferences);
+}
+
+/** 会话的归档与恢复（sessions:archive / unarchive 与闲置扫描共用） */
+export function getSessionArchive(): SessionArchive {
+  sessionArchive ??= createSessionArchive({
+    store: getSessionStore(),
+    dispose: (sessionId) => getAgentHost().implementsLauncher().disposeSession(sessionId),
+    cleanupWorktreeOnArchive: () => sessionPreferences().cleanupWorktreeOnArchive,
+    // 走 orchestration：只删已合并且干净的，编排记录随之更新
+    cleanupWorktree: async (session) =>
+      (await getOrchestrationRegistry()
+        .serviceFor(session.workspaceId)
+        ?.cleanupMergedWorktree(session.id)) ?? { removed: false, reason: 'no-workspace' },
+    changed: (workspaceId) => sendToAllWindows(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId),
+  });
+  return sessionArchive;
+}
+
+/** 闲置归档与过期删除的定时扫描；删除与 sessions:remove 相同（pi jsonl 保留） */
+export function getArchiveSweeper(): ArchiveSweeper {
+  archiveSweeper ??= createArchiveSweeper({
+    store: getSessionStore(),
+    archive: (sessionId) => getSessionArchive().archive(sessionId),
+    remove: (sessionId) => getAgentHost().remove(sessionId),
+    preferences: sessionPreferences,
+  });
+  return archiveSweeper;
 }
 
 function createAppAgentHost(): AgentHostService {
@@ -53,7 +108,7 @@ function createAppAgentHost(): AgentHostService {
   return createAgentHost({
     fork: () => forkAgentWorker(agentDir),
     agentDir,
-    store: createSessionStore({ filePath: join(userData, 'sessions.json') }),
+    store: getSessionStore(),
     workspaces: getWorkspaceService(),
     roles: getRoleStore(),
     models: createModelResolver(),
@@ -70,19 +125,48 @@ function createAppAgentHost(): AgentHostService {
   });
 }
 
-/** 注册 `sessions:*` handler。入参一律按 unknown 收窄，Renderer 只能传 id，不能传路径。 */
-export function registerSessionHandlers(host: () => AgentHostService = getAgentHost): void {
+/**
+ * 注册 `sessions:*` handler，并启动闲置归档的定时扫描。入参一律按 unknown 收窄，Renderer 只能传 id，不能传路径。
+ */
+export function registerSessionHandlers(
+  host: () => AgentHostService = getAgentHost,
+  archive: () => SessionArchive = getSessionArchive,
+  sweeper: () => ArchiveSweeper = getArchiveSweeper
+): void {
   ipcMain.handle(
     IPC_CHANNELS.SESSIONS_LIST,
     (_event, raw: unknown): IpcResult<{ sessions: SessionSummary[] }> => {
-      const workspaceId = parseWorkspaceId(raw);
-      if (!workspaceId) return { ok: false, error: '无效的工作区 id' };
+      const input = parseListSessionsInput(raw);
+      if (!input) return { ok: false, error: '无效的工作区 id' };
       try {
-        return { ok: true, sessions: host().list(workspaceId) };
+        const sessions = host().list(input.workspaceId);
+        return {
+          ok: true,
+          sessions: input.includeArchived
+            ? sessions
+            : sessions.filter((session) => session.archivedAt === undefined),
+        };
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
       }
     }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_ARCHIVE, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => archive().archive(sessionId))
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_UNARCHIVE, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => archive().unarchive(sessionId))
+  );
+
+  // 设置改了归档天数等之后，Renderer 让它立即按新设置扫一次（不用等下一个整点）
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SWEEP,
+    (_event, raw: unknown): Promise<IpcResult<ArchiveSweepResult>> =>
+      raw === undefined
+        ? guard(async () => ({ ok: true, ...(await sweeper().sweep()) }))
+        : invalid('无效的参数')
   );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_CREATE, (_event, raw: unknown) => {
@@ -146,6 +230,26 @@ export function registerSessionHandlers(host: () => AgentHostService = getAgentH
       console.warn('[sessions] 重读会话分支失败', error);
     }
   });
+
+  // 闲置归档与过期删除：启动后 30 秒扫第一次，之后每小时
+  sweeper().start();
+  app.on('before-quit', () => sweeper().stop());
+}
+
+/** workspaceId（不含归档的会话），或 `{ workspaceId, includeArchived? }` */
+export function parseListSessionsInput(
+  raw: unknown
+): { workspaceId: string; includeArchived: boolean } | null {
+  if (typeof raw === 'string') {
+    const workspaceId = parseWorkspaceId(raw);
+    return workspaceId ? { workspaceId, includeArchived: false } : null;
+  }
+  const record = strictRecord(raw, ['workspaceId', 'includeArchived']);
+  const workspaceId = parseWorkspaceId(record?.workspaceId);
+  const includeArchived = record?.includeArchived ?? false;
+  return workspaceId && typeof includeArchived === 'boolean'
+    ? { workspaceId, includeArchived }
+    : null;
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */

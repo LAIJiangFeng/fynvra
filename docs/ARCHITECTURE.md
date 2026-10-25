@@ -196,6 +196,7 @@ export interface SessionSummary {
   worktreeId?: string; parentSessionId?: string; dispatchId?: string;
   status: SessionStatus; createdAt: number; updatedAt: number;
   model?: SessionModelRef;
+  archivedAt?: number;   // 归档时间（Task 26）：手动归档或闲置扫描；恢复、会话再次运行时清除
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {
@@ -228,7 +229,8 @@ export interface ModelOptions { providers: ModelProviderOption[]; lastUsed?: Ses
 ### 9.3 `window.fynvra.sessions`（归属：agent-host；chat-ui 消费）
 ```ts
 export interface SessionsApi {
-  list(workspaceId: string): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
+  /** 默认不含归档的会话；includeArchived 时一并列出（带 archivedAt） */
+  list(workspaceId: string, options?: { includeArchived?: boolean }): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
   create(input: { workspaceId: string; roleId: string; model?: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
   prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
@@ -239,12 +241,22 @@ export interface SessionsApi {
   /** 换模型 / 思考档位：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
   setModel(input: { sessionId: string; model: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;   // 运行中拒绝
+  unarchive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>; // 闲置计时重新开始
+  sweep(): Promise<IpcResult<{ archived: number; removed: number }>>;            // 按设置立即扫一次
   onEvent(cb: (envelope: SessionEventEnvelope) => void): Unsubscribe;
   onSessionsChanged(cb: (workspaceId: string) => void): Unsubscribe;
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。
+
+- **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
+  归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经
+  `OrchestrationService.cleanupMergedWorktree` 删掉它的 worktree 与分支（只删经 merge_worktree 合并过、干净、合并后没有新提交的）。
+  恢复清掉 `archivedAt` 并把 `updatedAt` 设为当前时间；会话再次运行（用户发消息、主 agent 打回）时注册表自动清掉 `archivedAt`。
+  Main 启动后 30 秒、之后每小时按 `preferences.archiveIdleDays` / `deleteArchivedDays` 扫描（`sessions:sweep` 立即扫一次），
+  删除与 `sessions:remove` 相同（pi jsonl 保留）。
 
 - **换模型**（`sessions:set-model`）：Main 用 `ModelResolver` 解析 → 更新会话记录（sessions.json）→ 会话已在 worker 里时发
   `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`）→ worker 注册 provider 后调 pi 的 `setModel` / `setThinkingLevel`。

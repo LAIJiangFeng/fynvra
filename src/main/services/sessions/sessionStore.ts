@@ -31,7 +31,10 @@ export interface SessionStore {
   all(): StoredSession[];
   /** 新增或整条替换 */
   put(session: StoredSession): void;
-  /** 合并更新；不存在返回 undefined */
+  /**
+   * 合并更新；不存在返回 undefined。状态变成 running 时一并清掉归档：用户在归档的会话里发了消息，
+   * 或主 agent 打回 / 发消息给归档的 worker，它就回到会话列表。
+   */
   update(id: string, patch: Partial<Omit<StoredSession, 'id'>>): StoredSession | undefined;
   remove(id: string): StoredSession | undefined;
   /** 立即落盘待写内容；失败返回 false 并保留待写状态，下次重试 */
@@ -102,7 +105,9 @@ export function createSessionStore({
     update(id, patch) {
       const current = sessions.get(id);
       if (!current) return undefined;
-      const next: StoredSession = { ...current, ...patch, id };
+      const { archivedAt, ...rest } = { ...current, ...patch, id };
+      const next: StoredSession =
+        archivedAt === undefined || patch.status === 'running' ? rest : { ...rest, archivedAt };
       sessions.set(id, next);
       schedule();
       return next;
@@ -184,6 +189,8 @@ function parseStoredSession(raw: unknown): StoredSession | null {
       ...(isThinkingLevel(thinking) ? { thinking } : {}),
     };
   }
+  // 归档时间读不懂只丢时间（回到会话列表），不丢会话
+  if (Number.isFinite(record.archivedAt)) session.archivedAt = record.archivedAt as number;
   if (record.autoTitle === true) session.autoTitle = true;
   return session;
 }
