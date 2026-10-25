@@ -113,6 +113,12 @@ export interface RespondApprovalInput {
   decision: ApprovalDecision;
 }
 
+/** 旁路观察者（桌面通知用）：拿到的与推给 Renderer 的 sessions:event / sessions:approval-request 相同 */
+export interface SessionObserver {
+  event?(envelope: SessionEventEnvelope): void;
+  approval?(request: ApprovalRequest): void;
+}
+
 /** AgentHost（§9.5）加上 sessions IPC 用到的会话操作 */
 export interface AgentHostService extends AgentHost {
   /**
@@ -144,6 +150,10 @@ export interface AgentHostService extends AgentHost {
   setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 窗口重新获得焦点：重读读过的会话目录的分支（节流），有变化的工作区广播 sessions:changed */
   refreshBranches(): void;
+  /** 会话的 IPC 视图；不存在时 undefined */
+  get(sessionId: string): SessionSummary | undefined;
+  /** 订阅推给 Renderer 的会话事件与审批请求；观察者抛异常只记日志，不影响推送。返回取消订阅 */
+  observe(observer: SessionObserver): () => void;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -216,6 +226,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   ) => OrchestrationHost | null = () => null;
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
   let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
+  const observers = new Set<SessionObserver>();
 
   const client = createWorkerClient({
     fork: deps.fork,
@@ -294,6 +305,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       .catch((error: unknown) => log('warn', `读取会话分支失败：${errorMessage(error)}`));
   }
 
+  function tellObservers(notify: (observer: SessionObserver) => void): void {
+    for (const observer of observers) {
+      try {
+        notify(observer);
+      } catch (error) {
+        log('warn', `会话观察者出错：${errorMessage(error)}`);
+      }
+    }
+  }
+
   function setStatus(sessionId: string, status: SessionStatus): void {
     const stored = deps.store.get(sessionId);
     if (!stored || stored.status === status) return;
@@ -310,6 +331,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       event: { ...event, seq: state.sessionSeq } as FynvraSessionEvent,
     };
     deps.broadcast(IPC_CHANNELS.SESSIONS_EVENT, envelope);
+    tellObservers((observer) => observer.event?.(envelope));
   }
 
   /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求 */
@@ -578,6 +600,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       expiresAt,
     };
     deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, pushed);
+    tellObservers((observer) => observer.approval?.(pushed));
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
@@ -917,6 +940,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setApprovalMode,
     refreshBranches() {
       if (deps.branches) rereadBranches(deps.branches.known());
+    },
+    get(sessionId) {
+      const stored = deps.store.get(sessionId);
+      return stored ? summaryOf(stored) : undefined;
+    },
+    observe(observer) {
+      observers.add(observer);
+      return () => {
+        observers.delete(observer);
+      };
     },
   };
 }
