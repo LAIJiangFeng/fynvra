@@ -3,6 +3,7 @@ import { CircleStop, SendHorizontal } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { insertNewline, matchAction, useActionHandler, useComposerHints } from '@/lib/keybindings';
 import {
   isBusy,
   selectDraftOf,
@@ -26,9 +27,6 @@ import { STATUS_LABEL } from './SessionBadges';
 
 type Caret = 'start' | 'end';
 
-const hasModifier = (event: KeyboardEvent) =>
-  event.shiftKey || event.altKey || event.ctrlKey || event.metaKey;
-
 /** 光标（没有选区）在第一行：它前面没有换行 */
 function caretOnFirstLine(input: HTMLTextAreaElement): boolean {
   const { selectionStart, selectionEnd, value } = input;
@@ -46,6 +44,7 @@ function caretOnLastLine(input: HTMLTextAreaElement): boolean {
  * 左下角是模型胶囊与审批胶囊；Shift+Tab 循环切换审批档位。
  * ↑ / ↓ 像终端一样翻这个会话发过的消息：输入框为空或光标在第一行时 ↑ 取上一条，
  * 在最后一行时 ↓ 取下一条，翻过最新一条回到草稿；Esc 直接回到草稿；翻到的内容一经编辑就成为新的草稿。
+ * 这些都是默认键：按键经动作表（设置 → 快捷键）判断，另有运行中 Esc 停止、Ctrl+M（macOS ⌘M）打开模型选择器。
  */
 export function Composer({ sessionId }: { sessionId: string }) {
   const draft = useSessionsStore(selectDraftOf(sessionId));
@@ -56,7 +55,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const send = useSessionsStore((state) => state.send);
   const abort = useSessionsStore((state) => state.abort);
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
+  const openModelPicker = useSessionsStore((state) => state.openModelPicker);
+  const hints = useComposerHints();
   const input = useRef<HTMLTextAreaElement>(null);
+  useActionHandler('focus-composer', () => input.current?.focus());
   /** 正在翻的历史；null 表示没在浏览（输入框里是草稿） */
   const history = useRef<InputHistory | null>(null);
   /** 翻到新内容后光标放哪：↑ 放开头（接着按 ↑ 继续往前翻），↓ 放末尾 */
@@ -99,18 +101,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
     // 输入法组字时的按键（Enter 确认候选词、方向键选词）都交给输入法
     if (event.nativeEvent.isComposing) return;
     const textarea = event.currentTarget;
-    if (
-      event.key === 'Tab' &&
-      event.shiftKey &&
-      !event.altKey &&
-      !event.ctrlKey &&
-      !event.metaKey
-    ) {
+    if (matchAction(event, 'cycle-approval')) {
       event.preventDefault();
       if (approvalMode) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
       return;
     }
-    if (event.key === 'ArrowUp' && !hasModifier(event) && caretOnFirstLine(textarea)) {
+    if (matchAction(event, 'history-prev') && caretOnFirstLine(textarea)) {
       const state = history.current ?? startHistory(sent, draft);
       const next = up(state);
       if (next === state) return;
@@ -118,7 +114,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       browse(next, 'start');
       return;
     }
-    if (event.key === 'ArrowDown' && !hasModifier(event) && history.current) {
+    if (matchAction(event, 'history-next') && history.current) {
       if (!caretOnLastLine(textarea)) return;
       event.preventDefault();
       browse(down(history.current), 'end');
@@ -129,7 +125,21 @@ export function Composer({ sessionId }: { sessionId: string }) {
       browse(toDraft(history.current), 'end');
       return;
     }
-    if (event.key !== 'Enter' || event.shiftKey) return;
+    if (busy && matchAction(event, 'stop-turn')) {
+      event.preventDefault();
+      void abort();
+      return;
+    }
+    if (matchAction(event, 'open-model-picker')) {
+      event.preventDefault();
+      openModelPicker(sessionId);
+      return;
+    }
+    if (matchAction(event, 'newline')) {
+      insertNewline(event);
+      return;
+    }
+    if (!matchAction(event, 'send')) return;
     event.preventDefault();
     submit();
   };
@@ -164,8 +174,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
           value={draft}
           rows={1}
           aria-label="消息"
-          aria-keyshortcuts="Shift+Tab"
-          title="Enter 发送，Shift+Enter 换行，↑ / ↓ 翻历史消息"
+          aria-keyshortcuts={hints.ariaKeyShortcuts}
+          title={hints.title}
           placeholder="输入消息"
           className="field-sizing-content max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
           onChange={(event) => {
