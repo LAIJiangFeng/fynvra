@@ -14,9 +14,9 @@ import type { SessionsApi } from '../../lib/api/sessions';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 import {
   findSession,
-  selectActiveSessionsOf,
   selectArchivedSessionsOf,
   selectMessagesOf,
+  selectSessionsOf,
   selectStatusOf,
 } from './selectors';
 
@@ -293,7 +293,7 @@ describe('createSessionsStore · 列表与选择', () => {
 describe('createSessionsStore · 归档', () => {
   const ids = (sessions: SessionSummary[]) => sessions.map((session) => session.id);
 
-  it('列表连同归档的会话一起拉；选择器分成两组，归档的按归档时间倒序，引用稳定', async () => {
+  it('列表连同归档的会话一起拉，分进两份列表：会话列表不含归档的，归档的按归档时间倒序', async () => {
     const { store } = await setup([
       summary('active-old', { updatedAt: 1 }),
       summary('active-new', { updatedAt: 9 }),
@@ -301,14 +301,34 @@ describe('createSessionsStore · 归档', () => {
       summary('archived-late', { updatedAt: 2, archivedAt: 30 }),
     ]);
     const state = store.getState();
-    expect(ids(selectActiveSessionsOf(WS)(state))).toEqual(['active-new', 'active-old']);
+    // sessionsByWorkspace 的含义不变（侧栏的会话），读它的地方（上一个 / 下一个会话等）不会碰到归档的
+    expect(ids(state.sessionsByWorkspace[WS] ?? [])).toEqual(['active-new', 'active-old']);
+    expect(ids(selectSessionsOf(WS)(state))).toEqual(['active-new', 'active-old']);
     expect(ids(selectArchivedSessionsOf(WS)(state))).toEqual(['archived-late', 'archived-early']);
-    // 同一份列表拿到同一对数组：zustand 订阅不会因为选择器每次造新数组而反复渲染
-    expect(selectActiveSessionsOf(WS)(store.getState())).toBe(selectActiveSessionsOf(WS)(state));
-    expect(selectArchivedSessionsOf(WS)(store.getState())).toBe(
-      selectArchivedSessionsOf(WS)(state)
-    );
     expect(selectArchivedSessionsOf('ws-other')(state)).toEqual([]);
+    expect(findSession(state, 'archived-early')?.archivedAt).toBe(20);
+  });
+
+  it('选中的会话被 Main 归档（闲置扫描）后照常开着；被删除才取消选中', async () => {
+    const { store, setSessions, emitChanged } = await setup([summary('s1'), summary('s2')]);
+    await store.getState().selectSession('s1');
+    setSessions([summary('s1', { archivedAt: 40 }), summary('s2')]);
+    emitChanged();
+    await settle();
+    expect(store.getState().activeSessionId).toBe('s1');
+    expect(ids(selectArchivedSessionsOf(WS)(store.getState()))).toEqual(['s1']);
+    setSessions([summary('s2')]);
+    emitChanged();
+    await settle();
+    expect(store.getState().activeSessionId).toBeNull();
+  });
+
+  it('打开归档的会话也能换审批档位，留在已归档里', async () => {
+    const { store, api } = await setup([summary('s1', { archivedAt: 30 })]);
+    expect(await store.getState().setApprovalMode('s1', 'full')).toMatchObject({ ok: true });
+    expect(api.setApprovalMode).toHaveBeenCalledWith({ sessionId: 's1', mode: 'full' });
+    expect(selectArchivedSessionsOf(WS)(store.getState())[0]?.approvalMode).toBe('full');
+    expect(selectSessionsOf(WS)(store.getState())).toEqual([]);
   });
 
   it('archiveSession：先在列表里标上，回包后以 Main 的归档时间为准', async () => {
@@ -318,7 +338,7 @@ describe('createSessionsStore · 归档', () => {
     expect(await pending).toMatchObject({ ok: true });
     expect(api.archive).toHaveBeenCalledWith('s1');
     expect(findSession(store.getState(), 's1')?.archivedAt).toBe(50);
-    expect(ids(selectActiveSessionsOf(WS)(store.getState()))).toEqual(['s2']);
+    expect(ids(selectSessionsOf(WS)(store.getState()))).toEqual(['s2']);
   });
 
   it('archiveSession 失败：换回原样、提示原因并重拉列表', async () => {
@@ -351,7 +371,7 @@ describe('createSessionsStore · 归档', () => {
     ]);
     expect(await store.getState().unarchiveSession('s1')).toMatchObject({ ok: true });
     expect(api.unarchive).toHaveBeenCalledWith('s1');
-    expect(ids(selectActiveSessionsOf(WS)(store.getState()))).toEqual(['s1', 'a']);
+    expect(ids(selectSessionsOf(WS)(store.getState()))).toEqual(['s1', 'a']);
     expect(selectArchivedSessionsOf(WS)(store.getState())).toEqual([]);
   });
 

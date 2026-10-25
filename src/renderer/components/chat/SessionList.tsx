@@ -7,9 +7,9 @@ import { useNow } from '@/hooks/useNow';
 import { cn } from '@/lib/utils';
 import {
   isBusy,
-  selectActiveSessionsOf,
   selectArchivedSessionsOf,
   selectListErrorOf,
+  selectSessionsOf,
   selectStatusOf,
   useSessionsStore,
 } from '@/stores/sessions';
@@ -25,9 +25,9 @@ type Row = { kind: 'session'; session: SessionSummary } | { kind: 'archived'; co
  * 渲染为 `<li>`，挂在工作区条目之后；行用虚拟列表，滚动容器借用侧栏的 ScrollArea。
  */
 export function SessionList({ workspaceId }: { workspaceId: string }) {
-  const sessions = useSessionsStore(selectActiveSessionsOf(workspaceId));
-  const archived = useSessionsStore(selectArchivedSessionsOf(workspaceId));
+  const sessions = useSessionsStore(selectSessionsOf(workspaceId));
   const error = useSessionsStore(selectListErrorOf(workspaceId));
+  const archived = useSessionsStore(selectArchivedSessionsOf(workspaceId));
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
   const anchor = useCallback((node: HTMLElement | null) => {
