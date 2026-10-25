@@ -165,11 +165,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
           rows={1}
           aria-label="消息"
           aria-keyshortcuts="Shift+Tab"
-          placeholder={
-            busy
-              ? 'agent 正在运行，可以先写下一条…'
-              : '输入消息，Enter 发送，Shift+Enter 换行，↑ 翻出发过的消息'
-          }
+          title="Enter 发送，Shift+Enter 换行，↑ / ↓ 翻历史消息"
+          placeholder="输入消息"
           className="field-sizing-content max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
           onChange={(event) => {
             // 翻到的内容一经编辑就成为新的草稿，不再处于浏览状态
