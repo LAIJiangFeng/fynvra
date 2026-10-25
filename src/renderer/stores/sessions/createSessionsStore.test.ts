@@ -74,7 +74,7 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       };
     };
   const api = {
-    list: vi.fn(async (workspaceId: string) => ({
+    list: vi.fn(async (workspaceId: string, _options?: { includeArchived?: boolean }) => ({
       ok: true as const,
       sessions: sessions.filter((session) => session.workspaceId === workspaceId),
     })),
@@ -126,6 +126,28 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         sessions = sessions.map((item) => (item.id === session.id ? session : item));
         return { ok: true, session };
       }
+    ),
+    archive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const current = sessions.find((session) => session.id === sessionId);
+      if (!current) return { ok: false, error: '会话不存在' };
+      const session = { ...current, archivedAt: 50 };
+      sessions = sessions.map((item) => (item.id === session.id ? session : item));
+      return { ok: true, session };
+    }),
+    unarchive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const current = sessions.find((session) => session.id === sessionId);
+      if (!current) return { ok: false, error: '会话不存在' };
+      const { archivedAt: _archivedAt, ...rest } = current;
+      const session = { ...rest, updatedAt: 60 };
+      sessions = sessions.map((item) => (item.id === session.id ? session : item));
+      return { ok: true, session };
+    }),
+    sweep: vi.fn(
+      async (): Promise<IpcResult<{ archived: number; removed: number }>> => ({
+        ok: true,
+        archived: 0,
+        removed: 0,
+      })
     ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),

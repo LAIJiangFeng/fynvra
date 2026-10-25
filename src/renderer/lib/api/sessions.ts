@@ -109,6 +109,8 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
 
   function changed(session: MockSession, status?: SessionStatus): void {
     if (status) session.summary = { ...session.summary, status };
+    // 与 Main 相同：归档的会话又跑起来就回到会话列表
+    if (status === 'running') session.summary = unarchived(session.summary);
     session.summary = { ...session.summary, updatedAt: now() };
     for (const listener of changedListeners) listener(session.summary.workspaceId);
   }
@@ -430,12 +432,36 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
   const missing = () => ({ ok: false, error: '会话不存在' }) as const;
 
   return {
-    async list(workspaceId) {
+    async list(workspaceId, options = {}) {
       const list = [...sessions.values()]
         .map((session) => session.summary)
         .filter((summary) => summary.workspaceId === workspaceId)
+        .filter((summary) => options.includeArchived || summary.archivedAt === undefined)
         .sort((a, b) => b.updatedAt - a.updatedAt);
       return { ok: true, sessions: list };
+    },
+
+    async archive(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      if (session.run) return { ok: false, error: '会话正在运行，结束后再归档' };
+      // 与 Main 相同：归档不算一次更新
+      session.summary = { ...session.summary, archivedAt: now() };
+      for (const listener of changedListeners) listener(session.summary.workspaceId);
+      return { ok: true, session: session.summary };
+    },
+
+    async unarchive(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      session.summary = unarchived(session.summary);
+      changed(session);
+      return { ok: true, session: session.summary };
+    },
+
+    async sweep() {
+      // mock 的会话只在内存里、活不过一次刷新，不做闲置扫描
+      return { ok: true, archived: 0, removed: 0 };
     },
 
     async create(input) {
@@ -545,6 +571,10 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
     onSessionsChanged: subscribe(changedListeners),
     onApprovalRequest: subscribe(approvalListeners),
   };
+}
+
+function unarchived({ archivedAt: _archivedAt, ...summary }: SessionSummary): SessionSummary {
+  return summary;
 }
 
 function summarize(text: string): string {

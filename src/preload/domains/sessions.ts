@@ -13,7 +13,11 @@ import type { Unsubscribe } from '../types';
 
 // ARCHITECTURE §9.3
 export interface SessionsApi {
-  list(workspaceId: string): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
+  /** 默认不含归档的会话；`includeArchived` 时一并列出（带 archivedAt） */
+  list(
+    workspaceId: string,
+    options?: { includeArchived?: boolean }
+  ): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
   create(input: {
     workspaceId: string;
     roleId: string;
@@ -41,6 +45,12 @@ export interface SessionsApi {
     sessionId: string;
     mode: ApprovalMode;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 归档：运行中返回错误；按设置清理它绑定的、已合并且干净的 worktree */
+  archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 恢复归档的会话，闲置计时从现在重新开始 */
+  unarchive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 按「通用 → 会话」的设置立即扫一次：归档闲置会话、删除过期的归档 */
+  sweep(): Promise<IpcResult<{ archived: number; removed: number }>>;
   onEvent(cb: (envelope: SessionEventEnvelope) => void): Unsubscribe;
   onSessionsChanged(cb: (workspaceId: string) => void): Unsubscribe;
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
@@ -59,7 +69,11 @@ export interface PreloadIpc {
 /** `window.fynvra.sessions`：方法与通道一一对应，Renderer 只传 id 和文本 */
 export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
   return {
-    list: (workspaceId) => ipc.invoke(IPC_CHANNELS.SESSIONS_LIST, workspaceId),
+    list: (workspaceId, options) =>
+      ipc.invoke(
+        IPC_CHANNELS.SESSIONS_LIST,
+        options?.includeArchived ? { workspaceId, includeArchived: true } : workspaceId
+      ),
     create: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_CREATE, input),
     remove: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_REMOVE, sessionId),
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
@@ -69,6 +83,9 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     setModel: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, input),
     modelOptions: (input = {}) => ipc.invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, input),
     setApprovalMode: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, input),
+    archive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ARCHIVE, sessionId),
+    unarchive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_UNARCHIVE, sessionId),
+    sweep: () => ipc.invoke(IPC_CHANNELS.SESSIONS_SWEEP),
     onEvent: (cb) =>
       ipc.subscribe(IPC_CHANNELS.SESSIONS_EVENT, (envelope) =>
         cb(envelope as SessionEventEnvelope)
