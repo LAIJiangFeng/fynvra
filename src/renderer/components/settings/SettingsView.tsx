@@ -14,6 +14,7 @@ import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GeneralSettings } from './GeneralSettings';
@@ -25,10 +26,9 @@ import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 
-/** 页头只有页名，不加副标题 */
+/** 页头只有页名（字典 settings.sections.<value>），不加副标题 */
 interface SectionSpec {
   value: SettingsSection;
-  label: string;
   icon: LucideIcon;
   Component: ComponentType;
   /** 双栏内容（角色编辑器）用更宽的版心 */
@@ -36,14 +36,14 @@ interface SectionSpec {
 }
 
 const SECTIONS: SectionSpec[] = [
-  { value: 'general', label: '通用', icon: SlidersHorizontal, Component: GeneralSettings },
-  { value: 'notifications', label: '通知', icon: Bell, Component: NotificationSettings },
-  { value: 'providers', label: '模型服务', icon: Boxes, Component: ProvidersSettings },
-  { value: 'roles', label: '角色', icon: UserCog, Component: RolesSettings, wide: true },
-  { value: 'skills', label: '技能', icon: Sparkles, Component: SkillsSettings },
-  { value: 'mcp', label: 'MCP', icon: Plug, Component: McpSettings },
-  { value: 'appearance', label: '外观', icon: Palette, Component: AppearanceSettings },
-  { value: 'keybindings', label: '快捷键', icon: Keyboard, Component: KeybindingsSettings },
+  { value: 'general', icon: SlidersHorizontal, Component: GeneralSettings },
+  { value: 'notifications', icon: Bell, Component: NotificationSettings },
+  { value: 'providers', icon: Boxes, Component: ProvidersSettings },
+  { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
+  { value: 'skills', icon: Sparkles, Component: SkillsSettings },
+  { value: 'mcp', icon: Plug, Component: McpSettings },
+  { value: 'appearance', icon: Palette, Component: AppearanceSettings },
+  { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
 ];
 
 /**
@@ -60,6 +60,7 @@ function SettingsPanel() {
   const setSection = useSettingsViewStore((state) => state.setSection);
   const close = useSettingsViewStore((state) => state.close);
   const containerRef = useRef<HTMLDivElement>(null);
+  const t = useT();
   const current = SECTIONS.find((item) => item.value === section) ?? SECTIONS[0];
 
   useEffect(() => {
@@ -71,7 +72,7 @@ function SettingsPanel() {
       ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-label="设置"
+      aria-label={t('settings.title')}
       tabIndex={-1}
       className="fixed inset-x-0 top-10 bottom-0 z-40 flex bg-background outline-none"
       onKeyDown={(event) => {
@@ -90,16 +91,18 @@ function SettingsPanel() {
         className="flex min-w-0 flex-1 gap-0"
       >
         <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar p-2 text-sidebar-foreground">
-          <p className="px-2 pt-1 pb-2 font-medium text-muted-foreground text-xs">设置</p>
+          <p className="px-2 pt-1 pb-2 font-medium text-muted-foreground text-xs">
+            {t('settings.title')}
+          </p>
           <TabsList className="w-full gap-0.5 bg-transparent p-0">
-            {SECTIONS.map(({ value, label, icon: Icon }) => (
+            {SECTIONS.map(({ value, icon: Icon }) => (
               <TabsTrigger
                 key={value}
                 value={value}
                 className="h-8 w-full flex-none justify-start gap-2 px-2 font-normal text-sidebar-foreground hover:bg-sidebar-accent data-[active]:bg-sidebar-accent data-[active]:font-medium data-[active]:text-sidebar-accent-foreground data-[active]:shadow-none dark:text-sidebar-foreground dark:data-[active]:border-transparent dark:data-[active]:bg-sidebar-accent"
               >
                 <Icon className="text-muted-foreground" />
-                {label}
+                {t(`settings.sections.${value}`)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -108,9 +111,14 @@ function SettingsPanel() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center gap-4 border-b px-6">
             <h2 className="min-w-0 flex-1 truncate font-semibold leading-tight">
-              {current?.label}
+              {current && t(`settings.sections.${current.value}`)}
             </h2>
-            <Button variant="ghost" size="icon-sm" aria-label="关闭设置" onClick={close}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('app.closeSettings')}
+              onClick={close}
+            >
               <X />
             </Button>
           </header>

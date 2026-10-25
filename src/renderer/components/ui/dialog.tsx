@@ -1,6 +1,7 @@
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { XIcon } from 'lucide-react';
 import type * as React from 'react';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 
 const Dialog = DialogPrimitive.Root;
@@ -20,6 +21,7 @@ function DialogContent({
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & { showCloseButton?: boolean }) {
+  const t = useT();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
@@ -41,7 +43,7 @@ function DialogContent({
             className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
-            <span className="sr-only">关闭</span>
+            <span className="sr-only">{t('common.close')}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>

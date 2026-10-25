@@ -2,6 +2,7 @@ import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { SettingsButton } from '@/components/settings/SettingsButton';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/i18n/I18nProvider';
 import { ShortcutHint } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -19,7 +20,8 @@ export function TitleBar() {
   const sidePanelOpen = useSettingsStore((state) => state.sidePanelOpen);
   const toggleSidePanel = useSettingsStore((state) => state.toggleSidePanel);
   const workspaceName = useWorkspacesStore((state) => selectSelectedWorkspace(state)?.name);
-  const panelLabel = sidePanelOpen ? '收起右侧面板' : '展开右侧面板';
+  const t = useT();
+  const panelLabel = t(sidePanelOpen ? 'app.hideSidePanel' : 'app.showSidePanel');
 
   return (
     <header

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { OrchestrationPanel } from '@/components/orchestration/OrchestrationPanel';
+import { useT } from '@/i18n/I18nProvider';
 
 const MIN_WIDTH = 288;
 const DEFAULT_WIDTH = 360;
@@ -19,6 +20,7 @@ function clampWidth(width: number, viewport: number): number {
 export function SidePanel() {
   const [preferred, setPreferred] = useState(preferredWidth);
   const [viewport, setViewport] = useState(() => window.innerWidth);
+  const t = useT();
   const width = clampWidth(preferred, viewport);
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export function SidePanel() {
 
   return (
     <aside
-      aria-label="编排面板"
+      aria-label={t('app.sidePanel')}
       style={{ width }}
       className="relative flex shrink-0 flex-col border-l bg-sidebar text-sidebar-foreground"
     >
@@ -43,12 +45,12 @@ export function SidePanel() {
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整侧面板宽度"
+        aria-label={t('app.resizeSidePanel')}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={MAX_WIDTH}
         aria-valuenow={width}
         tabIndex={0}
-        title="拖动调整宽度，双击恢复默认"
+        title={t('app.resizeSidePanelHint')}
         className="absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize touch-none outline-none transition-colors hover:bg-ring/30 focus-visible:bg-ring/40"
         onPointerDown={(event) => {
           if (event.button !== 0) return;

@@ -1,6 +1,7 @@
 import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useT } from '@/i18n/I18nProvider';
 import { ShortcutHint } from '@/lib/keybindings';
 import { useSettingsViewStore } from './settingsViewStore';
 
@@ -8,7 +9,8 @@ import { useSettingsViewStore } from './settingsViewStore';
 export function SettingsButton() {
   const open = useSettingsViewStore((state) => state.open);
   const toggle = useSettingsViewStore((state) => state.toggle);
-  const label = open ? '关闭设置' : '设置';
+  const t = useT();
+  const label = t(open ? 'app.closeSettings' : 'app.openSettings');
 
   return (
     <Tooltip>

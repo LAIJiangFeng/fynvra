@@ -13,6 +13,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
+import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
@@ -25,31 +26,37 @@ export function Sidebar() {
   const add = useWorkspacesStore((state) => state.add);
   const select = useWorkspacesStore((state) => state.select);
   const remove = useWorkspacesStore((state) => state.remove);
+  const t = useT();
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
       <div className="flex h-10 shrink-0 items-center justify-between pr-2 pl-4">
-        <span className="font-medium text-muted-foreground text-xs">工作区</span>
+        <span className="font-medium text-muted-foreground text-xs">{t('workspaces.title')}</span>
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button variant="ghost" size="icon-xs" aria-label="挂入目录" disabled={adding} />
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t('workspaces.add')}
+                disabled={adding}
+              />
             }
             onClick={() => void add()}
           >
             <Plus />
           </TooltipTrigger>
-          <TooltipContent>挂入目录</TooltipContent>
+          <TooltipContent>{t('workspaces.add')}</TooltipContent>
         </Tooltip>
       </div>
 
       <ScrollArea className="flex-1">
         {workspaces.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-            <p className="text-muted-foreground text-sm">还没有工作区</p>
+            <p className="text-muted-foreground text-sm">{t('workspaces.empty')}</p>
             <Button size="sm" variant="outline" disabled={adding} onClick={() => void add()}>
               <Plus />
-              挂入目录
+              {t('workspaces.add')}
             </Button>
           </div>
         ) : (
@@ -83,6 +90,7 @@ function WorkspaceItem({
   onSelect: () => void;
   onRemove: () => void;
 }) {
+  const t = useT();
   return (
     <li className="group relative">
       <button
@@ -105,10 +113,10 @@ function WorkspaceItem({
             {workspace.vcs === 'none' && (
               <Badge
                 variant="outline"
-                title="不会使用 worktree"
+                title={t('common.noWorktrees')}
                 className="px-1 py-0 font-normal text-[10px] leading-4"
               >
-                无 git
+                {t('common.noGit')}
               </Badge>
             )}
           </span>
@@ -127,7 +135,7 @@ function WorkspaceItem({
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label={`${workspace.name} 的更多操作`}
+              aria-label={t('workspaces.moreActions', { name: workspace.name })}
               className="absolute top-1.5 right-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
             />
           }
@@ -137,7 +145,7 @@ function WorkspaceItem({
         <DropdownMenuContent align="end">
           <DropdownMenuItem variant="destructive" onClick={onRemove}>
             <Trash2 />
-            从列表移除
+            {t('workspaces.removeFromList')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

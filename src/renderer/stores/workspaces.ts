@@ -1,6 +1,7 @@
 import { errorMessage } from '@shared/guards';
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import { create } from 'zustand';
+import { translate } from '@/i18n';
 
 /** 需要用户确认的提示（如挂入被拒绝的原因），由 NoticeDialog 展示。 */
 export interface Notice {
@@ -33,7 +34,7 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
     try {
       const result = await api.list();
       if (!result.ok) {
-        set({ notice: { title: '读取工作区失败', message: result.error } });
+        set({ notice: { title: translate('workspaces.loadFailed'), message: result.error } });
         return;
       }
       set((state) => ({
@@ -43,7 +44,7 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
           : null,
       }));
     } catch (error) {
-      set({ notice: { title: '读取工作区失败', message: errorMessage(error) } });
+      set({ notice: { title: translate('workspaces.loadFailed'), message: errorMessage(error) } });
     }
   },
 
@@ -56,10 +57,10 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
         await get().refresh();
         set({ selectedId: result.workspace.id });
       } else if (result.code !== 'canceled') {
-        set({ notice: { title: '无法挂入仓库', message: result.error } });
+        set({ notice: { title: translate('workspaces.addFailed'), message: result.error } });
       }
     } catch (error) {
-      set({ notice: { title: '无法挂入仓库', message: errorMessage(error) } });
+      set({ notice: { title: translate('workspaces.addFailed'), message: errorMessage(error) } });
     } finally {
       set({ adding: false });
     }
@@ -69,12 +70,14 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
     try {
       const result = await api.remove(id);
       if (!result.ok) {
-        set({ notice: { title: '移除工作区失败', message: result.error } });
+        set({ notice: { title: translate('workspaces.removeFailed'), message: result.error } });
         return;
       }
       await get().refresh();
     } catch (error) {
-      set({ notice: { title: '移除工作区失败', message: errorMessage(error) } });
+      set({
+        notice: { title: translate('workspaces.removeFailed'), message: errorMessage(error) },
+      });
     }
   },
 
