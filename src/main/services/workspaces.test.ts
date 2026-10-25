@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { RepositoryInspection } from './gitRepository';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DirectoryInspection } from './gitRepository';
 import { createSettingsFile, type SettingsFile } from './settingsFile';
 import { createWorkspaceService, toDisplayPath } from './workspaces';
 
@@ -19,18 +19,32 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const repo = (root: string, name = 'fynvra'): RepositoryInspection => ({
+const repo = (root: string, name = 'fynvra'): DirectoryInspection => ({
   ok: true,
+  vcs: 'git',
   root,
   name,
   defaultBranch: 'main',
 });
 
-const service = (inspection: RepositoryInspection, platform: NodeJS.Platform = 'linux') => {
+const plainDir = (root: string, name = 'notes'): DirectoryInspection => ({
+  ok: true,
+  vcs: 'none',
+  root,
+  name,
+});
+
+const service = (
+  inspection:
+    | DirectoryInspection
+    | ((dir: string, options: { plain: boolean }) => DirectoryInspection),
+  platform: NodeJS.Platform = 'linux'
+) => {
   let next = 0;
   return createWorkspaceService({
     settings,
-    inspect: async () => inspection,
+    inspect: async (dir, options) =>
+      typeof inspection === 'function' ? inspection(dir, options) : inspection,
     newId: () => `ws-${++next}`,
     home: '/home/dev',
     platform,
@@ -84,14 +98,43 @@ describe('createWorkspaceService', () => {
     expect(settings.read().workspaces).toHaveLength(1);
   });
 
-  it('校验失败原样返回错误，不改动 settings', async () => {
-    const rejected: RepositoryInspection = {
-      ok: false,
-      code: 'not-git-repo',
-      error: '所选目录不是 git 仓库：/tmp/plain',
-    };
-    const result = await service(rejected).addDirectory('/tmp/plain');
-    expect(result).toEqual(rejected);
+  it('普通目录按 vcs: none 挂入，没有默认分支', async () => {
+    const result = await service(plainDir('/home/dev/notes')).addDirectory('/home/dev/notes');
+    expect(result).toEqual({
+      ok: true,
+      created: true,
+      workspace: { id: 'ws-1', name: 'notes', displayPath: '~/notes', vcs: 'none' },
+    });
+    expect(settings.read().workspaces).toEqual([
+      { id: 'ws-1', name: 'notes', repoPath: '/home/dev/notes', vcs: 'none' },
+    ]);
+  });
+
+  it('plain 原样交给 inspect（用户选了「仍然挂入该子目录」）', async () => {
+    const inspect = vi.fn((dir: string, options: { plain: boolean }) =>
+      options.plain ? plainDir(dir, 'src') : repo('/repos/fynvra')
+    );
+    const workspaces = service(inspect);
+    const result = await workspaces.addDirectory('/repos/fynvra/src', { plain: true });
+    expect(inspect).toHaveBeenCalledWith('/repos/fynvra/src', { plain: true });
+    expect(result).toMatchObject({ ok: true, workspace: { vcs: 'none', name: 'src' } });
+    await workspaces.addDirectory('/repos/fynvra');
+    expect(inspect).toHaveBeenLastCalledWith('/repos/fynvra', { plain: false });
+  });
+
+  it.each<[string, DirectoryInspection]>([
+    [
+      '仓库子目录',
+      {
+        ok: false,
+        code: 'not-repo-root',
+        repoRoot: '/repos/fynvra',
+        error: '所选目录位于 git 仓库 /repos/fynvra 内',
+      },
+    ],
+    ['目录不存在', { ok: false, code: 'failed', error: '目录不存在或无法访问：/tmp/gone' }],
+  ])('%s：原样返回，不改动 settings', async (_label, rejected) => {
+    expect(await service(rejected).addDirectory('/tmp/x')).toEqual(rejected);
     expect(settings.read().workspaces).toEqual([]);
   });
 

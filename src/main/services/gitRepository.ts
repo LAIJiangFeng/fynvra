@@ -27,22 +27,22 @@ export const runGit: GitRunner = (args, cwd) =>
     );
   });
 
-export type RepositoryInspection =
-  | { ok: true; root: string; name: string; defaultBranch: string }
-  | {
-      ok: false;
-      code: 'not-git-repo' | 'not-repo-root' | 'git-unavailable' | 'failed';
-      error: string;
-    };
+export type DirectoryInspection =
+  | { ok: true; vcs: 'git'; root: string; name: string; defaultBranch: string }
+  | { ok: true; vcs: 'none'; root: string; name: string }
+  /** 仓库子目录：`repoRoot` 是外层仓库的根目录 */
+  | { ok: false; code: 'not-repo-root'; repoRoot: string; error: string }
+  | { ok: false; code: 'failed'; error: string };
 
 /**
- * 确认 dir 是某个 git 工作区的根目录，并探测默认分支。
- * 仓库子目录不会被静默提升为外层仓库（可能挂错仓库），而是返回 not-repo-root 并给出根路径。
+ * 看所选目录能怎么挂入：git 仓库根目录（并探测默认分支），或普通目录（不是 git 仓库、找不到 git，
+ * 以及 `plain` 时——此时不跑 git）。仓库子目录不会被静默提升为外层仓库（可能挂错仓库），
+ * 而是返回 not-repo-root 与根目录，由调用方问用户。
  */
-export async function inspectGitRepository(
+export async function inspectDirectory(
   dir: string,
-  run: GitRunner = runGit
-): Promise<RepositoryInspection> {
+  { plain = false, run = runGit }: { plain?: boolean; run?: GitRunner } = {}
+): Promise<DirectoryInspection> {
   let selected: string;
   try {
     selected = await realpath(dir);
@@ -50,16 +50,10 @@ export async function inspectGitRepository(
     return { ok: false, code: 'failed', error: `目录不存在或无法访问：${dir}` };
   }
 
+  const plainDirectory = { ok: true, vcs: 'none', root: selected, name: nameOf(selected) } as const;
+  if (plain) return plainDirectory;
   const toplevel = await run(['rev-parse', '--show-toplevel'], selected);
-  if (!toplevel.ok) {
-    return toplevel.missingGit
-      ? {
-          ok: false,
-          code: 'git-unavailable',
-          error: '未找到 git，请先安装 git 并确保它在 PATH 中。',
-        }
-      : { ok: false, code: 'not-git-repo', error: `所选目录不是 git 仓库：${selected}` };
-  }
+  if (!toplevel.ok) return plainDirectory;
 
   let root: string;
   try {
@@ -71,15 +65,22 @@ export async function inspectGitRepository(
     return {
       ok: false,
       code: 'not-repo-root',
-      error: `所选目录位于仓库 ${root} 内，请选择仓库根目录。`,
+      repoRoot: root,
+      error: `所选目录位于 git 仓库 ${root} 内`,
     };
   }
   return {
     ok: true,
+    vcs: 'git',
     root,
-    name: basename(root),
+    name: nameOf(root),
     defaultBranch: await detectDefaultBranch(root, run),
   };
+}
+
+/** 目录名；磁盘根目录（如 `D:\`）没有目录名，用路径本身 */
+function nameOf(path: string): string {
+  return basename(path) || path;
 }
 
 /** origin/HEAD → 本地 main / master → 当前分支 → 'main'。 */

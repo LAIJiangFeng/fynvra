@@ -30,12 +30,8 @@ export interface WorkspaceSummary {
   defaultBranch?: string;
 }
 
-export type WorkspaceAddErrorCode =
-  | 'canceled'
-  | 'not-git-repo'
-  | 'not-repo-root'
-  | 'git-unavailable'
-  | 'failed';
+/** 任意目录都能挂入（仓库子目录由 Main 先问用户），所以失败只有取消与出错。 */
+export type WorkspaceAddErrorCode = 'canceled' | 'failed';
 
 export type WorkspaceAddResult =
   | { ok: true; workspace: WorkspaceSummary; created: boolean }

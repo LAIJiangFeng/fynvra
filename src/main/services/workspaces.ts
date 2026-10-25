@@ -1,21 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { Workspace, WorkspaceAddResult, WorkspaceSummary } from '@shared/types/workspace';
-import { inspectGitRepository, type RepositoryInspection, samePath } from './gitRepository';
+import { type DirectoryInspection, inspectDirectory, samePath } from './gitRepository';
 import type { SettingsFile } from './settingsFile';
 
 export interface WorkspaceServiceOptions {
   settings: SettingsFile;
-  inspect?: (dir: string) => Promise<RepositoryInspection>;
+  inspect?: (dir: string, options: { plain: boolean }) => Promise<DirectoryInspection>;
   newId?: () => string;
   home?: string;
   platform?: NodeJS.Platform;
 }
 
+/** 仓库子目录：Main 先问用户挂仓库根目录（`repoRoot`），还是把子目录按普通目录挂入。 */
+export type AddDirectoryResult =
+  | WorkspaceAddResult
+  | { ok: false; code: 'not-repo-root'; repoRoot: string; error: string };
+
 /** 工作区注册表：数据存在 settings.json，完整路径只留在 Main，对外视图是 WorkspaceSummary。 */
 export function createWorkspaceService({
   settings,
-  inspect = inspectGitRepository,
+  inspect = (dir, options) => inspectDirectory(dir, options),
   newId = randomUUID,
   home = homedir(),
   platform = process.platform,
@@ -38,9 +43,12 @@ export function createWorkspaceService({
       return settings.read().workspaces.find((workspace) => workspace.id === id);
     },
 
-    /** 校验目录是 git 仓库根后挂入；同一仓库重复挂入返回已有记录。 */
-    async addDirectory(dir: string): Promise<WorkspaceAddResult> {
-      const inspection = await inspect(dir);
+    /**
+     * 挂入目录：git 仓库根目录是 git 工作区，其他目录（以及 `plain` 时）是普通目录；
+     * 仓库子目录返回 not-repo-root。同一目录重复挂入返回已有记录（不改它的 vcs）。
+     */
+    async addDirectory(dir: string, { plain = false } = {}): Promise<AddDirectoryResult> {
+      const inspection = await inspect(dir, { plain });
       if (!inspection.ok) return inspection;
       const existing = settings
         .read()
@@ -51,8 +59,8 @@ export function createWorkspaceService({
         id: newId(),
         name: inspection.name,
         repoPath: inspection.root,
-        vcs: 'git',
-        defaultBranch: inspection.defaultBranch,
+        vcs: inspection.vcs,
+        ...(inspection.vcs === 'git' ? { defaultBranch: inspection.defaultBranch } : {}),
       };
       settings.update((current) => ({
         ...current,
