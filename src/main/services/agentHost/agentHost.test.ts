@@ -1240,6 +1240,26 @@ describe('createAgentHost model choice', () => {
     expect(specModel(env.sent('spawn-session')[0])).toEqual(openaiSpec);
   });
 
+  it('rebuilds a crashed session with the model chosen while the worker restarted', async () => {
+    const env = modelEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'first');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    env.worker().exit(1);
+    // worker 还没重启：只改记录和缓存的 spec；重建不能沿用崩溃前缓存的旧模型
+    const model: SessionModelRef = { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' };
+    expect(await env.host.setModel({ sessionId: session.id, model })).toMatchObject({ ok: true });
+    expect(env.sent('set-model')).toEqual([]);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(specModel(env.sent('spawn-session').at(-1))).toMatchObject({
+      providerId: OPENAI_RUNTIME,
+      modelId: 'gpt-5.5',
+      thinking: 'xhigh',
+    });
+  });
+
   it('refuses to switch while the session is running or a prompt is on its way', async () => {
     const env = modelEnv();
     const session = await createSession(env);

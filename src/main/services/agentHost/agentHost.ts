@@ -662,9 +662,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ...(current.status === 'error' ? { status: 'idle' as const } : {}),
       }) ?? current;
     const state = live.get(sessionId);
+    // 缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），重建时不会退回旧模型
+    const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
+    if (state?.spec) state.spec = { ...state.spec, model: spec };
     if (state?.spawned) {
-      const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
-      if (state.spec) state.spec = { ...state.spec, model: spec };
       // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
       if (!send({ type: 'set-model', identity: identityOf(sessionId, state), model: spec })) {
         detach(sessionId, state);
