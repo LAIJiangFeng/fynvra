@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import type {
   HostResult,
   OrchestrationHost,
@@ -197,7 +198,11 @@ export function createOrchestrationService(
     }
   });
   const inbox = new Inbox({ messages: store.messages, now });
-  const git = new GitWorktreeManager({ exec: options.exec });
+  // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
+  const git = new GitWorktreeManager({
+    exec: options.exec,
+    removeDir: (path) => rm(path, { recursive: true, force: true, maxRetries: 3 }),
+  });
 
   const ready = (async () => {
     try {

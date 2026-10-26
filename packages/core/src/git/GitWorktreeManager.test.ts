@@ -11,7 +11,7 @@ interface Step {
 }
 
 /** 按顺序回放脚本化的 git 结果，并记录实际调用；断言放在测试里（exec 内抛错会被被测代码吞掉）。 */
-function scriptedGit(steps: Step[]) {
+function scriptedGit(steps: Step[], removeDir?: (path: string) => Promise<void>) {
   const calls: { cmd: string; args: string[]; cwd: string }[] = [];
   const exec: ExecFn = async (cmd, args, cwd) => {
     calls.push({ cmd, args: [...args], cwd });
@@ -19,10 +19,13 @@ function scriptedGit(steps: Step[]) {
     if (step === undefined) return { code: 99, stdout: '', stderr: 'unexpected git call' };
     return { code: step.code ?? 0, stdout: step.stdout ?? '', stderr: step.stderr ?? '' };
   };
-  const expected = () => steps.map(({ args, cwd }) => ({ cmd: 'git', args, cwd }));
-  return { manager: new GitWorktreeManager({ exec }), calls, expected };
+  // 每条命令都带 -c core.longpaths=true（Windows 长路径）
+  const expected = () =>
+    steps.map(({ args, cwd }) => ({ cmd: 'git', args: [...LONGPATHS, ...args], cwd }));
+  return { manager: new GitWorktreeManager({ exec, removeDir }), calls, expected };
 }
 
+const LONGPATHS = ['-c', 'core.longpaths=true'];
 const REPO = '/repo';
 const ROOT = '/data/worktrees';
 const BASE = 'abc1230000000000000000000000000000000000';
@@ -412,6 +415,7 @@ describe('GitWorktreeManager.remove / prune / deleteBranch', () => {
       ok: true,
     });
     expect(git.calls).toEqual(git.expected());
+    expect(git.calls[0]?.args.slice(0, 2)).toEqual(['-c', 'core.longpaths=true']);
   });
 
   it('remove 失败（有未提交改动）返回 git 的错误', async () => {
@@ -425,6 +429,153 @@ describe('GitWorktreeManager.remove / prune / deleteBranch', () => {
     ]);
     const result = await git.manager.remove({ repoPath: REPO, path: worktree.path });
     expect(!result.ok && result.error).toMatch(/--force/);
+  });
+
+  const listing = (...paths: string[]) =>
+    paths.map((path) => `worktree ${path}\nHEAD ${BASE}\nbranch refs/heads/x\n\n`).join('');
+  const tooLong = {
+    code: 255,
+    stderr: `error: failed to delete '${worktree.path}': Filename too long`,
+  };
+
+  it('git 删除失败（Filename too long）时兜底：删目录 → prune → 确认已注销', async () => {
+    const removed: string[] = [];
+    const git = scriptedGit(
+      [
+        { args: ['worktree', 'remove', '--force', '--', worktree.path], cwd: REPO, ...tooLong },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: REPO,
+          stdout: listing(REPO, worktree.path),
+        },
+        { args: ['worktree', 'prune'], cwd: REPO },
+        { args: ['worktree', 'list', '--porcelain'], cwd: REPO, stdout: listing(REPO) },
+      ],
+      async (path) => {
+        removed.push(path);
+      }
+    );
+    const result = await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true });
+    expect(result).toEqual({ ok: true });
+    expect(removed).toEqual([worktree.path]);
+    expect(git.calls).toEqual(git.expected());
+  });
+
+  it('兜底按 Windows 路径比较（分隔符、大小写）', async () => {
+    const winPath = 'D:\\wt\\ws_1\\add-parser';
+    const removed: string[] = [];
+    const git = scriptedGit(
+      [
+        { args: ['worktree', 'remove', '--force', '--', winPath], cwd: 'D:\\repo', ...tooLong },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: 'D:\\repo',
+          stdout: listing('D:/repo', 'd:/wt/ws_1/add-parser'),
+        },
+        { args: ['worktree', 'prune'], cwd: 'D:\\repo' },
+        { args: ['worktree', 'list', '--porcelain'], cwd: 'D:\\repo', stdout: listing('D:/repo') },
+      ],
+      async (path) => {
+        removed.push(path);
+      }
+    );
+    const result = await git.manager.remove({ repoPath: 'D:\\repo', path: winPath, force: true });
+    expect(result).toEqual({ ok: true });
+    expect(removed).toEqual([winPath]);
+  });
+
+  it('非 force 且 worktree 有改动：不走兜底，返回 git 的拒绝', async () => {
+    const removed: string[] = [];
+    const git = scriptedGit(
+      [
+        {
+          args: ['worktree', 'remove', '--', worktree.path],
+          cwd: REPO,
+          code: 128,
+          stderr: 'fatal: contains modified or untracked files, use --force to delete it',
+        },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: REPO,
+          stdout: listing(REPO, worktree.path),
+        },
+        { args: ['status', '--porcelain'], cwd: worktree.path, stdout: '?? notes.md\n' },
+      ],
+      async (path) => {
+        removed.push(path);
+      }
+    );
+    const result = await git.manager.remove({ repoPath: REPO, path: worktree.path });
+    expect(!result.ok && result.error).toMatch(/--force/);
+    expect(removed).toEqual([]);
+    expect(git.calls).toEqual(git.expected());
+  });
+
+  it('非 force 且 git status 确认干净：文件系统错误走兜底', async () => {
+    const removed: string[] = [];
+    const git = scriptedGit(
+      [
+        { args: ['worktree', 'remove', '--', worktree.path], cwd: REPO, ...tooLong },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: REPO,
+          stdout: listing(REPO, worktree.path),
+        },
+        { args: ['status', '--porcelain'], cwd: worktree.path },
+        { args: ['worktree', 'prune'], cwd: REPO },
+        { args: ['worktree', 'list', '--porcelain'], cwd: REPO, stdout: listing(REPO) },
+      ],
+      async (path) => {
+        removed.push(path);
+      }
+    );
+    expect(await git.manager.remove({ repoPath: REPO, path: worktree.path })).toEqual({ ok: true });
+    expect(removed).toEqual([worktree.path]);
+    expect(git.calls).toEqual(git.expected());
+  });
+
+  it.each([
+    ['未登记的路径', worktree.path, listing(REPO, '/data/worktrees/ws_1/other')],
+    ['主 worktree', REPO, listing(REPO)],
+    ['根目录', '/', listing(REPO, '/')],
+    ['含主仓库的目录', '/data/x', listing('/data/x/repo', '/data/x')],
+  ])('兜底不删%s', async (_label, path, stdout) => {
+    const removed: string[] = [];
+    const repoPath = path === '/data/x' ? '/data/x/repo' : REPO;
+    const git = scriptedGit(
+      [
+        { args: ['worktree', 'remove', '--force', '--', path], cwd: repoPath, ...tooLong },
+        { args: ['worktree', 'list', '--porcelain'], cwd: repoPath, stdout },
+      ],
+      async (dir) => {
+        removed.push(dir);
+      }
+    );
+    const result = await git.manager.remove({ repoPath, path, force: true });
+    expect(!result.ok && result.error).toMatch(/Filename too long/);
+    expect(removed).toEqual([]);
+  });
+
+  it('删目录后仍在登记列表里：返回失败', async () => {
+    const git = scriptedGit(
+      [
+        { args: ['worktree', 'remove', '--force', '--', worktree.path], cwd: REPO, ...tooLong },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: REPO,
+          stdout: listing(REPO, worktree.path),
+        },
+        { args: ['worktree', 'prune'], cwd: REPO },
+        {
+          args: ['worktree', 'list', '--porcelain'],
+          cwd: REPO,
+          stdout: listing(REPO, worktree.path),
+        },
+      ],
+      async () => {}
+    );
+    const result = await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true });
+    expect(!result.ok && result.error).toMatch(/still registered/);
   });
 
   it('prune 执行 git worktree prune', async () => {

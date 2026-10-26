@@ -4,6 +4,7 @@ import {
   BUILTIN_ROLES,
   type ExecFn,
   type ExecResult,
+  GIT_CONFIG_ARGS,
   type Role,
   type RoleStore,
 } from '@fynvra/core';
@@ -45,6 +46,10 @@ function defaultGit(args: readonly string[]): Partial<ExecResult> {
   return {};
 }
 
+function startsWith(args: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.every((arg, index) => args[index] === arg);
+}
+
 export function createFakeExec(): FakeExec {
   const calls: ExecCall[] = [];
   const responders: ExecResponder[] = [];
@@ -54,7 +59,11 @@ export function createFakeExec(): FakeExec {
       responders.unshift(responder);
     },
     commands: () => calls.map((call) => `${call.cmd} ${call.args.join(' ')}`),
-    exec: async (cmd, args, cwd) => {
+    exec: async (cmd, rawArgs, cwd) => {
+      // GitWorktreeManager 给每条命令加的 -c core.longpaths=true 在这里去掉，应答与断言只看子命令
+      const args = startsWith(rawArgs, GIT_CONFIG_ARGS)
+        ? rawArgs.slice(GIT_CONFIG_ARGS.length)
+        : rawArgs;
       const call = { cmd, args: [...args], cwd };
       calls.push(call);
       const scripted = responders.map((responder) => responder(call)).find(Boolean);
