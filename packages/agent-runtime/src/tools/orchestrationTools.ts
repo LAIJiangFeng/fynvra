@@ -469,7 +469,6 @@ function isStringArray(value: unknown): value is string[] {
 
 function normalizeRole(value: unknown, roles: readonly RoleOption[]): unknown {
   if (value === undefined || value === null) return DEFAULT_ROLE_ID;
-  if (value === null) return undefined;
   if (typeof value !== 'string') return value;
   const wanted = value.trim();
   if (!wanted) return DEFAULT_ROLE_ID;
@@ -502,6 +501,7 @@ function emptyToUndefined(value: unknown): unknown {
 
 /** 档位不区分大小写、去空白；`none` 归一为 `off`；认不出的原样留给校验报错 */
 function normalizeThinking(value: unknown): unknown {
+  if (value === null) return undefined;
   if (typeof value !== 'string') return value;
   const wanted = value.trim().toLowerCase();
   if (wanted === '') return undefined;
