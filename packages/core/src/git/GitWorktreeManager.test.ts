@@ -305,6 +305,28 @@ describe('GitWorktreeManager.diff', () => {
     expect(git.calls).toEqual(git.expected());
   });
 
+  it('在主仓库用指定 worker ref 读取差异，不读主仓库 HEAD', async () => {
+    const range = `${BASE}...refs/heads/fynvra/add-parser`;
+    const git = scriptedGit([
+      { args: ['diff', '--name-only', '-z', range], cwd: REPO, stdout: 'worker.ts\0' },
+      {
+        args: ['-c', 'core.quotepath=false', 'diff', '--no-color', '--no-ext-diff', range],
+        cwd: REPO,
+        stdout: '+worker change\n',
+      },
+    ]);
+    expect(
+      await git.manager.diff({ path: REPO, baseCommit: BASE }, BASE, 'refs/heads/fynvra/add-parser')
+    ).toEqual({ ok: true, files: ['worker.ts'], patch: '+worker change\n' });
+    expect(git.calls).toEqual(git.expected());
+  });
+
+  it.each(['', '--output=/tmp/x', 'HEAD\n--stat'])('拒绝非法 headRef %j', async (headRef) => {
+    const git = scriptedGit([]);
+    expect(await git.manager.diff(worktree, BASE, headRef)).toMatchObject({ ok: false });
+    expect(git.calls).toEqual([]);
+  });
+
   it('拒绝以 - 开头的 baseCommit', async () => {
     const git = scriptedGit([]);
     const result = await git.manager.diff(worktree, '--output=/tmp/x');

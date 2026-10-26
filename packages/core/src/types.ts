@@ -103,6 +103,8 @@ export interface Task {
   status: TaskStatus;
   /** 前置任务 id。 */
   dependsOn: string[];
+  /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
+  mergedDiff?: { baseCommit: string; headCommit: string };
 }
 
 /**

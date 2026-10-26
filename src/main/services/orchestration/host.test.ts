@@ -514,7 +514,7 @@ describe('sendToWorker', () => {
 });
 
 describe('reviewDiff 与 runChecks', () => {
-  it('reviewDiff：baseCommit...HEAD 的文件、stat 与 diff（在 worktree 里执行）', async () => {
+  it('reviewDiff：baseCommit...worker 分支的文件、stat 与 diff（在主仓库里执行）', async () => {
     const first = await dispatch();
     const start = fake.calls.length;
     expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toEqual({
@@ -526,11 +526,11 @@ describe('reviewDiff 与 runChecks', () => {
       diff: 'diff --git a/src/a.ts\n+x\n',
     });
     expect(commandsSince(start)).toEqual([
-      `git diff --name-only -z ${BASE_COMMIT}...HEAD`,
-      `git -c core.quotepath=false diff --no-color --no-ext-diff ${BASE_COMMIT}...HEAD`,
-      `git -c core.quotepath=false diff --stat=200 --no-color ${BASE_COMMIT}...HEAD`,
+      `git diff --name-only -z ${BASE_COMMIT}...refs/heads/fynvra/add-toggle`,
+      `git -c core.quotepath=false diff --no-color --no-ext-diff ${BASE_COMMIT}...refs/heads/fynvra/add-toggle`,
+      `git -c core.quotepath=false diff --stat=200 --no-color ${BASE_COMMIT}...refs/heads/fynvra/add-toggle`,
     ]);
-    expect(fake.calls.slice(start).every((call) => call.cwd === WORKTREE_PATH)).toBe(true);
+    expect(fake.calls.slice(start).every((call) => call.cwd === '/repo')).toBe(true);
   });
 
   it('runChecks：白名单外的命令被拒绝，不会执行', async () => {
@@ -582,6 +582,7 @@ describe('mergeWorktree', () => {
       'git rev-parse --verify --quiet main^{commit}',
       `git rev-list --left-right --count ${BASE_COMMIT}...HEAD`,
       'git symbolic-ref --quiet --short HEAD',
+      'git rev-parse --verify --quiet refs/heads/fynvra/add-toggle^{commit}',
       'git merge --no-ff --no-edit fynvra/add-toggle',
       'git rev-parse HEAD',
     ]);
@@ -592,8 +593,12 @@ describe('mergeWorktree', () => {
       '/repo',
       '/repo',
       '/repo',
+      '/repo',
     ]);
-    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
+    expect(store.tasks.get(first.task.id)).toMatchObject({
+      status: 'completed',
+      mergedDiff: { baseCommit: BASE_COMMIT, headCommit: BASE_COMMIT },
+    });
     expect(store.dispatches.get(first.dispatch.id)).toMatchObject({ outcome: 'succeeded' });
   });
 
@@ -617,6 +622,22 @@ describe('mergeWorktree', () => {
     expect(store.tasks.get(second)?.status).toBe('in-progress');
     expect(launcher.createWorkerSession).toHaveBeenCalledTimes(2);
     expect(store.dispatches.list((dispatch) => dispatch.taskId === second)).toHaveLength(1);
+  });
+
+  it('读不到 worker 提交时不合并、不标记完成，避免清理后失去历史范围', async () => {
+    const first = await reported();
+    fake.respond(({ args }) =>
+      args[0] === 'rev-parse' && args.at(-1) === 'refs/heads/fynvra/add-toggle^{commit}'
+        ? { code: 1, stdout: '' }
+        : undefined
+    );
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('could not read the worker commit'),
+    });
+    expect(fake.commands().some((command) => command.startsWith('git merge'))).toBe(false);
+    expect(store.tasks.get(first.task.id)?.status).toBe('in-review');
+    expect(store.tasks.get(first.task.id)).not.toHaveProperty('mergedDiff');
   });
 
   it('worker 还没汇报时拒绝合并', async () => {
@@ -797,7 +818,7 @@ describe('cleanupWorktree', () => {
       ok: false,
       error: expect.stringContaining('already cleaned up'),
     });
-    expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toMatchObject({ ok: false });
+    expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toMatchObject({ ok: true });
   });
 
   it('分支删不掉时 deletedBranch: false，worktree 照常清理', async () => {

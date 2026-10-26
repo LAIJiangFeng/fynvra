@@ -44,7 +44,7 @@ import {
 } from './checkCommand';
 import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
-import { currentBranch, readDispatchOutput, reviewWorktreeDiff } from './queries';
+import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
 
 /** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
@@ -527,8 +527,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
     if (isInPlace(found.dispatch)) return reportedFiles(found.task);
-    if (found.worktree === undefined) return fail(cleanedUp(found.dispatch));
-    return reviewWorktreeDiff({ git, exec: deps.exec }, found.worktree);
+    return reviewDispatchDiff({ git, exec: deps.exec, store, repoPath }, found.dispatch);
   }
 
   async function runChecks(
@@ -587,6 +586,16 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       );
     }
 
+    // 在合并前固定 worker 提交；主仓库的合并提交还可能包含其他任务的改动，不能作为 diff 终点。
+    const head = await deps.exec(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}^{commit}`],
+      repoPath
+    );
+    const headCommit = head.stdout.trim();
+    if (head.code !== 0 || headCommit === '') {
+      return fail(`could not read the worker commit for ${worktree.branch}; merge was not started`);
+    }
     const merged = await git.merge({ repoPath, branch: worktree.branch });
     if (!merged.ok) {
       if (merged.conflicts !== undefined && merged.conflicts.length > 0) {
@@ -599,7 +608,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       }
       return fail(merged.error);
     }
-    const completed = store.tasks.update(task.id, { status: 'completed' });
+    const completed = store.tasks.update(task.id, {
+      status: 'completed',
+      mergedDiff: { baseCommit: worktree.baseCommit, headCommit },
+    });
     if (!completed.ok) {
       return fail(
         `${worktree.branch} was merged into ${coordinatorBranch}, but the task could not be marked completed: ${completed.error}`

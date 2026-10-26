@@ -5,7 +5,6 @@ import {
   type GitWorktreeManager,
   isDispatchSettled,
   type OrchestrationStore,
-  type Worktree,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { fail } from './hostResult';
@@ -24,29 +23,34 @@ export async function currentBranch(exec: ExecFn, repoPath: string): Promise<str
   }
 }
 
-/** worker 已提交的改动（`baseCommit...HEAD`）：文件列表、`--stat` 摘要与完整 diff。 */
-export async function reviewWorktreeDiff(
-  deps: { git: GitWorktreeManager; exec: ExecFn },
-  worktree: Worktree
+/** 在主仓库读 worker 提交；合并后优先使用固定范围，清理目录、删除或复用分支不影响历史改动。 */
+export async function reviewDispatchDiff(
+  deps: { git: GitWorktreeManager; exec: ExecFn; store: OrchestrationStore; repoPath: string },
+  dispatch: Dispatch
 ): Promise<HostResult<ReviewDiffOutput>> {
-  const diff = await deps.git.diff(worktree);
+  const mergedDiff = deps.store.tasks.get(dispatch.taskId)?.mergedDiff;
+  const worktree = deps.store.worktrees.get(dispatch.worktreeId);
+  const baseCommit = mergedDiff?.baseCommit ?? worktree?.baseCommit;
+  const headRef = mergedDiff?.headCommit ?? (worktree && `refs/heads/${worktree.branch}`);
+  if (baseCommit === undefined || headRef === undefined) {
+    return fail(
+      `the worktree of dispatch ${dispatch.id} was already cleaned up; no saved diff commits`
+    );
+  }
+  const diff = await deps.git.diff({ path: deps.repoPath, baseCommit }, baseCommit, headRef);
   if (!diff.ok) return fail(`could not read the diff: ${diff.error}`);
   let stat = '';
   try {
     const args = ['-c', 'core.quotepath=false', 'diff', '--stat=200', '--no-color'];
-    const result = await deps.exec(
-      'git',
-      [...args, `${worktree.baseCommit}...HEAD`],
-      worktree.path
-    );
+    const result = await deps.exec('git', [...args, `${baseCommit}...${headRef}`], deps.repoPath);
     if (result.code === 0) stat = result.stdout.trimEnd();
   } catch {
     // stat 只是摘要；diff 已经拿到，取不到 stat 时留空
   }
   return {
     ok: true,
-    branch: worktree.branch,
-    baseCommit: worktree.baseCommit,
+    branch: dispatch.branch,
+    baseCommit,
     files: diff.files,
     stat,
     diff: diff.patch,

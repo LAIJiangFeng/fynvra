@@ -75,7 +75,8 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   （不是错误），task 保持 `in-review`。
 - **`cleanup_worktree`**：先 `disposeSession`，再 `worktree remove --force`、从 store 删 worktree，最后删分支：
   已合并用 `-d`，未完成的任务视为放弃（进行中的尝试按 failed 结算、task → `abandoned`）用 `-D`。删 worktree 失败时
-  返回错误并保留记录，可以重试。清理后该 dispatch 的 `review_diff` 不再可用（worktree 记录与分支都没了）。
+  返回错误并保留记录，可以重试。合并时在 Task 保存 `mergedDiff`（基准 / worker 提交），清理后 `review_diff` 与面板仍从主仓库读这对提交。
+  旧记录没有固定范围时，使用尚存的 worktree 基准和 worker 分支，不在已注销的 worktree 目录里跑 diff。
 - **`run_checks` 白名单**：每一段（`&&`、`;`、`|` 分隔）以 pnpm / npm / yarn / bun / node / npx / git / cargo / go /
   python / pytest / make 开头，其余 shell 元字符一律拒绝；默认另外只放行 git 只读子命令、拒绝 npm publish 之类的发布命令。
   这是护栏不是沙箱（node / npx / make 本身能执行任意代码），可通过 `checkPolicy` 替换。执行时关闭颜色、默认 20 分钟超时。

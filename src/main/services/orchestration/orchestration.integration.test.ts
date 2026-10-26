@@ -43,6 +43,21 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   let service: OrchestrationService;
   let host: OrchestrationHost;
 
+  function openService(): OrchestrationService {
+    return createOrchestrationService({
+      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
+      statePath,
+      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
+      launcher,
+      roles: createFakeRoles(),
+      exec: nodeExec,
+      runChecks: createShellRunner(),
+      fs,
+      notifyChanged: () => {},
+      log: () => {},
+    });
+  }
+
   beforeEach(() => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'fynvra-orchestration-it-')));
     repo = join(root, 'repo');
@@ -56,18 +71,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     commitFile(repo, 'a.txt', 'base\n', 'init');
 
     launcher = createFakeLauncher();
-    service = createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
-      statePath,
-      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
-      launcher,
-      roles: createFakeRoles(),
-      exec: nodeExec,
-      runChecks: createShellRunner(),
-      fs,
-      notifyChanged: () => {},
-      log: () => {},
-    });
+    service = openService();
     host = service.hostFor('session_coord');
   });
 
@@ -153,6 +157,71 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(snapshot.worktrees).toEqual([]);
     await service.flush();
     expect(JSON.parse(readFileSync(statePath, 'utf8')).tasks[0].status).toBe('completed');
+  });
+
+  it('旧记录的 worktree 已注销但残留目录还在：工具和面板从主仓库读取 worker 分支', async () => {
+    const { dispatch: attempt, worktree } = await dispatch('Removed directory');
+    commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
+    await report(attempt.workerSessionId);
+    const expected = await service.reviewDiff(attempt.id);
+    expect(expected).toMatchObject({ ok: true, files: ['worker.txt'] });
+
+    // 模拟旧版 Windows 清理失败：Git 登记和 .git 已删，应用仍保留 worktree 记录。
+    git(repo, 'merge', '--no-ff', '--no-edit', worktree.branch);
+    git(repo, 'worktree', 'remove', worktree.path);
+    mkdirSync(worktree.path);
+    commitFile(repo, 'unrelated.txt', 'not part of this task\n', 'unrelated');
+    expect(await service.reviewDiff(attempt.id)).toEqual(expected);
+    expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(expected);
+
+    rmSync(worktree.path, { recursive: true });
+    expect(await service.reviewDiff(attempt.id)).toEqual(expected);
+  });
+
+  it.each(['coordinator', 'archive'] as const)(
+    '%s 清理 worktree 与分支后，重启仍读取固定提交，不混入主分支或同名新分支的改动',
+    async (cleanup) => {
+      const { dispatch: attempt, worktree } = await dispatch('Historical change');
+      commitFile(worktree.path, 'worker.txt', 'original change\n', 'worker change');
+      await report(attempt.workerSessionId);
+      const expected = await service.reviewDiff(attempt.id);
+      expect(expected).toMatchObject({ ok: true, files: ['worker.txt'] });
+      // 主分支在 worker 期间前进：不能用主分支 HEAD 或合并提交作为 diff 终点。
+      commitFile(repo, 'unrelated.txt', 'another task\n', 'unrelated');
+      expect(await host.mergeWorktree({ dispatchId: attempt.id })).toMatchObject({ merged: true });
+      if (cleanup === 'coordinator') {
+        expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({
+          ok: true,
+          deletedBranch: true,
+        });
+      } else {
+        expect(await service.cleanupMergedWorktree(attempt.workerSessionId)).toEqual({
+          removed: true,
+        });
+      }
+      expect((await service.snapshot()).worktrees).toEqual([]);
+      expect(git(repo, 'branch', '--list', worktree.branch)).toBe('');
+      expect(await service.reviewDiff(attempt.id)).toEqual(expected);
+      expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(expected);
+      await service.flush();
+
+      commitFile(repo, 'later.txt', 'later change\n', 'later');
+      git(repo, 'branch', worktree.branch);
+      const restored = openService();
+      expect(await restored.reviewDiff(attempt.id)).toEqual(expected);
+      expect(
+        await restored.hostFor('session_coord').reviewDiff({ dispatchId: attempt.id })
+      ).toEqual(expected);
+    }
+  );
+
+  it('worker 分支已丢失时不能悄悄显示主仓库 HEAD 的改动', async () => {
+    const { dispatch: attempt, worktree } = await dispatch('Missing branch');
+    commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
+    git(repo, 'worktree', 'remove', worktree.path);
+    git(repo, 'branch', '-D', worktree.branch);
+    commitFile(repo, 'unrelated.txt', 'not worker changes\n', 'unrelated');
+    expect(await service.reviewDiff(attempt.id)).toMatchObject({ ok: false });
   });
 
   it('冲突：worker 与主分支改了同一行 → merged: false 并列出冲突文件，主仓库回到合并前', async () => {

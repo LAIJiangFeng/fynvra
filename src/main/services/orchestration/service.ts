@@ -25,7 +25,7 @@ import type { CheckCommandPolicy } from './checkCommand';
 import { createOrchestrationHost, type RunChecksFn } from './host';
 import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
-import { currentBranch, readDispatchOutput, reviewWorktreeDiff } from './queries';
+import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { createWorkerHost } from './workerHost';
 import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
@@ -313,11 +313,10 @@ export function createOrchestrationService(
         if (dispatch.mode === 'in-place') {
           return fail(`dispatch ${dispatchId} has no diff: the workspace has no git`);
         }
-        const worktree = store.worktrees.get(dispatch.worktreeId);
-        if (worktree === undefined) {
-          return fail(`the worktree of dispatch ${dispatchId} was already cleaned up`);
-        }
-        return reviewWorktreeDiff({ git, exec: options.exec }, worktree);
+        return reviewDispatchDiff(
+          { git, exec: options.exec, store, repoPath: workspace.repoPath },
+          dispatch
+        );
       }),
 
     async cleanupMergedWorktree(sessionId) {
