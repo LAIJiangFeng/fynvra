@@ -1,6 +1,6 @@
-import type { WorkspaceFileEntry } from '@shared/types/files';
+import type { FileError, WorkspaceFileEntry } from '@shared/types/files';
 import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Link, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   ConfirmDeleteDialog,
   MENU_ICONS,
@@ -21,7 +21,7 @@ interface MenuTarget {
   parentId: string | undefined;
 }
 
-/** 新建 / 重命名对话框的目标。 */
+/** 新建行 / 重命名对话框的目标。 */
 interface NameTarget {
   kind: 'create' | 'rename';
   entryKind: 'file' | 'directory';
@@ -35,10 +35,29 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [nameTarget, setNameTarget] = useState<NameTarget | null>(null);
   const [deleting, setDeleting] = useState<WorkspaceFileEntry | null>(null);
+  const [actionError, setActionError] = useState<FileError | 'restartRequired' | null>(null);
 
   useEffect(() => {
     void store.getState().refresh();
   }, [store]);
+
+  const startCreate = (parentId: string | undefined, entryKind: 'file' | 'directory') => {
+    const state = store.getState();
+    if (parentId && !state.expanded.includes(parentId)) void state.toggleDirectory(parentId);
+    setNameTarget({ kind: 'create', entryKind, parentId });
+  };
+
+  const runAction = async (
+    action: () => Promise<{ ok: true } | { ok: false; error: FileError | 'restartRequired' }>
+  ) => {
+    setActionError(null);
+    try {
+      const result = await action();
+      if (!result.ok) setActionError(result.error);
+    } catch {
+      setActionError('unavailable');
+    }
+  };
 
   const clipboardCopy = async (text: string) => {
     try {
@@ -50,20 +69,19 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
 
   const menuItems = (target: MenuTarget): MenuItem[] => {
     const { entry, parentId } = target;
-    const separator: MenuItem = { id: 'sep' };
     if (!entry) {
       return [
         {
           id: 'new-file',
           label: t('files.menu.newFile'),
           icon: MENU_ICONS.newFile,
-          onSelect: () => setNameTarget({ kind: 'create', entryKind: 'file', parentId }),
+          onSelect: () => startCreate(parentId, 'file'),
         },
         {
           id: 'new-folder',
           label: t('files.menu.newFolder'),
           icon: MENU_ICONS.newFolder,
-          onSelect: () => setNameTarget({ kind: 'create', entryKind: 'directory', parentId }),
+          onSelect: () => startCreate(parentId, 'directory'),
         },
       ];
     }
@@ -74,16 +92,15 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
           id: 'new-file',
           label: t('files.menu.newFile'),
           icon: MENU_ICONS.newFile,
-          onSelect: () => setNameTarget({ kind: 'create', entryKind: 'file', parentId: entry.id }),
+          onSelect: () => startCreate(entry.id, 'file'),
         },
         {
           id: 'new-folder',
           label: t('files.menu.newFolder'),
           icon: MENU_ICONS.newFolder,
-          onSelect: () =>
-            setNameTarget({ kind: 'create', entryKind: 'directory', parentId: entry.id }),
+          onSelect: () => startCreate(entry.id, 'directory'),
         },
-        separator
+        { id: 'sep-create' }
       );
     } else if (entry.kind === 'file') {
       items.push(
@@ -93,28 +110,26 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
           icon: MENU_ICONS.view,
           onSelect: () => void store.getState().openFile(entry),
         },
-        separator
+        { id: 'sep-view' }
       );
     }
     items.push({
       id: 'copy',
       label: t('files.menu.copy'),
       icon: MENU_ICONS.copy,
-      onSelect: () => void store.getState().copyEntry(entry),
+      onSelect: () => void runAction(() => store.getState().copyEntry(entry)),
     });
     items.push(
       {
         id: 'copy-path',
         label: t('files.menu.copyPath'),
         icon: MENU_ICONS.copyPath,
-        onSelect: () => {
-          void store
-            .getState()
-            .resolvePath(entry)
-            .then((result) => {
-              if (result.ok) void clipboardCopy(result.path);
-            });
-        },
+        onSelect: () =>
+          void runAction(async () => {
+            const result = await store.getState().resolvePath(entry);
+            if (result.ok) await clipboardCopy(result.path);
+            return result;
+          }),
       },
       {
         id: 'copy-relative-path',
@@ -128,15 +143,16 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
         id: 'duplicate',
         label: t('files.menu.duplicate'),
         icon: MENU_ICONS.duplicate,
-        onSelect: () => void store.getState().duplicateFile(parentId, entry),
+        onSelect: () => void runAction(() => store.getState().duplicateFile(parentId, entry)),
       });
     }
     items.push(
-      separator,
+      { id: 'sep-actions' },
       {
         id: 'reveal',
         label: t('files.menu.reveal'),
-        onSelect: () => void store.getState().revealEntry(entry),
+        icon: MENU_ICONS.reveal,
+        onSelect: () => void runAction(() => store.getState().revealEntry(entry)),
       },
       {
         id: 'rename',
@@ -185,8 +201,21 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
             setMenu({ x: event.clientX, y: event.clientY, entry: null, parentId: undefined });
           }}
         >
-          <DirectoryEntries store={store} depth={0} onContextMenu={setMenu} />
+          <DirectoryEntries
+            store={store}
+            depth={0}
+            onContextMenu={setMenu}
+            creating={nameTarget?.kind === 'create' ? nameTarget : null}
+            onCancelCreate={() =>
+              setNameTarget((current) => (current === nameTarget ? null : current))
+            }
+          />
         </nav>
+        {actionError && (
+          <p role="alert" className="shrink-0 px-3 py-2 text-destructive text-xs">
+            {t(`files.errors.${actionError}`)}
+          </p>
+        )}
       </section>
 
       {menu && (
@@ -197,28 +226,18 @@ export function FilesView({ store, workspaceName }: { store: FilesStore; workspa
           onClose={() => setMenu(null)}
         />
       )}
-      {nameTarget && (
+      {nameTarget?.kind === 'rename' && nameTarget.entry && (
         <NameDialog
-          title={t(
-            nameTarget.kind === 'create'
-              ? nameTarget.entryKind === 'file'
-                ? 'files.menu.newFile'
-                : 'files.menu.newFolder'
-              : 'files.renameTitle',
-            nameTarget.entry ? { name: nameTarget.entry.name } : undefined
-          )}
-          initial={nameTarget.kind === 'rename' ? (nameTarget.entry?.name ?? '') : ''}
-          confirmLabel={t(nameTarget.kind === 'create' ? 'common.create' : 'common.save')}
+          title={t('files.renameTitle', { name: nameTarget.entry.name })}
+          initial={nameTarget.entry.name}
+          confirmLabel={t('common.save')}
           busyLabel={t('common.working')}
           onConfirm={async (name) => {
-            const state = store.getState();
-            const result =
-              nameTarget.kind === 'create'
-                ? await state.createEntry(nameTarget.parentId, name, nameTarget.entryKind)
-                : nameTarget.entry
-                  ? await state.renameEntry(nameTarget.parentId, nameTarget.entry, name)
-                  : null;
-            if (!result || result.ok) return null;
+            if (!nameTarget.entry) return null;
+            const result = await store
+              .getState()
+              .renameEntry(nameTarget.parentId, nameTarget.entry, name);
+            if (result.ok) return null;
             return result.error === 'restartRequired' ? 'unavailable' : result.error;
           }}
           onClose={() => setNameTarget(null)}
@@ -259,14 +278,19 @@ function DirectoryEntries({
   directoryId,
   depth,
   onContextMenu,
+  creating,
+  onCancelCreate,
 }: {
   store: FilesStore;
   directoryId?: string;
   depth: number;
   onContextMenu(target: MenuTarget): void;
+  creating: NameTarget | null;
+  onCancelCreate(): void;
 }) {
   const t = useT();
   const directory = store((state) => state.directories[directoryId ?? ROOT_DIRECTORY_ID]);
+  const creatingHere = creating && creating.parentId === directoryId;
   if (!directory || (directory.loading && directory.entries.length === 0))
     return (
       <div
@@ -292,6 +316,15 @@ function DirectoryEntries({
     );
   return (
     <ul className="min-w-fit">
+      {creatingHere && (
+        <NewEntryRow
+          key={creating.entryKind}
+          store={store}
+          target={creating}
+          depth={depth}
+          onClose={onCancelCreate}
+        />
+      )}
       {directory.entries.map((entry) => (
         <FileRow
           key={entry.id}
@@ -300,9 +333,11 @@ function DirectoryEntries({
           depth={depth}
           parentDirectoryId={directoryId}
           onContextMenu={onContextMenu}
+          creating={creating}
+          onCancelCreate={onCancelCreate}
         />
       ))}
-      {directory.entries.length === 0 && (
+      {directory.entries.length === 0 && !creatingHere && (
         <li className="px-4 py-2 text-muted-foreground text-xs">{t('files.emptyDirectory')}</li>
       )}
       {directory.truncated && (
@@ -314,18 +349,124 @@ function DirectoryEntries({
   );
 }
 
+/** 新建条目直接占据目标目录的一行，失败不丢名称，未确认时不写磁盘。 */
+function NewEntryRow({
+  store,
+  target,
+  depth,
+  onClose,
+}: {
+  store: FilesStore;
+  target: NameTarget;
+  depth: number;
+  onClose(): void;
+}) {
+  const t = useT();
+  const input = useRef<HTMLInputElement>(null);
+  const pending = useRef(false);
+  const errorId = useId();
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<FileError | 'restartRequired' | null>(null);
+  const directory = target.entryKind === 'directory';
+  const Icon = directory ? Folder : File;
+  const label = t(directory ? 'files.menu.newFolder' : 'files.menu.newFile');
+
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.scrollIntoView({ block: 'nearest' });
+  }, []);
+
+  const submit = async () => {
+    if (pending.current || !name.trim()) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await store
+        .getState()
+        .createEntry(target.parentId, name.trim(), target.entryKind);
+      if (result.ok) onClose();
+      else setError(result.error);
+    } catch {
+      setError('unavailable');
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li>
+      <div
+        className="flex h-7 items-center gap-1.5 pr-3 text-xs"
+        style={{ paddingLeft: 10 + depth * 14 }}
+      >
+        <span className="w-3 shrink-0" />
+        <Icon
+          className={cn(
+            'size-3.5 shrink-0',
+            directory ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+          )}
+        />
+        <input
+          ref={input}
+          aria-label={label}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          aria-busy={busy}
+          placeholder={label}
+          value={name}
+          readOnly={busy}
+          className="h-6 min-w-0 flex-1 rounded-sm border border-ring bg-background px-1 text-xs outline-none aria-invalid:border-destructive"
+          onChange={(event) => {
+            setName(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === 'Escape' && !pending.current) {
+              event.preventDefault();
+              event.stopPropagation();
+              onClose();
+            } else if (event.key === 'Enter') {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        {busy && <Loader2 aria-hidden="true" className="size-3 shrink-0 animate-spin" />}
+      </div>
+      {error && (
+        <p
+          id={errorId}
+          role="alert"
+          className="pr-3 pb-1 text-destructive text-xs"
+          style={{ paddingLeft: 44 + depth * 14 }}
+        >
+          {t(`files.errors.${error}`)}
+        </p>
+      )}
+    </li>
+  );
+}
+
 function FileRow({
   entry,
   store,
   depth,
   parentDirectoryId,
   onContextMenu,
+  creating,
+  onCancelCreate,
 }: {
   entry: WorkspaceFileEntry;
   store: FilesStore;
   depth: number;
   parentDirectoryId: string | undefined;
   onContextMenu(target: MenuTarget): void;
+  creating: NameTarget | null;
+  onCancelCreate(): void;
 }) {
   const t = useT();
   const expanded = store((state) => state.expanded.includes(entry.id));
@@ -386,6 +527,8 @@ function FileRow({
           directoryId={entry.id}
           depth={depth + 1}
           onContextMenu={onContextMenu}
+          creating={creating}
+          onCancelCreate={onCancelCreate}
         />
       )}
     </li>

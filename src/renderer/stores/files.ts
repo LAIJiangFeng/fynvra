@@ -291,7 +291,7 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
         if (result.ok) {
           await get().loadDirectory(parentId, true);
           if (kind === 'file') await get().openFile(result.entry);
-          else set((state) => ({ expanded: [...state.expanded, result.entry.id] }));
+          else await get().toggleDirectory(result.entry.id);
         }
         return result;
       },

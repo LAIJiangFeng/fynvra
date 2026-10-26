@@ -4,6 +4,7 @@ import {
   Copy,
   Eye,
   FilePlus2,
+  FolderOpen,
   FolderPlus,
   Loader2,
   Pencil,
@@ -50,6 +51,8 @@ export function TreeContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(-1);
   const selectable = items.map((item, index) => (item.label && item.onSelect ? index : -1));
+
+  useEffect(() => menuRef.current?.focus(), []);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -101,6 +104,7 @@ export function TreeContextMenu({
           move(-1);
         } else if (event.key === 'Enter' && active >= 0) {
           event.preventDefault();
+          onClose();
           items[active]?.onSelect?.();
         }
       }}
@@ -140,11 +144,12 @@ export const MENU_ICONS = {
   copyPath: ClipboardCopy,
   duplicate: Copy,
   view: Eye,
+  reveal: FolderOpen,
   rename: Pencil,
   remove: Trash2,
 } as const;
 
-/** 新建 / 重命名共用的名称输入框：确认时调用 action，返回错误文案键则展示错误并保持打开。 */
+/** 重命名输入框：确认时调用 action，返回错误文案键则展示错误并保持打开。 */
 export function NameDialog({
   title,
   description,
@@ -233,10 +238,16 @@ export function ConfirmDeleteDialog({
   const del = async () => {
     if (busy) return;
     setBusy(true);
-    const failure = await onDelete();
-    setBusy(false);
-    if (failure !== null) setError(failure);
-    else onClose();
+    setError(null);
+    try {
+      const failure = await onDelete();
+      if (failure !== null) setError(failure);
+      else onClose();
+    } catch {
+      setError('unavailable');
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>

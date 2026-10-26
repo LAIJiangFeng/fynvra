@@ -325,6 +325,11 @@ describe('文件预览状态', () => {
       kind: 'directory',
     });
     expect(store.getState().expanded).toContain('new-directory');
+    expect(api.list).toHaveBeenCalledWith({ workspaceId: 'ws', directoryId: 'new-directory' });
+    expect(store.getState().directories['new-directory']).toMatchObject({
+      loading: false,
+      error: null,
+    });
   });
 
   it('重命名同步已打开标签的名称与路径', async () => {

@@ -122,8 +122,8 @@ export function registerFilesHandlers(): void {
   const mutating =
     (
       invoke: (input: EntryRefRequest) => Promise<MutationResult>
-    ): ((raw: unknown) => Promise<MutationResult>) =>
-    async (raw: unknown) => {
+    ): ((_event: unknown, raw: unknown) => Promise<MutationResult>) =>
+    async (_event: unknown, raw: unknown) => {
       const input = parseEntryRefRequest(raw);
       if (!input) return { ok: false, error: 'invalidRequest' };
       try {
