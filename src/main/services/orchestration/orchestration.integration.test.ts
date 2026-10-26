@@ -192,6 +192,26 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(omit(await service.reviewDiff(attempt.id), 'uncommitted')).toEqual(committed);
   });
 
+  it('git 删到一半已注销、残留目录没有 .git：cleanup_worktree 删掉目录与分支，记录清掉', async () => {
+    const { dispatch: attempt, worktree } = await dispatch('Leftover directory');
+    commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
+    writeFileSync(join(worktree.path, 'untracked.txt'), 'left behind\n');
+    // 模拟 Windows 上的 "Filename too long"：.git 链接与管理目录没了，目录还在
+    rmSync(join(worktree.path, '.git'));
+    git(repo, 'worktree', 'prune');
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('leftover-directory');
+
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toEqual({
+      ok: true,
+      removedWorktree: true,
+      deletedBranch: true,
+    });
+    expect(existsSync(worktree.path)).toBe(false);
+    expect(git(repo, 'branch', '--list', worktree.branch)).toBe('');
+    expect((await service.snapshot()).worktrees).toEqual([]);
+    expect(existsSync(join(repo, 'a.txt'))).toBe(true);
+  });
+
   it.each(['coordinator', 'archive'] as const)(
     '%s 清理 worktree 与分支后，重启仍读取固定提交，不混入主分支或同名新分支的改动',
     async (cleanup) => {

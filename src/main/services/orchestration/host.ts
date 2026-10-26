@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path';
 import type {
   CleanupWorktreeOutput,
   DispatchRef,
@@ -46,6 +47,7 @@ import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
+import { isInsideDirectory } from './worktreesRoot';
 
 /** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
 export type RunChecksFn = (
@@ -207,9 +209,37 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
   }
 
+  /**
+   * worktree 建在 `<worktreesRoot>/<workspaceId>/<slug>`：记录路径的祖父目录与当前推导出的根目录一致时才返回它，
+   * 作为 `git.remove` 的 `ownedRoot`（允许删掉 git 已注销的残留目录）；对不上（设置改过、退回过 userData）时不担保。
+   */
+  async function ownedRootOf(worktree: Worktree): Promise<string | undefined> {
+    const workspaceDir = dirname(worktree.path);
+    if (basename(workspaceDir) !== workspace.id) return undefined;
+    const root = dirname(workspaceDir);
+    let current: string;
+    try {
+      current = await deps.resolveWorktreesRoot(workspace);
+    } catch {
+      return undefined;
+    }
+    return isInsideDirectory(root, current) && isInsideDirectory(current, root) ? root : undefined;
+  }
+
+  /** 强删 worktree 目录；git 已注销的残留目录在托管根目录内时也删掉。 */
+  async function removeWorktree(worktree: Worktree) {
+    const ownedRoot = await ownedRootOf(worktree);
+    return git.remove({
+      repoPath,
+      path: worktree.path,
+      force: true,
+      ...(ownedRoot === undefined ? {} : { ownedRoot }),
+    });
+  }
+
   /** 删掉 worktree 与分支（尽力而为）；返回拼到错误信息后面的失败说明。 */
   async function discardWorktree(worktree: Worktree): Promise<string> {
-    const removed = await git.remove({ repoPath, path: worktree.path, force: true });
+    const removed = await removeWorktree(worktree);
     const deleted = await git.deleteBranch({ repoPath, branch: worktree.branch, force: true });
     const problems = [removed, deleted].flatMap((result) => (result.ok ? [] : [result.error]));
     return problems.length === 0 ? '' : ` (cleanup failed: ${problems.join('; ')})`;
@@ -724,7 +754,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (!merged) abandon(task);
     // 先停 worker：它的进程可能还占着 worktree 里的文件
     await disposeWorker(dispatch.workerSessionId);
-    const removed = await git.remove({ repoPath, path: worktree.path, force: true });
+    const removed = await removeWorktree(worktree);
     if (!removed.ok) {
       return fail(`could not remove the worktree ${worktree.path}: ${removed.error}`);
     }

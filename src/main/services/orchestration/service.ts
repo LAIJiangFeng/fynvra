@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { lstat, rm } from 'node:fs/promises';
 import type {
   HostResult,
   OrchestrationHost,
@@ -202,6 +202,15 @@ export function createOrchestrationService(
   const git = new GitWorktreeManager({
     exec: options.exec,
     removeDir: (path) => rm(path, { recursive: true, force: true, maxRetries: 3 }),
+    pathKind: async (path) => {
+      try {
+        const stat = await lstat(path);
+        return stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+        throw error;
+      }
+    },
   });
 
   const ready = (async () => {
