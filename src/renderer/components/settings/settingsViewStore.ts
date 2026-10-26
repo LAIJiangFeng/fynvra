@@ -9,6 +9,7 @@ export const SETTINGS_SECTIONS = [
   'mcp',
   'appearance',
   'keybindings',
+  'usage',
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 

@@ -237,6 +237,13 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
 - 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
 
+### 7.5 本机用量统计
+
+- `usage:summary` 只接收 `{ range: 'today' | '7d' | '30d' | '90d' }`，返回当前及前一等长日历周期的总计、每日序列和周日到周六 × 24 小时消息热力图；范围含今天，日界线按本地时间计算。
+- Main 的 `services/usage` 只读流式扫描 `userData/agent/sessions/*.jsonl`（含归档及已从列表删除的会话），跳过坏行和不可读文件，以路径、mtime、size 缓存每文件聚合；不读取正文到 Renderer，不写回 transcript。
+- Token 总量为 input + output + cacheRead + cacheWrite，费用累计 pi 记录的 cost.total；消息仅计 user / assistant。活跃时长累加同一周期内每会话相邻消息不超过 5 分钟的间隔。
+- 改动层限于 shared 用量类型/通道、Main 服务/handler、preload typed 出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。

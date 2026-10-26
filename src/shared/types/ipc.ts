@@ -163,6 +163,10 @@ export const IPC_CHANNELS = {
   NOTIFICATIONS_SET_VIEWING: 'notifications:set-viewing',
   /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
   SESSIONS_FOCUS: 'sessions:focus',
+
+  // --- usage ---
+  /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
+  USAGE_SUMMARY: 'usage:summary',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

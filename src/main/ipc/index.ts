@@ -9,6 +9,7 @@ import { registerSettingsHandlers } from './settings';
 import { registerSkillHandlers } from './skills';
 import { registerTerminalHandlers } from './terminals';
 import { registerUpdateHandlers } from './updates';
+import { registerUsageHandlers } from './usage';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
 
@@ -27,4 +28,5 @@ export function registerIpcHandlers(): void {
   registerSkillHandlers();
   registerMcpHandlers();
   registerNotificationHandlers();
+  registerUsageHandlers();
 }
