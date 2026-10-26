@@ -128,12 +128,9 @@ function DispatchDiff({
   const t = useT();
 
   useEffect(() => {
-    if (worktreeAlive) void loadDiff(dispatchId);
-  }, [dispatchId, worktreeAlive, loadDiff]);
-
-  if (!worktreeAlive && entry?.status !== 'ready') {
-    return <PanelMessage icon={GitCompareArrows} title={t('orchestration.worktreeCleaned')} />;
-  }
+    // 已合并的改动从主仓库里的固定提交读取，不以 worktree 是否还在决定能否加载。
+    void loadDiff(dispatchId);
+  }, [dispatchId, loadDiff]);
   if (!entry || entry.status === 'loading') {
     return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
   }
@@ -160,7 +157,7 @@ function DispatchDiff({
       data={entry.data}
       refreshing={entry.refreshing}
       stale={!worktreeAlive}
-      onRefresh={worktreeAlive ? () => void loadDiff(dispatchId, { force: true }) : undefined}
+      onRefresh={() => void loadDiff(dispatchId, { force: true })}
     />
   );
 }

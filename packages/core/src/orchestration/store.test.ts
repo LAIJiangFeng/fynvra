@@ -322,6 +322,28 @@ describe('parseOrchestrationSnapshot', () => {
     });
   });
 
+  it('保留已合并任务的 diff 提交范围，旧任务没有此字段仍可加载', () => {
+    const mergedDiff = { baseCommit: 'a'.repeat(40), headCommit: 'b'.repeat(40) };
+    const completed = { ...task, status: 'completed', mergedDiff };
+    expect(parseOrchestrationSnapshot({ version: 1, tasks: [completed] })).toMatchObject({
+      ok: true,
+      snapshot: { tasks: [completed] },
+    });
+    expect(parseOrchestrationSnapshot({ version: 1, tasks: [task] })).toMatchObject({
+      ok: true,
+      snapshot: { tasks: [task] },
+    });
+  });
+
+  it.each([null, 'HEAD', {}, { baseCommit: 42, headCommit: 'abc' }, { baseCommit: 'abc' }])(
+    '拒绝非法的 mergedDiff %j',
+    (mergedDiff) => {
+      expect(
+        parseOrchestrationSnapshot({ version: 1, tasks: [{ ...task, mergedDiff }] })
+      ).toMatchObject({ ok: false, error: expect.stringContaining('mergedDiff') });
+    }
+  );
+
   it('普通目录的尝试保留 mode: in-place（worktreeId / branch 为空串）', () => {
     const inPlace = { ...dispatch, worktreeId: '', branch: '', mode: 'in-place' as const };
     expect(parseOrchestrationSnapshot({ version: 1, dispatches: [inPlace] })).toMatchObject({

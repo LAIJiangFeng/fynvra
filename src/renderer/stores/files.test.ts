@@ -1,7 +1,10 @@
 import type {
   DirectoryResult,
+  EntryResult,
   FileResult,
   FileWriteResult,
+  MutationResult,
+  ResolveResult,
   WorkspaceFileEntry,
 } from '@shared/types/files';
 import { describe, expect, it, vi } from 'vitest';
@@ -36,6 +39,28 @@ const fakeApi = () => ({
       preview: { ...ready(text).preview, version: 'b'.repeat(64) },
     })
   ),
+  create: vi.fn(
+    async ({ kind }: { kind: 'file' | 'directory' }): Promise<EntryResult> => ({
+      ok: true,
+      entry: {
+        id: `new-${kind}`,
+        name: `x.${kind === 'file' ? 'ts' : ''}`,
+        relativePath: `x.${kind === 'file' ? 'ts' : ''}`,
+        kind,
+      },
+    })
+  ),
+  rename: vi.fn(
+    async ({ entryId }: { entryId: string }): Promise<EntryResult> => ({
+      ok: true,
+      entry: { ...file(entryId), name: 'b.ts', relativePath: 'b.ts' },
+    })
+  ),
+  duplicate: vi.fn(async (): Promise<EntryResult> => ({ ok: true, entry: file('copy') })),
+  remove: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
+  reveal: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
+  copy: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
+  resolve: vi.fn(async (): Promise<ResolveResult> => ({ ok: true, path: 'D:/repo/b.ts' })),
 });
 
 function deferred<T>() {
@@ -282,6 +307,62 @@ describe('文件预览状态', () => {
     });
     await store.getState().openFile(file('a'));
     expect(store.getState().previews.a?.preview).toMatchObject({ text: '内容' });
+  });
+
+  it('新建文件后刷新目录并打开；新建目录后自动展开', async () => {
+    const api = fakeApi();
+    const store = createFilesStore(api, 'ws');
+    const created = await store.getState().createEntry(undefined, 'x.ts', 'file');
+    expect(created).toMatchObject({ ok: true, entry: { id: 'new-file' } });
+    expect(api.list).toHaveBeenCalledWith({ workspaceId: 'ws' });
+    expect(store.getState().opened.map((entry) => entry.id)).toContain('new-file');
+
+    await store.getState().createEntry('dir-1', 'y', 'directory');
+    expect(api.create).toHaveBeenLastCalledWith({
+      workspaceId: 'ws',
+      parentDirectoryId: 'dir-1',
+      name: 'y',
+      kind: 'directory',
+    });
+    expect(store.getState().expanded).toContain('new-directory');
+    expect(api.list).toHaveBeenCalledWith({ workspaceId: 'ws', directoryId: 'new-directory' });
+    expect(store.getState().directories['new-directory']).toMatchObject({
+      loading: false,
+      error: null,
+    });
+  });
+
+  it('重命名同步已打开标签的名称与路径', async () => {
+    const api = fakeApi();
+    const store = createFilesStore(api, 'ws');
+    await store.getState().openFile(file('a'));
+    const result = await store.getState().renameEntry(undefined, file('a'), 'b.ts');
+    expect(result).toMatchObject({ ok: true, entry: { name: 'b.ts' } });
+    expect(store.getState().opened[0]).toMatchObject({
+      id: 'a',
+      name: 'b.ts',
+      relativePath: 'b.ts',
+    });
+  });
+
+  it('删除条目后关闭受影响的打开标签、收起目录并刷新', async () => {
+    const api = fakeApi();
+    const store = createFilesStore(api, 'ws');
+    await store.getState().openFile(file('a'));
+    const dir: WorkspaceFileEntry = {
+      id: 'dir-1',
+      name: 'dir',
+      relativePath: 'dir',
+      kind: 'directory',
+    };
+    store.setState({ expanded: [...store.getState().expanded, 'dir-1'] });
+    expect(await store.getState().deleteEntry(undefined, dir)).toEqual({ ok: true });
+    expect(store.getState().expanded).not.toContain('dir-1');
+    // 删除打开过的文件：标签与预览一并移除
+    expect(await store.getState().deleteEntry(undefined, file('a'))).toEqual({ ok: true });
+    expect(store.getState().opened).toEqual([]);
+    expect(store.getState().previews).toEqual({});
+    expect(store.getState().selectedId).toBeNull();
   });
 
   it('两个工作区的响应与打开标签彼此隔离', async () => {

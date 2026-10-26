@@ -191,15 +191,18 @@ export class GitWorktreeManager {
   }
 
   /**
-   * `baseCommit...HEAD` 的改动：worker 已提交的内容（即合并会带进来的东西），不含未提交改动。
+   * `baseCommit...headRef` 的已提交改动，不含未提交改动。
    * @param baseCommit - 默认 `worktree.baseCommit`；传目标分支名可只看相对它当前位置的改动。
+   * @param headRef - 默认 HEAD；指定 worker 分支或提交时可在主仓库读取，不依赖 worktree 目录。
    */
   async diff(
     worktree: Pick<Worktree, 'path' | 'baseCommit'>,
-    baseCommit: string = worktree.baseCommit
+    baseCommit: string = worktree.baseCommit,
+    headRef = 'HEAD'
   ): Promise<WorktreeDiffResult> {
     if (!isSafeRefArg(baseCommit)) return fail(`invalid baseCommit: ${JSON.stringify(baseCommit)}`);
-    const range = `${baseCommit}...HEAD`;
+    if (!isSafeRefArg(headRef)) return fail(`invalid headRef: ${JSON.stringify(headRef)}`);
+    const range = `${baseCommit}...${headRef}`;
     const namesArgs = ['diff', '--name-only', '-z', range];
     const names = await this.#git(namesArgs, worktree.path);
     if (names.code !== 0) return fail(describeFailure(namesArgs, names));

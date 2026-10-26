@@ -7,6 +7,7 @@ import { BUILTIN_ROLES, getBuiltinRole, JsonFileRoleStore, type Role } from '@fy
 import type { AgentApprovalRequest, AgentCommand, ModelQuery } from '@shared/types/agent';
 import type {
   ApprovalDecision,
+  ChatImage,
   ModelThinkingCapability,
   SessionEventEnvelope,
   SessionModelRef,
@@ -157,7 +158,7 @@ describe('createAgentHost sessions', () => {
     expect(env.sent()).toEqual([]);
   });
 
-  it("records the role's approval mode; a dispatched worker takes its own role's, not the orchestrator's", async () => {
+  it("records the role's approval mode; a dispatched worker inherits the coordinator's current one", async () => {
     const careful: Role = { ...tester, id: 'careful', name: 'Careful', approvalMode: 'supervised' };
     const env = setup({
       roles: {
@@ -170,19 +171,31 @@ describe('createAgentHost sessions', () => {
     expect((await createSession(env, 'careful')).approvalMode).toBe('supervised');
 
     env.host.setCoordinatorLookup(() => coordinator.id);
-    const created = await env.host.implementsLauncher().createWorkerSession({
-      workspaceId: 'ws-1',
-      runId: 'run_1',
-      dispatchId: 'dsp_1',
-      roleId: 'tester',
-      cwd: '/worktrees/ws-1/a',
-      worktreeId: 'wt_1',
-      brief: '# A',
+    const dispatch = async () => {
+      const created = await env.host.implementsLauncher().createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId: `dsp_${env.host.list('ws-1').length}`,
+        roleId: 'tester',
+        cwd: '/worktrees/ws-1/a',
+        worktreeId: 'wt_1',
+        brief: '# A',
+      });
+      if (!created.ok) throw new Error(created.error);
+      return env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    };
+    // 主 agent 当前是 full：worker 带过去的是 full，不是角色自己的 auto-edits
+    expect(await dispatch()).toMatchObject({
+      parentSessionId: coordinator.id,
+      approvalMode: 'full',
     });
-    if (!created.ok) throw new Error(created.error);
-    const worker = env.host.list('ws-1').find((session) => session.id === created.sessionId);
-    expect(worker).toMatchObject({ parentSessionId: coordinator.id, approvalMode: 'auto-edits' });
-    // 落盘的也是它
+    // 主 agent 切成 supervised 后再派：新 worker 跟随新档位
+    await env.host.setApprovalMode({ sessionId: coordinator.id, mode: 'supervised' });
+    expect(await dispatch()).toMatchObject({ approvalMode: 'supervised' });
+    // 没有主 agent（未接线）：回落角色自己的档位
+    env.host.setCoordinatorLookup(() => undefined);
+    expect(await dispatch()).toMatchObject({ approvalMode: 'auto-edits' });
+    // 落盘的也是它们
     expect(env.store.flush()).toBe(true);
     const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
     expect(
@@ -191,8 +204,10 @@ describe('createAgentHost sessions', () => {
         session.approvalMode,
       ])
     ).toEqual([
-      ['orchestrator', 'full'],
+      ['orchestrator', 'supervised'],
       ['careful', 'supervised'],
+      ['tester', 'full'],
+      ['tester', 'supervised'],
       ['tester', 'auto-edits'],
     ]);
   });
@@ -273,6 +288,37 @@ describe('createAgentHost sessions', () => {
       'prompt',
     ]);
     expect(env.host.list('ws-1')[0]?.title).toBe('Fix the flaky build');
+  });
+
+  it('sends the pasted images with the prompt, and only when there are some', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const identity = { sessionId: session.id, generation: 1 };
+    expect(await env.host.prompt(session.id, 'What is wrong here?', [screenshot])).toEqual({
+      ok: true,
+    });
+    await env.host.prompt(session.id, '', [screenshot]);
+    await env.host.prompt(session.id, 'text only');
+    expect(env.sent('prompt')).toEqual([
+      { type: 'prompt', identity, text: 'What is wrong here?', images: [screenshot] },
+      { type: 'prompt', identity, text: '', images: [screenshot] },
+      { type: 'prompt', identity, text: 'text only' },
+    ]);
+    expect(env.sent('prompt')[2]).not.toHaveProperty('images');
+  });
+
+  it('keeps the automatic title for the next message when a message has only images', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    await env.host.prompt(session.id, '', [screenshot]);
+    expect(env.host.list('ws-1')[0]).toMatchObject({ title: 'Worker', status: 'running' });
+
+    await env.host.prompt(session.id, 'Why does the build fail here?', [screenshot]);
+    expect(env.host.list('ws-1')[0]?.title).toBe('Why does the build fail here?');
+    await env.host.prompt(session.id, 'second message');
+    expect(env.host.list('ws-1')[0]?.title).toBe('Why does the build fail here?');
   });
 
   it('spawns with the skills and MCP servers resolved for the role and logs their warnings', async () => {

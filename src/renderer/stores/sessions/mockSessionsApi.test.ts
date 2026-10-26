@@ -1,4 +1,6 @@
+import type { ChatImage } from '@shared/types/chat';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { translate } from '../../i18n';
 import { createMockSessionsApi } from '../../lib/api/sessions';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 import { selectApprovalsOf, selectMessagesOf, selectStatusOf } from './selectors';
@@ -127,6 +129,38 @@ describe('mock SessionsApi + store', () => {
       ['dispatch_task', 'done'],
       ['wait_for_workers', 'done'],
     ]);
+  });
+
+  it('只有图片的消息：回显确认后图片还在，history 回放里也在；不占用自动标题', async () => {
+    const { store, api, sessionId } = await setup('orchestrator');
+    const state = () => store.getState();
+    const shot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+
+    expect(state().attachImages(sessionId, [shot])).toBeUndefined();
+    expect(await state().send('')).toBe(true);
+    await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
+    expect(selectMessagesOf(sessionId)(state())[0]).toMatchObject({
+      role: 'user',
+      text: '',
+      images: [shot],
+    });
+    expect(selectMessagesOf(sessionId)(state())[0]?.optimistic).toBeUndefined();
+    expect(state().sessionsByWorkspace['ws-1']?.[0]?.title).toBe(translate('sessions.untitled'));
+
+    await state().selectSession(sessionId);
+    expect(selectMessagesOf(sessionId)(state())[0]).toMatchObject({
+      role: 'user',
+      text: '',
+      images: [shot],
+    });
+
+    expect(await state().send('再看看这个')).toBe(true);
+    await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
+    expect(state().sessionsByWorkspace['ws-1']?.[0]?.title).toBe('再看看这个');
+    expect(await api.prompt({ sessionId, text: ' ' })).toEqual({
+      ok: false,
+      error: translate('sessions.errors.emptyMessage'),
+    });
   });
 
   it('运行中停止：流式消息收尾、待审批清空、回到 idle，可以再次发送', async () => {

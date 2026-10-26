@@ -29,19 +29,36 @@ export const MessageItem = memo(function MessageItem({
   );
 });
 
+/** 用户的消息：粘贴的图片画在气泡上方（右对齐），正文为空（只有图片）时不画气泡 */
 function UserMessage({ message }: { message: TimelineMessage }) {
   const t = useT();
+  const sending = message.optimistic && !message.failed;
   return (
     <div className="flex flex-col items-end gap-1">
-      <div
-        className={cn(
-          'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-secondary px-4 py-2 text-secondary-foreground text-sm',
-          message.optimistic && !message.failed && 'opacity-70',
-          message.failed && 'border border-destructive/50'
-        )}
-      >
-        {message.text}
-      </div>
+      {message.images?.map((image, index) => (
+        <img
+          // biome-ignore lint/suspicious/noArrayIndexKey: 消息里的图片没有 id，也不会重排
+          key={index}
+          src={`data:${image.mimeType};base64,${image.data}`}
+          alt={t('chat.image', { index: index + 1 })}
+          className={cn(
+            'max-h-48 max-w-full rounded-lg border object-contain',
+            sending && 'opacity-70',
+            message.failed && 'border-destructive/50'
+          )}
+        />
+      ))}
+      {message.text.trim() && (
+        <div
+          className={cn(
+            'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-secondary px-4 py-2 text-secondary-foreground text-sm',
+            sending && 'opacity-70',
+            message.failed && 'border border-destructive/50'
+          )}
+        >
+          {message.text}
+        </div>
+      )}
       {message.optimistic && (
         <span
           className={cn('text-xs', message.failed ? 'text-destructive' : 'text-muted-foreground')}

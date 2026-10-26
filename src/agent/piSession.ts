@@ -1,5 +1,6 @@
 import { dirname } from 'node:path';
-import { SessionManager } from '@earendil-works/pi-coding-agent';
+import type { ImageContent, Message } from '@earendil-works/pi-ai';
+import { type AgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 import {
   type ApprovalGate,
   createRoleSession,
@@ -9,6 +10,7 @@ import {
 } from '@fynvra/agent-runtime';
 import type { Role } from '@fynvra/core';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
+import type { ChatImage } from '@shared/types/chat';
 import { createSessionSettings } from './shell';
 import type { OpenSession } from './supervisor';
 
@@ -67,6 +69,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       settingsManager: createSessionSettings(spec.shellPath),
     });
     const { session } = created;
+    dropEmptyUserText(session);
     options.onModelSelected?.(identity.sessionId, model);
     return {
       warnings: created.warnings,
@@ -78,7 +81,11 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         );
         return { unsubscribe: subscription.unsubscribe, emit: subscription.emit };
       },
-      prompt: (text) => session.prompt(text, { streamingBehavior: 'followUp' }),
+      prompt: (text, images) =>
+        session.prompt(text, {
+          streamingBehavior: 'followUp',
+          ...(images?.length ? { images: images.map(toImageContent) } : {}),
+        }),
       steer: async (text) => {
         await session.steer(text);
       },
@@ -107,6 +114,36 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
 function withRoleThinking(model: ResolvedModelSpec, role: Role): ResolvedModelSpec {
   const thinking = model.thinking ?? role.model?.thinking;
   return thinking ? { ...model, thinking } : model;
+}
+
+/** 粘贴的图片 → pi 的 ImageContent（缩放、转 PNG 由 pi 的 prompt 自己做） */
+function toImageContent({ data, mimeType }: ChatImage): ImageContent {
+  return { type: 'image', data, mimeType };
+}
+
+/**
+ * 只有图片、没有文字的 user 消息，pi 照样在图片前放一个空的 text 块（jsonl 里也这样记）。
+ * Anthropic、OpenAI Chat Completions 的消息转换会滤掉空文本块，OpenAI Responses、Google 的不滤，
+ * 而 Gemini 拒绝空的 text part；这条消息之后每一轮都在上下文里，一旦被拒，整个会话都发不出去。
+ * 所以在 pi 把消息交给 provider 之前（agent 的 convertToLlm）去掉 user 消息里的空文本块；
+ * 只有空文本的消息原样保留，不造出没有内容的消息。
+ */
+function dropEmptyUserText(session: AgentSession): void {
+  const { agent } = session;
+  const convert = agent.convertToLlm.bind(agent);
+  agent.convertToLlm = async (messages) => withoutEmptyUserText(await convert(messages));
+}
+
+function withoutEmptyUserText(messages: Message[]): Message[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || typeof message.content === 'string') return message;
+    const content = message.content.filter(
+      (block) => block.type !== 'text' || block.text.trim() !== ''
+    );
+    return content.length === message.content.length || content.length === 0
+      ? message
+      : { ...message, content };
+  });
 }
 
 /**

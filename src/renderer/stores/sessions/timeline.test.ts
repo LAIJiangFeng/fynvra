@@ -152,6 +152,25 @@ describe('buildTimelineRows · 折叠历史轮次', () => {
     ]);
   });
 
+  it('只有图片、正文为空的提问照样开始一轮，也照样折成标题行', () => {
+    const image = { data: 'iVBORw0KGgo=', mimeType: 'image/png' as const };
+    const withImages = [
+      user('u1', '', { images: [image] }),
+      assistant('a1', { text: '是一张截图' }),
+      user('u2', '再看这张', { images: [image] }),
+      assistant('a2', { text: '好的' }),
+    ];
+    expect(shape(buildTimelineRows(withImages, PLAIN))).toEqual([
+      'user:u1',
+      'assistant:a1[]',
+      'user:u2',
+      'assistant:a2[]',
+    ]);
+    const rows = buildTimelineRows(withImages, FOLD);
+    expect(shape(rows)).toEqual(['turn:u1', 'user:u2', 'assistant:a2[]']);
+    expect(rows[0]).toMatchObject({ kind: 'turn', message: { text: '', images: [image] } });
+  });
+
   it('发送新消息（乐观回显）后，刚才那一轮也折起来', () => {
     const sent = [...messages, user('local-1', '第四个问题', { optimistic: true })];
     expect(shape(buildTimelineRows(sent, FOLD))).toEqual([

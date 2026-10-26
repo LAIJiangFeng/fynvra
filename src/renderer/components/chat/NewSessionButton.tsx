@@ -3,7 +3,7 @@ import { RadioGroup } from '@base-ui/react/radio-group';
 import { ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import type { SessionModelRef } from '@shared/types/chat';
 import { Crown, Plus } from 'lucide-react';
-import { useId, useRef, useState } from 'react';
+import { type ReactNode, useId, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,7 +29,13 @@ import { isOrchestratorRole, roleDescription, useRoles } from './roles';
  * 每次打开默认选 orchestrator 并重读角色库与可选模型。模型默认依次取角色的模型、该工作区上一次用过的、
  * 列表第一个；档位只列这个模型自己的。`compact` 用于侧栏的小图标按钮。
  */
-export function NewSessionButton({ compact = false }: { compact?: boolean }) {
+export function NewSessionButton({
+  compact = false,
+  children,
+}: {
+  compact?: boolean;
+  children?: (open: () => void) => ReactNode;
+}) {
   const id = useId();
   const roles = useRoles();
   // 角色库是空的又读取失败时，列表里只有退回的内置角色：告诉用户原因
@@ -68,37 +74,40 @@ export function NewSessionButton({ compact = false }: { compact?: boolean }) {
     else setError(result.error);
   };
 
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    if (!next) return;
+    setError(null);
+    setRoleId(ORCHESTRATOR_ROLE_ID);
+    setPicked(null);
+    void refreshRoles();
+    void loadModelOptions();
+  };
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) return;
-        setError(null);
-        setRoleId(ORCHESTRATOR_ROLE_ID);
-        setPicked(null);
-        void refreshRoles();
-        void loadModelOptions();
-      }}
-    >
-      <DialogTrigger
-        ref={trigger}
-        render={
-          compact ? (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t('sessions.new')}
-              title={t('sessions.new')}
-            />
-          ) : (
-            <Button />
-          )
-        }
-      >
-        <Plus />
-        {!compact && t('sessions.new')}
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={changeOpen}>
+      {children ? (
+        children(() => changeOpen(true))
+      ) : (
+        <DialogTrigger
+          ref={trigger}
+          render={
+            compact ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t('sessions.new')}
+                title={t('sessions.new')}
+              />
+            ) : (
+              <Button />
+            )
+          }
+        >
+          <Plus />
+          {!compact && t('sessions.new')}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('sessions.new')}</DialogTitle>

@@ -19,6 +19,9 @@ export const mainZhCN = {
   },
   app: {
     startFailed: 'Fynvra 启动失败',
+    showWindow: '显示 Fynvra',
+    quit: '退出',
+    closeFailed: '无法完成窗口操作，窗口已保留。请重试或选择退出。',
   },
   updates: {
     downloaded: '版本 {version} 已下载，返回应用可重启安装',

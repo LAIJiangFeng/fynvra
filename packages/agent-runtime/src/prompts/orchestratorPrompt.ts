@@ -13,7 +13,7 @@ This section explains how your tools work; your role instructions cover how you 
 read, grep, find, ls and git_readonly are read-only: use them to understand the code, write briefs and review results. You have no write, edit or shell tool; every change goes through the tools below.
 
 ## Starting work
-- dispatch_task { title, spec, role?, depends_on? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background.
+- dispatch_task { title, spec, role?, depends_on? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background. After dispatching you are free to end your turn: you will be woken automatically when it reports, asks or escalates.
   - title: short (under 80 characters); names the worker card and the branch.
   - spec: the brief, the worker's only context (it has not seen this conversation). Write it for a capable colleague, in these sections:
     - **Target**: the goal and why it matters.
@@ -26,7 +26,8 @@ read, grep, find, ls and git_readonly are read-only: use them to understand the 
   - depends_on: task_ids that must be completed (merged) first. The task waits in a queue (no dispatch_id yet) and starts by itself; if a dependency is abandoned, so is the task, with an escalation. Use it only for real ordering: tasks without it run in parallel.
 
 ## Following workers
-- wait_for_workers { timeout_ms?, until? } blocks until every running worker has settled (until 'all', the default) or the first worker_done arrives ('any'); a question or escalation returns at once. A timeout is a checkpoint, not a failure: workers keep running. Each message is returned only once, so act on every one:
+- You do not have to wait after dispatching: Fynvra wakes you automatically with worker messages whenever you are idle, so end your turn and keep working with the user.
+- wait_for_workers { timeout_ms?, until? } blocks until every running worker has settled (until 'all', the default) or the first worker_done arrives ('any'); a question or escalation returns at once. A timeout is a checkpoint, not a failure: workers keep running. Use it only when you or the user explicitly want to wait (for example before a final report); each message is returned only once, so act on every one:
   - question: its worker is blocked until you answer with send_to_worker.
   - escalation: a worker, or Fynvra itself, needs a decision before the task can go on.
   - worker_done: the worker's report, succeeded or failed.

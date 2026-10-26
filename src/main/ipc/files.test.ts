@@ -1,11 +1,15 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFilesApi } from '../../preload/domains/files';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   list: vi.fn(),
   read: vi.fn(),
   write: vi.fn(),
+  remove: vi.fn(),
+  reveal: vi.fn(),
+  copy: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: {
@@ -14,7 +18,7 @@ vi.mock('electron', () => ({
   },
 }));
 vi.mock('../services/files', () => ({
-  createFilesService: () => ({ list: mocks.list, read: mocks.read, write: mocks.write }),
+  createFilesService: () => mocks,
 }));
 vi.mock('./workspaces', () => ({ getWorkspaceService: () => ({ get: vi.fn() }) }));
 
@@ -27,6 +31,42 @@ describe('文件 IPC', () => {
     vi.clearAllMocks();
     registerFilesHandlers();
   });
+
+  it.each([
+    ['remove', IPC_CHANNELS.FILES_DELETE],
+    ['reveal', IPC_CHANNELS.FILES_REVEAL],
+    ['copy', IPC_CHANNELS.FILES_COPY],
+  ] as const)(
+    '%s：真实 preload 载荷是第二个参数，不把 IPC 事件当作请求',
+    async (method, channel) => {
+      const input = { workspaceId: 'ws', entryId: 'entry' };
+      const api = createFilesApi({ invoke: async (name, ...args) => invoke(name, args[0]) });
+      mocks[method].mockResolvedValue({ ok: true });
+      expect(await api[method](input)).toEqual({ ok: true });
+      expect(mocks[method]).toHaveBeenCalledExactlyOnceWith(input);
+
+      mocks[method].mockClear();
+      for (const raw of [
+        null,
+        { ...input, entryId: '../outside' },
+        { ...input, path: '/secret' },
+      ]) {
+        expect(await invoke(channel, raw)).toEqual({ ok: false, error: 'invalidRequest' });
+      }
+      expect(mocks[method]).not.toHaveBeenCalled();
+      // 第一参数即使形似有效载荷也不能替代 Renderer 的无效入参。
+      expect(await mocks.handlers.get(channel)?.(input, null)).toEqual({
+        ok: false,
+        error: 'invalidRequest',
+      });
+      expect(mocks[method]).not.toHaveBeenCalled();
+
+      mocks[method].mockResolvedValueOnce({ ok: false, error: 'entryNotFound' });
+      expect(await api[method](input)).toEqual({ ok: false, error: 'entryNotFound' });
+      mocks[method].mockRejectedValueOnce(new Error('C:\\private\\secret'));
+      expect(await api[method](input)).toEqual({ ok: false, error: 'unavailable' });
+    }
+  );
 
   it('未知入参先收窄，路径和额外参数不能到达文件服务', async () => {
     for (const raw of [

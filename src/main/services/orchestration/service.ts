@@ -25,7 +25,7 @@ import type { CheckCommandPolicy } from './checkCommand';
 import { createOrchestrationHost, type RunChecksFn } from './host';
 import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
-import { currentBranch, readDispatchOutput, reviewWorktreeDiff } from './queries';
+import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { createWorkerHost } from './workerHost';
 import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
@@ -78,6 +78,10 @@ export interface OrchestrationService {
   cleanupMergedWorktree(sessionId: string): Promise<MergedCleanupResult>;
   /** 等待所有落盘完成并写入当前状态。 */
   flush(): Promise<void>;
+  /** 收件箱里发给该会话、未确认的消息（不消费）；状态未加载时为空。协调者唤醒器用。 */
+  pendingMessagesTo(sessionId: string): Message[];
+  /** 确认已投递的消息（尽力而为，幂等）。 */
+  ackMessages(ids: readonly string[]): void;
 }
 
 function observe<T extends { id: string }>(
@@ -309,11 +313,10 @@ export function createOrchestrationService(
         if (dispatch.mode === 'in-place') {
           return fail(`dispatch ${dispatchId} has no diff: the workspace has no git`);
         }
-        const worktree = store.worktrees.get(dispatch.worktreeId);
-        if (worktree === undefined) {
-          return fail(`the worktree of dispatch ${dispatchId} was already cleaned up`);
-        }
-        return reviewWorktreeDiff({ git, exec: options.exec }, worktree);
+        return reviewDispatchDiff(
+          { git, exec: options.exec, store, repoPath: workspace.repoPath },
+          dispatch
+        );
       }),
 
     async cleanupMergedWorktree(sessionId) {
@@ -325,6 +328,12 @@ export function createOrchestrationService(
     async flush() {
       await ready;
       await persist();
+    },
+
+    pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
+
+    ackMessages: (ids) => {
+      for (const id of ids) inbox.ack(id);
     },
   };
 }

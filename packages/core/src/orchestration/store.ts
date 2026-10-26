@@ -343,6 +343,10 @@ const TASK_SCHEMA: Schema<Task> = {
   roleId: isString,
   status: isTaskStatus,
   dependsOn: isStringArray,
+  mergedDiff: {
+    optional: (value) =>
+      isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),
+  },
 };
 const DISPATCH_SCHEMA: Schema<Dispatch> = {
   id: isString,

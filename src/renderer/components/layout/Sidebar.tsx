@@ -1,5 +1,5 @@
 import type { WorkspaceSummary } from '@shared/types/workspace';
-import { Ellipsis, Folder, FolderGit2, Plus, Trash2 } from 'lucide-react';
+import { Ellipsis, Folder, FolderGit2, FolderOpen, Plus, Trash2 } from 'lucide-react';
 import { Fragment } from 'react';
 import { SessionList } from '@/components/chat/SessionList';
 import { Badge } from '@/components/ui/badge';
@@ -12,19 +12,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
-/** 左栏：工作区列表；选中的工作区下面列出它的会话。 */
+/** 左栏：工作区列表；选中的工作区下面列出它的会话，再点一次选中的工作区折叠 / 展开会话列表。 */
 export function Sidebar() {
-  useSessionsWorkspaceSync();
   const workspaces = useWorkspacesStore((state) => state.workspaces);
   const selectedId = useWorkspacesStore((state) => state.selectedId);
+  const sessionsCollapsed = useWorkspacesStore((state) => state.sessionsCollapsed);
   const adding = useWorkspacesStore((state) => state.adding);
   const add = useWorkspacesStore((state) => state.add);
   const select = useWorkspacesStore((state) => state.select);
+  const toggleSessions = useWorkspacesStore((state) => state.toggleSessions);
   const remove = useWorkspacesStore((state) => state.remove);
   const t = useT();
 
@@ -61,17 +61,23 @@ export function Sidebar() {
           </div>
         ) : (
           <ul className="flex flex-col gap-0.5 px-2 pb-2">
-            {workspaces.map((workspace) => (
-              <Fragment key={workspace.id}>
-                <WorkspaceItem
-                  workspace={workspace}
-                  selected={workspace.id === selectedId}
-                  onSelect={() => select(workspace.id)}
-                  onRemove={() => void remove(workspace.id)}
-                />
-                {workspace.id === selectedId && <SessionList workspaceId={workspace.id} />}
-              </Fragment>
-            ))}
+            {workspaces.map((workspace) => {
+              const selected = workspace.id === selectedId;
+              const expanded = selected && !sessionsCollapsed;
+              return (
+                <Fragment key={workspace.id}>
+                  <WorkspaceItem
+                    workspace={workspace}
+                    selected={selected}
+                    expanded={expanded}
+                    // 点选中的工作区折叠 / 展开它的会话列表；点别的工作区选中它并展开
+                    onSelect={() => (selected ? toggleSessions() : select(workspace.id))}
+                    onRemove={() => void remove(workspace.id)}
+                  />
+                  {expanded && <SessionList workspaceId={workspace.id} />}
+                </Fragment>
+              );
+            })}
           </ul>
         )}
       </ScrollArea>
@@ -82,31 +88,33 @@ export function Sidebar() {
 function WorkspaceItem({
   workspace,
   selected,
+  expanded,
   onSelect,
   onRemove,
 }: {
   workspace: WorkspaceSummary;
   selected: boolean;
+  /** 选中且会话列表展开着 */
+  expanded: boolean;
   onSelect: () => void;
   onRemove: () => void;
 }) {
   const t = useT();
+  const FolderIcon = expanded ? FolderOpen : workspace.vcs === 'none' ? Folder : FolderGit2;
   return (
     <li className="group relative">
       <button
         type="button"
         aria-current={selected ? 'true' : undefined}
+        // 选中的工作区控制它下面的会话列表
+        aria-expanded={selected ? expanded : undefined}
         onClick={onSelect}
         className={cn(
           'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
           selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
         )}
       >
-        {workspace.vcs === 'none' ? (
-          <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <FolderGit2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        )}
+        <FolderIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 pr-6">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{workspace.name}</span>

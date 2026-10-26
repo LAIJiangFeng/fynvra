@@ -21,6 +21,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   },
   app: {
     startFailed: 'Fynvra failed to start',
+    showWindow: 'Show Fynvra',
+    quit: 'Quit',
+    closeFailed:
+      'The window action failed. Your window has been kept open. Please retry or choose Quit.',
   },
   updates: {
     downloaded: 'Version {version} is downloaded. Return to the app to restart and install',

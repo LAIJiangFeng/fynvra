@@ -82,7 +82,10 @@ export interface SessionRef {
 // 编排：Run 是命名空间 + 收件箱；Task 是工作；Dispatch 是一次权威尝试
 export type TaskStatus = 'todo' | 'in-progress' | 'in-review' | 'completed' | 'failed' | 'abandoned';
 export interface Run { id: string; workspaceId: string; coordinatorSessionId: string; objective: string; createdAt: number; }
-export interface Task { id: string; runId: string; title: string; spec: string; roleId: string; status: TaskStatus; dependsOn: string[]; }
+export interface Task {
+  id: string; runId: string; title: string; spec: string; roleId: string; status: TaskStatus; dependsOn: string[];
+  mergedDiff?: { baseCommit: string; headCommit: string }; // 合并时固定 worker 的差异范围，清理 worktree / 分支后仍可查看
+}
 export interface Dispatch {
   id: string; taskId: string; workerSessionId: string; worktreeId: string; branch: string;
   mode?: 'in-place';          // 工作区 vcs 为 none：worker 直接在工作区目录里干活，worktreeId / branch 为空串；缺省是 worktree 模式
@@ -107,7 +110,7 @@ export interface Message {
   - 覆盖是完整角色快照，不把缺省字段重新与模板合并：用户可以清空参考提示词、技能、MCP 和模型。界面的「恢复默认」只还原草稿，保存后生效。
   - 新启动的会话读取保存后的角色；已经启动的会话不热替换资源、不强制重启。工具权限和编排/worker 协议仍由运行时执行，不因修改参考提示词而移除。
 - `orchestration/`：`OrchestrationStore`（内存实现 + 可注入的 JSON 持久化）、状态迁移纯函数（task / dispatch 合法迁移表，非法迁移返回错误而不是抛异常）、`Inbox`（FIFO、ack、按类型过滤、`waitFor(predicate, timeoutMs)` Promise）。
-- `git/`：`GitWorktreeManager`（注入 `exec(cmd, args, cwd)`）：`create({ repoPath, workspaceId, slug, baseRef, worktreesRoot })` → 分支 `fynvra/<slug>`（冲突加后缀），路径 `<worktreesRoot>/<workspaceId>/<slug>`；`status`（dirty / ahead / behind）；`diff(baseCommit)`；`remove`；`prune`；`merge({ repoPath, branch })` 走 `--no-ff`，返回 `{ ok, conflicts?: string[] }`，冲突时自动 `merge --abort`；`deleteBranch`。
+- `git/`：`GitWorktreeManager`（注入 `exec(cmd, args, cwd)`）：`create({ repoPath, workspaceId, slug, baseRef, worktreesRoot })` → 分支 `fynvra/<slug>`（冲突加后缀），路径 `<worktreesRoot>/<workspaceId>/<slug>`；`status`（dirty / ahead / behind）；`diff(worktree, baseCommit?, headRef?)`（headRef 默认 HEAD）；`remove`；`prune`；`merge({ repoPath, branch })` 走 `--no-ff`，返回 `{ ok, conflicts?: string[] }`，冲突时自动 `merge --abort`；`deleteBranch`。
 - `briefs/`：任务书模板渲染（Target / Change / Constraints / Ownership / Acceptance 五段 + `report_done` 契约段）。
 
 ## 5. Agent 运行时（`packages/agent-runtime`，`@fynvra/agent-runtime`）
@@ -159,11 +162,20 @@ export interface Message {
 
 1. 用户在 Orchestrator 会话输入需求。
 2. 主 agent 调 `dispatch_task`（可多次、并行）→ Main：建 worktree（`fynvra/<slug>`）→ 新建 worker 会话（指定角色或 `worker`）→ 投递任务书（含 `report_done` 契约）。
-3. 主 agent `wait_for_workers`；期间 `question` 到达时用 `send_to_worker` 回答。
+3. 主 agent 结束回合，继续与用户对话（可再派发）；不阻塞等待。Main 的协调者唤醒器在收件箱出现
+   `worker_done` / `question` / `escalation` 且主 agent 会话空闲时，把消息合成一条注入 prompt 唤醒它
+   （与 `wait_for_workers` 的交付一样确认消息）；主 agent 忙碌时消息留在收件箱，回合结束后再投。
+   `wait_for_workers` 仍可用，但只在需要显式阻塞等待时调用。期间 `question` 到达时用 `send_to_worker` 回答。
 4. `worker_done` → 主 agent `review_diff` + `run_checks`（如 `pnpm typecheck && pnpm lint && pnpm test`）→ 判定：
    - 通过：`merge_worktree`（no-ff 合并到主 agent 所在分支）→ `cleanup_worktree` → 向用户汇报。
    - 不通过：`reject_work` 把意见发回 worker，回到 3。
 5. 全部任务 settled 后向用户给出每个任务的结果、证据、未解决项。
+
+**改动的生命周期**：`review_diff` 与面板共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
+合并时将创建基准和 worker 提交 SHA 写入 Task 的可选 `mergedDiff`，随编排快照保存；正常清理、归档清理、重启后仍读这对提交，
+不拿主仓库当前 HEAD 代替 worker 提交。旧快照没有此字段时，沿用尚存的 worktree 基准与 worker 分支；两者已清理且无历史范围时明确报不可用。
+此修复必改 core 的 `types.ts`、`orchestration/store.ts`、`git/GitWorktreeManager.ts`，Main 的 `orchestration/{host,queries,service}.ts`，
+Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变，不另存完整补丁，不修改 worktree 删除策略或文件管理功能。
 
 **没有 git 的工作区（`vcs: 'none'`）**：编排原地进行，Main 不调用任何 git。
 - 挂入：任意目录都能挂；git 仓库的子目录先问用户（改挂仓库根目录 / 仍然按普通目录挂入该子目录 / 取消）。
@@ -190,7 +202,9 @@ export interface Message {
 - UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 复用 GFM 渲染组件，支持编辑 / 预览 / 双栏。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。HTML / SVG 仅按源码显示，不执行。
 - Main 按文件串行保存，写前核对当前内容版本，冲突时保留磁盘与草稿；同目录临时文件写完后替换原文件。拒绝越界链接、二进制和超限写入；保留 UTF-8 BOM，编辑器沿用原文件的换行格式。
 - 未保存草稿不被目录刷新覆盖；切换对话、文件、工作区或折叠右栏不丢草稿；关闭标签及退出窗口前确认，取消退出不停止 agent 服务。保存中的新输入不能被旧保存响应覆盖。
-- 文件内容与打开标签只在内存，不写 `settings.json`；不包含删除、执行文件或切换到 worker 的 worktree。
+- 文件内容与打开标签只在内存，不写 `settings.json`；不执行文件、不切换到 worker 的 worktree。
+- 目录树右键支持新建、重命名、副本、复制、显示位置及确认后移入回收站；操作仍由 Main 按条目 id 校验路径。新建在目标目录下显示行内输入，名称非空时失焦自动创建，空白名称失焦取消；也支持 Enter 确认、Escape 取消，不能因按键与失焦重复创建，失败保留名称并提示；显示位置等操作失败不可静默忽略。
+- 本次文件操作修复仅涉及 Main `ipc/files.ts` 的事件/载荷签名、Renderer `FilesView.tsx` / `FileTreeContextMenu.tsx` 与文件 store 的新建目录加载，以及对应测试；沿用现有通道和 preload 类型，不引入文件管理依赖或永久删除能力。全链路回归运行 `pnpm build && node scripts/verify-files.cjs`，使用隔离 userData / 临时工作区，回收站只处理脚本生成的条目。
 
 ### 7.2 应用更新与发布
 
@@ -205,6 +219,23 @@ export interface Message {
 - 无证书打包修正：main push（包含 PR 合并）或 main 手动触发都打包并发布下载文件。没有任何 Apple 凭证时生成 ad-hoc 签名的 Mac 手动安装包，不公证；凭证齐全时走 Developer ID 签名、公证，部分配置缺失时明确失败而不静默降级。
 - Mac 包通过受 Main 读取的打包元数据区分手动安装与签名更新；手动版不请求更新源、不启用自动安装，界面说明须手动下载新版。手动版的公开产物不含 `latest-mac.yml` 或 ZIP blockmap，避免被签名版客户端误认作可自动安装更新；Windows 仍正常发布更新元数据。
 - 此修正只涉及打包配置、发布脚本与工作流、Main 更新可用性判断、shared 原因枚举、现有更新提示文案和对应测试文档，不新增 IPC，不改变文件编辑、角色或 Agent 协议。
+
+### 7.3 关闭窗口与运行时图标
+
+- 用户关闭窗口（标题栏关闭按钮、系统关窗）由 Main 拦截，通过 `window:close-requested` 仅通知发起关窗的 Renderer，复用应用内 Dialog 显示「取消 / 最小化到托盘 / 退出」；不使用系统消息框。外观参照圆角卡片、灰色说明和右下角三按钮，跟随明暗主题；默认聚焦取消，Esc / 点击遮罩等同取消。
+- Renderer 通过 `window:respond-close` 只回传 `cancel | tray | quit`，Main 收窄未知参数并绑定 IPC sender 的窗口；没有待处理关窗、窗口已销毁或正在退出时忽略迟到回答。操作失败保留弹窗并就地提示。最小化到托盘只隐藏窗口，不丢编辑草稿、不停止 agent；普通最小化按钮仍缩到任务栏。
+- 托盘使用现有 Fynvra 图标，点击可恢复窗口，菜单提供显示窗口与退出；单实例唤醒和 macOS 激活也必须恢复隐藏窗口。真正退出仍先确认未保存文件，再等 agent 及编排收尾，并销毁托盘。
+- 明确退出与更新安装绕过关窗选择，不重复弹出托盘选项；未保存确认取消后，后续用户关窗仍会询问。托盘创建失败时保持窗口可见并提示，不留下无法找回的隐藏窗口。
+- 窗口、托盘及开发模式的 macOS Dock 复用 `resources/icon.png`，通过 electron-vite 资源导入包含在构建产物中；Windows 直接设置 Fynvra AppUserModelId，开发版与正式版分组隔离，不使用 Electron 默认身份。
+- 应用内确认框改动限于 Main `windows/closeBehavior.ts` / `ipc/window.ts`、shared IPC / Main 字典、preload typed 出口、Renderer `CloseWindowDialog.tsx` / `App.tsx` 挂载点 / `ui/dialog.tsx` 遮罩样式参数 / 中英文字典和对应测试；不改图标、退出收尾或未保存确认机制，不新增持久化关闭偏好、图片生成或手机连接能力。`pnpm build && node scripts/verify-window.cjs` 使用临时数据点击真实 UI、记录明暗截图，验证托盘、窗口恢复、图标资源和退出收尾（仅未保存原生确认框由脚本代答）。
+
+### 7.4 工作区内嵌终端
+
+- 中央标签栏「＋ → 终端」创建真正的终端标签，与对话、文件并排；内容在应用内显示，不启动外部终端窗口。「＋ → 对话」复用新建会话流程。
+- Main 用 node-pty 托管 PTY，Windows 启动 PowerShell，其他平台启动登录 shell；cwd 从工作区 id 查注册表，Renderer 不传路径、shell 或环境变量。
+- `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
+- Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
+- 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
 
 ## 8. 分阶段
 
@@ -246,8 +277,11 @@ export interface ChatToolCall {
   id: string; name: string; args: unknown;
   status: 'running' | 'done' | 'error'; output?: string; durationMs?: number;
 }
+/** 输入框粘贴的图片：base64（不含 data: 前缀）。缩放、转 PNG 由 pi 在 worker 里做 */
+export interface ChatImage { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; }
 export interface ChatMessage {
   id: string; sessionId: string; role: ChatRole; text: string; thinking?: string;
+  images?: ChatImage[];  // 只用于 user 消息；带图片的正文不含 pi 接在末尾的 [Image …] 提示行
   toolCalls: ChatToolCall[]; createdAt: number; streaming: boolean;
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }
@@ -276,7 +310,11 @@ export interface SessionsApi {
   list(workspaceId: string, options?: { includeArchived?: boolean }): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
   create(input: { workspaceId: string; roleId: string; model?: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
-  prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
+  /**
+   * images：最多 10 张，单张解码后 ≤ 20 MiB、合计 ≤ 50 MiB，有一张不合法就整条拒绝；
+   * 带图片时 text 可以为空，不带时不能全是空白
+   */
+  prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
@@ -306,7 +344,8 @@ export interface SessionsApi {
   换不成功时 worker 关掉该会话并报 fatal `session-error`，Main 下次使用前按记录重新 spawn。
 - **可选档位**（`sessions:model-options`）：Main 不加载 pi，经进程级的 `describe-models` / `models-described` 问 worker，结果按
   （协议, 模型 id, reasoning 标记）缓存；worker 用的是与注册模型同一份目录模板（同 id 同协议时官方 provider 的条目优先）。
-- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。
+- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。审批档位随主 agent：
+  按派发时主 agent 会话的当前档位（用户可能切过），没有主 agent 时才用角色自己的。
 
 ### 9.4 `window.fynvra.orchestration`（归属：orchestration-host；orchestration-ui 消费）
 ```ts

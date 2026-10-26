@@ -22,6 +22,12 @@ export const IPC_CHANNELS = {
   /** Main 弹目录选择框并校验；Renderer 不传路径 */
   WORKSPACES_ADD: 'workspaces:add',
   WORKSPACES_REMOVE: 'workspaces:remove',
+  TERMINALS_CREATE: 'terminals:create',
+  TERMINALS_WRITE: 'terminals:write',
+  TERMINALS_RESIZE: 'terminals:resize',
+  TERMINALS_CLOSE: 'terminals:close',
+  /** PTY 输出 / 退出仅发送给创建它的窗口 */
+  TERMINALS_EVENT: 'terminals:event',
   /** Main → Renderer：工作区列表已变更 */
   WORKSPACES_CHANGED: 'workspaces:changed',
 
@@ -31,10 +37,28 @@ export const IPC_CHANNELS = {
   FILES_READ: 'files:read',
   /** 按读取版本保存文本，冲突时不覆盖磁盘内容 */
   FILES_WRITE: 'files:write',
+  /** 在目录里新建空文件 / 空子目录（名称由 Main 校验，路径不回传） */
+  FILES_CREATE: 'files:create',
+  /** 同目录内重命名（条目 id 不变，缓存同步改写） */
+  FILES_RENAME: 'files:rename',
+  /** 删除文件 / 目录（移到系统回收站，不直接抹除） */
+  FILES_DELETE: 'files:delete',
+  /** 同目录创建文件副本（copy / copy 2 …） */
+  FILES_DUPLICATE: 'files:duplicate',
+  /** 在系统文件资源管理器中显示条目 */
+  FILES_REVEAL: 'files:reveal',
+  /** 把条目复制到系统剪贴板（Windows 为文件本体，其他平台退回路径文本） */
+  FILES_COPY: 'files:copy',
+  /** 解析条目的绝对真实路径（仅用于复制路径文本） */
+  FILES_RESOLVE: 'files:resolve',
 
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
   WINDOW_CLOSE: 'window:close',
+  /** Main → 当前 Renderer：显示应用内关窗选择 */
+  WINDOW_CLOSE_REQUESTED: 'window:close-requested',
+  /** Renderer 只回传 cancel / tray / quit；Main 绑定 sender 窗口 */
+  WINDOW_RESPOND_CLOSE: 'window:respond-close',
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
   /** Main → Renderer：窗口最大化状态变化 */
   WINDOW_MAXIMIZED_CHANGED: 'window:maximized-changed',
@@ -140,6 +164,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+export type WindowCloseAction = 'cancel' | 'tray' | 'quit';
 
 /** 跨 IPC 边界的统一返回形状：handler 不抛异常，失败时带可展示的错误信息。 */
 export type IpcResult<T extends object = object> =

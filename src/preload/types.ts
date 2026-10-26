@@ -1,4 +1,4 @@
-import type { IpcResult } from '@shared/types/ipc';
+import type { IpcResult, WindowCloseAction } from '@shared/types/ipc';
 import type {
   PickWorktreesRootResult,
   Preferences,
@@ -43,6 +43,8 @@ export interface WindowApi {
   minimize(): Promise<IpcResult>;
   toggleMaximize(): Promise<IpcResult>;
   close(): Promise<IpcResult>;
+  respondClose(action: WindowCloseAction): Promise<IpcResult>;
+  onCloseRequested(callback: () => void): Unsubscribe;
   isMaximized(): Promise<IpcResult<{ maximized: boolean }>>;
   onMaximizedChange(callback: (maximized: boolean) => void): Unsubscribe;
 }
@@ -53,6 +55,7 @@ export interface FynvraApi {
   settings: SettingsApi;
   workspaces: WorkspacesApi;
   files: import('./domains/files').FilesApi;
+  terminals: import('./domains/terminals').TerminalsApi;
   orchestration: OrchestrationApi;
   window: WindowApi;
   sessions: import('./domains/sessions').SessionsApi;

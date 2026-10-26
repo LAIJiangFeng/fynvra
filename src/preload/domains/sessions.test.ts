@@ -16,13 +16,18 @@ function fakeIpc() {
 }
 
 describe('createSessionsApi', () => {
-  it('maps every method to its channel and passes only ids and text', async () => {
+  it('maps every method to its channel and passes only ids, text and pasted images', async () => {
     const { ipc, invoke } = fakeIpc();
     const api = createSessionsApi(ipc);
     await api.list('ws-1');
     await api.create({ workspaceId: 'ws-1', roleId: 'worker' });
     await api.remove('s-1');
     await api.prompt({ sessionId: 's-1', text: 'hi' });
+    await api.prompt({
+      sessionId: 's-1',
+      text: '',
+      images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+    });
     await api.abort('s-1');
     await api.history('s-1');
     await api.respondApproval({ sessionId: 's-1', requestId: 'r-1', decision: 'allow' });
@@ -43,6 +48,14 @@ describe('createSessionsApi', () => {
       [IPC_CHANNELS.SESSIONS_CREATE, { workspaceId: 'ws-1', roleId: 'worker' }],
       [IPC_CHANNELS.SESSIONS_REMOVE, 's-1'],
       [IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: 'hi' }],
+      [
+        IPC_CHANNELS.SESSIONS_PROMPT,
+        {
+          sessionId: 's-1',
+          text: '',
+          images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
+        },
+      ],
       [IPC_CHANNELS.SESSIONS_ABORT, 's-1'],
       [IPC_CHANNELS.SESSIONS_HISTORY, 's-1'],
       [

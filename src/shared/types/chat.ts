@@ -4,6 +4,7 @@ import {
   type FynvraSessionEvent,
   type ThinkingLevel,
 } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
+import { asRecord } from '../guards';
 import type { ProviderApi } from './llm';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
@@ -45,11 +46,34 @@ export interface ChatToolCall {
   output?: string;
   durationMs?: number;
 }
+/** 输入框能粘贴、能发给 pi 的图片格式 */
+export const CHAT_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+] as const;
+export type ChatImageMimeType = (typeof CHAT_IMAGE_MIME_TYPES)[number];
+/** 随 user 消息发送的图片。缩放、转码由 pi 在 worker 里做，Renderer 原样发出 */
+export interface ChatImage {
+  /** base64，不含 `data:` 前缀 */
+  data: string;
+  mimeType: ChatImageMimeType;
+}
+/** 每条消息最多几张图片 */
+export const MAX_CHAT_IMAGES = 10;
+/** 单张图片解码后的上限 */
+export const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
+/** 一条消息里图片解码后的合计上限：单条 IPC 远低于 Chromium 约 128 MiB 的消息上限 */
+export const MAX_CHAT_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
+
 export interface ChatMessage {
   id: string;
   sessionId: string;
   role: ChatRole;
   text: string;
+  /** 只用于 user 消息：随消息发送的图片 */
+  images?: ChatImage[];
   thinking?: string;
   toolCalls: ChatToolCall[];
   createdAt: number;
@@ -70,6 +94,59 @@ export interface ApprovalRequest {
 export interface SessionEventEnvelope {
   sessionId: string;
   event: FynvraSessionEvent;
+}
+
+export function isChatImageMimeType(value: unknown): value is ChatImageMimeType {
+  return (CHAT_IMAGE_MIME_TYPES as readonly unknown[]).includes(value);
+}
+
+// 标准 base64（不是 base64url）：不含空白，= 只能在末尾
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** base64 解码后的字节数，按字符串长度与末尾的 = 算（不解码）；不是合法 base64 时为 null */
+export function base64ByteLength(data: string): number | null {
+  if (data.length % 4 !== 0 || !BASE64.test(data)) return null;
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  return (data.length / 4) * 3 - padding;
+}
+
+/**
+ * 一条消息的图片（IPC 入参与 Main → worker 的 prompt 都经它收窄）：1 到 {@link MAX_CHAT_IMAGES} 张；
+ * 每张只有 data、mimeType 两个键，格式在白名单里，data 是非空的标准 base64；
+ * 解码后单张不超过 {@link MAX_CHAT_IMAGE_BYTES}，合计不超过 {@link MAX_CHAT_IMAGES_TOTAL_BYTES}。
+ * 任一张不合法时整组作废。
+ */
+export function parseChatImages(raw: unknown): ChatImage[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_CHAT_IMAGES) return null;
+  const images: ChatImage[] = [];
+  let total = 0;
+  for (const item of raw) {
+    const record = asRecord(item);
+    if (!record || Object.keys(record).length !== 2) return null;
+    const { data, mimeType } = record;
+    if (typeof data !== 'string' || !isChatImageMimeType(mimeType)) return null;
+    const bytes = base64ByteLength(data);
+    if (!bytes || bytes > MAX_CHAT_IMAGE_BYTES) return null;
+    total += bytes;
+    if (total > MAX_CHAT_IMAGES_TOTAL_BYTES) return null;
+    images.push({ data, mimeType });
+  }
+  return images;
+}
+
+/**
+ * pi 收到带图片的 prompt 时，缩放或转换过图片就把提示行接在正文后面：`${正文}\n\n${提示行.join('\n')}`，
+ * 如 `[Image: original 3773x1017, displayed at 2000x539. …]`、`[Image converted from image/webp to image/png.]`、
+ * `[Image omitted: …]`。它们会出现在 user 的 message_end 与 jsonl 里。
+ */
+const IMAGE_HINTS = /(?:^|\n\n)\[Image[: ][^\n]*\](?:\n\[Image[: ][^\n]*\])*$/;
+
+/**
+ * 去掉 pi 接在末尾的图片提示行（连同前面的空行）；正文只剩提示行时返回空串，正文中间形似提示行的文字保留。
+ * 只用于带图片的 user 消息。
+ */
+export function stripImageHints(text: string): string {
+  return text.replace(IMAGE_HINTS, '');
 }
 
 // 审批档位、思考档位的显示名在 Renderer 的字典里（approval.modes.<mode>、thinking.levels.<level>）

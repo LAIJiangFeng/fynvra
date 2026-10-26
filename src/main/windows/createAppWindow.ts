@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BrowserWindow, type BrowserWindowConstructorOptions, nativeTheme, shell } from 'electron';
+import appIcon from '../../../resources/icon.png?asset';
 import { registerFileUnloadGuard } from './fileUnloadGuard';
 
 /** 与 styles/globals.css 的 --background 一致，避免首帧闪白 / 闪黑。 */
@@ -22,6 +23,7 @@ export function createAppWindow(options: AppWindowOptions): BrowserWindow {
     ...options,
     show: false,
     title: 'Fynvra',
+    icon: appIcon,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     backgroundColor: nativeTheme.shouldUseDarkColors ? BACKGROUND.dark : BACKGROUND.light,
     webPreferences: {

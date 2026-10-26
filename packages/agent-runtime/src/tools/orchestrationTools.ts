@@ -80,7 +80,8 @@ export function createOrchestrationTools(
         'Create a task and start a worker agent on it in a fresh git worktree (branch fynvra/<slug>); ' +
         'in a workspace without git the worker edits the workspace directory in place instead. ' +
         "The spec is the worker's entire context, so write it as a complete brief. Returns task_id and " +
-        'dispatch_id. Workers run in the background; wait_for_workers delivers their results.',
+        'dispatch_id. Workers run in the background; Fynvra wakes you automatically when they report, ' +
+        'and wait_for_workers can also collect their results.',
       promptSnippet: 'Start a worker in its own git worktree on a task brief',
       promptGuidelines: [
         'Delegate every code change with dispatch_task; never edit files or run write commands yourself.',
@@ -321,7 +322,7 @@ export function createOrchestrationTools(
             `## Feedback sent · dispatch ${code(payload.dispatchId)}`,
             `- message_id: ${code(result.messageId)}`,
             '',
-            'The worker continues in the same worktree. Call wait_for_workers for its next worker_done, then review again.',
+            'The worker continues in the same worktree. You will be woken automatically when it reports again; review its next worker_done like the first.',
           ].join('\n'),
           result
         );
@@ -608,8 +609,8 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
     `- status: ${task.status}`,
     '',
     inPlace
-      ? 'No git: the worker edits files directly in the workspace directory, and every running worker shares it. Dispatch one task at a time unless their files are strictly disjoint. You know nothing about its result until its worker_done message arrives; call wait_for_workers.'
-      : 'The worker runs in the background in its own worktree. You know nothing about its result until its worker_done message arrives; call wait_for_workers.',
+      ? 'No git: the worker edits files directly in the workspace directory, and every running worker shares it. Dispatch one task at a time unless their files are strictly disjoint. You know nothing about its result until its worker_done message arrives; you will be woken automatically when it reports.'
+      : 'The worker runs in the background in its own worktree. You know nothing about its result until its worker_done message arrives; you will be woken automatically when it reports, so keep working with the user or dispatch more tasks.',
   ].join('\n');
 }
 

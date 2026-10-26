@@ -1,6 +1,8 @@
 import type { WorkspaceFileEntry } from '@shared/types/files';
-import { FileCode2, MessageSquare, X } from 'lucide-react';
+import { FileCode2, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { NewSessionButton } from '@/components/chat/NewSessionButton';
+import { TerminalPane } from '@/components/terminal/TerminalPane';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -10,10 +12,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { filesStoreFor, isFileDirty } from '@/stores/files';
 import { useSessionsStore } from '@/stores/sessions';
+import { useTerminalsStore } from '@/stores/terminals';
 import { FilePane } from './FilePane';
 
 /** 中央标签与对话共用空间，切换时不卸载对话或已打开的编辑器。 */
@@ -28,6 +37,15 @@ export function FileWorkspace({
   const opened = store((state) => state.opened);
   const selectedId = store((state) => state.selectedId);
   const previews = store((state) => state.previews);
+  const allTerminals = useTerminalsStore((state) => state.tabs);
+  const terminals = allTerminals.filter((tab) => tab.workspaceId === workspaceId);
+  const terminalId = useTerminalsStore((state) => state.selected[workspaceId] ?? null);
+  const [closingTerminal, setClosingTerminal] = useState<string | null>(null);
+  const selectTerminal = (id: string | null) => useTerminalsStore.getState().select(workspaceId, id);
+  const showChat = () => {
+    selectTerminal(null);
+    store.getState().showChat();
+  };
   const selectedTab = useRef<HTMLDivElement>(null);
   const [confirm, setConfirm] = useState<{
     file: WorkspaceFileEntry;
@@ -40,14 +58,23 @@ export function FileWorkspace({
   }, [selectedId]);
 
   useEffect(
+    () => store.subscribe((state) => {
+      if (state.selectedId) useTerminalsStore.getState().select(workspaceId, null);
+    }),
+    [store, workspaceId]
+  );
+
+  useEffect(
     () =>
       useSessionsStore.subscribe((state, previous) => {
         if (
           state.workspaceId === workspaceId &&
           previous.workspaceId === workspaceId &&
           state.activeSessionId !== previous.activeSessionId
-        )
+        ) {
+          useTerminalsStore.getState().select(workspaceId, null);
           store.getState().showChat();
+        }
       }),
     [store, workspaceId]
   );
@@ -71,11 +98,11 @@ export function FileWorkspace({
       <nav aria-label={t('files.opened')} className="flex h-10 shrink-0 border-b bg-sidebar/60">
         <button
           type="button"
-          aria-pressed={selectedId === null}
-          onClick={() => store.getState().showChat()}
+          aria-pressed={selectedId === null && !terminalId}
+          onClick={showChat}
           className={cn(
             'flex shrink-0 items-center gap-2 border-r border-t-2 border-t-transparent px-4 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-            selectedId === null && 'border-t-primary bg-background font-medium'
+            selectedId === null && !terminalId && 'border-t-primary bg-background font-medium'
           )}
         >
           <MessageSquare className="size-3.5" />
@@ -118,9 +145,78 @@ export function FileWorkspace({
               </Button>
             </div>
           ))}
+          {terminals.map((tab) => (
+            <div
+              key={tab.id}
+              className={cn(
+                'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
+                tab.id === terminalId && 'border-t-primary bg-background text-foreground'
+              )}
+            >
+              <button
+                type="button"
+                aria-pressed={tab.id === terminalId}
+                className="flex h-full items-center gap-2 pr-1 pl-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                onClick={() => {
+                  store.getState().showChat();
+                  selectTerminal(tab.id);
+                }}
+              >
+                <SquareTerminal className="size-3.5" />
+                {t('files.terminal')} {tab.number}
+                {tab.exited && <span className="text-muted-foreground">{t('terminals.finished')}</span>}
+              </button>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="mx-1 size-6"
+                aria-label={t('terminals.closeTitle')}
+                onClick={() => {
+                  if (tab.exited) void useTerminalsStore.getState().close(tab.id);
+                  else setClosingTerminal(tab.id);
+                }}
+              >
+                <X className="size-3" />
+              </Button>
+            </div>
+          ))}
+          <NewSessionButton>
+            {(openChat) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="m-1 shrink-0"
+                      aria-label={t('files.newTab')}
+                      title={t('files.newTab')}
+                    />
+                  }
+                >
+                  <Plus />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-36">
+                  <DropdownMenuItem onClick={openChat}>
+                    <MessageSquare />
+                    {t('files.chat')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      store.getState().showChat();
+                      void useTerminalsStore.getState().create(workspaceId);
+                    }}
+                  >
+                    <SquareTerminal />
+                    {t('files.terminal')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </NewSessionButton>
         </div>
       </nav>
-      <div className={cn('min-h-0 flex-1 flex-col', selectedId === null ? 'flex' : 'hidden')}>
+      <div className={cn('min-h-0 flex-1 flex-col', selectedId === null && !terminalId ? 'flex' : 'hidden')}>
         {children}
       </div>
       {opened.map((file) => (
@@ -139,6 +235,29 @@ export function FileWorkspace({
           />
         </div>
       ))}
+      {terminals.map((tab) => (
+        <div
+          key={tab.id}
+          className={cn('min-h-0 min-w-0 flex-1 flex-col', terminalId === tab.id ? 'flex' : 'hidden')}
+        >
+          <TerminalPane id={tab.id} active={terminalId === tab.id} />
+        </div>
+      ))}
+      <Dialog open={closingTerminal !== null} onOpenChange={(open) => { if (!open) setClosingTerminal(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('terminals.closeTitle')}</DialogTitle>
+            <DialogDescription>{t('terminals.closeHint')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClosingTerminal(null)}>{t('common.cancel')}</Button>
+            <Button variant="destructive" onClick={() => {
+              if (closingTerminal) void useTerminalsStore.getState().close(closingTerminal);
+              setClosingTerminal(null);
+            }}>{t('terminals.closeTitle')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={confirm !== null}
         onOpenChange={(open) => {

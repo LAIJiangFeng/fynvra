@@ -226,6 +226,10 @@ describe('默认键', () => {
     expect(defaultChord('new-session', 'windows')).toBe('ctrl+n');
     expect(defaultChord('open-settings', 'windows')).toBe('ctrl+,');
     expect(defaultChord('toggle-side-panel', 'linux')).toBe('ctrl+b');
+    expect(defaultChord('toggle-side-panel', 'mac')).toBe('meta+b');
+    expect(defaultChord('toggle-sidebar', 'windows')).toBe('ctrl+shift+b');
+    expect(defaultChord('toggle-sidebar', 'linux')).toBe('ctrl+shift+b');
+    expect(defaultChord('toggle-sidebar', 'mac')).toBe('shift+meta+b');
     expect(defaultChord('focus-composer', 'windows')).toBe('ctrl+l');
     expect(defaultChord('prev-session', 'windows')).toBe('ctrl+shift+[');
     expect(defaultChord('next-session', 'windows')).toBe('ctrl+shift+]');
@@ -263,6 +267,7 @@ describe('默认键', () => {
       'new-session',
       'open-settings',
       'toggle-side-panel',
+      'toggle-sidebar',
       'focus-composer',
       'prev-session',
       'next-session',

@@ -66,7 +66,18 @@ describe('preload bridge', () => {
   });
 
   it('文件浏览出口完整接入，目录和预览只传工作区与条目 id', async () => {
-    expect(Object.keys(api.files).sort()).toEqual(['list', 'read', 'write']);
+    expect(Object.keys(api.files).sort()).toEqual([
+      'copy',
+      'create',
+      'duplicate',
+      'list',
+      'read',
+      'remove',
+      'rename',
+      'resolve',
+      'reveal',
+      'write',
+    ]);
     await api.files.list({ workspaceId: 'ws-1' });
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_LIST, {
       workspaceId: 'ws-1',
@@ -76,6 +87,19 @@ describe('preload bridge', () => {
       workspaceId: 'ws-1',
       fileId: 'file-1',
     });
+  });
+
+  it('关闭确认只回传操作，推送不泄露 Electron 事件且能解绑', async () => {
+    await api.window.respondClose('tray');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WINDOW_RESPOND_CLOSE, 'tray');
+    const callback = vi.fn();
+    const unsubscribe = api.window.onCloseRequested(callback);
+    const [channel, listener] = mocks.on.mock.calls.at(-1) ?? [];
+    expect(channel).toBe(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED);
+    listener({ sender: { send: vi.fn() } });
+    expect(callback).toHaveBeenCalledWith();
+    unsubscribe();
+    expect(mocks.removeListener).toHaveBeenCalledWith(channel, listener);
   });
 
   it('订阅回调拿不到 IpcRendererEvent，取消订阅移除同一个 listener', () => {

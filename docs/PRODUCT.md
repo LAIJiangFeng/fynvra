@@ -15,12 +15,13 @@ Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) S
 默认 **Orchestrator（主 agent）** 使用编排工具策略，用户可以按需调整角色配置。默认主 agent：
 - 把用户的需求拆成任务，为每个任务 **开一个 git worktree**，启动一个 worker agent（可指定角色；未指定则用 `worker`），把任务书发给它。
 - **自己不改代码**：工具集被限制为只读（读文件、git 只读、orchestration 工具），不能写文件 / 执行任意 shell。
-- **监控** worker：收件箱收到 `worker_done` / `question` / `escalation`，回答问题、等待完成。
+- **监控** worker：派发后不阻塞等待，可继续与用户对话；收件箱收到 `worker_done` / `question` / `escalation` 时由 Fynvra 自动唤醒主 agent，回答问题、验收结果。
 - **验收合并**：worker 完成后读 diff、跑检查命令、判断是否达标；达标则把 worker 分支合并到主 agent 所在分支，再删 worktree；不达标则把意见发回让 worker 继续改。
 - 向用户汇报每个任务的结果与证据。
 
 ### 3. Worker 在独立 worktree 里干活
 每个 worker 会话绑定一个 worktree（分支 `fynvra/<task-slug>`）。worker 的工具：pi 默认编程工具 + `ask_coordinator`（阻塞提问）+ `report_done`（一次性汇报，带 succeeded/failed）。
+worker 的审批档位随主 agent 派发时的当前档位（主 agent 免确认，worker 也免确认；保护底线如 `rm -rf`、`git push` 任何档位仍要人确认）；模型按角色配置，角色没配则用主 agent 当前的。
 
 ## 一句话用户旅程
 挂入仓库 → 在该仓库开一个 Orchestrator 会话 → 说「做 X，Y 用测试工程师角色」→ 侧栏出现多个 worker 卡片（各自 worktree、实时输出、状态）→ 主 agent 验收合并 → 用户在自己的浏览器/终端验证效果。

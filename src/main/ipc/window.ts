@@ -1,6 +1,7 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { BrowserWindow, ipcMain } from 'electron';
 import { translate } from '../i18n';
+import { respondToClose } from '../windows/closeBehavior';
 
 /** 自绘标题栏的窗口控制：一律作用于发起调用的窗口。 */
 export function registerWindowHandlers(): void {
@@ -15,6 +16,13 @@ export function registerWindowHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WINDOW_CLOSE, (event) =>
     withSenderWindow(event, (win) => win.close())
   );
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_RESPOND_CLOSE, (event, raw: unknown): IpcResult => {
+    if (raw !== 'cancel' && raw !== 'tray' && raw !== 'quit')
+      return { ok: false, error: translate('common.invalidArgs') };
+    const win = senderWindow(event);
+    return win ? respondToClose(win, raw) : { ok: false, error: translate('common.windowClosed') };
+  });
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, (event): IpcResult<{ maximized: boolean }> => {
     const win = senderWindow(event);

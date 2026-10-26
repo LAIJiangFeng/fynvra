@@ -25,6 +25,7 @@ import type {
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ChatImage,
   ChatMessage,
   ModelOptions,
   ModelThinkingCapability,
@@ -133,7 +134,11 @@ export interface AgentHostService extends AgentHost {
   list(workspaceId: string): SessionSummary[];
   create(input: CreateSessionInput): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
-  prompt(sessionId: string, text: string): Promise<IpcResult>;
+  /**
+   * 发消息（首次使用时先在 worker 里 spawn）。images 是用户粘贴的图片，只来自 sessions:prompt；
+   * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
+   */
+  prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
@@ -640,7 +645,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
-  async function prompt(sessionId: string, text: string): Promise<Result> {
+  async function prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
@@ -649,15 +654,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const spawned = await ensureSpawned(stored);
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
-      if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
+      const identity = identityOf(sessionId, state);
+      if (!send({ type: 'prompt', identity, text, ...(images?.length ? { images } : {}) })) {
         return fail(translate('agent.workerUnavailable'));
       }
       state.running = true;
       const current = deps.store.get(sessionId) ?? stored;
+      // 只有图片（文本取不出标题）的消息不占用自动标题，留给下一条有文字的
+      const title = current.autoTitle ? titleFrom(text) : '';
       deps.store.update(sessionId, {
         status: 'running',
         updatedAt: now(),
-        ...(current.autoTitle ? { title: titleFrom(text) || current.title, autoTitle: false } : {}),
+        ...(title ? { title, autoTitle: false } : {}),
       });
       changed(stored.workspaceId);
       return { ok: true };
@@ -818,8 +826,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model: sessionModelOf(resolved.ref, requested?.thinking),
-        // 按派出的角色自己的档位，不继承主 agent 会话的
-        approvalMode: role.approvalMode,
+        // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
+        approvalMode:
+          (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
+          role.approvalMode,
       };
       deps.store.put(stored);
       changed(stored.workspaceId);

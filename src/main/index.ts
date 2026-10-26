@@ -1,14 +1,17 @@
 import { join, resolve } from 'node:path';
-import { electronApp, optimizer } from '@electron-toolkit/utils';
+import { optimizer } from '@electron-toolkit/utils';
 import { errorMessage } from '@shared/guards';
 import { app, BrowserWindow, dialog } from 'electron';
+import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
+import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { getUpdateService } from './services/updates';
+import { registerCloseBehavior } from './windows/closeBehavior';
 import { createAppWindow } from './windows/createAppWindow';
 import { createQuitGuard } from './windows/quitGuard';
 
@@ -29,13 +32,15 @@ let mainWindow: BrowserWindow | null = null;
 let quitGuard: ReturnType<typeof createQuitGuard> | undefined;
 
 function showMainWindow(): void {
-  if (getUpdateService().getState().status === 'installing') return;
+  if (quitGuard?.isQuitRequested() || getUpdateService().getState().status === 'installing') return;
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
     mainWindow.focus();
     return;
   }
   mainWindow = createAppWindow({ width: 1280, height: 800, minWidth: 960, minHeight: 600 });
+  registerCloseBehavior(mainWindow, () => quitGuard?.isQuitRequested() ?? false);
   mainWindow.webContents.on('will-prevent-unload', (event) => {
     if (!event.defaultPrevented) {
       quitGuard?.cancel();
@@ -54,9 +59,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showMainWindow);
   // dev 下 F12 开关 DevTools；打包后屏蔽刷新快捷键
   app.on('browser-window-created', (_event, window) => optimizer.watchWindowShortcuts(window));
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) showMainWindow();
-  });
+  app.on('activate', showMainWindow);
   // Electron 退出时不给 utilityProcess 发 SIGTERM：先让 worker 关闭全部会话再退出，否则命令会成孤儿进程
   quitGuard = createQuitGuard({
     windows: () => BrowserWindow.getAllWindows(),
@@ -81,7 +84,10 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
-      electronApp.setAppUserModelId('com.fynvra.app');
+      // toolkit 在 dev 下会改用 electron.exe 的身份；开发版也使用独立的 Fynvra 分组。
+      if (process.platform === 'win32')
+        app.setAppUserModelId(app.isPackaged ? 'com.fynvra.app' : 'com.fynvra.app.dev');
+      if (process.platform === 'darwin') app.dock?.setIcon(appIcon);
       // Main 的文案按设置里的界面语言；跟随系统时与 Renderer 一样先看应用 locale（navigator.languages 由它而来）
       const systemLanguages = [app.getLocale(), ...app.getPreferredSystemLanguages()];
       configureMainLocale({
@@ -94,6 +100,8 @@ if (!app.requestSingleInstanceLock()) {
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
+      // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
+      installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
       agentHost.start();
       showMainWindow();
       getUpdateService().start();

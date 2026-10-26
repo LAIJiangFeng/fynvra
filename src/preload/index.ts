@@ -8,6 +8,7 @@ import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
 import { createSkillsApi } from './domains/skills';
+import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import type { FynvraApi, Unsubscribe } from './types';
 
@@ -43,11 +44,15 @@ const api: FynvraApi = {
   },
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),
+  terminals: createTerminalsApi(ipcRenderer, subscribe),
   window: {
     platform: process.platform,
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),
     toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TOGGLE_MAXIMIZE),
     close: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE),
+    respondClose: (action) => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_RESPOND_CLOSE, action),
+    onCloseRequested: (callback) =>
+      subscribe(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, () => callback()),
     isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED),
     onMaximizedChange: (callback) =>
       subscribe(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, (maximized) => callback(maximized === true)),
