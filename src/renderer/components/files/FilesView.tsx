@@ -423,11 +423,17 @@ function NewEntryRow({
             setName(event.target.value);
             setError(null);
           }}
+          onBlur={() => {
+            if (pending.current) return;
+            if (name.trim()) void submit();
+            else onClose();
+          }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
             if (event.key === 'Escape' && !pending.current) {
               event.preventDefault();
               event.stopPropagation();
+              pending.current = true; // 取消导致的失焦不能再次创建。
               onClose();
             } else if (event.key === 'Enter') {
               event.preventDefault();
