@@ -41,11 +41,14 @@ describe('退出收尾顺序', () => {
     const quit = vi.fn();
     const guard = createQuitGuard({ windows: () => [{ close }], shutdown, quit, mac: true });
     const event = { preventDefault: vi.fn() };
+    expect(guard.isQuitRequested()).toBe(false);
     guard.beforeQuit(event);
+    expect(guard.isQuitRequested()).toBe(true);
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
     expect(shutdown).not.toHaveBeenCalled();
     guard.cancel();
+    expect(guard.isQuitRequested()).toBe(false);
     guard.allWindowsClosed();
     expect(quit).not.toHaveBeenCalled();
   });

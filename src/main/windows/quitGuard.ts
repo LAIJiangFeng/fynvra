@@ -17,6 +17,7 @@ export function createQuitGuard({
   let stopping = false;
   let stopped = false;
   return {
+    isQuitRequested: () => requested,
     beforeQuit(event: { preventDefault(): void }) {
       if (stopped) return;
       event.preventDefault();

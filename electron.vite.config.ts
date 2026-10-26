@@ -15,6 +15,8 @@ const agentRuntimeAlias = {
 
 export default defineConfig({
   main: {
+    // electron-vite 会把 false 重置为 resources；限定公共目录，让图标经 ?asset 输出到 out。
+    publicDir: 'resources/public',
     // Agent worker（src/agent/index.ts）不是第二个入口：Main 以 `?modulePath` 引用它
     // （services/agentHost/electronWorker.ts），electron-vite 用本段配置单独构建成 out/main/chunks/ 下的文件，
     // alias 与 externalizeDeps 都沿用这里。pi 因此要写进根 dependencies，否则会被打进 worker 产物。

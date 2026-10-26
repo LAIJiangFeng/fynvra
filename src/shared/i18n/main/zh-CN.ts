@@ -19,6 +19,14 @@ export const mainZhCN = {
   },
   app: {
     startFailed: 'Fynvra 启动失败',
+    closeTitle: '确认退出',
+    closeMessage: '关闭 Fynvra？',
+    closeDetail:
+      '退出将关闭应用并停止正在运行的任务。最小化到托盘后，任务会继续在后台运行，未保存的编辑也会保留。',
+    minimizeToTray: '最小化到托盘',
+    showWindow: '显示 Fynvra',
+    quit: '退出',
+    closeFailed: '无法完成窗口操作，窗口已保留。请重试或选择退出。',
   },
   updates: {
     downloaded: '版本 {version} 已下载，返回应用可重启安装',
