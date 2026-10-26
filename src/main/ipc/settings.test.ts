@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import type { PickWorktreesRootResult, WorktreesRootInfoResult } from '@shared/types/settings';
+import {
+  type PickWorktreesRootResult,
+  parseSettings,
+  type WorktreesRootInfoResult,
+} from '@shared/types/settings';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -113,6 +117,7 @@ describe('settings IPC', () => {
     [{ theme: 'dark' }],
     { theme: 'neon' },
     { sidePanelOpen: 1 },
+    { sidebarOpen: 'false' },
     { theme: 'dark', workspaces: [{ repoPath: 'C:\\' }] },
     { worktreesRoot: 'D:\\wt' },
   ])('settings:update 拒绝非法入参 %j，不抛异常也不改动设置', (raw) => {
@@ -140,6 +145,20 @@ describe('settings IPC', () => {
     mocks.send.mockClear();
     expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, { theme: 'dark' })).toMatchObject({ ok: true });
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('settings:update 记下左栏开合并落盘，重启后读回', () => {
+    mocks.send.mockClear();
+    expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, { sidebarOpen: false })).toEqual({
+      ok: true,
+      preferences: { theme: 'dark', sidePanelOpen: true, sidebarOpen: false },
+    });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+
+    mocks.appListeners.get('before-quit')?.();
+    const disk = JSON.parse(readFileSync(join(mocks.userData, 'settings.json'), 'utf8'));
+    expect(disk.preferences).toEqual({ theme: 'dark', sidePanelOpen: true, sidebarOpen: false });
+    expect(parseSettings(disk).preferences.sidebarOpen).toBe(false);
   });
 });
 

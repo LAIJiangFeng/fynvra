@@ -27,6 +27,7 @@ const ACTIONS = {
   'new-session': { scope: 'global', chord: 'mod+n', allowInInput: true },
   'open-settings': { scope: 'global', chord: 'mod+,', allowInInput: true },
   'toggle-side-panel': { scope: 'global', chord: 'mod+b', allowInInput: true },
+  'toggle-sidebar': { scope: 'global', chord: 'mod+shift+b', allowInInput: true },
   'focus-composer': { scope: 'global', chord: 'mod+l', allowInInput: true },
   'prev-session': { scope: 'global', chord: 'mod+shift+[', allowInInput: true },
   'next-session': { scope: 'global', chord: 'mod+shift+]', allowInInput: true },

@@ -4,6 +4,7 @@ import {
   type Preferences,
   parsePreferences,
   SETTINGS_VERSION,
+  sidebarOpenOf,
   type ThemeMode,
 } from '@shared/types/settings';
 import { create } from 'zustand';
@@ -16,6 +17,9 @@ export interface SettingsState extends Preferences {
   setTheme(theme: ThemeMode): void;
   setLanguage(language: Language): void;
   toggleSidePanel(): void;
+  toggleSidebar(): void;
+  /** 展开左栏；已经展开时什么都不做（不落盘） */
+  openSidebar(): void;
 }
 
 /**
@@ -48,20 +52,25 @@ export function createSettingsStore(api: PreferencesBridge) {
 
   return create<SettingsState>()(
     persist(
-      (set) => ({
+      (set, get) => ({
         ...DEFAULT_PREFERENCES,
         setTheme: (theme) => set({ theme }),
         setLanguage: (language) => set({ language }),
         toggleSidePanel: () => set((state) => ({ sidePanelOpen: !state.sidePanelOpen })),
+        toggleSidebar: () => set((state) => ({ sidebarOpen: !sidebarOpenOf(state) })),
+        openSidebar: () => {
+          if (!sidebarOpenOf(get())) set({ sidebarOpen: true });
+        },
       }),
       {
         name: 'preferences',
         version: SETTINGS_VERSION,
         storage,
-        // 语言没选过时不写（按跟随系统）
-        partialize: ({ theme, sidePanelOpen, language }): Preferences => ({
+        // 左栏没切换过、语言没选过时不写（按展开、跟随系统）；切换过就一直写，Main 按字段合并
+        partialize: ({ theme, sidePanelOpen, sidebarOpen, language }): Preferences => ({
           theme,
           sidePanelOpen,
+          ...(sidebarOpen !== undefined ? { sidebarOpen } : {}),
           ...(language ? { language } : {}),
         }),
         merge: (persisted, current) => ({ ...current, ...parsePreferences(persisted) }),

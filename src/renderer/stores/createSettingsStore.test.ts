@@ -1,4 +1,4 @@
-import type { Preferences, PreferencesResult } from '@shared/types/settings';
+import { type Preferences, type PreferencesResult, sidebarOpenOf } from '@shared/types/settings';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSettingsStore, type PreferencesBridge } from './createSettingsStore';
 
@@ -111,5 +111,130 @@ describe('createSettingsStore', () => {
     await settle();
     expect(store.getState()).toMatchObject({ theme: 'system', sidePanelOpen: true });
     expect(store.getState().setTheme).toBeTypeOf('function');
+  });
+});
+
+describe('左栏开合（sidebarOpen）', () => {
+  it('首次水合前的切换不落盘；水合后切换连同其他偏好一起写入', async () => {
+    const pending = deferred<PreferencesResult>();
+    const { api, update } = bridge(() => pending.promise);
+    const store = createSettingsStore(api);
+
+    store.getState().toggleSidebar();
+    await settle();
+    expect(update).not.toHaveBeenCalled();
+
+    pending.resolve({
+      ok: true,
+      preferences: { theme: 'light', sidePanelOpen: false, sidebarOpen: false },
+    });
+    await settle();
+    expect(sidebarOpenOf(store.getState())).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+
+    store.getState().toggleSidebar();
+    await settle();
+    expect(sidebarOpenOf(store.getState())).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenLastCalledWith({
+      theme: 'light',
+      sidePanelOpen: false,
+      sidebarOpen: true,
+    });
+  });
+
+  it('读取失败时一直关闸：切换只在内存里生效', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { api, update } = bridge(async () => ({ ok: false, error: 'settings.json 不可读' }));
+    const store = createSettingsStore(api);
+    await settle();
+
+    store.getState().toggleSidebar();
+    await settle();
+    expect(sidebarOpenOf(store.getState())).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+  });
+
+  it('没切换过时按展开、不写这个字段；切换后落盘，重新水合读回', async () => {
+    let disk: PreferencesResult = {
+      ok: true,
+      preferences: { theme: 'system', sidePanelOpen: true },
+    };
+    const { api, update } = bridge(async () => disk);
+    const store = createSettingsStore(api);
+    await settle();
+    expect(store.getState().sidebarOpen).toBeUndefined();
+    expect(sidebarOpenOf(store.getState())).toBe(true);
+
+    store.getState().toggleSidePanel();
+    await settle();
+    expect(update).toHaveBeenLastCalledWith({ theme: 'system', sidePanelOpen: false });
+
+    store.getState().toggleSidebar();
+    await settle();
+    expect(update).toHaveBeenLastCalledWith({
+      theme: 'system',
+      sidePanelOpen: false,
+      sidebarOpen: false,
+    });
+
+    // 展开也要写：Main 按字段合并，不写的话磁盘上还是收起
+    store.getState().toggleSidebar();
+    await settle();
+    expect(update).toHaveBeenLastCalledWith({
+      theme: 'system',
+      sidePanelOpen: false,
+      sidebarOpen: true,
+    });
+
+    // 重启（或其他窗口改过）：按磁盘上的值
+    disk = { ok: true, preferences: { theme: 'system', sidePanelOpen: true, sidebarOpen: false } };
+    await store.persist.rehydrate();
+    expect(sidebarOpenOf(store.getState())).toBe(false);
+  });
+
+  it('磁盘上的非法值按展开', async () => {
+    const corrupted = { theme: 'dark', sidePanelOpen: true, sidebarOpen: 'no' };
+    const store = createSettingsStore(
+      bridge(async () => ({ ok: true, preferences: corrupted as unknown as Preferences })).api
+    );
+    await settle();
+    expect(store.getState().sidebarOpen).toBeUndefined();
+    expect(sidebarOpenOf(store.getState())).toBe(true);
+  });
+
+  it('openSidebar：收起时展开并落盘；已经展开时什么都不写', async () => {
+    const { api, update } = bridge(async () => ({
+      ok: true,
+      preferences: { theme: 'system', sidePanelOpen: true, sidebarOpen: false },
+    }));
+    const store = createSettingsStore(api);
+    await settle();
+
+    store.getState().openSidebar();
+    await settle();
+    expect(sidebarOpenOf(store.getState())).toBe(true);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenLastCalledWith({
+      theme: 'system',
+      sidePanelOpen: true,
+      sidebarOpen: true,
+    });
+
+    store.getState().openSidebar();
+    await settle();
+    expect(update).toHaveBeenCalledTimes(1);
+
+    // 没切换过（按展开）也不写
+    const fresh = bridge(async () => ({
+      ok: true,
+      preferences: { theme: 'system', sidePanelOpen: true },
+    }));
+    const untouched = createSettingsStore(fresh.api);
+    await settle();
+    untouched.getState().openSidebar();
+    await settle();
+    expect(fresh.update).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,8 @@ export interface Preferences {
   theme: ThemeMode;
   /** 右侧面板是否展开 */
   sidePanelOpen: boolean;
+  /** 左栏（工作区 / 会话）是否展开；没写过时展开（读取用 {@link sidebarOpenOf}） */
+  sidebarOpen?: boolean;
   // --- sessions ---（Main 的归档扫描按它执行；没写过时取 DEFAULT_SESSION_PREFERENCES）
   /** 超过这么多天没有更新的会话移入「已归档」 */
   archiveIdleDays?: ArchiveIdleDays;
@@ -135,6 +137,11 @@ export function isThemeMode(value: unknown): value is ThemeMode {
 /** 生效的界面语言设置：没写过时跟随系统 */
 export function languageOf(preferences: Pick<Preferences, 'language'>): Language {
   return preferences.language ?? DEFAULT_LANGUAGE;
+}
+
+/** 生效的左栏开合：没写过（或写的不是布尔值）时展开 */
+export function sidebarOpenOf(preferences: Pick<Preferences, 'sidebarOpen'>): boolean {
+  return preferences.sidebarOpen ?? true;
 }
 
 // --- sessions ---
@@ -249,6 +256,7 @@ export function parsePreferences(raw: unknown): Preferences {
   const record = asRecord(raw);
   const theme = record?.theme;
   const sidePanelOpen = record?.sidePanelOpen;
+  const sidebarOpen = record?.sidebarOpen;
   const shellPath = typeof record?.shellPath === 'string' ? record.shellPath.trim() : '';
   const worktreesRoot =
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
@@ -262,6 +270,7 @@ export function parsePreferences(raw: unknown): Preferences {
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
+    ...(typeof sidebarOpen === 'boolean' ? { sidebarOpen } : {}),
     ...parseSessionPreferences(record),
     ...parseTimelinePreferences(record),
     ...(shellPath ? { shellPath } : {}),
@@ -332,6 +341,10 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
       case 'sidePanelOpen':
         if (typeof value !== 'boolean') return null;
         patch.sidePanelOpen = value;
+        break;
+      case 'sidebarOpen':
+        if (typeof value !== 'boolean') return null;
+        patch.sidebarOpen = value;
         break;
       case 'notifications': {
         const notifications = parseNotificationPreferencesPatch(value);
