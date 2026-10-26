@@ -46,43 +46,30 @@ export function CloseWindowDialog() {
         data-testid="close-window-dialog"
         showCloseButton={false}
         initialFocus={cancel}
-        overlayClassName="bg-black/30 dark:bg-black/50"
-        className="gap-0 rounded-2xl border-border/80 px-6 py-8 shadow-xl sm:max-w-[31.25rem]"
+        className="sm:max-w-md"
       >
-        <DialogHeader className="gap-3 text-left">
-          <DialogTitle className="font-normal text-xl leading-7">{t('app.closeTitle')}</DialogTitle>
-          <DialogDescription className="text-base leading-relaxed">
-            {t('app.closeDetail')}
-          </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t('app.closeTitle')}</DialogTitle>
+          <DialogDescription className="leading-relaxed">{t('app.closeDetail')}</DialogDescription>
         </DialogHeader>
         {error && (
-          <p role="alert" className="mt-4 text-destructive text-sm">
+          <p role="alert" className="text-destructive text-sm">
             {error}
           </p>
         )}
-        <DialogFooter className="mt-12 flex-row justify-end gap-3">
+        <DialogFooter>
           <Button
             ref={cancel}
             variant="outline"
-            className="rounded-xl px-3.5 font-normal text-base"
             disabled={busy}
             onClick={() => void respond('cancel')}
           >
             {t('common.cancel')}
           </Button>
-          <Button
-            className="rounded-xl px-3.5 font-normal text-base"
-            disabled={busy}
-            onClick={() => void respond('tray')}
-          >
+          <Button disabled={busy} onClick={() => void respond('tray')}>
             {t('app.minimizeToTray')}
           </Button>
-          <Button
-            variant="destructive"
-            className="rounded-xl px-3.5 font-normal text-base"
-            disabled={busy}
-            onClick={() => void respond('quit')}
-          >
+          <Button variant="destructive" disabled={busy} onClick={() => void respond('quit')}>
             {t('app.quit')}
           </Button>
         </DialogFooter>
