@@ -7,6 +7,7 @@ import { BUILTIN_ROLES, getBuiltinRole, JsonFileRoleStore, type Role } from '@fy
 import type { AgentApprovalRequest, AgentCommand, ModelQuery } from '@shared/types/agent';
 import type {
   ApprovalDecision,
+  ChatImage,
   ModelThinkingCapability,
   SessionEventEnvelope,
   SessionModelRef,
@@ -287,6 +288,37 @@ describe('createAgentHost sessions', () => {
       'prompt',
     ]);
     expect(env.host.list('ws-1')[0]?.title).toBe('Fix the flaky build');
+  });
+
+  it('sends the pasted images with the prompt, and only when there are some', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const identity = { sessionId: session.id, generation: 1 };
+    expect(await env.host.prompt(session.id, 'What is wrong here?', [screenshot])).toEqual({
+      ok: true,
+    });
+    await env.host.prompt(session.id, '', [screenshot]);
+    await env.host.prompt(session.id, 'text only');
+    expect(env.sent('prompt')).toEqual([
+      { type: 'prompt', identity, text: 'What is wrong here?', images: [screenshot] },
+      { type: 'prompt', identity, text: '', images: [screenshot] },
+      { type: 'prompt', identity, text: 'text only' },
+    ]);
+    expect(env.sent('prompt')[2]).not.toHaveProperty('images');
+  });
+
+  it('keeps the automatic title for the next message when a message has only images', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    await env.host.prompt(session.id, '', [screenshot]);
+    expect(env.host.list('ws-1')[0]).toMatchObject({ title: 'Worker', status: 'running' });
+
+    await env.host.prompt(session.id, 'Why does the build fail here?', [screenshot]);
+    expect(env.host.list('ws-1')[0]?.title).toBe('Why does the build fail here?');
+    await env.host.prompt(session.id, 'second message');
+    expect(env.host.list('ws-1')[0]?.title).toBe('Why does the build fail here?');
   });
 
   it('spawns with the skills and MCP servers resolved for the role and logs their warnings', async () => {

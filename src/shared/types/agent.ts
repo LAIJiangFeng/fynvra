@@ -12,8 +12,10 @@ import { asRecord, isNonEmptyString } from '../guards';
 import {
   type ApprovalDecision,
   type ApprovalKind,
+  type ChatImage,
   isThinkingSource,
   type ModelThinkingCapability,
+  parseChatImages,
   type SessionStatus,
 } from './chat';
 
@@ -142,8 +144,11 @@ export interface AgentApprovalRequest {
 /** Main → worker。 */
 export type AgentCommand =
   | { type: 'spawn-session'; identity: SessionIdentity; spec: SpawnSessionSpec }
-  /** 会话运行中到达时排到当前回合之后（followUp） */
-  | { type: 'prompt'; identity: SessionIdentity; text: string }
+  /**
+   * 会话运行中到达时排到当前回合之后（followUp）。可以带图片（用户粘贴的），带图片时 text 可以是空串，
+   * 不带图片时 text 不能为空
+   */
+  | { type: 'prompt'; identity: SessionIdentity; text: string; images?: ChatImage[] }
   /** 会话运行中插话（当前工具调用结束后送达）；空闲时等同 prompt */
   | { type: 'steer'; identity: SessionIdentity; text: string }
   | { type: 'abort'; identity: SessionIdentity }
@@ -259,8 +264,13 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       return isApprovalMode(record.mode)
         ? { type: 'set-approval-mode', identity, mode: record.mode }
         : null;
-    case 'prompt':
-      return isNonEmptyString(record.text) ? { type: 'prompt', identity, text: record.text } : null;
+    case 'prompt': {
+      const { text } = record;
+      if (typeof text !== 'string') return null;
+      if (record.images === undefined) return text ? { type: 'prompt', identity, text } : null;
+      const images = parseChatImages(record.images);
+      return images ? { type: 'prompt', identity, text, images } : null;
+    }
     case 'steer':
       return isNonEmptyString(record.text) ? { type: 'steer', identity, text: record.text } : null;
     case 'abort':

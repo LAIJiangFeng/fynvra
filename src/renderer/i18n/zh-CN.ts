@@ -198,6 +198,13 @@ export const zhCN = {
     tokensHint: '累计输入 / 输出 tokens',
     costHint: '累计费用',
     branchHint: '当前分支（{cwd}）',
+    image: '图片 {index}',
+    imageOnly: '[图片]',
+    removeImage: '移除图片 {index}',
+    imagesTooMany: '每条消息最多 {max} 张图片',
+    imageTooLarge: '图片太大：单张不超过 {single} MB，合计不超过 {total} MB',
+    imageUnsupported: '只能粘贴 PNG、JPEG、GIF、WebP 图片',
+    imageUnreadable: '读不出这张图片',
   },
   model: {
     pick: '选择模型',

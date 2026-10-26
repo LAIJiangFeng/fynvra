@@ -1,4 +1,9 @@
-import type { ModelProviderOption, SessionStatus, SessionSummary } from '@shared/types/chat';
+import type {
+  ChatImage,
+  ModelProviderOption,
+  SessionStatus,
+  SessionSummary,
+} from '@shared/types/chat';
 import type { SessionsState } from './createSessionsStore';
 import type { PendingApproval, SessionRuntime, TimelineMessage } from './reducer';
 
@@ -7,6 +12,7 @@ const EMPTY_SESSIONS: SessionSummary[] = [];
 const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const EMPTY_PROVIDERS: ModelProviderOption[] = [];
+const EMPTY_IMAGES: ChatImage[] = [];
 
 type Lists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
 
@@ -80,6 +86,12 @@ export const selectRuntimeOf =
 
 export const selectDraftOf = (sessionId: string) => (state: SessionsState) =>
   state.drafts[sessionId] ?? '';
+
+/** 输入框里粘贴的图片（草稿） */
+export const selectDraftImagesOf =
+  (sessionId: string) =>
+  (state: SessionsState): ChatImage[] =>
+    state.draftImages[sessionId] ?? EMPTY_IMAGES;
 
 export const selectLoadingHistoryOf = (sessionId: string) => (state: SessionsState) =>
   state.loadingHistory[sessionId] === true;

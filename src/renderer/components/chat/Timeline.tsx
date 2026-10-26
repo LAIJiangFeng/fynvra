@@ -227,7 +227,7 @@ const TimelineRowView = memo(function TimelineRowView({
   );
 });
 
-/** 折起来的历史轮次：一行提问 + 时间，点开接着显示整轮 */
+/** 折起来的历史轮次：一行提问 + 时间，点开接着显示整轮；只有图片的提问显示占位 */
 function TurnHeader({
   message,
   open,
@@ -237,7 +237,9 @@ function TurnHeader({
   open: boolean;
   onToggle: (questionId: string, opening: boolean) => void;
 }) {
-  const question = message.text.replace(/\s+/g, ' ').trim();
+  const t = useT();
+  const question =
+    message.text.replace(/\s+/g, ' ').trim() || (message.images ? t('chat.imageOnly') : '');
   return (
     <button
       type="button"

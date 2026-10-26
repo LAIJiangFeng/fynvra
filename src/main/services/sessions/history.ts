@@ -1,7 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { asRecord } from '@shared/guards';
-import type { ChatMessage, ChatToolCall } from '@shared/types/chat';
+import {
+  type ChatImage,
+  type ChatMessage,
+  type ChatToolCall,
+  isChatImageMimeType,
+  stripImageHints,
+} from '@shared/types/chat';
 
 /**
  * 工具输出在投影里保留的长度，与 agent-runtime 的 TOOL_OUTPUT_PREVIEW_CHARS 相同。
@@ -47,6 +53,7 @@ interface Entry {
  * pi jsonl（权威源）→ Renderer 的 ChatMessage[] 投影。
  * 只走当前分支（从最后一条条目沿 parentId 回到根），不是文件里的每一行；
  * user / assistant 各成一条消息，toolResult 回填到发起它的工具调用上，其余条目（system、模型切换、标签等）跳过。
+ * user 消息带上它的图片；带图片的，正文去掉 pi 规整图片时接在末尾的提示行。
  * 读不懂的行直接忽略，永不抛异常。
  */
 export function projectHistory(
@@ -66,7 +73,14 @@ export function projectHistory(
       streaming: false,
     };
     if (message.role === 'user') {
-      messages.push({ ...base, role: 'user', text: textOf(message.content), toolCalls: [] });
+      const images = imagesOf(message.content);
+      const text = textOf(message.content);
+      messages.push({
+        ...base,
+        role: 'user',
+        ...(images.length > 0 ? { text: stripImageHints(text), images } : { text }),
+        toolCalls: [],
+      });
     } else if (message.role === 'assistant') {
       const toolCalls = toolCallsOf(message.content);
       for (const call of toolCalls) calls.set(call.id, call);
@@ -153,6 +167,15 @@ function textOf(content: unknown): string {
   return blocksOf(content)
     .map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
     .join('');
+}
+
+/** image 块（格式在白名单里、data 是字符串）；pi 存的是它规整后的图片 */
+function imagesOf(content: unknown): ChatImage[] {
+  return blocksOf(content).flatMap(({ type, data, mimeType }): ChatImage[] =>
+    type === 'image' && typeof data === 'string' && isChatImageMimeType(mimeType)
+      ? [{ data, mimeType }]
+      : []
+  );
 }
 
 function thinkingOf(content: unknown): string {

@@ -203,6 +203,13 @@ export const en: MessagesShape<typeof zhCN> = {
     tokensHint: 'Total input / output tokens',
     costHint: 'Total cost',
     branchHint: 'Current branch ({cwd})',
+    image: 'Image {index}',
+    imageOnly: '[Image]',
+    removeImage: 'Remove image {index}',
+    imagesTooMany: 'Up to {max} images per message',
+    imageTooLarge: 'Image too large: up to {single} MB each and {total} MB in total',
+    imageUnsupported: 'Only PNG, JPEG, GIF and WebP images can be pasted',
+    imageUnreadable: 'Could not read the image',
   },
   model: {
     pick: 'Select model',

@@ -249,8 +249,11 @@ export interface ChatToolCall {
   id: string; name: string; args: unknown;
   status: 'running' | 'done' | 'error'; output?: string; durationMs?: number;
 }
+/** 输入框粘贴的图片：base64（不含 data: 前缀）。缩放、转 PNG 由 pi 在 worker 里做 */
+export interface ChatImage { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; }
 export interface ChatMessage {
   id: string; sessionId: string; role: ChatRole; text: string; thinking?: string;
+  images?: ChatImage[];  // 只用于 user 消息；带图片的正文不含 pi 接在末尾的 [Image …] 提示行
   toolCalls: ChatToolCall[]; createdAt: number; streaming: boolean;
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }
@@ -279,7 +282,11 @@ export interface SessionsApi {
   list(workspaceId: string, options?: { includeArchived?: boolean }): Promise<IpcResult<{ sessions: SessionSummary[] }>>;
   create(input: { workspaceId: string; roleId: string; model?: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
-  prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
+  /**
+   * images：最多 10 张，单张解码后 ≤ 20 MiB、合计 ≤ 50 MiB，有一张不合法就整条拒绝；
+   * 带图片时 text 可以为空，不带时不能全是空白
+   */
+  prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Message } from '@earendil-works/pi-ai';
 import type {
   ApprovalGate,
   ApprovalPolicyHooks,
@@ -25,11 +26,22 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * 假的 pi AgentSession：只有工厂在打开时会碰的 agent.convertToLlm（原样返回），其余方法按用例给。
+ */
+function fakePiSession<T extends object>(methods: T = {} as T) {
+  return { agent: { convertToLlm: async (messages: Message[]) => messages }, ...methods };
+}
+
 describe('createPiSessionFactory', () => {
   it('opens the session with the shell path of the spawn spec in its settings', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-'));
     dirs.push(dir);
-    mocks.createRoleSession.mockResolvedValue({ session: {}, warnings: [], dispose: vi.fn() });
+    mocks.createRoleSession.mockResolvedValue({
+      session: fakePiSession(),
+      warnings: [],
+      dispose: vi.fn(),
+    });
     const open = createPiSessionFactory({
       agentDir: join(dir, 'agent'),
       resolveModel: async () => ({}) as ResolvedModel,
@@ -96,7 +108,10 @@ describe('createPiSessionFactory model switch', () => {
   async function openWith(roleThinking?: 'low') {
     const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-model-'));
     dirs.push(dir);
-    const piSession = { setModel: vi.fn(async () => {}), setThinkingLevel: vi.fn() };
+    const piSession = fakePiSession({
+      setModel: vi.fn(async () => {}),
+      setThinkingLevel: vi.fn(),
+    });
     mocks.createRoleSession.mockResolvedValue({
       session: piSession,
       warnings: [],
@@ -211,7 +226,7 @@ describe('createPiSessionFactory approval mode switch', () => {
     mocks.createRoleSession.mockImplementation(
       async (options: { approval?: ApprovalPolicyHooks }) => {
         options.approval?.onGate?.(gate as unknown as ApprovalGate);
-        return { session: {}, warnings: [], dispose: vi.fn() };
+        return { session: fakePiSession(), warnings: [], dispose: vi.fn() };
       }
     );
     const open = createPiSessionFactory({
@@ -245,6 +260,105 @@ describe('createPiSessionFactory approval mode switch', () => {
     const { session, gate } = await openWith(undefined);
     expect(() => session.setApprovalMode('full')).toThrow(/no approval gate/);
     expect(gate.setMode).not.toHaveBeenCalled();
+  });
+});
+
+describe('createPiSessionFactory prompt', () => {
+  const screenshot = { data: 'iVBORw0KGgo=', mimeType: 'image/png' as const };
+  const photo = { data: 'UklGRg==', mimeType: 'image/webp' as const };
+
+  async function openSession() {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-prompt-'));
+    dirs.push(dir);
+    const piSession = fakePiSession({
+      prompt: vi.fn(async (_text: string, _options?: unknown) => {}),
+    });
+    mocks.createRoleSession.mockResolvedValue({
+      session: piSession,
+      warnings: [],
+      dispose: vi.fn(),
+    });
+    const open = createPiSessionFactory({
+      agentDir: join(dir, 'agent'),
+      resolveModel: async () => ({}) as ResolvedModel,
+    });
+    const session = await open({
+      identity: { sessionId: 'session-1', generation: 1 },
+      spec: {
+        role: {
+          id: 'worker',
+          name: 'Worker',
+          skillIds: [],
+          mcpServerIds: [],
+          tools: 'all',
+          approvalMode: 'auto-edits',
+        },
+        cwd: dir,
+        sessionFile: join(dir, 'agent', 'sessions', 'session-1.jsonl'),
+        model: {
+          providerId: 'fynvra-test',
+          api: 'anthropic-messages',
+          modelId: 'claude-sonnet-5-5',
+        },
+        skills: [],
+        mcpServers: [],
+        worker: false,
+        roles: [],
+      },
+      host: null,
+      workerHost: null,
+    });
+    return { session, piSession };
+  }
+
+  it('hands pasted images to pi as image content, and no images option without them', async () => {
+    const { session, piSession } = await openSession();
+    await session.prompt('What is wrong here?', [screenshot, photo]);
+    await session.prompt('', [screenshot]);
+    await session.prompt('text only');
+    await session.prompt('an empty list is no images', []);
+    expect(piSession.prompt.mock.calls).toEqual([
+      [
+        'What is wrong here?',
+        {
+          streamingBehavior: 'followUp',
+          images: [
+            { type: 'image', data: screenshot.data, mimeType: 'image/png' },
+            { type: 'image', data: photo.data, mimeType: 'image/webp' },
+          ],
+        },
+      ],
+      [
+        '',
+        {
+          streamingBehavior: 'followUp',
+          images: [{ type: 'image', data: screenshot.data, mimeType: 'image/png' }],
+        },
+      ],
+      ['text only', { streamingBehavior: 'followUp' }],
+      ['an empty list is no images', { streamingBehavior: 'followUp' }],
+    ]);
+  });
+
+  it('leaves out the empty text block pi puts before the images of a prompt without text', async () => {
+    const { piSession } = await openSession();
+    const image = { type: 'image' as const, ...screenshot };
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: '' }, image], timestamp: 1 },
+      { role: 'user', content: [{ type: 'text', text: ' \n' }, image, image], timestamp: 2 },
+      { role: 'user', content: [{ type: 'text', text: 'What is this?' }, image], timestamp: 3 },
+      { role: 'user', content: 'plain string', timestamp: 4 },
+      // 只有空文本、没有别的内容：原样留着，不造出没有内容的消息
+      { role: 'user', content: [{ type: 'text', text: '' }], timestamp: 5 },
+    ];
+    // 工厂打开会话时换上的转换：pi 每一轮把消息交给 provider 之前都经过它
+    expect(await piSession.agent.convertToLlm(messages)).toEqual([
+      { role: 'user', content: [image], timestamp: 1 },
+      { role: 'user', content: [image, image], timestamp: 2 },
+      messages[2],
+      messages[3],
+      messages[4],
+    ]);
   });
 });
 

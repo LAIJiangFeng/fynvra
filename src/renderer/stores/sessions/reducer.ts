@@ -1,13 +1,15 @@
 import type { FynvraSessionEvent } from '@fynvra/core';
 import { asRecord } from '@shared/guards';
-import type {
-  ApprovalKind,
-  ApprovalRequest,
-  ChatMessage,
-  ChatToolCall,
-  SessionEventEnvelope,
-  SessionStatus,
-  SessionSummary,
+import {
+  type ApprovalKind,
+  type ApprovalRequest,
+  type ChatImage,
+  type ChatMessage,
+  type ChatToolCall,
+  type SessionEventEnvelope,
+  type SessionStatus,
+  type SessionSummary,
+  stripImageHints,
 } from '@shared/types/chat';
 
 /**
@@ -320,14 +322,30 @@ function finishAssistant(slice: Slice, fresh: Fresh, text: string): Slice {
   };
 }
 
-/** user 的 message_end：确认最早的乐观回显（原位、去掉标记）；没有回显就追加一条。 */
+/**
+ * user 的 message_end：确认最早的乐观回显（原位、去掉标记，图片留着）；没有回显就追加一条。
+ * 带图片的回显，正文取去掉 pi 提示行后的文本（事件里不带图片）。
+ */
 function confirmUser(slice: Slice, fresh: Fresh, text: string): Slice {
   const index = slice.messages.findIndex((message) => message.optimistic);
   if (index < 0) {
     return { ...slice, messages: [...slice.messages, newMessage(fresh, 'user', text, false)] };
   }
   const { optimistic: _optimistic, failed: _failed, ...confirmed } = slice.messages[index];
-  return { ...slice, messages: replaceAt(slice.messages, index, { ...confirmed, text }) };
+  const delivered = confirmed.images ? stripImageHints(text) : text;
+  return {
+    ...slice,
+    messages: replaceAt(slice.messages, index, { ...confirmed, text: delivered }),
+  };
+}
+
+/**
+ * history 里的 user 消息是不是这条回显送达后的样子。投影里带图片的已去掉 pi 的提示行，
+ * 图片都被 pi 略去的没有图片、正文还带着提示行；pi 存的是规整后的图片，所以只比正文。
+ */
+function deliveredAs(echo: TimelineMessage, message: ChatMessage): boolean {
+  if (message.text === echo.text) return true;
+  return echo.images !== undefined && stripImageHints(message.text) === echo.text;
 }
 
 /**
@@ -439,15 +457,19 @@ function approvalFromEvent(
   };
 }
 
-/** 发送时的乐观回显：追加在末尾，会话置 running 并清掉上一轮的错误和未送达的回显。 */
+/**
+ * 发送时的乐观回显（带着粘贴的图片）：追加在末尾，会话置 running 并清掉上一轮的错误和未送达的回显。
+ */
 export function addOptimisticMessage<S extends ChatProjection>(
   state: S,
   sessionId: string,
-  input: { id: string; text: string; createdAt: number }
+  input: { id: string; text: string; images?: readonly ChatImage[]; createdAt: number }
 ): S {
   const before = sliceOf(state, sessionId);
+  const { id, text, images, createdAt } = input;
   const echo: TimelineMessage = {
-    ...newMessage({ ...input, sessionId }, 'user', input.text, false),
+    ...newMessage({ id, sessionId, createdAt }, 'user', text, false),
+    ...(images?.length ? { images: [...images] } : {}),
     optimistic: true,
   };
   const after = startTurn({
@@ -474,7 +496,7 @@ export function withdrawOptimisticMessage<S extends ChatProjection>(
 
 /**
  * history 回放：用权威投影整体替换。还没落盘的内容（权威区末尾的流式消息、未确认的乐观回显）
- * 留在尾部；history 里出现了本地还没见过的同文 user 消息时，对应的回显视为已送达。
+ * 留在尾部；history 里出现了本地还没见过的同文 user 消息时，对应的回显视为已送达（见 deliveredAs）。
  */
 export function applyHistory<S extends ChatProjection>(
   state: S,
@@ -487,12 +509,9 @@ export function applyHistory<S extends ChatProjection>(
   const streaming = last?.role === 'assistant' && last.streaming ? [last] : [];
 
   const seenUsers = before.messages.slice(0, end).filter((message) => message.role === 'user');
-  const unseen = history
-    .filter((message) => message.role === 'user')
-    .slice(seenUsers.length)
-    .map((message) => message.text);
-  const echoes = before.messages.slice(end).filter((message) => {
-    const delivered = unseen.indexOf(message.text);
+  const unseen = history.filter((message) => message.role === 'user').slice(seenUsers.length);
+  const echoes = before.messages.slice(end).filter((echo) => {
+    const delivered = unseen.findIndex((message) => deliveredAs(echo, message));
     if (delivered < 0) return true;
     unseen.splice(delivered, 1);
     return false;

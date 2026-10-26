@@ -1,5 +1,10 @@
 import type { FynvraSessionEventBody } from '@fynvra/core';
-import type { ApprovalRequest, ChatMessage, SessionEventEnvelope } from '@shared/types/chat';
+import type {
+  ApprovalRequest,
+  ChatImage,
+  ChatMessage,
+  SessionEventEnvelope,
+} from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
 import {
   addOptimisticMessage,
@@ -40,6 +45,12 @@ const runtimeOf = (state: ChatProjection, sessionId = S) => state.runtimeBySessi
 function chat(partial: Partial<ChatMessage> & Pick<ChatMessage, 'id' | 'role'>): ChatMessage {
   return { sessionId: S, text: '', toolCalls: [], createdAt: T0, streaming: false, ...partial };
 }
+
+const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
+/** pi 缩放图片后接在正文末尾的提示行 */
+const RESIZED =
+  '[Image: original 3773x1017, displayed at 2000x539. Multiply coordinates by 1.89 to map to original image.]';
 
 describe('reduceSessionEvent · seq', () => {
   it('按 sessionId 分桶，互不影响', () => {
@@ -199,6 +210,125 @@ describe('乐观回显', () => {
     state = addOptimisticMessage(state, S, { id: 'local-2', text: 'hi again', createdAt: T0 });
     expect(messagesOf(state).map((message) => message.id)).toEqual(['local-2']);
     expect(runtimeOf(state)).toMatchObject({ status: 'running', error: undefined });
+  });
+});
+
+describe('带图片的消息', () => {
+  it('回显带着图片；user 的 message_end 确认时保留图片，正文去掉 pi 接上的提示行', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: '哪里不对？',
+      images: [SHOT, PHOTO],
+      createdAt: T0,
+    });
+    expect(messagesOf(state)).toEqual([
+      expect.objectContaining({
+        id: 'local-1',
+        role: 'user',
+        text: '哪里不对？',
+        images: [SHOT, PHOTO],
+        optimistic: true,
+      }),
+    ]);
+
+    state = run([{ type: 'message_end', role: 'user', text: `哪里不对？\n\n${RESIZED}` }], state);
+    const messages = messagesOf(state);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ id: 'local-1', text: '哪里不对？', images: [SHOT, PHOTO] });
+    expect(messages[0]?.optimistic).toBeUndefined();
+  });
+
+  it('只有图片的回显：确认后正文为空，图片还在，会话开始新一轮', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: '',
+      images: [SHOT],
+      createdAt: T0,
+    });
+    state = run([{ type: 'message_end', role: 'user', text: `\n\n${RESIZED}` }], state);
+    expect(messagesOf(state)).toEqual([
+      expect.objectContaining({ id: 'local-1', role: 'user', text: '', images: [SHOT] }),
+    ]);
+    expect(runtimeOf(state)?.status).toBe('running');
+  });
+
+  it('不带图片的回显照常确认：形似提示行的文字是用户写的，不剥；空的图片列表不留字段', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: `解释这一行\n\n${RESIZED}`,
+      images: [],
+      createdAt: T0,
+    });
+    expect(messagesOf(state)[0]).not.toHaveProperty('images');
+    state = run([{ type: 'message_end', role: 'user', text: `解释这一行\n\n${RESIZED}` }], state);
+    expect(messagesOf(state)[0]).toMatchObject({ text: `解释这一行\n\n${RESIZED}` });
+    expect(messagesOf(state)[0]).not.toHaveProperty('images');
+  });
+
+  it('撤回带图片的回显与不带图片的一样', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: '',
+      images: [SHOT],
+      createdAt: T0,
+    });
+    state = withdrawOptimisticMessage(state, S, 'local-1', {
+      status: 'idle',
+      error: '没有可用的模型',
+    });
+    expect(messagesOf(state)).toEqual([]);
+    expect(runtimeOf(state)).toMatchObject({ status: 'idle', error: '没有可用的模型' });
+  });
+
+  it('history 回放：带图片的回显能和去掉了提示行的、只有图片的、图片都被略去的投影对上', () => {
+    let state = applyHistory(emptyProjection(), S, [
+      chat({ id: 'u0', role: 'user', text: '开场' }),
+    ]);
+    state = addOptimisticMessage(state, S, {
+      id: 'local-1',
+      text: '看看这张',
+      images: [SHOT],
+      createdAt: T0,
+    });
+    state = addOptimisticMessage(state, S, {
+      id: 'local-2',
+      text: '',
+      images: [SHOT],
+      createdAt: T0,
+    });
+    state = addOptimisticMessage(state, S, {
+      id: 'local-3',
+      text: '太大了',
+      images: [PHOTO],
+      createdAt: T0,
+    });
+    state = addOptimisticMessage(state, S, {
+      id: 'local-4',
+      text: '还没落盘',
+      images: [PHOTO],
+      createdAt: T0,
+    });
+
+    state = applyHistory(state, S, [
+      chat({ id: 'u0', role: 'user', text: '开场' }),
+      // pi 存的是规整后的图片，数据与回显不同：按正文对上
+      chat({ id: 'u1', role: 'user', text: '看看这张', images: [PHOTO] }),
+      chat({ id: 'u2', role: 'user', text: '', images: [PHOTO] }),
+      // 图片都被 pi 略去：投影里没有图片，正文还带着 pi 的提示行
+      chat({
+        id: 'u3',
+        role: 'user',
+        text: '太大了\n\n[Image omitted: could not be resized below the inline image size limit.]',
+      }),
+    ]);
+
+    expect(messagesOf(state).map((message) => [message.id, message.optimistic])).toEqual([
+      ['u0', undefined],
+      ['u1', undefined],
+      ['u2', undefined],
+      ['u3', undefined],
+      ['local-4', true],
+    ]);
   });
 });
 
