@@ -3,11 +3,27 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { planRelease, selectMacSigningMode, verifyRelease } from '../../../../scripts/release';
 
 const sha = 'a'.repeat(40);
 const old = 'b'.repeat(40);
+
+describe('Windows 安装器配置', () => {
+  it('使用支持选择安装目录的向导，卸载时保留用户数据', () => {
+    const config = parse(
+      readFileSync(new URL('../../../../electron-builder.yml', import.meta.url), 'utf8')
+    );
+    expect(config).toMatchObject({
+      win: { target: 'nsis' },
+      nsis: {
+        oneClick: false,
+        allowToChangeInstallationDirectory: true,
+        deleteAppDataOnUninstall: false,
+      },
+    });
+  });
+});
 
 describe('Mac 签名模式', () => {
   const credentials = {
