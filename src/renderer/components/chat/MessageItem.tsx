@@ -1,9 +1,10 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import type { TimelineMessage } from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
 import { CopyButton } from './CopyButton';
+import { ImagePreview } from './ImagePreview';
 import { Markdown } from './Markdown';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ReadonlyTools, ToolCallCard } from './ToolCallCard';
@@ -32,22 +33,37 @@ export const MessageItem = memo(function MessageItem({
 /** 用户的消息：粘贴的图片画在气泡上方（右对齐），正文为空（只有图片）时不画气泡 */
 function UserMessage({ message }: { message: TimelineMessage }) {
   const t = useT();
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const sending = message.optimistic && !message.failed;
   return (
     <div className="flex flex-col items-end gap-1">
       {message.images?.map((image, index) => (
-        <img
+        <button
           // biome-ignore lint/suspicious/noArrayIndexKey: 消息里的图片没有 id，也不会重排
           key={index}
-          src={`data:${image.mimeType};base64,${image.data}`}
-          alt={t('chat.image', { index: index + 1 })}
-          className={cn(
-            'max-h-48 max-w-full rounded-lg border object-contain',
-            sending && 'opacity-70',
-            message.failed && 'border-destructive/50'
-          )}
-        />
+          type="button"
+          aria-label={t('chat.previewImage', { index: index + 1 })}
+          onClick={() => setPreviewIndex(index)}
+          className="max-w-full rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <img
+            src={`data:${image.mimeType};base64,${image.data}`}
+            alt={t('chat.image', { index: index + 1 })}
+            className={cn(
+              'max-h-48 max-w-full rounded-lg border object-contain',
+              sending && 'opacity-70',
+              message.failed && 'border-destructive/50'
+            )}
+          />
+        </button>
       ))}
+      {message.images && (
+        <ImagePreview
+          images={message.images}
+          index={previewIndex}
+          onIndexChange={setPreviewIndex}
+        />
+      )}
       {message.text.trim() && (
         <div
           className={cn(
