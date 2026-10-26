@@ -498,7 +498,7 @@ export const en: MessagesShape<typeof zhCN> = {
         'Only affects the local Windows agent command tool. Applies to the next session',
       terminalShell: 'Terminal shell',
       terminalShellHint: 'Only applies to newly opened terminals',
-      agentShellDefault: 'Windows default (Git Bash)',
+      agentShellDefault: 'Windows default (Git Bash, otherwise PowerShell)',
       terminalShellDefault: 'System default (Windows PowerShell)',
       loginShellDefault: 'System default (login shell)',
       loginShell: 'Login shell',

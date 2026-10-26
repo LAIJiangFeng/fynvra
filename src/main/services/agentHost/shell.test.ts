@@ -12,6 +12,8 @@ const ENV = {
 const PROGRAM_FILES_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe';
 const PROGRAM_FILES_X86_BASH = 'C:\\Program Files (x86)\\Git\\bin\\bash.exe';
 const LOCAL_APP_DATA_BASH = 'C:\\Users\\me\\AppData\\Local\\Programs\\Git\\bin\\bash.exe';
+const WINDOWS_POWERSHELL = 'C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const PWSH = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
 
 /** where.exe 的输出（null 表示 where 失败：git 不在 PATH 上时退出码 1）与磁盘上存在的文件 */
 function probe(
@@ -146,16 +148,41 @@ describe('createShellPathResolver', () => {
     expect(env.checked).toEqual([]);
   });
 
-  it('fails closed without Git Bash, caching the failed detection rather than letting pi pick WSL', async () => {
-    const env = probe(null, []);
+  it.each([
+    [[WINDOWS_POWERSHELL, PWSH], WINDOWS_POWERSHELL, 'Windows PowerShell 5.1'],
+    [[PWSH], PWSH, 'PowerShell 7'],
+  ] as const)(
+    'falls back without Git Bash using %s, and warns once',
+    async (existing, expected, label) => {
+      const env = probe(null, [...existing]);
+      const resolve = createShellPathResolver({
+        ...env.deps,
+        settings: { read: () => settingsWith() },
+      });
+      expect(await Promise.all([resolve(), resolve()])).toEqual([expected, expected]);
+      expect(await resolve()).toBe(expected);
+      expect(env.exec).toHaveBeenCalledTimes(2);
+      expect(env.logs).toEqual([
+        `warn: no Git Bash found; worker sessions fall back to ${label} at ${expected}`,
+      ]);
+    }
+  );
+
+  it('fails closed only without any usable shell, caching detection rather than letting pi pick WSL', async () => {
+    const env = probe(null, [
+      'C:\\WINDOWS\\System32\\cmd.exe',
+      'C:\\WINDOWS\\System32\\wsl.exe',
+      'C:\\WINDOWS\\System32\\bash.exe',
+    ]);
     const resolve = createShellPathResolver({
       ...env.deps,
       settings: { read: () => settingsWith() },
     });
     const attempts = await Promise.allSettled([resolve(), resolve()]);
     expect(attempts.map((attempt) => attempt.status)).toEqual(['rejected', 'rejected']);
-    await expect(resolve()).rejects.toThrow('No Git Bash found');
-    expect(env.exec).toHaveBeenCalledTimes(1);
+    await expect(resolve()).rejects.toThrow('No usable Windows agent shell found');
+    expect(env.exec).toHaveBeenCalledTimes(2);
+    expect(env.exec).not.toHaveBeenCalledWith(WHERE, ['bash.exe']);
     expect(env.logs.filter((line) => line.startsWith('warn:'))).toHaveLength(1);
   });
 
@@ -187,15 +214,19 @@ describe('createShellPathResolver', () => {
     });
     expect(await resolveUnix()).toBeUndefined();
     expect(unix.exec).not.toHaveBeenCalled();
-    const files = [PROGRAM_FILES_BASH];
+    const files = [PROGRAM_FILES_BASH, WINDOWS_POWERSHELL, PWSH];
     const env = probe(null, files);
     const resolve = createShellPathResolver({
       ...env.deps,
       settings: { read: () => settingsWith() },
     });
     expect(await resolve()).toBe(PROGRAM_FILES_BASH);
-    files.pop();
-    await expect(resolve()).rejects.toThrow('No Git Bash found');
+    files.shift();
+    expect(await resolve()).toBe(WINDOWS_POWERSHELL);
+    files.shift();
+    expect(await resolve()).toBe(PWSH);
+    files.shift();
+    await expect(resolve()).rejects.toThrow('No usable Windows agent shell found');
   });
 
   it('reads the override on every call, so a later edit wins over the cached detection', async () => {
@@ -207,6 +238,6 @@ describe('createShellPathResolver', () => {
     expect(await resolve()).toBe('C:\\msys64\\usr\\bin\\bash.exe');
     settings = settingsWith();
     expect(await resolve()).toBe('D:\\Software\\Git\\bin\\bash.exe');
-    expect(env.exec).toHaveBeenCalledTimes(1);
+    expect(env.exec).toHaveBeenCalledTimes(2);
   });
 });

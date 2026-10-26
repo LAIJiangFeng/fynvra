@@ -34,15 +34,8 @@ describe('界面字典', () => {
     for (const [key, text] of entries(en)) expect(text, key).not.toMatch(CJK);
   });
 
-  it('文案不以句号结尾（Shell 说明按指定文案保留句号）', () => {
-    const shellHints = new Map([
-      ['settings.general.agentShellHint', '只影响 Windows 本机 agent 命令工具，下次开会话生效。'],
-      ['settings.general.terminalShellHint', '仅对新开的终端生效。'],
-    ]);
-    for (const [key, text] of entries(zhCN)) {
-      if (shellHints.has(key)) expect(text, key).toBe(shellHints.get(key));
-      else expect(text, key).not.toMatch(/。$/u);
-    }
+  it('文案不以句号结尾', () => {
+    for (const [key, text] of entries(zhCN)) expect(text, key).not.toMatch(/。$/u);
     for (const [key, text] of entries(en)) expect(text, key).not.toMatch(/[^.]\.$/u);
   });
 });

@@ -179,7 +179,30 @@ describe('agent shell resolution', () => {
       ).toBe(paths['git-bash']);
     }
     files.delete(paths['git-bash']);
+    expect(resolveAgentShell({}, shells, deps)).toBe(paths.powershell);
+    expect(resolveAgentShell({ agentShell: { kind: 'pwsh' } }, shells, deps)).toBe(
+      paths.powershell
+    );
+    files.delete(paths.powershell);
     expect(resolveAgentShell({}, shells, deps)).toBeUndefined();
+  });
+
+  it('uses the same default fallback order in session resolution and settings paths', async () => {
+    const { deps, files } = fake();
+    const defaults = parsePreferences({});
+    for (const expected of [paths['git-bash'], paths.powershell, paths.pwsh]) {
+      const shells = await availableShells(deps);
+      expect(resolveAgentShell({}, shells, deps)).toBe(expected);
+      expect(await describeShells(defaults, deps)).toMatchObject({
+        defaultAgentPath: expected,
+        agentPath: expected,
+      });
+      files.delete(expected);
+    }
+    expect(await describeShells(defaults, deps)).toMatchObject({
+      defaultAgentPath: undefined,
+      agentPath: undefined,
+    });
   });
 
   it('ignores the Windows preference on other platforms', () => {

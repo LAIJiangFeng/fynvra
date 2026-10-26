@@ -202,7 +202,9 @@ export function resolveAgentShell(
   if (deps.platform !== 'win32') return undefined;
   return (
     selectedPath(preferences.agentShell, shells, deps, true) ??
-    selectedPath({ kind: 'git-bash' }, shells, deps, true)
+    selectedPath({ kind: 'git-bash' }, shells, deps, true) ??
+    selectedPath({ kind: 'powershell' }, shells, deps, true) ??
+    selectedPath({ kind: 'pwsh' }, shells, deps, true)
   );
 }
 
@@ -237,7 +239,7 @@ export async function describeShells(
   const shells = await availableShells(deps);
   return {
     shells,
-    defaultAgentPath: shells.find((shell) => shell.id === 'git-bash')?.path,
+    defaultAgentPath: resolveAgentShell({}, shells, deps),
     defaultTerminalPath: defaultTerminalShell(deps).path,
     agentPath: resolveAgentShell(preferences, shells, deps),
     terminalPath: resolveTerminalShell(preferences.terminalShell, shells, deps).path,

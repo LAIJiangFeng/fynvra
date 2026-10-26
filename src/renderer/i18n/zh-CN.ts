@@ -483,10 +483,10 @@ export const zhCN = {
     },
     general: {
       agentShell: 'Windows 本地命令壳',
-      agentShellHint: '只影响 Windows 本机 agent 命令工具，下次开会话生效。',
+      agentShellHint: '只影响 Windows 本机 agent 命令工具，下次开会话生效',
       terminalShell: '终端 Shell',
-      terminalShellHint: '仅对新开的终端生效。',
-      agentShellDefault: 'Windows 默认（Git Bash）',
+      terminalShellHint: '仅对新开的终端生效',
+      agentShellDefault: 'Windows 默认（Git Bash，未安装时用 PowerShell）',
       terminalShellDefault: '系统默认（Windows PowerShell）',
       loginShellDefault: '系统默认（登录 Shell）',
       loginShell: '登录 Shell',
