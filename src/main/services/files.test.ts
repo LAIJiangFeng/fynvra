@@ -250,3 +250,146 @@ describe('工作区文件只读服务', () => {
     expect(await readFile(join(outside, 'secret.txt'), 'utf8')).toBe('外部内容');
   });
 });
+
+describe('文件条目变更（右键菜单背后的服务）', () => {
+  let base: string;
+  let root: string;
+  let service: ReturnType<typeof createFilesService>;
+  const shell = {
+    revealed: [] as string[],
+    copied: [] as string[][],
+    trashed: [] as string[],
+    reveal: (path: string) => void shell.revealed.push(path),
+    copyFiles: (paths: string[]) => void shell.copied.push(paths),
+    trash: async (path: string) => void shell.trashed.push(path),
+  };
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), 'fynvra-files-mutate-'));
+    root = join(base, 'repo');
+    await mkdir(join(root, 'src'), { recursive: true });
+    await writeFile(join(root, 'src', 'a.ts'), 'export {}');
+    shell.revealed = [];
+    shell.copied = [];
+    shell.trashed = [];
+    service = createFilesService({
+      getWorkspace: () => ({ id: 'ws', name: 'repo', repoPath: root, vcs: 'none' }),
+      shell,
+    });
+  });
+
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true });
+  });
+
+  async function entryId(name: string, parent?: string): Promise<string> {
+    const result = await service.list({
+      workspaceId: 'ws',
+      ...(parent ? { directoryId: parent } : {}),
+    });
+    if (!result.ok) throw new Error(result.error);
+    const found = result.entries.find((item) => item.name === name);
+    if (!found) throw new Error(`未找到：${name}`);
+    return found.id;
+  }
+
+  it('新建文件与子目录：同名已存在时报 exists，非法名称报 invalidName', async () => {
+    const src = await entryId('src');
+    const file = await service.create({
+      workspaceId: 'ws',
+      parentDirectoryId: src,
+      name: 'b.ts',
+      kind: 'file',
+    });
+    expect(file).toMatchObject({ ok: true, entry: { name: 'b.ts', relativePath: 'src/b.ts' } });
+    expect(
+      await service.create({
+        workspaceId: 'ws',
+        parentDirectoryId: src,
+        name: 'b.ts',
+        kind: 'file',
+      })
+    ).toEqual({ ok: false, error: 'exists' });
+    const dir = await service.create({
+      workspaceId: 'ws',
+      parentDirectoryId: src,
+      name: 'util',
+      kind: 'directory',
+    });
+    expect(dir).toMatchObject({ ok: true, entry: { kind: 'directory', relativePath: 'src/util' } });
+    expect(await service.create({ workspaceId: 'ws', name: 'x/y.ts', kind: 'file' })).toEqual({
+      ok: false,
+      error: 'invalidName',
+    });
+    expect(await service.create({ workspaceId: 'ws', name: ' ', kind: 'file' })).toEqual({
+      ok: false,
+      error: 'invalidName',
+    });
+  });
+
+  it('重命名：同 id 可继续读取；目录重命名后子条目 id 仍有效', async () => {
+    const src = await entryId('src');
+    const file = await entryId('a.ts', src);
+    const renamed = await service.rename({ workspaceId: 'ws', entryId: file, name: 'b.ts' });
+    expect(renamed).toMatchObject({ ok: true, entry: { name: 'b.ts', relativePath: 'src/b.ts' } });
+    expect(await service.read({ workspaceId: 'ws', fileId: file })).toMatchObject({
+      ok: true,
+      preview: { text: 'export {}' },
+    });
+    // 目录重命名：子文件同一 id 换新路径
+    const child = await entryId('b.ts', src);
+    await service.rename({ workspaceId: 'ws', entryId: src, name: 'lib' });
+    expect(await service.read({ workspaceId: 'ws', fileId: child })).toMatchObject({ ok: true });
+    expect(await service.rename({ workspaceId: 'ws', entryId: child, name: 'lib/a.ts' })).toEqual({
+      ok: false,
+      error: 'invalidName',
+    });
+  });
+
+  it('创建副本：同目录取第一个空闲名字，内容一致；非文件报 notFile', async () => {
+    const src = await entryId('src');
+    const file = await entryId('a.ts', src);
+    const copy = await service.duplicate({ workspaceId: 'ws', entryId: file });
+    expect(copy).toMatchObject({
+      ok: true,
+      entry: { name: 'a copy.ts', relativePath: 'src/a copy.ts' },
+    });
+    expect(await service.duplicate({ workspaceId: 'ws', entryId: file })).toMatchObject({
+      ok: true,
+      entry: { name: 'a copy 2.ts' },
+    });
+    expect(await readFile(join(root, 'src', 'a copy.ts'), 'utf8')).toBe('export {}');
+    expect(await service.duplicate({ workspaceId: 'ws', entryId: src })).toEqual({
+      ok: false,
+      error: 'notFile',
+    });
+  });
+
+  it('删除走回收站并清缓存；打开过的 id 不再可读', async () => {
+    const src = await entryId('src');
+    const file = await entryId('a.ts', src);
+    expect(await service.read({ workspaceId: 'ws', fileId: file })).toMatchObject({ ok: true });
+    expect(await service.remove({ workspaceId: 'ws', entryId: file })).toEqual({ ok: true });
+    expect(shell.trashed).toEqual([join(root, 'src', 'a.ts')]);
+    expect(await service.read({ workspaceId: 'ws', fileId: file })).toMatchObject({
+      ok: false,
+      error: 'entryNotFound',
+    });
+    // 目录：子条目一并失效
+    const srcAgain = await entryId('src');
+    const child = await entryId('a.ts', srcAgain);
+    expect(await service.remove({ workspaceId: 'ws', entryId: srcAgain })).toEqual({ ok: true });
+    expect(await service.read({ workspaceId: 'ws', fileId: child })).toMatchObject({ ok: false });
+  });
+
+  it('reveal / copy / resolve：给出绝对路径，符号链接也只指向自身', async () => {
+    const src = await entryId('src');
+    const file = await entryId('a.ts', src);
+    expect(await service.reveal({ workspaceId: 'ws', entryId: file })).toEqual({ ok: true });
+    expect(shell.revealed).toEqual([join(root, 'src', 'a.ts')]);
+    expect(await service.copy({ workspaceId: 'ws', entryId: file })).toEqual({ ok: true });
+    expect(shell.copied).toEqual([[join(root, 'src', 'a.ts')]]);
+    const resolved = await service.resolve({ workspaceId: 'ws', entryId: src });
+    expect(resolved).toEqual({ ok: true, path: join(root, 'src') });
+  });
+});

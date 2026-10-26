@@ -1,9 +1,17 @@
-import type { FileError, FilePreview, WorkspaceFileEntry } from '@shared/types/files';
+import type {
+  EntryResult,
+  FileError,
+  FilePreview,
+  MutationResult,
+  ResolveResult,
+  WorkspaceFileEntry,
+} from '@shared/types/files';
 import { create } from 'zustand';
 import type { FilesApi } from '../../preload/domains/files';
 
 export const ROOT_DIRECTORY_ID = 'root';
 type FilesViewError = FileError | 'restartRequired';
+type MutateResult<T> = T | { ok: false; error: 'restartRequired' };
 
 export interface DirectoryState {
   entries: WorkspaceFileEntry[];
@@ -48,6 +56,28 @@ export interface FilesState {
   reloadFile(fileId: string, discard?: boolean): Promise<void>;
   setMode(fileId: string, mode: FileMode): void;
   refresh(): Promise<void>;
+  // 右键菜单背后的条目变更：parentId 是条目所在目录的 id（根目录为 undefined），操作后刷新该目录
+  createEntry(
+    parentId: string | undefined,
+    name: string,
+    kind: 'file' | 'directory'
+  ): Promise<MutateResult<EntryResult>>;
+  renameEntry(
+    parentId: string | undefined,
+    entry: WorkspaceFileEntry,
+    name: string
+  ): Promise<MutateResult<EntryResult>>;
+  duplicateFile(
+    parentId: string | undefined,
+    entry: WorkspaceFileEntry
+  ): Promise<MutateResult<EntryResult>>;
+  deleteEntry(
+    parentId: string | undefined,
+    entry: WorkspaceFileEntry
+  ): Promise<MutateResult<MutationResult>>;
+  copyEntry(entry: WorkspaceFileEntry): Promise<MutateResult<MutationResult>>;
+  revealEntry(entry: WorkspaceFileEntry): Promise<MutateResult<MutationResult>>;
+  resolvePath(entry: WorkspaceFileEntry): Promise<MutateResult<ResolveResult>>;
 }
 
 export function createFilesStore(api: FilesApi | undefined, workspaceId: string) {
@@ -248,6 +278,100 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
           ...get().expanded.map((id) => get().loadDirectory(id, true)),
           ...get().opened.map((file) => get().reloadFile(file.id)),
         ]);
+      },
+
+      async createEntry(parentId, name, kind) {
+        if (!api) return { ok: false, error: 'restartRequired' };
+        const result = await api.create({
+          workspaceId,
+          ...(parentId !== undefined ? { parentDirectoryId: parentId } : {}),
+          name,
+          kind,
+        });
+        if (result.ok) {
+          await get().loadDirectory(parentId, true);
+          if (kind === 'file') await get().openFile(result.entry);
+          else set((state) => ({ expanded: [...state.expanded, result.entry.id] }));
+        }
+        return result;
+      },
+
+      async renameEntry(parentId, entry, name) {
+        if (!api) return { ok: false, error: 'restartRequired' };
+        const result = await api.rename({ workspaceId, entryId: entry.id, name });
+        if (result.ok) {
+          const prefix = `${entry.relativePath}/`;
+          const renamed = (path: string) =>
+            path === entry.relativePath
+              ? result.entry.relativePath
+              : path.startsWith(prefix)
+                ? `${result.entry.relativePath}${path.slice(entry.relativePath.length)}`
+                : path;
+          set((state) => ({
+            opened: state.opened.map((file) =>
+              file.id === entry.id || file.relativePath.startsWith(prefix)
+                ? {
+                    ...file,
+                    name: file.id === entry.id ? result.entry.name : file.name,
+                    relativePath: renamed(file.relativePath),
+                  }
+                : file
+            ),
+          }));
+          await get().loadDirectory(parentId, true);
+        }
+        return result;
+      },
+
+      async duplicateFile(parentId, entry) {
+        if (!api) return { ok: false, error: 'restartRequired' };
+        const result = await api.duplicate({ workspaceId, entryId: entry.id });
+        if (result.ok) await get().loadDirectory(parentId, true);
+        return result;
+      },
+
+      async deleteEntry(parentId, entry) {
+        if (!api) return { ok: false, error: 'restartRequired' };
+        const result = await api.remove({ workspaceId, entryId: entry.id });
+        if (result.ok) {
+          const prefix = `${entry.relativePath}/`;
+          const removed = get().opened.filter(
+            (file) => file.id === entry.id || file.relativePath.startsWith(prefix)
+          );
+          const removedIds = new Set(removed.map((file) => file.id));
+          set((state) => ({
+            opened: state.opened.filter((file) => !removedIds.has(file.id)),
+            previews: Object.fromEntries(
+              Object.entries(state.previews).filter(([id]) => !removedIds.has(id))
+            ),
+            expanded: state.expanded.filter((id) => id !== entry.id),
+            selectedId:
+              state.selectedId !== null && removedIds.has(state.selectedId)
+                ? null
+                : state.selectedId,
+          }));
+          for (const file of removed) fileRequests.delete(file.id);
+          await get().loadDirectory(parentId, true);
+        }
+        return result;
+      },
+
+      copyEntry(entry) {
+        return api
+          ? api.copy({ workspaceId, entryId: entry.id })
+          : Promise.resolve({ ok: false as const, error: 'restartRequired' as const });
+      },
+
+      revealEntry(entry) {
+        return api
+          ? api.reveal({ workspaceId, entryId: entry.id })
+          : Promise.resolve({ ok: false as const, error: 'restartRequired' as const });
+      },
+
+      resolvePath(entry) {
+        return api
+          ? api.resolve({ workspaceId, entryId: entry.id })
+          : Promise.resolve({ ok: false as const, error: 'restartRequired' as const });
       },
     };
   });

@@ -31,6 +31,20 @@ export const IPC_CHANNELS = {
   FILES_READ: 'files:read',
   /** 按读取版本保存文本，冲突时不覆盖磁盘内容 */
   FILES_WRITE: 'files:write',
+  /** 在目录里新建空文件 / 空子目录（名称由 Main 校验，路径不回传） */
+  FILES_CREATE: 'files:create',
+  /** 同目录内重命名（条目 id 不变，缓存同步改写） */
+  FILES_RENAME: 'files:rename',
+  /** 删除文件 / 目录（移到系统回收站，不直接抹除） */
+  FILES_DELETE: 'files:delete',
+  /** 同目录创建文件副本（copy / copy 2 …） */
+  FILES_DUPLICATE: 'files:duplicate',
+  /** 在系统文件资源管理器中显示条目 */
+  FILES_REVEAL: 'files:reveal',
+  /** 把条目复制到系统剪贴板（Windows 为文件本体，其他平台退回路径文本） */
+  FILES_COPY: 'files:copy',
+  /** 解析条目的绝对真实路径（仅用于复制路径文本） */
+  FILES_RESOLVE: 'files:resolve',
 
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',

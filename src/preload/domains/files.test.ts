@@ -5,7 +5,18 @@ import { createFilesApi } from './files';
 it('文件出口按 id 读取与保存，不转发路径', async () => {
   const ipc = { invoke: vi.fn(async () => ({ ok: true })) };
   const api = createFilesApi(ipc);
-  expect(Object.keys(api).sort()).toEqual(['list', 'read', 'write']);
+  expect(Object.keys(api).sort()).toEqual([
+    'copy',
+    'create',
+    'duplicate',
+    'list',
+    'read',
+    'remove',
+    'rename',
+    'resolve',
+    'reveal',
+    'write',
+  ]);
   await api.list({ workspaceId: 'ws' });
   expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_LIST, { workspaceId: 'ws' });
   const input = { workspaceId: 'ws', directoryId: 'dir', path: '../outside' };
