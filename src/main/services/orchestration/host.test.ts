@@ -289,6 +289,30 @@ describe('listWorkers 与排队派发', () => {
     expect(launcher.created()[1]).toMatchObject({ roleId: 'tester' });
   });
 
+  it('keeps the model / thinking chosen at dispatch on the Task and launches the queued worker with it', async () => {
+    const first = await dispatch('First');
+    expect(launcher.created()[0]).not.toHaveProperty('model');
+    expect(launcher.created()[0]).not.toHaveProperty('thinking');
+    const queued = await host.dispatchTask({
+      title: 'Second',
+      spec: 'S',
+      roleId: 'worker',
+      dependsOn: [first.task.id],
+      model: ' gpt-6-astra ',
+      thinking: 'max',
+    });
+    expect(queued).toMatchObject({
+      ok: true,
+      task: { status: 'todo', model: 'gpt-6-astra', thinking: 'max' },
+    });
+    const queuedId = queued.ok ? queued.task.id : '';
+    expect(store.tasks.get(queuedId)).toMatchObject({ model: 'gpt-6-astra', thinking: 'max' });
+
+    await worker(first.dispatch.id).reportDone('succeeded', 'Done.');
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    expect(launcher.created()[1]).toMatchObject({ model: 'gpt-6-astra', thinking: 'max' });
+  });
+
   it('依赖被放弃：排队任务随之放弃，并给主 agent 投 escalation', async () => {
     const first = await dispatch('First');
     const queued = await host.dispatchTask({
@@ -819,6 +843,108 @@ describe('cleanupWorktree', () => {
       error: expect.stringContaining('already cleaned up'),
     });
     expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toMatchObject({ ok: true });
+  });
+
+  it('git 删不掉超长路径（Filename too long）：兜底删目录 + prune，分支照样删', async () => {
+    const removed: string[] = [];
+    host = makeHost({
+      git: new GitWorktreeManager({
+        exec: fake.exec,
+        removeDir: async (path) => {
+          removed.push(path);
+        },
+      }),
+    });
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    fake.respond(({ args }) =>
+      args[0] === 'worktree' && args[1] === 'remove'
+        ? { code: 255, stderr: `error: failed to delete '${WORKTREE_PATH}': Filename too long` }
+        : undefined
+    );
+    fake.respond(({ args }) =>
+      args[0] === 'worktree' && args[1] === 'list'
+        ? {
+            stdout:
+              removed.length === 0
+                ? `worktree /repo\n\nworktree ${WORKTREE_PATH}\n\n`
+                : 'worktree /repo\n\n',
+          }
+        : undefined
+    );
+    const start = fake.calls.length;
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+      removedWorktree: true,
+      deletedBranch: true,
+    });
+    expect(removed).toEqual([WORKTREE_PATH]);
+    expect(commandsSince(start)).toEqual(
+      expect.arrayContaining(['git worktree prune', 'git branch -d fynvra/add-toggle'])
+    );
+    expect(store.worktrees.list()).toHaveLength(0);
+  });
+
+  describe('git 已注销的残留目录（之前的删除做了一半）', () => {
+    let removed: string[];
+    const notATree = {
+      code: 128,
+      stderr: `fatal: '${WORKTREE_PATH}' is not a working tree`,
+    };
+
+    function leftoverHost(overrides: Partial<OrchestrationHostDeps> = {}): OrchestrationHost {
+      removed = [];
+      return makeHost({
+        git: new GitWorktreeManager({
+          exec: fake.exec,
+          removeDir: async (path) => {
+            removed.push(path);
+          },
+          pathKind: async (path) => (path === WORKTREE_PATH ? 'directory' : 'missing'),
+        }),
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'remove' ? notATree : undefined
+      );
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'list' ? { stdout: 'worktree /repo\n\n' } : undefined
+      );
+    });
+
+    it('在托管根目录内：删目录 + prune，记录清掉，分支照样删', async () => {
+      host = leftoverHost();
+      const first = await reported();
+      const start = fake.calls.length;
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual({
+        ok: true,
+        removedWorktree: true,
+        deletedBranch: true,
+      });
+      expect(removed).toEqual([WORKTREE_PATH]);
+      expect(commandsSince(start)).toEqual(
+        expect.arrayContaining(['git worktree prune', 'git branch -D fynvra/add-toggle'])
+      );
+      expect(store.worktrees.list()).toHaveLength(0);
+    });
+
+    it('记录路径不在当前托管根目录下：不担保，拒绝并说明原因，记录保留', async () => {
+      host = leftoverHost();
+      const first = await reported();
+      host = leftoverHost({ resolveWorktreesRoot: async () => '/elsewhere/worktrees' });
+      const result = await host.cleanupWorktree({ dispatchId: first.dispatch.id });
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(
+          'fallback skipped: path is not a registered worktree (no owned worktrees root)'
+        ),
+      });
+      expect(removed).toEqual([]);
+      expect(store.worktrees.list()).toHaveLength(1);
+    });
   });
 
   it('分支删不掉时 deletedBranch: false，worktree 照常清理', async () => {

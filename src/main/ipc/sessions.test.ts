@@ -32,6 +32,7 @@ const host = {
   create: vi.fn(async () => ({ ok: true })),
   remove: vi.fn(async () => ({ ok: true })),
   prompt: vi.fn(async () => ({ ok: true })),
+  steer: vi.fn(async () => ({ ok: true })),
   abort: vi.fn(async () => ({ ok: true })),
   history: vi.fn(async () => ({ ok: true, messages: [] })),
   respondApproval: vi.fn(async () => ({ ok: true })),
@@ -176,6 +177,7 @@ describe('sessions IPC', () => {
         'sessions:respond-approval',
         'sessions:set-model',
         'sessions:set-approval-mode',
+        'sessions:steer',
         'sessions:sweep',
         'sessions:unarchive',
       ].sort()
@@ -270,6 +272,14 @@ describe('sessions IPC', () => {
       images: [screenshot],
     });
     expect(host.prompt).toHaveBeenLastCalledWith('s-1', '', [screenshot]);
+    await invoke(IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: 'also check docs' });
+    expect(host.steer).toHaveBeenLastCalledWith('s-1', 'also check docs', undefined);
+    await invoke(IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: '', images: [screenshot] });
+    expect(host.steer).toHaveBeenLastCalledWith('s-1', '', [screenshot]);
+    expect(
+      await invoke(IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: '  ', cwd: '/' })
+    ).toMatchObject({ ok: false });
+    expect(host.steer).toHaveBeenCalledTimes(2);
     await invoke(IPC_CHANNELS.SESSIONS_ABORT, 's-1');
     expect(host.abort).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');

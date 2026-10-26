@@ -103,6 +103,10 @@ export interface Task {
   status: TaskStatus;
   /** 前置任务 id。 */
   dependsOn: string[];
+  /** 派发时指定的模型（`modelId` 或 `providerId/modelId`）；缺省按角色 / 主 agent 的模型。 */
+  model?: string;
+  /** 派发时指定的思考档位；缺省按模型 / 角色 / 主 agent 的默认。 */
+  thinking?: ThinkingLevel;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
 }

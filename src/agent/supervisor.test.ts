@@ -35,6 +35,8 @@ class FakeSession implements SupervisedSession {
   /** 每次 prompt 带的图片，与 prompts 一一对应（没带时为 undefined） */
   promptImages: (ChatImage[] | undefined)[] = [];
   steers: string[] = [];
+  /** 每次 steer 带的图片，与 steers 一一对应（没带时为 undefined） */
+  steerImages: (ChatImage[] | undefined)[] = [];
   aborts = 0;
   disposals = 0;
   idle = true;
@@ -81,8 +83,9 @@ class FakeSession implements SupervisedSession {
     });
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string, images?: ChatImage[]): Promise<void> {
     this.steers.push(text);
+    this.steerImages.push(images);
   }
 
   async setModel(spec: ResolvedModelSpec): Promise<void> {
@@ -310,11 +313,13 @@ describe('SessionSupervisor spawn and prompt', () => {
 
     supervisor.handle({ type: 'prompt', identity: id1, text: 'and this one', images: [photo] });
     supervisor.handle({ type: 'prompt', identity: id1, text: 'text only' });
-    supervisor.handle({ type: 'steer', identity: id1, text: 'steer has no images' });
+    supervisor.handle({ type: 'steer', identity: id1, text: 'steer text only' });
+    supervisor.handle({ type: 'steer', identity: id1, text: 'steer this', images: [photo] });
     await settle();
     expect(session.prompts).toEqual(['', 'and this one', 'text only']);
     expect(session.promptImages).toEqual([[screenshot], [photo], undefined]);
-    expect(session.steers).toEqual(['steer has no images']);
+    expect(session.steers).toEqual(['steer text only', 'steer this']);
+    expect(session.steerImages).toEqual([undefined, [photo]]);
   });
 
   it('runs steer as steer while busy and as a prompt while idle', async () => {

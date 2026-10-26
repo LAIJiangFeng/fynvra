@@ -188,6 +188,14 @@ export function registerSessionHandlers(
       : invalid(translate('sessions.invalidPrompt'));
   });
 
+  // 运行中插话：入参与 sessions:prompt 相同
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_STEER, (_event, raw: unknown) => {
+    const input = parsePromptInput(raw);
+    return input
+      ? guard(() => host().steer(input.sessionId, input.text, input.images))
+      : invalid(translate('sessions.invalidPrompt'));
+  });
+
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>
     withSessionId(raw, (sessionId) => host().abort(sessionId))
   );

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   trayEvents: new Map<string, () => void>(),
 }));
 vi.mock('../../../resources/icon.png?asset', () => ({ default: '/test/fynvra.png' }));
+vi.mock('../../../resources/icon.ico?asset', () => ({ default: '/test/fynvra.ico' }));
 vi.mock('electron', () => ({
   app: { quit: mocks.quit },
   dialog: { showMessageBox: mocks.prompt },
@@ -68,12 +69,28 @@ beforeEach(() => {
   mocks.loadImage.mockReturnValue(mocks.image);
   mocks.image.resize.mockReturnValue(mocks.image);
 });
+const originalPlatform = process.platform;
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+}
+
 afterEach(() => {
+  setPlatform(originalPlatform);
   configureMainLocale(null);
   vi.restoreAllMocks();
 });
 
 describe('应用内关窗选择与托盘', () => {
+  it('Windows 托盘使用多尺寸 ico，由系统按 DPI 选尺寸', () => {
+    setPlatform('win32');
+    const { close, respond } = setup();
+    close();
+    expect(respond('tray')).toEqual({ ok: true });
+    expect(mocks.loadImage).toHaveBeenCalledWith('/test/fynvra.ico');
+    expect(mocks.image.resize).not.toHaveBeenCalled();
+    expect(mocks.createTray).toHaveBeenCalledWith(mocks.image);
+  });
+
   it('只通知当前 Renderer 显示弹窗，不调用系统消息框；取消后没有关闭副作用', () => {
     const { win, close, respond } = setup();
     expect(close().preventDefault).toHaveBeenCalledOnce();
@@ -101,6 +118,7 @@ describe('应用内关窗选择与托盘', () => {
   });
 
   it('最小化只隐藏，重复回答无副作用；点击/菜单恢复，明确退出先显示窗口', () => {
+    setPlatform('linux');
     const { win, close, respond } = setup();
     close();
     win.show.mockClear();
@@ -110,6 +128,7 @@ describe('应用内关窗选择与托盘', () => {
     respond('quit');
     expect(win.hide).toHaveBeenCalledOnce();
     expect(mocks.loadImage).toHaveBeenCalledWith('/test/fynvra.png');
+    expect(mocks.image.resize).toHaveBeenCalledWith({ width: 16, height: 16 });
     expect(mocks.createTray).toHaveBeenCalledWith(mocks.image);
     expect(mocks.tooltip).toHaveBeenCalledWith('Fynvra');
     expect(mocks.quit).not.toHaveBeenCalled();

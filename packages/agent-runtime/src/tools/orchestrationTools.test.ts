@@ -189,6 +189,68 @@ describe('dispatch_task', () => {
     });
   });
 
+  it('passes model and thinking through, normalizing aliases and case', async () => {
+    const host = createHost();
+    host.dispatchTask.mockImplementation(async (input) => ({
+      ok: true,
+      task: {
+        ...task,
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.thinking ? { thinking: input.thinking } : {}),
+      },
+      dispatch,
+    }));
+    const tool = toolByName(createOrchestrationTools(host), 'dispatch_task');
+    const run = await runTool(tool, {
+      title: 'x',
+      spec: 'y',
+      model: ' gpt-6-astra ',
+      thinking: ' MAX ',
+    });
+    expect(run.isError).toBe(false);
+    expect(host.dispatchTask.mock.calls[0]?.[0]).toMatchObject({
+      model: 'gpt-6-astra',
+      thinking: 'max',
+    });
+    expect(run.text).toContain('- model: gpt-6-astra · thinking: max');
+    host.listWorkers.mockResolvedValueOnce({
+      ok: true,
+      workers: [{ task: { ...task, thinking: 'high' }, dispatch }],
+    });
+    const listed = await runTool(toolByName(createOrchestrationTools(host), 'list_workers'), {});
+    expect(listed.text).toContain('- model: default \u00b7 thinking: high');
+
+    await runTool(tool, {
+      title: 'x',
+      spec: 'y',
+      model_id: 'openai/gpt-5.5',
+      reasoning_effort: 'none',
+    });
+    expect(host.dispatchTask.mock.calls[1]?.[0]).toMatchObject({
+      model: 'openai/gpt-5.5',
+      thinking: 'off',
+    });
+    await runTool(tool, { title: 'x', spec: 'y', modelId: 'm', thinkingLevel: 'high' });
+    expect(host.dispatchTask.mock.calls[2]?.[0]).toMatchObject({ model: 'm', thinking: 'high' });
+    await runTool(tool, { title: 'x', spec: 'y', thinking_level: 'low', model: '' });
+    const fourth = host.dispatchTask.mock.calls[3]?.[0];
+    expect(fourth).toMatchObject({ thinking: 'low' });
+    expect(fourth).not.toHaveProperty('model');
+  });
+
+  it('omits model and thinking when not given and rejects unknown thinking levels', async () => {
+    const host = createHost();
+    const tool = toolByName(createOrchestrationTools(host), 'dispatch_task');
+    await runTool(tool, { title: 'x', spec: 'y' });
+    const input = host.dispatchTask.mock.calls[0]?.[0];
+    expect(input).not.toHaveProperty('model');
+    expect(input).not.toHaveProperty('thinking');
+
+    const bad = await runTool(tool, { title: 'x', spec: 'y', thinking: 'ultra' });
+    expect(bad.isError).toBe(true);
+    expect(host.dispatchTask).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects unknown roles before reaching the host', async () => {
     const host = createHost();
     const tool = toolByName(createOrchestrationTools(host, { roles }), 'dispatch_task');

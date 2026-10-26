@@ -95,6 +95,8 @@ function fakeApi(initial: OrchestrationSnapshotView = view()) {
       files: ['a.ts'],
       stat: ' 1 file changed',
       diff: 'diff --git a/a.ts b/a.ts\n',
+      uncommitted: { available: true, files: [], diff: '' },
+      commits: [],
     })),
     onChanged: vi.fn((callback: (workspaceId: string) => void) => {
       listeners.add(callback);

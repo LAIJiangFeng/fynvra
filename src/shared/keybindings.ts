@@ -36,6 +36,8 @@ const ACTIONS = {
   newline: { scope: 'composer', chord: 'shift+enter' },
   'cycle-approval': { scope: 'composer', chord: 'shift+tab' },
   'stop-turn': { scope: 'composer', chord: 'escape' },
+  /** 运行中：把最近一条排队的消息（没有排队时是草稿）立即插入当前回合（steer） */
+  'steer-now': { scope: 'composer', chord: 'mod+s' },
   'open-model-picker': { scope: 'composer', chord: 'mod+m' },
   'history-prev': { scope: 'composer', chord: 'arrowup' },
   'history-next': { scope: 'composer', chord: 'arrowdown' },

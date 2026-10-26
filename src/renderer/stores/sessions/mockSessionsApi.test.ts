@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../../i18n';
 import { createMockSessionsApi } from '../../lib/api/sessions';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
-import { selectApprovalsOf, selectMessagesOf, selectStatusOf } from './selectors';
+import { selectApprovalsOf, selectMessagesOf, selectQueueOf, selectStatusOf } from './selectors';
 
 // store + 内存 mock 的端到端：pnpm dev 的 mock 模式走的就是这条路
 
@@ -170,11 +170,13 @@ describe('mock SessionsApi + store', () => {
     await state().send('写到一半就停');
     await advanceUntil(() => (selectMessagesOf(sessionId)(state())[1]?.text.length ?? 0) > 8);
     expect(selectStatusOf(sessionId)(state())).toBe('running');
-    expect(await state().send('插队')).toBe(false);
+    expect(await state().send('插队')).toBe(true);
 
     await state().abort();
     await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
 
+    // stop keeps the queued message instead of sending it
+    expect(selectQueueOf(sessionId)(state()).length).toBe(1);
     const messages = selectMessagesOf(sessionId)(state());
     expect(messages.every((message) => !message.streaming)).toBe(true);
     expect(selectApprovalsOf(sessionId)(state())).toEqual([]);

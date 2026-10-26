@@ -18,6 +18,7 @@ import {
   selectArchivedSessionsOf,
   selectDraftImagesOf,
   selectMessagesOf,
+  selectQueueOf,
   selectSessionsOf,
   selectStatusOf,
 } from './selectors';
@@ -100,6 +101,13 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       }): Promise<IpcResult> => ({
         ok: true,
       })
+    ),
+    steer: vi.fn(
+      async (_input: {
+        sessionId: string;
+        text: string;
+        images?: ChatImage[];
+      }): Promise<IpcResult> => ({ ok: true })
     ),
     abort: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     history: vi.fn(
@@ -421,26 +429,31 @@ describe('createSessionsStore · send', () => {
     expect(selectStatusOf('s1')(store.getState())).toBe('running');
   });
 
-  it('prompt 在途或会话 running 时不重复发送', async () => {
+  it('queues instead of sending while a prompt is in flight or the session is running', async () => {
     const { store, api, emitEvent } = await setup();
     await store.getState().selectSession('s1');
     const pending = deferred<IpcResult>();
     api.prompt.mockReturnValueOnce(pending.promise);
 
-    const first = store.getState().send('第一条');
-    expect(await store.getState().send('第二条')).toBe(false);
+    const first = store.getState().send('first');
+    store.getState().setDraft('s1', 'second');
+    expect(await store.getState().send('second')).toBe(true);
+    expect(store.getState().drafts.s1).toBeUndefined();
     pending.resolve({ ok: true });
     expect(await first).toBe(true);
 
-    // prompt 已返回，但会话仍在 running（agent 还没 settled）
-    emitEvent(1, { type: 'message_end', role: 'user', text: '第一条' });
+    // prompt returned but the session is still running (the agent has not settled)
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
     emitEvent(2, { type: 'text_delta', delta: '…' });
-    expect(await store.getState().send('第三条')).toBe(false);
+    expect(await store.getState().send('third')).toBe(true);
     expect(api.prompt).toHaveBeenCalledTimes(1);
-
-    emitEvent(3, { type: 'agent_settled', aborted: false });
-    expect(await store.getState().send('第四条')).toBe(true);
-    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(selectQueueOf('s1')(store.getState()).map((item) => item.text)).toEqual([
+      'second',
+      'third',
+    ]);
+    // queued messages are not echoed in the timeline
+    const users = selectMessagesOf('s1')(store.getState()).filter((m) => m.role === 'user');
+    expect(users.map((message) => message.text)).toEqual(['first']);
   });
 
   it('prompt 失败：撤回回显、恢复草稿与状态、记录错误', async () => {
@@ -963,5 +976,128 @@ describe('createSessionsStore · 模型选择', () => {
     expect(store.getState().modelPickerFor).toBe('s1');
     store.getState().closeModelPicker();
     expect(store.getState().modelPickerFor).toBeNull();
+  });
+});
+
+describe('createSessionsStore · queue while running', () => {
+  const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+
+  /** s1 selected and running a first turn */
+  async function running() {
+    const env = await setup();
+    await env.store.getState().selectSession('s1');
+    await env.store.getState().send('first');
+    env.emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
+    return env;
+  }
+
+  const texts = (store: Awaited<ReturnType<typeof running>>['store']) =>
+    selectQueueOf('s1')(store.getState()).map((item) => item.text);
+
+  it('queues text with the draft images and clears the draft', async () => {
+    const { store, api } = await running();
+    store.getState().attachImages('s1', [SHOT]);
+    expect(await store.getState().send('look at this')).toBe(true);
+    expect(selectQueueOf('s1')(store.getState())).toEqual([
+      expect.objectContaining({ text: 'look at this', images: [SHOT] }),
+    ]);
+    expect(store.getState().draftImages.s1).toBeUndefined();
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains the queue in order, one prompt per settled turn', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual(['third']);
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+
+    emitEvent(3, { type: 'message_end', role: 'user', text: 'second' });
+    emitEvent(4, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenCalledTimes(3);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(texts(store)).toEqual([]);
+  });
+
+  it('keeps the queue after a stop or an error; the next manual send resumes it', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    await store.getState().abort();
+    emitEvent(2, { type: 'agent_settled', aborted: true });
+    await settle();
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(texts(store)).toEqual(['second']);
+
+    await store.getState().send('manual');
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'manual' });
+    emitEvent(3, { type: 'error', source: 'host', message: 'boom' });
+    emitEvent(4, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(selectStatusOf('s1')(store.getState())).toBe('error');
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(texts(store)).toEqual(['second']);
+  });
+
+  it('removes a queued message', async () => {
+    const { store } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+    const [first] = selectQueueOf('s1')(store.getState());
+    store.getState().removeQueued('s1', first?.id ?? '');
+    expect(texts(store)).toEqual(['third']);
+  });
+
+  it('steers the most recent queued message (with its images), or a given one', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    store.getState().attachImages('s1', [SHOT]);
+    await store.getState().send('third');
+
+    expect(await store.getState().steer('s1')).toBe(true);
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third', images: [SHOT] });
+    expect(texts(store)).toEqual(['second']);
+
+    const [second] = selectQueueOf('s1')(store.getState());
+    expect(await store.getState().steer('s1', second?.id)).toBe(true);
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual([]);
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('steers the draft when nothing is queued; nothing to send returns false', async () => {
+    const { store, api } = await running();
+    expect(await store.getState().steer('s1')).toBe(false);
+    store.getState().setDraft('s1', 'also check docs');
+    expect(await store.getState().steer('s1')).toBe(true);
+    expect(api.steer).toHaveBeenCalledWith({ sessionId: 's1', text: 'also check docs' });
+    expect(store.getState().drafts.s1).toBeUndefined();
+  });
+
+  it('puts a message back when steering fails', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    api.steer.mockResolvedValueOnce({ ok: false, error: 'gone' });
+    expect(await store.getState().steer('s1')).toBe(false);
+    expect(texts(store)).toEqual(['second']);
+    expect(store.getState().notice).toContain('gone');
+  });
+
+  it('sends a queued message as a prompt when the session is idle', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    await store.getState().abort();
+    emitEvent(2, { type: 'agent_settled', aborted: true });
+    await settle();
+    const [second] = selectQueueOf('s1')(store.getState());
+    expect(await store.getState().steer('s1', second?.id)).toBe(true);
+    expect(api.steer).not.toHaveBeenCalled();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual([]);
   });
 });

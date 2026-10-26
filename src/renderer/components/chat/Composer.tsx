@@ -7,7 +7,7 @@ import {
   MAX_CHAT_IMAGES_TOTAL_BYTES,
   nextApprovalMode,
 } from '@shared/types/chat';
-import { CircleStop, SendHorizontal, X } from 'lucide-react';
+import { CircleStop, ListPlus, SendHorizontal, X } from 'lucide-react';
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -23,13 +23,21 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
-import { insertNewline, matchAction, useActionHandler, useComposerHints } from '@/lib/keybindings';
+import {
+  insertNewline,
+  matchAction,
+  useActionHandler,
+  useChordLabel,
+  useComposerHints,
+} from '@/lib/keybindings';
 import {
   type ImageRejection,
   isBusy,
+  type QueuedMessage,
   selectDraftImagesOf,
   selectDraftOf,
   selectMessagesOf,
+  selectQueueOf,
   selectSessionOf,
   selectStatusOf,
   useSessionsStore,
@@ -112,12 +120,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
   const send = useSessionsStore((state) => state.send);
+  const steer = useSessionsStore((state) => state.steer);
+  const removeQueued = useSessionsStore((state) => state.removeQueued);
+  const queue = useSessionsStore(selectQueueOf(sessionId));
   const abort = useSessionsStore((state) => state.abort);
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   const attachImages = useSessionsStore((state) => state.attachImages);
   const removeDraftImage = useSessionsStore((state) => state.removeDraftImage);
   const hints = useComposerHints();
+  const sendLabel = useChordLabel('send');
+  const steerLabel = useChordLabel('steer-now');
   const t = useT();
   const input = useRef<HTMLTextAreaElement>(null);
   useActionHandler('focus-composer', () => input.current?.focus());
@@ -135,11 +148,21 @@ export function Composer({ sessionId }: { sessionId: string }) {
   );
 
   const busy = isBusy(status);
-  const canSend = !busy && (draft.trim().length > 0 || images.length > 0);
+  // While running the message is queued (sent when the turn settles) instead of being refused
+  const canSend = draft.trim().length > 0 || images.length > 0;
   const submit = () => {
     if (!canSend) return;
     history.current = null;
     void send(draft);
+  };
+  /** Idle: same as send. Running: steer the latest queued message, or the draft when none is queued */
+  const steerNow = () => {
+    if (!busy) {
+      submit();
+      return;
+    }
+    if (queue.length === 0) history.current = null;
+    void steer(sessionId);
   };
 
   const placeCaret = (caret: Caret) => {
@@ -191,6 +214,22 @@ export function Composer({ sessionId }: { sessionId: string }) {
       input.current?.focus();
     },
     [sessionId, removeDraftImage]
+  );
+
+  // The row buttons disappear with the row: keep the focus in the input
+  const sendQueuedNow = useCallback(
+    (id: string) => {
+      void steer(sessionId, id);
+      input.current?.focus();
+    },
+    [sessionId, steer]
+  );
+  const dropQueued = useCallback(
+    (id: string) => {
+      removeQueued(sessionId, id);
+      input.current?.focus();
+    },
+    [sessionId, removeQueued]
   );
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -248,6 +287,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
       openModelPicker(sessionId);
       return;
     }
+    if (matchAction(event, 'steer-now')) {
+      // Always swallow it (Ctrl+S / Cmd+S), even when there is nothing to send
+      event.preventDefault();
+      steerNow();
+      return;
+    }
     if (matchAction(event, 'newline')) {
       insertNewline(event);
       return;
@@ -289,6 +334,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
   return (
     <div className="shrink-0 px-4 pb-3">
       <div className="mx-auto max-w-3xl rounded-xl border bg-background shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
+        <QueuedMessages
+          queue={queue}
+          steerLabel={steerLabel}
+          onSendNow={sendQueuedNow}
+          onRemove={dropQueued}
+        />
         <DraftImages images={images} onRemove={removeImage} />
         {imageHint && (
           <p role="status" className="px-4 pt-2 text-destructive text-xs">
@@ -321,18 +372,31 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 {t(`sessions.status.${status}`)}
               </span>
             )}
+            {busy && (
+              <span className="truncate text-muted-foreground text-xs">
+                {t('chat.queueHint', { queue: sendLabel, steer: steerLabel })}
+              </span>
+            )}
           </div>
-          {busy ? (
-            <Button size="sm" variant="secondary" onClick={() => void abort()}>
-              <CircleStop />
-              {t('chat.stop')}
-            </Button>
-          ) : (
-            <Button size="sm" disabled={!canSend} onClick={submit}>
-              <SendHorizontal />
-              {t('chat.send')}
-            </Button>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {busy && (
+              <Button size="sm" variant="secondary" onClick={() => void abort()}>
+                <CircleStop />
+                {t('chat.stop')}
+              </Button>
+            )}
+            {busy ? (
+              <Button size="sm" variant="outline" disabled={!canSend} onClick={submit}>
+                <ListPlus />
+                {t('chat.queue')}
+              </Button>
+            ) : (
+              <Button size="sm" disabled={!canSend} onClick={submit}>
+                <SendHorizontal />
+                {t('chat.send')}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -371,5 +435,68 @@ const DraftImages = memo(function DraftImages({
         </div>
       ))}
     </div>
+  );
+});
+
+/**
+ * Messages queued while the session runs, oldest first: text preview, image count, send now (steer)
+ * and remove. They are not in the timeline until they are actually sent
+ */
+const QueuedMessages = memo(function QueuedMessages({
+  queue,
+  steerLabel,
+  onSendNow,
+  onRemove,
+}: {
+  queue: QueuedMessage[];
+  steerLabel: string;
+  onSendNow: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const t = useT();
+  if (queue.length === 0) return null;
+  const buttonClass =
+    'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50';
+  return (
+    <ul className="flex flex-col gap-1 px-3 pt-3">
+      {queue.map((item) => {
+        const preview = item.text.trim().split(/\r?\n/)[0] ?? '';
+        return (
+          <li
+            key={item.id}
+            className="flex items-center gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3 text-xs"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {preview || (
+                <span className="text-muted-foreground">{t('chat.queuedImageOnly')}</span>
+              )}
+            </span>
+            {item.images.length > 0 && (
+              <span className="shrink-0 text-muted-foreground">
+                {t('chat.queuedImages', { count: item.images.length })}
+              </span>
+            )}
+            <button
+              type="button"
+              aria-label={t('chat.sendNow', { chord: steerLabel })}
+              title={t('chat.sendNow', { chord: steerLabel })}
+              onClick={() => onSendNow(item.id)}
+              className={buttonClass}
+            >
+              <SendHorizontal className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('chat.removeQueued')}
+              title={t('chat.removeQueued')}
+              onClick={() => onRemove(item.id)}
+              className={buttonClass}
+            >
+              <X className="size-3.5" />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 });

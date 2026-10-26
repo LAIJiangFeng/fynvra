@@ -33,7 +33,42 @@ export type ExecFn = (cmd: string, args: readonly string[], cwd: string) => Prom
 export interface GitWorktreeManagerOptions {
   /** 执行 git 的函数；所有 git 调用都经过它。 */
   exec: ExecFn;
+  /**
+   * 递归删除目录（Main 侧用 `fs.rm(path, { recursive: true, force: true, maxRetries: 3 })`）。
+   * 仅作 `git worktree remove` 失败（如 Windows 上 "Filename too long"）后的兜底；不传则没有兜底。
+   */
+  removeDir?: (path: string) => Promise<void>;
+  /**
+   * 路径是什么（Main 侧用 `fs.lstat`，不跟随链接；ENOENT → `'missing'`，其它错误照常 reject）。
+   * 仅用于兜底删除 git 已注销的残留目录（见 {@link RemoveWorktreeInput.ownedRoot}）；不传则不处理残留目录。
+   */
+  pathKind?: (path: string) => Promise<PathKind>;
 }
+
+/** {@link GitWorktreeManagerOptions.pathKind} 的结果。 */
+export type PathKind = 'missing' | 'directory' | 'file' | 'other';
+
+/** {@link GitWorktreeManager.remove} 入参。 */
+export interface RemoveWorktreeInput {
+  /** 主仓库路径。 */
+  repoPath: string;
+  /** 要删的 worktree 目录。 */
+  path: string;
+  /** 有未提交改动也删（`git worktree remove --force`）。 */
+  force?: boolean;
+  /**
+   * 调用方担保的 worktree 托管根目录（{@link CreateWorktreeInput.worktreesRoot}）。仅 `force` 时生效：
+   * git 已不再登记该路径（之前的删除做了一半）时，只要 `path` 严格位于它之内、不是也不包含主仓库、
+   * 顶层没有 `.git` 目录（嵌套的真仓库），就删掉该残留目录。
+   */
+  ownedRoot?: string;
+}
+
+/**
+ * 每条 git 命令都带上的配置：Git for Windows 默认 `core.longpaths=false`，超过 MAX_PATH 的路径
+ * （如 worktree 里 pnpm 装的 node_modules）无法删除/检出；其它平台上无影响。
+ */
+export const GIT_CONFIG_ARGS: readonly string[] = ['-c', 'core.longpaths=true'];
 
 /** {@link GitWorktreeManager.create} 入参。 */
 export interface CreateWorktreeInput {
@@ -120,6 +155,43 @@ function splitNul(output: string): string[] {
   return output.split('\0').filter((entry) => entry !== '');
 }
 
+/** 比较用的路径形式：统一 `/`、去重复与末尾分隔符；带盘符的（Windows）不区分大小写。 */
+function comparablePath(path: string): string {
+  const normalized = path.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:/i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+/** 绝对路径且至少两段（排除空串、`/`、`C:\`、`/a` 这类根或近根路径）。 */
+function isDeletablePath(path: string): boolean {
+  const normalized = comparablePath(path);
+  const absolute = normalized.startsWith('/') || /^[a-z]:\//i.test(normalized);
+  const segments = normalized.split('/').filter((part) => part !== '' && !/^[a-z]:$/i.test(part));
+  return absolute && segments.length >= 2 && !segments.includes('..') && !segments.includes('.');
+}
+
+/** 绝对路径、无 `.` / `..` 段，且 `path` 严格位于 `root` 之内。 */
+function isStrictlyInside(path: string, root: string): boolean {
+  const target = comparablePath(path);
+  const base = comparablePath(root);
+  const segments = base.split('/');
+  const absolute = base.startsWith('/') || /^[a-z]:\//i.test(base);
+  return (
+    absolute &&
+    !segments.includes('..') &&
+    !segments.includes('.') &&
+    isDeletablePath(path) &&
+    target.startsWith(`${base}/`)
+  );
+}
+
+/** `git worktree list --porcelain` 的各 worktree 路径；第一个是主 worktree。 */
+function parseWorktreeList(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .filter((field) => field.startsWith('worktree '))
+    .map((field) => field.slice('worktree '.length));
+}
+
 function fail(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
@@ -136,11 +208,15 @@ function describeFailure(args: readonly string[], result: ExecResult): string {
  */
 export class GitWorktreeManager {
   readonly #exec: ExecFn;
+  readonly #removeDir: ((path: string) => Promise<void>) | undefined;
+  readonly #pathKind: ((path: string) => Promise<PathKind>) | undefined;
   #pendingCreate: Promise<unknown> = Promise.resolve();
 
-  /** @param options - 注入的 {@link ExecFn}。 */
+  /** @param options - 注入的 {@link ExecFn} 与可选的 `removeDir`。 */
   constructor(options: GitWorktreeManagerOptions) {
     this.#exec = options.exec;
+    this.#removeDir = options.removeDir;
+    this.#pathKind = options.pathKind;
   }
 
   /**
@@ -215,10 +291,108 @@ export class GitWorktreeManager {
   /**
    * `git worktree remove`；有未提交改动或未跟踪文件时 git 会拒绝，除非 `force`。
    * 目录已被手动删掉时同样会注销该 worktree。分支保留（见 {@link GitWorktreeManager.deleteBranch}）。
+   *
+   * git 删除失败（如 Windows 上 "Filename too long"）且注入了 `removeDir` 时兜底，删目录后
+   * `git worktree prune`，登记随之消失才算成功：
+   * - `path` 仍是登记的（非主）worktree：`force` 或 `git status` 确认它干净才删；非 force 下的「有改动」拒绝不会被绕过。
+   * - 删除前登记、删除后不再登记：git 已过了自己的干净检查、删掉了 `.git` 链接与管理目录，只是没删完目录，直接删。
+   * - 删除前就未登记（之前那次删除留下的残留）：仅 `force` 且给了 `ownedRoot` 时按其约束删除（需注入 `pathKind`）。
+   * 此时目录根本不存在则只 prune，返回成功（删除是幂等的）。
    */
-  async remove(input: { repoPath: string; path: string; force?: boolean }): Promise<GitResult> {
+  async remove(input: RemoveWorktreeInput): Promise<GitResult> {
+    // 先记下登记列表：git 删到一半失败时已经注销了该 worktree，事后就查不到了
+    const before =
+      this.#removeDir === undefined ? undefined : await this.#listWorktrees(input.repoPath);
     const args = ['worktree', 'remove', ...(input.force ? ['--force'] : []), '--', input.path];
-    return this.#simple(args, input.repoPath);
+    const result = await this.#git(args, input.repoPath);
+    if (result.code === 0) return { ok: true };
+    const error = describeFailure(args, result);
+    if (this.#removeDir === undefined) return fail(error);
+    return this.#removeByFs(input, error, before);
+  }
+
+  async #removeByFs(
+    input: RemoveWorktreeInput,
+    gitError: string,
+    before: string[] | undefined
+  ): Promise<GitResult> {
+    const { repoPath, path } = input;
+    const target = comparablePath(path);
+    const repo = comparablePath(repoPath);
+    const skipped = (reason: string) => fail(`${gitError}; fallback skipped: ${reason}`);
+    // 不删根/近根路径，也不删主仓库或包含主仓库的目录
+    if (!isDeletablePath(path) || repo === target || repo.startsWith(`${target}/`)) {
+      return skipped('unsafe path');
+    }
+    const listed = await this.#listWorktrees(repoPath);
+    if (listed === undefined) return skipped('cannot list worktrees');
+    const isRegistered = (entries: string[]) =>
+      entries.slice(1).some((entry) => comparablePath(entry) === target);
+    if (isRegistered(listed)) {
+      if (!input.force) {
+        // 非 force：git 的拒绝可能是因为有改动；只有确认干净时才认定是文件系统错误
+        const status = await this.#git(['status', '--porcelain'], path);
+        if (status.code !== 0 || status.stdout.trim() !== '') {
+          return skipped('the worktree has changes or its status is unknown');
+        }
+      }
+    } else if (before === undefined || !isRegistered(before)) {
+      const leftover = await this.#checkLeftover(input, repo, target);
+      if (leftover === 'missing') return this.#pruneAndVerify(repoPath, target, gitError);
+      if (leftover !== 'ok') return skipped(leftover);
+    }
+    try {
+      await this.#removeDir?.(path);
+    } catch (error) {
+      return fail(`${gitError}; fallback delete failed: ${errorMessage(error)}`);
+    }
+    return this.#pruneAndVerify(repoPath, target, gitError);
+  }
+
+  /** 未登记的路径能否当作残留目录删除：`'ok'`、`'missing'`（不存在）或拒绝原因。 */
+  async #checkLeftover(input: RemoveWorktreeInput, repo: string, target: string): Promise<string> {
+    const notRegistered = 'path is not a registered worktree';
+    if (!input.force) return `${notRegistered} (not forced)`;
+    if (this.#pathKind === undefined) return notRegistered;
+    let kind: PathKind;
+    try {
+      kind = await this.#pathKind(input.path);
+    } catch (error) {
+      return `cannot inspect the path: ${errorMessage(error)}`;
+    }
+    if (kind === 'missing') return 'missing';
+    if (input.ownedRoot === undefined) return `${notRegistered} (no owned worktrees root)`;
+    if (!isStrictlyInside(input.path, input.ownedRoot)) {
+      return `${notRegistered} and is outside the worktrees root ${input.ownedRoot}`;
+    }
+    if (target.startsWith(`${repo}/`)) return 'path is inside the repository';
+    if (kind !== 'directory') return `${notRegistered} and is not a directory`;
+    let gitKind: PathKind;
+    try {
+      gitKind = await this.#pathKind(joinPath(input.path, '.git'));
+    } catch (error) {
+      return `cannot inspect ${joinPath(input.path, '.git')}: ${errorMessage(error)}`;
+    }
+    // .git 文件是 worktree 链接（已失效）；.git 目录（或链接）说明是个真仓库
+    if (gitKind !== 'missing' && gitKind !== 'file') return 'path contains a .git directory';
+    return 'ok';
+  }
+
+  async #pruneAndVerify(repoPath: string, target: string, gitError: string): Promise<GitResult> {
+    const pruned = await this.#git(['worktree', 'prune'], repoPath);
+    if (pruned.code !== 0) {
+      return fail(`${gitError}; ${describeFailure(['worktree', 'prune'], pruned)}`);
+    }
+    const after = await this.#listWorktrees(repoPath);
+    if (after === undefined || after.some((entry) => comparablePath(entry) === target)) {
+      return fail(`${gitError}; the worktree is still registered after deleting its directory`);
+    }
+    return { ok: true };
+  }
+
+  async #listWorktrees(repoPath: string): Promise<string[] | undefined> {
+    const listed = await this.#git(['worktree', 'list', '--porcelain'], repoPath);
+    return listed.code === 0 ? parseWorktreeList(listed.stdout) : undefined;
   }
 
   /** `git worktree prune`：清理目录已不存在的 worktree 登记。 */
@@ -328,7 +502,7 @@ export class GitWorktreeManager {
 
   async #git(args: readonly string[], cwd: string): Promise<ExecResult> {
     try {
-      return await this.#exec('git', args, cwd);
+      return await this.#exec('git', [...GIT_CONFIG_ARGS, ...args], cwd);
     } catch (error) {
       return { code: -1, stdout: '', stderr: errorMessage(error) };
     }

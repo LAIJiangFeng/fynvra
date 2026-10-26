@@ -308,6 +308,20 @@ describe('createAgentHost sessions', () => {
     expect(env.sent('prompt')[2]).not.toHaveProperty('images');
   });
 
+  it('sends steer commands (with images when there are some) for sessions:steer', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const identity = { sessionId: session.id, generation: 1 };
+    expect(await env.host.steer(session.id, 'also check docs')).toEqual({ ok: true });
+    await env.host.steer(session.id, 'look', [screenshot]);
+    expect(env.sent('steer')).toEqual([
+      { type: 'steer', identity, text: 'also check docs' },
+      { type: 'steer', identity, text: 'look', images: [screenshot] },
+    ]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
+  });
+
   it('keeps the automatic title for the next message when a message has only images', async () => {
     const env = setup();
     const session = await createSession(env);
@@ -1520,6 +1534,124 @@ describe('createAgentHost model choice', () => {
       })
     ).toMatchObject({ ok: true });
     expect(env.remembered).toHaveLength(remembered);
+  });
+
+  it('lets dispatch_task pick the model and thinking level over the role and the coordinator', async () => {
+    const astra: StoredProvider = {
+      ...openai,
+      id: 'astra',
+      name: 'Astra',
+      models: [{ id: 'gpt-6-astra', name: 'GPT-6 Astra' }],
+      apiKey: 'sk-astra-secret',
+    };
+    const providers = [...catalog, astra];
+    const env = modelEnv({
+      models: modelsOf(providers),
+      providers: { list: async () => providers.map(toProviderView) },
+    });
+    const coordinator = await env.host.create({
+      workspaceId: 'ws-1',
+      roleId: 'orchestrator',
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'xhigh' },
+    });
+    if (!coordinator.ok) throw new Error(coordinator.error);
+    env.host.setCoordinatorLookup(() => coordinator.session.id);
+    const launcher = env.host.implementsLauncher();
+    const astraLevels = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+    let seq = 0;
+    const dispatch = async (
+      extra: { model?: string; thinking?: SessionModelRef['thinking'] },
+      roleId = 'architect'
+    ) => {
+      const pending = launcher.createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId: `dsp_${++seq}`,
+        roleId,
+        cwd: '/worktrees/ws-1/a',
+        worktreeId: 'wt_1',
+        brief: '# A',
+        ...extra,
+      });
+      // thinking is checked against the levels the worker reports for the model
+      const before = env.sent('describe-models').length;
+      await flush();
+      const command = env.sent('describe-models').at(-1);
+      if (env.sent('describe-models').length > before && command?.type === 'describe-models') {
+        env.worker().emit({
+          type: 'models-described',
+          requestId: command.requestId,
+          result: {
+            ok: true,
+            models: command.models.map((query) =>
+              query.modelId === 'gpt-6-astra'
+                ? { thinkingLevels: [...astraLevels], defaultThinking: 'medium' }
+                : describeLikePi(query)
+            ),
+          },
+        });
+      }
+      const created = await pending;
+      if (!created.ok) return created;
+      return env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    };
+
+    // explicit model + thinking beat the role's model
+    expect(await dispatch({ model: 'GPT-6-Astra', thinking: 'max' })).toMatchObject({
+      model: { providerId: 'astra', modelId: 'gpt-6-astra', thinking: 'max' },
+    });
+    // providerId/modelId form; no thinking = the model's default
+    const qualified = await dispatch({ model: 'openai/gpt-5.5' });
+    expect(qualified && 'model' in qualified ? qualified.model : qualified).toEqual({
+      providerId: 'openai',
+      modelId: 'gpt-5.5',
+    });
+    // only thinking: applied to the role's model
+    expect(await dispatch({ thinking: 'high' })).toMatchObject({
+      model: { providerId: 'anthropic', modelId: 'claude-haiku-5-5', thinking: 'high' },
+    });
+    // only thinking, no role model: applied to the coordinator's model
+    expect(await dispatch({ thinking: 'low' }, 'worker')).toMatchObject({
+      model: { providerId: 'openai', modelId: 'gpt-5.5', thinking: 'low' },
+    });
+
+    const sessions = env.host.list('ws-1').length;
+    const unknown = await dispatch({ model: 'gpt-7' });
+    expect(unknown).toEqual({
+      ok: false,
+      error: expect.stringMatching(/unknown model "gpt-7"; available: .*astra\/gpt-6-astra/),
+    });
+    // disabled / keyless providers are not offered, keys never show up
+    expect(JSON.stringify(unknown)).not.toMatch(/old-openai|keyless|sk-/);
+    expect(await dispatch({ model: 'gpt-6-astra', thinking: 'minimal' })).toEqual({
+      ok: false,
+      error: expect.stringContaining('supported: low, medium, high, xhigh, max'),
+    });
+    expect(env.host.list('ws-1')).toHaveLength(sessions);
+  });
+
+  it('reports an ambiguous model id with the providerId/modelId options', async () => {
+    const twin: StoredProvider = { ...openai, id: 'openai-2', name: 'OpenAI 2' };
+    const providers = [...catalog, twin];
+    const env = modelEnv({
+      models: modelsOf(providers),
+      providers: { list: async () => providers.map(toProviderView) },
+    });
+    const created = await env.host.implementsLauncher().createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: '/worktrees/ws-1/a',
+      worktreeId: 'wt_1',
+      brief: '# A',
+      model: 'gpt-5.5',
+    });
+    expect(created).toEqual({
+      ok: false,
+      error:
+        'model "gpt-5.5" is ambiguous; use providerId/modelId: openai/gpt-5.5, openai-2/gpt-5.5',
+    });
   });
 });
 

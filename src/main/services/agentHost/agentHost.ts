@@ -139,6 +139,8 @@ export interface AgentHostService extends AgentHost {
    * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
    */
   prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
+  /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
+  steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
@@ -198,6 +200,8 @@ const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
 const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
+/** dispatch_task 认不出模型时错误里最多列出的可选模型数 */
+const MODEL_OPTIONS_SHOWN = 30;
 
 /**
  * Main 侧的 agent 会话管理：
@@ -407,6 +411,70 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * dispatch_task 的 model 参数 → 设置里的模型：按 modelId（不区分大小写）或 providerId/modelId 匹配，
+   * 只看启用且有 key 的服务。认不出或有歧义时报错并列出可选项（只有 id，不带 key）。
+   */
+  async function pickModel(wanted: string): Promise<Result<{ ref: ModelRef }>> {
+    let views: readonly ModelProviderView[];
+    try {
+      views = await providerViews();
+    } catch (error) {
+      return fail(translate('providers.readFailed', { error: errorMessage(error) }));
+    }
+    const options = views
+      .filter((view) => view.enabled && view.hasApiKey)
+      .flatMap((view) => view.models.map((entry) => ({ providerId: view.id, modelId: entry.id })));
+    const key = wanted.trim().toLowerCase();
+    const matches = options.filter(
+      (option) =>
+        option.modelId.toLowerCase() === key || qualifiedModelId(option).toLowerCase() === key
+    );
+    const [only] = matches;
+    if (only && matches.length === 1) return { ok: true, ref: only };
+    const listed = (matches.length > 1 ? matches : options).map(qualifiedModelId);
+    const more =
+      listed.length > MODEL_OPTIONS_SHOWN
+        ? `, … (${listed.length - MODEL_OPTIONS_SHOWN} more)`
+        : '';
+    const shown = `${listed.slice(0, MODEL_OPTIONS_SHOWN).join(', ')}${more}`;
+    if (matches.length > 1) {
+      return fail(`model "${wanted}" is ambiguous; use providerId/modelId: ${shown}`);
+    }
+    return fail(
+      listed.length > 0
+        ? `unknown model "${wanted}"; available: ${shown}`
+        : `unknown model "${wanted}"; no models are configured`
+    );
+  }
+
+  /** 派发时指定的思考档位必须在模型支持的档位里（不支持推理的模型只接受 off） */
+  async function checkThinking(ref: ModelRef, thinking: ThinkingLevel): Promise<Result> {
+    let views: readonly ModelProviderView[];
+    try {
+      views = await providerViews();
+    } catch (error) {
+      return fail(translate('providers.readFailed', { error: errorMessage(error) }));
+    }
+    const view = views.find((candidate) => candidate.id === ref.providerId);
+    const entry = view?.models.find((candidate) => candidate.id === ref.modelId);
+    const name = qualifiedModelId(ref);
+    if (!view || !entry) {
+      return fail(`cannot check thinking levels of ${name}: it is not in the configured models`);
+    }
+    const described = await describeModels([queryOf(view, entry)]);
+    if (!described.ok) return described;
+    const levels = described.models[0]?.thinkingLevels ?? [];
+    if (levels.includes(thinking) || (levels.length === 0 && thinking === 'off')) {
+      return { ok: true };
+    }
+    return fail(
+      levels.length > 0
+        ? `model ${name} does not support thinking "${thinking}"; supported: ${levels.join(', ')}`
+        : `model ${name} does not support thinking levels; omit thinking`
+    );
   }
 
   /** 问 worker（pi 内置目录）每个模型的思考档位；问过的从缓存取，结果与 queries 一一对应 */
@@ -645,7 +713,20 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
-  async function prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+  function prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+    return deliverMessage('prompt', sessionId, text, images);
+  }
+
+  function steer(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+    return deliverMessage('steer', sessionId, text, images);
+  }
+
+  async function deliverMessage(
+    type: 'prompt' | 'steer',
+    sessionId: string,
+    text: string,
+    images?: ChatImage[]
+  ): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
@@ -655,7 +736,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
       const identity = identityOf(sessionId, state);
-      if (!send({ type: 'prompt', identity, text, ...(images?.length ? { images } : {}) })) {
+      if (!send({ type, identity, text, ...(images?.length ? { images } : {}) })) {
         return fail(translate('agent.workerUnavailable'));
       }
       state.running = true;
@@ -806,11 +887,24 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
-      // 角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
-      const requested =
-        modelRefOf(role) ?? (parentSessionId ? deps.store.get(parentSessionId)?.model : undefined);
+      // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
+      let requested: SessionModelRef | undefined;
+      if (input.model !== undefined) {
+        const picked = await pickModel(input.model);
+        if (!picked.ok) return picked;
+        requested = picked.ref;
+      } else {
+        requested =
+          modelRefOf(role) ??
+          (parentSessionId ? deps.store.get(parentSessionId)?.model : undefined);
+      }
       const resolved = await deps.models.resolve(requested && bareRef(requested));
       if (!resolved.ok) return resolved;
+      if (input.thinking !== undefined) {
+        const supported = await checkThinking(resolved.ref, input.thinking);
+        if (!supported.ok) return supported;
+        requested = { ...resolved.ref, thinking: input.thinking };
+      }
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -920,6 +1014,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     remove,
     prompt,
+    steer,
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = live.get(sessionId);
@@ -988,6 +1083,10 @@ function defaultLog(level: LogLevel, message: string): void {
 /** 角色配的模型（含思考档位） */
 function modelRefOf(role: Role): SessionModelRef | undefined {
   return role.model ? sessionModelOf(role.model, role.model.thinking) : undefined;
+}
+
+function qualifiedModelId({ providerId, modelId }: ModelRef): string {
+  return `${providerId}/${modelId}`;
 }
 
 /** 交给解析器的引用：只有服务 id 与模型 id，思考档位由会话记录另外带 */

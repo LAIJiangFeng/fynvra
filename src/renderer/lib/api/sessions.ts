@@ -441,6 +441,33 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
 
   const missing = () => ({ ok: false, error: translate('sessions.errors.notFound') }) as const;
 
+  async function prompt({
+    sessionId,
+    text,
+    images,
+  }: Parameters<SessionsApi['prompt']>[0]): ReturnType<SessionsApi['prompt']> {
+    const session = sessions.get(sessionId);
+    if (!session) return missing();
+    // 与 Main 相同：只有图片也能发，文字与图片都没有才算空消息
+    if (!text.trim() && !images?.length) {
+      return { ok: false, error: translate('sessions.errors.emptyMessage') };
+    }
+    if (session.run) return { ok: false, error: translate('sessions.errors.busy') };
+    const run = new AbortController();
+    session.run = run;
+    // 与 Main 相同：第一条有文字的消息作标题，只有图片的消息不算
+    const title = summarize(text);
+    const titled = session.history.some(
+      (message) => message.role === 'user' && summarize(message.text)
+    );
+    if (title && !titled) session.summary = { ...session.summary, title };
+    changed(session, 'running');
+    void play(session, text, images, run.signal).finally(() => {
+      if (session.run === run) session.run = null;
+    });
+    return { ok: true };
+  }
+
   return {
     async list(workspaceId, options = {}) {
       const list = [...sessions.values()]
@@ -540,25 +567,28 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true };
     },
 
-    async prompt({ sessionId, text, images }) {
-      const session = sessions.get(sessionId);
+    prompt,
+
+    async steer(input) {
+      const session = sessions.get(input.sessionId);
       if (!session) return missing();
-      // 与 Main 相同：只有图片也能发，文字与图片都没有才算空消息
+      // Like Main: steering an idle session starts a turn (same as prompt)
+      if (!session.run) return prompt(input);
+      const { text, images } = input;
       if (!text.trim() && !images?.length) {
         return { ok: false, error: translate('sessions.errors.emptyMessage') };
       }
-      if (session.run) return { ok: false, error: translate('sessions.errors.busy') };
-      const run = new AbortController();
-      session.run = run;
-      // 与 Main 相同：第一条有文字的消息作标题，只有图片的消息不算
-      const title = summarize(text);
-      const titled = session.history.some(
-        (message) => message.role === 'user' && summarize(message.text)
-      );
-      if (title && !titled) session.summary = { ...session.summary, title };
-      changed(session, 'running');
-      void play(session, text, images, run.signal).finally(() => {
-        if (session.run === run) session.run = null;
+      // The mock script does not react to it; it only shows up in the transcript like pi's steer
+      emit(session, { type: 'message_end', role: 'user', text });
+      session.history.push({
+        id: nextId('entry'),
+        sessionId: input.sessionId,
+        role: 'user',
+        text,
+        ...(images?.length ? { images } : {}),
+        toolCalls: [],
+        createdAt: now(),
+        streaming: false,
       });
       return { ok: true };
     },

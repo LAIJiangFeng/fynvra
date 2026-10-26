@@ -86,8 +86,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
           streamingBehavior: 'followUp',
           ...(images?.length ? { images: images.map(toImageContent) } : {}),
         }),
-      steer: async (text) => {
-        await session.steer(text);
+      steer: async (text, images) => {
+        await session.steer(text, images?.length ? images.map(toImageContent) : undefined);
       },
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));

@@ -1,8 +1,8 @@
+import { lstat, rm } from 'node:fs/promises';
 import type {
   HostResult,
   OrchestrationHost,
   ReadWorkerOutputOutput,
-  ReviewDiffOutput,
   WorkerHost,
 } from '@fynvra/agent-runtime';
 import {
@@ -25,7 +25,12 @@ import type { CheckCommandPolicy } from './checkCommand';
 import { createOrchestrationHost, type RunChecksFn } from './host';
 import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
-import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
+import {
+  currentBranch,
+  type PanelReviewDiff,
+  readDispatchOutput,
+  reviewDispatchPanelDiff,
+} from './queries';
 import { createWorkerHost } from './workerHost';
 import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
@@ -70,7 +75,8 @@ export interface OrchestrationService {
     dispatchId: string;
     cursor: number;
   }): Promise<HostResult<ReadWorkerOutputOutput>>;
-  reviewDiff(dispatchId: string): Promise<HostResult<ReviewDiffOutput>>;
+  /** 面板用：比 agent 的 review_diff 多未提交改动与提交列表。 */
+  reviewDiff(dispatchId: string): Promise<HostResult<PanelReviewDiff>>;
   /**
    * 归档 worker 会话时调用（「通用 → 会话 → 归档时清理 worktree」）：它的 worktree 已合并且干净就删掉
    * worktree 与分支，否则保留（见 `worktreeCleanup.ts`）。
@@ -192,7 +198,20 @@ export function createOrchestrationService(
     }
   });
   const inbox = new Inbox({ messages: store.messages, now });
-  const git = new GitWorktreeManager({ exec: options.exec });
+  // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
+  const git = new GitWorktreeManager({
+    exec: options.exec,
+    removeDir: (path) => rm(path, { recursive: true, force: true, maxRetries: 3 }),
+    pathKind: async (path) => {
+      try {
+        const stat = await lstat(path);
+        return stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+        throw error;
+      }
+    },
+  });
 
   const ready = (async () => {
     try {
@@ -313,7 +332,7 @@ export function createOrchestrationService(
         if (dispatch.mode === 'in-place') {
           return fail(`dispatch ${dispatchId} has no diff: the workspace has no git`);
         }
-        return reviewDispatchDiff(
+        return reviewDispatchPanelDiff(
           { git, exec: options.exec, store, repoPath: workspace.repoPath },
           dispatch
         );
