@@ -4,7 +4,7 @@ import type {
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
-import type { SessionsState } from './createSessionsStore';
+import type { QueuedMessage, SessionsState } from './createSessionsStore';
 import type { PendingApproval, SessionRuntime, TimelineMessage } from './reducer';
 
 // 选择器返回 store 里已有的引用；缺省值用模块级常量，避免每次渲染都拿到新对象
@@ -13,6 +13,7 @@ const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const EMPTY_PROVIDERS: ModelProviderOption[] = [];
 const EMPTY_IMAGES: ChatImage[] = [];
+const EMPTY_QUEUE: QueuedMessage[] = [];
 
 type Lists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
 
@@ -92,6 +93,12 @@ export const selectDraftImagesOf =
   (sessionId: string) =>
   (state: SessionsState): ChatImage[] =>
     state.draftImages[sessionId] ?? EMPTY_IMAGES;
+
+/** Messages queued while the session runs, oldest first */
+export const selectQueueOf =
+  (sessionId: string) =>
+  (state: SessionsState): QueuedMessage[] =>
+    state.queuedBySession[sessionId] ?? EMPTY_QUEUE;
 
 export const selectLoadingHistoryOf = (sessionId: string) => (state: SessionsState) =>
   state.loadingHistory[sessionId] === true;

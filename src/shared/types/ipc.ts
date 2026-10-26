@@ -79,6 +79,8 @@ export const IPC_CHANNELS = {
   SESSIONS_CREATE: 'sessions:create',
   SESSIONS_REMOVE: 'sessions:remove',
   SESSIONS_PROMPT: 'sessions:prompt',
+  /** 运行中插话（入参同 sessions:prompt），立即注入当前回合；会话空闲时等同 prompt */
+  SESSIONS_STEER: 'sessions:steer',
   SESSIONS_ABORT: 'sessions:abort',
   /** 从 pi jsonl 重建的消息投影 */
   SESSIONS_HISTORY: 'sessions:history',

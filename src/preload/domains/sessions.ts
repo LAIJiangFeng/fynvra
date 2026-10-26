@@ -30,6 +30,8 @@ export interface SessionsApi {
    * 有一张图片不合法就整条拒绝
    */
   prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
+  /** Steer the running turn right away (pi steer); same input as prompt. Acts as prompt when idle */
+  steer(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
@@ -82,6 +84,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     create: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_CREATE, input),
     remove: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_REMOVE, sessionId),
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
+    steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
     abort: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ABORT, sessionId),
     history: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_HISTORY, sessionId),
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),

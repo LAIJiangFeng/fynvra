@@ -38,6 +38,16 @@ import { findSession, isBusy, statusOf } from './selectors';
  */
 export type ImageRejection = 'count' | 'size' | 'invalid';
 
+/**
+ * A message typed while the session was running. Kept in memory only (not in the transcript, which is a
+ * projection of pi's jsonl): it shows up in the timeline once it is actually sent.
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  images: ChatImage[];
+}
+
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
   workspaceId: string | null;
@@ -50,6 +60,11 @@ export interface SessionsState extends ChatProjection {
   drafts: Record<string, string>;
   /** 输入框里粘贴的图片，按会话保存（与 drafts 并列，切换会话不丢） */
   draftImages: Record<string, ChatImage[]>;
+  /**
+   * Messages queued while the session was running, oldest first. Sent one at a time as prompts when
+   * the turn settles to idle; kept (not sent) after a stop or an error until the user sends again
+   */
+  queuedBySession: Record<string, QueuedMessage[]>;
   /** 正在拉 history 的会话 */
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
@@ -79,6 +94,14 @@ export interface SessionsState extends ChatProjection {
    * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片、会话运行中或上一条还在途时返回 false
    */
   send(text: string): Promise<boolean>;
+  /**
+   * Send a message into the running turn right away (pi steer): the queued message `queuedId`, else the
+   * most recent queued one, else the draft (text and images). When the session is idle the message is
+   * sent as a normal prompt. Returns false when there is nothing to send or it was not delivered
+   */
+  steer(sessionId: string, queuedId?: string): Promise<boolean>;
+  /** Drop a queued message */
+  removeQueued(sessionId: string, queuedId: string): void;
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
@@ -244,6 +267,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
   let modelOptionsRequest = 0;
   let requestSeq = 0;
+  /** Sessions whose queue is paused: the user stopped the turn (or a queued send failed) */
+  const heldQueues = new Set<string>();
+  let queueSeq = 0;
 
   return create<SessionsState>()((set, get) => {
     function flushEvents(): void {
@@ -255,6 +281,82 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         let next = state;
         for (const envelope of batch) next = reduceSessionEvent(next, envelope, now());
         return next;
+      });
+      // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
+      const settled = new Set<string>();
+      for (const { sessionId, event } of batch) {
+        if (event.type !== 'agent_settled') continue;
+        if (event.aborted) heldQueues.add(sessionId);
+        settled.add(sessionId);
+      }
+      for (const sessionId of settled) drainQueue(sessionId);
+    }
+
+    function queueOf(sessionId: string): QueuedMessage[] {
+      return get().queuedBySession[sessionId] ?? [];
+    }
+
+    function setQueue(sessionId: string, update: (queue: QueuedMessage[]) => QueuedMessage[]) {
+      set((state) => {
+        const queue = update(state.queuedBySession[sessionId] ?? []);
+        return {
+          queuedBySession:
+            queue.length > 0
+              ? { ...state.queuedBySession, [sessionId]: queue }
+              : omitKey(state.queuedBySession, sessionId),
+        };
+      });
+    }
+
+    /**
+     * Prompt the session with an optimistic echo. On failure the echo is withdrawn with the error and
+     * `restore` puts the message back where it came from (draft or queue)
+     */
+    async function deliver(
+      sessionId: string,
+      body: string,
+      images: ChatImage[],
+      restore: (state: SessionsState) => Partial<SessionsState>
+    ): Promise<boolean> {
+      const previous = statusOf(get(), sessionId);
+      sending.add(sessionId);
+      const id = `local-${++localSeq}`;
+      set((state) =>
+        addOptimisticMessage(state, sessionId, { id, text: body, images, createdAt: now() })
+      );
+      try {
+        const result = await safely(() =>
+          api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
+        );
+        if (result.ok) {
+          heldQueues.delete(sessionId);
+          return true;
+        }
+        set((state) => ({
+          ...withdrawOptimisticMessage(state, sessionId, id, {
+            status: previous,
+            error: result.error,
+          }),
+          ...restore(state),
+        }));
+        return false;
+      } finally {
+        sending.delete(sessionId);
+      }
+    }
+
+    /** Send the oldest queued message when the session is idle and its queue is not paused */
+    function drainQueue(sessionId: string): void {
+      if (heldQueues.has(sessionId) || sending.has(sessionId)) return;
+      if (statusOf(get(), sessionId) !== 'idle') return;
+      const [next] = queueOf(sessionId);
+      if (!next) return;
+      setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
+      void deliver(sessionId, next.text, next.images, (state) => {
+        // Put it back in front and pause the queue so a broken session does not loop
+        heldQueues.add(sessionId);
+        const queue = state.queuedBySession[sessionId] ?? [];
+        return { queuedBySession: { ...state.queuedBySession, [sessionId]: [next, ...queue] } };
       });
     }
 
@@ -315,6 +417,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       activeSessionId: null,
       drafts: {},
       draftImages: {},
+      queuedBySession: {},
       loadingHistory: {},
       listErrors: {},
       notice: null,
@@ -429,45 +532,116 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const body = normalizePrompt(text);
         const images = get().draftImages[sessionId] ?? [];
         if (!body.trim() && images.length === 0) return false;
-        const previous = statusOf(get(), sessionId);
-        if (sending.has(sessionId) || isBusy(previous)) return false;
-
-        sending.add(sessionId);
-        const id = `local-${++localSeq}`;
-        set((state) => ({
-          ...addOptimisticMessage(state, sessionId, { id, text: body, images, createdAt: now() }),
+        const clearDraft = (state: SessionsState) => ({
           drafts: omitKey(state.drafts, sessionId),
           draftImages: omitKey(state.draftImages, sessionId),
-        }));
-        try {
-          const result = await safely(() =>
-            api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
-          );
-          if (result.ok) return true;
+        });
+        // Running (or a prompt still in flight): queue it, it is sent when the turn settles
+        if (sending.has(sessionId) || isBusy(statusOf(get(), sessionId))) {
+          const item: QueuedMessage = { id: `queued-${++queueSeq}`, text: body, images };
           set((state) => ({
-            ...withdrawOptimisticMessage(state, sessionId, id, {
-              status: previous,
-              error: result.error,
-            }),
-            // 没送出去的文字与图片放回输入框（用户已经开始写新草稿时不覆盖，文字与图片各看各的）
-            drafts:
-              !text || state.drafts[sessionId]
-                ? state.drafts
-                : { ...state.drafts, [sessionId]: text },
-            draftImages:
-              images.length === 0 || state.draftImages[sessionId]
-                ? state.draftImages
-                : { ...state.draftImages, [sessionId]: images },
+            ...clearDraft(state),
+            queuedBySession: {
+              ...state.queuedBySession,
+              [sessionId]: [...(state.queuedBySession[sessionId] ?? []), item],
+            },
           }));
-          return false;
-        } finally {
-          sending.delete(sessionId);
+          return true;
         }
+        set(clearDraft);
+        return deliver(sessionId, body, images, (state) => ({
+          // Put what was not sent back in the input (unless the user already started a new draft;
+          // text and images are checked separately)
+          drafts:
+            !text || state.drafts[sessionId]
+              ? state.drafts
+              : { ...state.drafts, [sessionId]: text },
+          draftImages:
+            images.length === 0 || state.draftImages[sessionId]
+              ? state.draftImages
+              : { ...state.draftImages, [sessionId]: images },
+        }));
+      },
+
+      async steer(sessionId, queuedId) {
+        const queue = queueOf(sessionId);
+        const item = queuedId
+          ? queue.find((candidate) => candidate.id === queuedId)
+          : queue[queue.length - 1];
+        if (queuedId && !item) return false;
+        const draftText = get().drafts[sessionId] ?? '';
+        const message: QueuedMessage | undefined =
+          item ??
+          (() => {
+            const text = normalizePrompt(draftText);
+            const images = get().draftImages[sessionId] ?? [];
+            return text.trim() || images.length > 0 ? { id: '', text, images } : undefined;
+          })();
+        if (!message) return false;
+        const fromQueue = item !== undefined;
+        const take = (state: SessionsState): Partial<SessionsState> =>
+          fromQueue
+            ? {
+                queuedBySession: (() => {
+                  const rest = (state.queuedBySession[sessionId] ?? []).filter(
+                    (candidate) => candidate.id !== message.id
+                  );
+                  return rest.length > 0
+                    ? { ...state.queuedBySession, [sessionId]: rest }
+                    : omitKey(state.queuedBySession, sessionId);
+                })(),
+              }
+            : {
+                drafts: omitKey(state.drafts, sessionId),
+                draftImages: omitKey(state.draftImages, sessionId),
+              };
+        const index = queue.indexOf(message);
+        const putBack = (state: SessionsState): Partial<SessionsState> => {
+          if (fromQueue) {
+            const current = [...(state.queuedBySession[sessionId] ?? [])];
+            current.splice(Math.min(index, current.length), 0, message);
+            return { queuedBySession: { ...state.queuedBySession, [sessionId]: current } };
+          }
+          return {
+            drafts: state.drafts[sessionId]
+              ? state.drafts
+              : { ...state.drafts, [sessionId]: draftText },
+            draftImages:
+              message.images.length === 0 || state.draftImages[sessionId]
+                ? state.draftImages
+                : { ...state.draftImages, [sessionId]: message.images },
+          };
+        };
+        set(take);
+        // Idle: nothing to steer, send it as a normal prompt
+        if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
+          return deliver(sessionId, message.text, message.images, putBack);
+        }
+        // No echo: pi injects it into the run and the transcript shows it once it is delivered
+        const result = await safely(() =>
+          api.steer({
+            sessionId,
+            text: message.text,
+            ...(message.images.length > 0 ? { images: message.images } : {}),
+          })
+        );
+        if (result.ok) return true;
+        set((state) => ({
+          ...putBack(state),
+          notice: translate('sessions.errors.steerFailed', { error: result.error }),
+        }));
+        return false;
+      },
+
+      removeQueued(sessionId, queuedId) {
+        setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
       },
 
       async abort() {
         const sessionId = get().activeSessionId;
         if (!sessionId) return;
+        // Stop keeps the queue but pauses it: the user decides what to send next
+        heldQueues.add(sessionId);
         const result = await safely(() => api.abort(sessionId));
         if (!result.ok)
           set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });

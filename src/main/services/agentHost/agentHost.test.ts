@@ -308,6 +308,20 @@ describe('createAgentHost sessions', () => {
     expect(env.sent('prompt')[2]).not.toHaveProperty('images');
   });
 
+  it('sends steer commands (with images when there are some) for sessions:steer', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const identity = { sessionId: session.id, generation: 1 };
+    expect(await env.host.steer(session.id, 'also check docs')).toEqual({ ok: true });
+    await env.host.steer(session.id, 'look', [screenshot]);
+    expect(env.sent('steer')).toEqual([
+      { type: 'steer', identity, text: 'also check docs' },
+      { type: 'steer', identity, text: 'look', images: [screenshot] },
+    ]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
+  });
+
   it('keeps the automatic title for the next message when a message has only images', async () => {
     const env = setup();
     const session = await createSession(env);
