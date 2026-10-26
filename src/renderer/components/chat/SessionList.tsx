@@ -1,8 +1,18 @@
 import type { SessionSummary } from '@shared/types/chat';
-import { Archive, ArchiveRestore, ChevronRight } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { Archive, ArchiveRestore, ChevronRight, Trash2 } from 'lucide-react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { useNow } from '@/hooks/useNow';
 import { useT } from '@/i18n/I18nProvider';
 import { SessionSearchButton, SessionSearchInput, useFilteredSessions } from '@/lib/keybindings';
@@ -118,49 +128,94 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
   const select = useSessionsStore((state) => state.selectSession);
   const archive = useSessionsStore((state) => state.archiveSession);
   const unarchive = useSessionsStore((state) => state.unarchiveSession);
+  const remove = useSessionsStore((state) => state.removeSession);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const cancel = useRef<HTMLButtonElement>(null);
   const now = useNow();
   const t = useT();
   const archived = session.archivedAt !== undefined;
   const action = t(archived ? 'sessions.unarchive' : 'sessions.archive');
+  const busy = isBusy(status);
 
   return (
-    <div className="group/session relative mb-0.5">
-      <button
-        type="button"
-        aria-current={active ? 'true' : undefined}
-        onClick={() => {
-          filesStoreFor(session.workspaceId, window.fynvra.files).getState().showChat();
-          void select(session.id);
-        }}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
-          active && 'bg-sidebar-accent text-sidebar-accent-foreground'
-        )}
-      >
-        <StatusDot status={status} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate" title={session.title}>
-            {session.title}
-          </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-            <RoleBadge roleId={session.roleId} className="max-w-28 truncate" />
-            <span className="truncate">{formatRelativeTime(session.updatedAt, now, t)}</span>
-          </span>
-        </span>
-      </button>
-      {/* 运行中、等审批的会话不能归档 */}
-      {(archived || !isBusy(status)) && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={action}
-          title={action}
-          onClick={() => void (archived ? unarchive(session.id) : archive(session.id))}
-          className="absolute top-1/2 right-1 -translate-y-1/2 bg-sidebar-accent opacity-0 hover:bg-background focus-visible:opacity-100 group-hover/session:opacity-100"
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <div className="group/session relative mb-0.5">
+        <button
+          type="button"
+          aria-current={active ? 'true' : undefined}
+          onClick={() => {
+            filesStoreFor(session.workspaceId, window.fynvra.files).getState().showChat();
+            void select(session.id);
+          }}
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md py-1.5 pr-16 pl-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
+            active && 'bg-sidebar-accent text-sidebar-accent-foreground'
+          )}
         >
-          {archived ? <ArchiveRestore /> : <Archive />}
-        </Button>
-      )}
-    </div>
+          <StatusDot status={status} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate" title={session.title}>
+              {session.title}
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+              <RoleBadge roleId={session.roleId} className="max-w-28 truncate" />
+              <span className="truncate">{formatRelativeTime(session.updatedAt, now, t)}</span>
+            </span>
+          </span>
+        </button>
+        {/* 运行中、等审批的会话不能归档或删除；已归档的仍可恢复。 */}
+        {(archived || !busy) && (
+          <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={action}
+              title={action}
+              onClick={() => void (archived ? unarchive(session.id) : archive(session.id))}
+              className="hover:bg-background"
+            >
+              {archived ? <ArchiveRestore /> : <Archive />}
+            </Button>
+            {!busy && (
+              <DialogTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t('sessions.remove')}
+                    title={t('sessions.remove')}
+                    className="hover:bg-background hover:text-destructive"
+                  />
+                }
+              >
+                <Trash2 />
+              </DialogTrigger>
+            )}
+          </div>
+        )}
+      </div>
+      <DialogContent initialFocus={cancel} className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t('sessions.removeTitle')}</DialogTitle>
+          <DialogDescription>{t('sessions.removeHint')}</DialogDescription>
+        </DialogHeader>
+        <p className="break-all text-sm">{session.title}</p>
+        <DialogFooter>
+          <DialogClose render={<Button ref={cancel} variant="outline" />}>
+            {t('common.cancel')}
+          </DialogClose>
+          <Button
+            variant="destructive"
+            disabled={busy}
+            onClick={() => {
+              setConfirmOpen(false);
+              void remove(session.id);
+            }}
+          >
+            {t('common.delete')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 });
