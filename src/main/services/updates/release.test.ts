@@ -19,9 +19,18 @@ describe('Windows 安装器配置', () => {
       nsis: {
         oneClick: false,
         allowToChangeInstallationDirectory: true,
+        include: 'resources/installer.nsh',
         deleteAppDataOnUninstall: false,
       },
     });
+  });
+
+  it('浏览选择父目录时由安装器显示应用子目录，而不是开始安装后才补上', () => {
+    const include = readFileSync(
+      new URL('../../../../resources/installer.nsh', import.meta.url),
+      'utf8'
+    );
+    expect(include).toContain(String.raw`InstallDir "$LOCALAPPDATA\Programs\${APP_FILENAME}"`);
   });
 });
 

@@ -14,6 +14,7 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  include: resources/installer.nsh
   artifactName: ${productName}-${version}-${arch}-setup.${ext}
   deleteAppDataOnUninstall: false
 mac:
