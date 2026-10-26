@@ -1,6 +1,9 @@
 import {
   ChevronRight,
   CircleAlert,
+  File,
+  Folder,
+  FolderOpen,
   GitBranch,
   GitCommitHorizontal,
   GitCompareArrows,
@@ -34,7 +37,8 @@ import {
   parseUnifiedDiff,
   statSummary,
 } from './diff';
-import { oneLine, shortSha, taskStatusLabel } from './format';
+import { buildFileTree, type FileTreeNode } from './fileTree';
+import { formatRelative, oneLine, shortSha, taskStatusLabel } from './format';
 import { useSeenOnce } from './hooks';
 
 /** 默认展开的文件：单个不超过这么多行，且累计不超过 {@link OPEN_BUDGET}。 */
@@ -173,31 +177,8 @@ function DiffContent({
   stale: boolean;
   onRefresh: (() => void) | undefined;
 }) {
-  const files = useMemo(() => parseUnifiedDiff(data.diff), [data]);
-  // `files` 里有、patch 里没有文本 diff 的条目（理论上不会出现，防御一下）
-  const extra = useMemo(() => {
-    const parsed = new Set(files.flatMap((file) => [file.path, file.oldPath ?? file.path]));
-    return data.files.filter((path) => !parsed.has(path));
-  }, [data, files]);
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => defaultOpenFiles(files));
-  const sectionRefs = useRef(new Map<string, HTMLElement>());
   const summary = statSummary(data.stat);
   const t = useT();
-
-  const toggle = (key: string, next: boolean) =>
-    setOpen((current) => {
-      const updated = new Set(current);
-      if (next) updated.add(key);
-      else updated.delete(key);
-      return updated;
-    });
-
-  const reveal = (key: string) => {
-    toggle(key, true);
-    requestAnimationFrame(() =>
-      sectionRefs.current.get(key)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    );
-  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -247,41 +228,140 @@ function DiffContent({
         )}
       </div>
 
+      {data.uncommitted.available ? (
+        <ChangeSet
+          title={t('orchestration.uncommittedChanges')}
+          files={data.uncommitted.files}
+          diff={data.uncommitted.diff}
+          empty={t('orchestration.noUncommitted')}
+        />
+      ) : (
+        <SectionBox title={t('orchestration.uncommittedChanges')}>
+          <SectionNote>{t('orchestration.worktreeRemoved')}</SectionNote>
+        </SectionBox>
+      )}
+      <ChangeSet
+        title={t('orchestration.committedChanges')}
+        files={data.files}
+        diff={data.diff}
+        empty={t('orchestration.noCommits')}
+      />
+      <SectionBox title={t('orchestration.commitsSection')} count={data.commits.length}>
+        {data.commits.length === 0 ? (
+          <SectionNote>{t('orchestration.noCommitList')}</SectionNote>
+        ) : (
+          <CommitList commits={data.commits} />
+        )}
+      </SectionBox>
+    </div>
+  );
+}
+
+/** 一个可折叠分区：标题 + 数量，默认展开。 */
+function SectionBox({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count?: number;
+  children: ReactNode;
+}) {
+  return (
+    <section aria-label={title}>
+      <Collapsible defaultOpen>
+        <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded py-0.5 text-left font-semibold text-[11px] text-muted-foreground uppercase tracking-wide outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          {count !== undefined && (
+            <span className="shrink-0 rounded-full bg-muted px-1.5 font-mono font-normal tabular-nums">
+              {count}
+            </span>
+          )}
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-1.5 flex flex-col gap-2">{children}</div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
+  );
+}
+
+function SectionNote({ children }: { children: ReactNode }) {
+  return <p className="py-3 text-center text-muted-foreground text-xs">{children}</p>;
+}
+
+/** 一组改动（未提交 / 已提交）：目录树 + 下面逐文件的 diff，点树里的文件展开并滚到它的 diff。 */
+function ChangeSet({
+  title,
+  files: names,
+  diff,
+  empty,
+}: {
+  title: string;
+  files: string[];
+  diff: string;
+  empty: string;
+}) {
+  const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
+  // `files` 里有、patch 里没有文本 diff 的条目（理论上不会出现，防御一下）
+  const extra = useMemo(() => {
+    const parsed = new Set(files.flatMap((file) => [file.path, file.oldPath ?? file.path]));
+    return names.filter((path) => !parsed.has(path));
+  }, [names, files]);
+  const tree = useMemo(() => buildFileTree(files), [files]);
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => defaultOpenFiles(files));
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+  const t = useT();
+
+  const toggle = (key: string, next: boolean) =>
+    setOpen((current) => {
+      const updated = new Set(current);
+      if (next) updated.add(key);
+      else updated.delete(key);
+      return updated;
+    });
+
+  const reveal = (key: string) => {
+    toggle(key, true);
+    requestAnimationFrame(() =>
+      sectionRefs.current.get(key)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    );
+  };
+
+  return (
+    <SectionBox title={title} count={files.length + extra.length}>
       {files.length === 0 && extra.length === 0 ? (
-        <p className="py-6 text-center text-muted-foreground text-xs">
-          {t('orchestration.noCommits')}
-        </p>
+        <SectionNote>{empty}</SectionNote>
       ) : (
         <>
-          <FileList files={files} onReveal={reveal} />
-          <div className="flex flex-col gap-2">
-            {files.map((file) => {
-              const key = fileKey(file);
-              return (
-                <DiffFileSection
-                  key={key}
-                  file={file}
-                  open={open.has(key)}
-                  onOpenChange={(next) => toggle(key, next)}
-                  sectionRef={(element) => {
-                    if (element) sectionRefs.current.set(key, element);
-                    else sectionRefs.current.delete(key);
-                  }}
-                />
-              );
-            })}
-            {extra.map((path) => (
-              <p key={path} className="rounded-md border px-2 py-1.5 font-mono text-[11px]">
-                {path}{' '}
-                <span className="font-sans text-muted-foreground">
-                  {t('orchestration.noTextDiff')}
-                </span>
-              </p>
-            ))}
-          </div>
+          {files.length > 0 && <FileTree nodes={tree} onReveal={reveal} />}
+          {files.map((file) => {
+            const key = fileKey(file);
+            return (
+              <DiffFileSection
+                key={key}
+                file={file}
+                open={open.has(key)}
+                onOpenChange={(next) => toggle(key, next)}
+                sectionRef={(element) => {
+                  if (element) sectionRefs.current.set(key, element);
+                  else sectionRefs.current.delete(key);
+                }}
+              />
+            );
+          })}
+          {extra.map((path) => (
+            <p key={path} className="rounded-md border px-2 py-1.5 font-mono text-[11px]">
+              {path}{' '}
+              <span className="font-sans text-muted-foreground">
+                {t('orchestration.noTextDiff')}
+              </span>
+            </p>
+          ))}
         </>
       )}
-    </div>
+    </SectionBox>
   );
 }
 
@@ -302,32 +382,120 @@ function defaultOpenFiles(files: DiffFile[]): Set<string> {
   return open;
 }
 
-function FileList({ files, onReveal }: { files: DiffFile[]; onReveal: (key: string) => void }) {
+const TREE_INDENT_PX = 12;
+
+/** VS Code 式目录树：目录行折叠 / 展开，文件行点击展开并滚到它的 diff。 */
+function FileTree({ nodes, onReveal }: { nodes: FileTreeNode[]; onReveal: (key: string) => void }) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const t = useT();
+  const toggleFolder = (path: string) =>
+    setCollapsed((current) => {
+      const updated = new Set(current);
+      if (updated.has(path)) updated.delete(path);
+      else updated.add(path);
+      return updated;
+    });
+
+  const rows: ReactNode[] = [];
+  const walk = (list: FileTreeNode[], depth: number) => {
+    for (const node of list) {
+      const indent = 6 + depth * TREE_INDENT_PX;
+      if (node.kind === 'folder') {
+        const isOpen = !collapsed.has(node.path);
+        const Icon = isOpen ? FolderOpen : Folder;
+        rows.push(
+          <li key={`d:${node.path}`}>
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              className="flex w-full items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent"
+              style={{ paddingLeft: indent }}
+              title={node.path}
+              onClick={() => toggleFolder(node.path)}
+            >
+              <ChevronRight
+                className={cn('size-3 shrink-0 transition-transform', isOpen && 'rotate-90')}
+              />
+              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate font-mono">{node.name}</span>
+              <span
+                className="shrink-0 rounded-full bg-muted px-1.5 font-mono text-muted-foreground tabular-nums"
+                title={t('orchestration.folderFiles', { count: node.fileCount })}
+              >
+                {node.fileCount}
+              </span>
+            </button>
+          </li>
+        );
+        if (isOpen) walk(node.children, depth + 1);
+        continue;
+      }
+      const { file } = node;
+      const mark = STATUS_MARK[file.status];
+      const key = fileKey(file);
+      rows.push(
+        <li key={`f:${key}`}>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent"
+            // 与目录行的 chevron（size-3 + gap）对齐
+            style={{ paddingLeft: indent + 16 }}
+            title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+            onClick={() => onReveal(key)}
+          >
+            <File className="size-3.5 shrink-0 text-muted-foreground" />
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate font-mono',
+                file.status === 'deleted' && 'line-through'
+              )}
+            >
+              {node.name}
+            </span>
+            <LineCounts file={file} />
+            <span
+              className={cn('w-3 shrink-0 text-center font-mono font-semibold', mark.className)}
+            >
+              <span aria-hidden>{mark.letter}</span>
+              <span className="sr-only">{t(`orchestration.fileStatus.${file.status}`)}</span>
+            </span>
+          </button>
+        </li>
+      );
+    }
+  };
+  walk(nodes, 0);
+
   return (
     <ul
       className="flex flex-col rounded-md border py-1"
       aria-label={t('orchestration.changedFiles')}
     >
-      {files.map((file) => {
-        const mark = STATUS_MARK[file.status];
+      {rows}
+    </ul>
+  );
+}
+
+/** 提交列表：新的在前。 */
+function CommitList({ commits }: { commits: ReviewDiffData['commits'] }) {
+  const t = useT();
+  const now = Date.now();
+  return (
+    <ul className="flex flex-col rounded-md border py-1">
+      {commits.map((commit) => {
+        const epoch = Date.parse(commit.date);
         return (
-          <li key={fileKey(file)}>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-2 py-0.5 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent"
-              title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
-              onClick={() => onReveal(fileKey(file))}
-            >
-              <span className={cn('w-3 shrink-0 font-mono font-semibold', mark.className)}>
-                <span aria-hidden>{mark.letter}</span>
-                <span className="sr-only">{t(`orchestration.fileStatus.${file.status}`)}</span>
-              </span>
-              <span className="min-w-0 flex-1 truncate font-mono" dir="rtl">
-                <bdi>{file.path}</bdi>
-              </span>
-              <LineCounts file={file} />
-            </button>
+          <li
+            key={commit.sha}
+            className="flex min-w-0 items-center gap-1.5 px-2 py-0.5 text-[11px]"
+            title={`${commit.sha}\n${commit.author} · ${commit.date}\n\n${commit.subject}`}
+          >
+            <GitCommitHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="shrink-0 font-mono text-muted-foreground">{shortSha(commit.sha)}</span>
+            <span className="min-w-0 flex-1 truncate">{commit.subject}</span>
+            <span className="max-w-[40%] shrink-0 truncate text-muted-foreground">
+              {commit.author} · {Number.isNaN(epoch) ? commit.date : formatRelative(epoch, now, t)}
+            </span>
           </li>
         );
       })}

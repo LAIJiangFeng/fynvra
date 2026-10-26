@@ -158,6 +158,11 @@ describe('createMockOrchestrationApi', () => {
     expect(statSummary(result.stat)).toBe(
       `6 files changed, ${insertions} insertions(+), ${deletions} deletions(-)`
     );
+    expect(result.uncommitted.available).toBe(true);
+    expect(parseUnifiedDiff(result.uncommitted.diff).map((file) => file.path)).toEqual(
+      result.uncommitted.files
+    );
+    expect(result.commits.length).toBeGreaterThan(0);
   });
 
   it('演示工作区使用通用项目名称，筛选示例与数据一致', async () => {

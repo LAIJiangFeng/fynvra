@@ -35,6 +35,11 @@ function commitFile(cwd: string, file: string, content: string, message: string)
   git(cwd, 'commit', '-q', '-m', message);
 }
 
+/** 去掉若干字段：面板结果的未提交改动随 worktree 存亡变化，agent 工具结果没有面板专有字段。 */
+function omit(result: object, ...keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(result).filter(([key]) => !keys.includes(key)));
+}
+
 describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   let root: string;
   let repo: string;
@@ -164,18 +169,27 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
     await report(attempt.workerSessionId);
     const expected = await service.reviewDiff(attempt.id);
-    expect(expected).toMatchObject({ ok: true, files: ['worker.txt'] });
+    expect(expected).toMatchObject({
+      ok: true,
+      files: ['worker.txt'],
+      uncommitted: { available: true, files: [], diff: '' },
+      commits: [{ subject: 'worker change' }],
+    });
+    const committed = omit(expected, 'uncommitted');
+    const tool = omit(expected, 'uncommitted', 'commits');
 
     // 模拟旧版 Windows 清理失败：Git 登记和 .git 已删，应用仍保留 worktree 记录。
     git(repo, 'merge', '--no-ff', '--no-edit', worktree.branch);
     git(repo, 'worktree', 'remove', worktree.path);
     mkdirSync(worktree.path);
     commitFile(repo, 'unrelated.txt', 'not part of this task\n', 'unrelated');
-    expect(await service.reviewDiff(attempt.id)).toEqual(expected);
-    expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(expected);
+    const panel = await service.reviewDiff(attempt.id);
+    expect(omit(panel, 'uncommitted')).toEqual(committed);
+    expect(panel.ok && panel.uncommitted).toEqual({ available: false, files: [], diff: '' });
+    expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(tool);
 
     rmSync(worktree.path, { recursive: true });
-    expect(await service.reviewDiff(attempt.id)).toEqual(expected);
+    expect(omit(await service.reviewDiff(attempt.id), 'uncommitted')).toEqual(committed);
   });
 
   it.each(['coordinator', 'archive'] as const)(
@@ -185,7 +199,13 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
       commitFile(worktree.path, 'worker.txt', 'original change\n', 'worker change');
       await report(attempt.workerSessionId);
       const expected = await service.reviewDiff(attempt.id);
-      expect(expected).toMatchObject({ ok: true, files: ['worker.txt'] });
+      expect(expected).toMatchObject({
+        ok: true,
+        files: ['worker.txt'],
+        commits: [{ subject: 'worker change' }],
+      });
+      const committed = omit(expected, 'uncommitted');
+      const tool = omit(expected, 'uncommitted', 'commits');
       // 主分支在 worker 期间前进：不能用主分支 HEAD 或合并提交作为 diff 终点。
       commitFile(repo, 'unrelated.txt', 'another task\n', 'unrelated');
       expect(await host.mergeWorktree({ dispatchId: attempt.id })).toMatchObject({ merged: true });
@@ -201,19 +221,49 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
       }
       expect((await service.snapshot()).worktrees).toEqual([]);
       expect(git(repo, 'branch', '--list', worktree.branch)).toBe('');
-      expect(await service.reviewDiff(attempt.id)).toEqual(expected);
-      expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(expected);
+      const panel = await service.reviewDiff(attempt.id);
+      expect(omit(panel, 'uncommitted')).toEqual(committed);
+      expect(panel.ok && panel.uncommitted.available).toBe(false);
+      expect(await host.reviewDiff({ dispatchId: attempt.id })).toEqual(tool);
       await service.flush();
 
       commitFile(repo, 'later.txt', 'later change\n', 'later');
       git(repo, 'branch', worktree.branch);
       const restored = openService();
-      expect(await restored.reviewDiff(attempt.id)).toEqual(expected);
+      expect(omit(await restored.reviewDiff(attempt.id), 'uncommitted')).toEqual(committed);
       expect(
         await restored.hostFor('session_coord').reviewDiff({ dispatchId: attempt.id })
-      ).toEqual(expected);
+      ).toEqual(tool);
     }
   );
+
+  it('面板的未提交改动：已跟踪文件的改动与未跟踪文件（新增），不写 worktree', async () => {
+    const { dispatch: attempt, worktree } = await dispatch('Uncommitted');
+    commitFile(worktree.path, 'tracked.txt', 'one\n', 'add tracked');
+    writeFileSync(join(worktree.path, 'tracked.txt'), 'one\ntwo\n');
+    writeFileSync(join(worktree.path, 'new file.txt'), 'fresh');
+    writeFileSync(join(worktree.path, 'blob.bin'), Buffer.from([1, 0, 2]));
+    const status = git(worktree.path, 'status', '--porcelain');
+
+    const result = await service.reviewDiff(attempt.id);
+    expect(result).toMatchObject({ ok: true, files: ['tracked.txt'] });
+    if (!result.ok) return;
+    expect(result.uncommitted.available).toBe(true);
+    expect([...result.uncommitted.files].sort()).toEqual([
+      'blob.bin',
+      'new file.txt',
+      'tracked.txt',
+    ]);
+    expect(result.uncommitted.diff).toContain('+two');
+    expect(result.uncommitted.diff).toContain(
+      'diff --git a/new file.txt b/new file.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new file.txt\n@@ -0,0 +1,1 @@\n+fresh\n\\ No newline at end of file\n'
+    );
+    expect(result.uncommitted.diff).toContain('Binary files /dev/null and b/blob.bin differ');
+    expect(result.commits).toMatchObject([{ subject: 'add tracked', author: expect.any(String) }]);
+    expect(result.commits[0]?.sha).toBe(git(worktree.path, 'rev-parse', 'HEAD'));
+    expect(git(worktree.path, 'status', '--porcelain')).toBe(status);
+    expect(await host.reviewDiff({ dispatchId: attempt.id })).not.toHaveProperty('uncommitted');
+  });
 
   it('worker 分支已丢失时不能悄悄显示主仓库 HEAD 的改动', async () => {
     const { dispatch: attempt, worktree } = await dispatch('Missing branch');

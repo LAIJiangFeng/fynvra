@@ -96,7 +96,17 @@ export function registerOrchestrationHandlers(): void {
       _event,
       raw: unknown
     ): Promise<
-      IpcResult<{ branch: string; baseCommit: string; files: string[]; stat: string; diff: string }>
+      IpcResult<{
+        branch: string;
+        baseCommit: string;
+        files: string[];
+        stat: string;
+        diff: string;
+        /** worker worktree 相对 HEAD 的工作区改动；worktree 已删除时 available 为 false */
+        uncommitted: { available: boolean; files: string[]; diff: string };
+        /** base..branch 的提交，新的在前 */
+        commits: { sha: string; subject: string; author: string; date: string }[];
+      }>
     > => {
       const dispatchId = parseDispatchId(raw);
       if (!dispatchId) return { ok: false, error: translate('orchestration.invalidDispatchId') };
