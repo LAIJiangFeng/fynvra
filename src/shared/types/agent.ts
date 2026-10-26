@@ -94,6 +94,8 @@ export interface SpawnSessionSpec {
   /** 已解析的 skill 目录或 SKILL.md 路径 */
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** Main reads the selected file on every spawn; worker never accesses its source path. */
+  instructionFile?: { name: string; content: string };
   /** 由编排派发的 worker 会话：加 ask_coordinator / report_done，背后是 Main 的 WorkerHost */
   worker: boolean;
   /** dispatch_task 的角色枚举（orchestrator 策略的会话用） */
@@ -547,6 +549,15 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
   const { cwd, sessionFile, worker, shellPath, inPlace } = record;
+  const instructionFile =
+    record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
+  if (
+    instructionFile !== undefined &&
+    (!instructionFile ||
+      !isNonEmptyString(instructionFile.name) ||
+      !isString(instructionFile.content))
+  )
+    return null;
   if (!role.ok || !model || !skills || !mcpServers || !roles) return null;
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
@@ -561,6 +572,14 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     mcpServers,
     worker,
     roles,
+    ...(instructionFile
+      ? {
+          instructionFile: {
+            name: instructionFile.name as string,
+            content: instructionFile.content as string,
+          },
+        }
+      : {}),
     ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
   };

@@ -81,11 +81,18 @@ describe('createPiSessionFactory', () => {
     // 工作区没有 git：inPlace 原样交给 createRoleSession（提示词按它追加）
     await open({
       identity: { sessionId: 'session-2', generation: 1 },
-      spec: { ...spec, inPlace: true },
+      spec: {
+        ...spec,
+        inPlace: true,
+        instructionFile: { name: 'CLAUDE.md', content: 'Selected text' },
+      },
       host: null,
       workerHost: null,
     });
-    expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({ inPlace: true });
+    expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({
+      inPlace: true,
+      resourcePaths: { instructionFile: { name: 'CLAUDE.md', content: 'Selected text' } },
+    });
   });
 });
 

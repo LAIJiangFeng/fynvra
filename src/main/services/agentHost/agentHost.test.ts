@@ -341,6 +341,7 @@ describe('createAgentHost sessions', () => {
       skills: ['/skills/pdf'],
       mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
       warnings: ['skill "gone" of role "tester" is no longer registered; skipped'],
+      instructionFile: { name: 'CLAUDE.md', content: 'Selected instruction content' },
     }));
     const env = setup({
       resolveResources,
@@ -352,6 +353,7 @@ describe('createAgentHost sessions', () => {
     expect(resolveResources).toHaveBeenCalledWith(tester);
     const spawn = env.sent('spawn-session')[0];
     expect(spawn?.type === 'spawn-session' && spawn.spec).toMatchObject({
+      instructionFile: { name: 'CLAUDE.md', content: 'Selected instruction content' },
       skills: ['/skills/pdf'],
       mcpServers: [{ name: 'github', command: 'npx', env: { GITHUB_TOKEN: 'ghp_secret' } }],
     });

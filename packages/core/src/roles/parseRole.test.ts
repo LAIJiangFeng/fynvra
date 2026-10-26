@@ -18,6 +18,24 @@ describe('parseRole', () => {
     expect(parseRole(valid)).toEqual({ ok: true, role: valid });
   });
 
+  it.each([undefined, null, 'my-instructions'])(
+    'preserves instruction selection %s (absent means follow global)',
+    (instructionFileId) => {
+      const input = { ...valid, ...(instructionFileId === undefined ? {} : { instructionFileId }) };
+      expect(parseRole(input)).toEqual({ ok: true, role: input });
+    }
+  );
+
+  it.each(['', '../AGENTS.md', '/tmp/file.md', 42, true, {}])(
+    'rejects invalid instruction selection %s',
+    (instructionFileId) => {
+      expect(parseRole({ ...valid, instructionFileId })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('instructionFileId'),
+      });
+    }
+  );
+
   it('思考档位可以是 pi 的 max', () => {
     const model = { providerId: 'anthropic', modelId: 'claude-fable-5-1', thinking: 'max' };
     expect(parseRole({ ...valid, model })).toEqual({ ok: true, role: { ...valid, model } });

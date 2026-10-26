@@ -1,11 +1,13 @@
 import type { Role } from '@fynvra/core';
 import type { AgentMcpServer } from '@shared/types/agent';
+import type { InstructionRegistry } from '../instructions/instructionRegistry';
 import type { McpRegistry, StoredMcpServer } from '../mcp/mcpRegistry';
 import type { SkillRegistry } from '../skills/skillRegistry';
 import type { RoleResources } from './agentHost';
 
 export interface RoleResourceSources {
   skills: Pick<SkillRegistry, 'list'>;
+  instructions?: Pick<InstructionRegistry, 'resolve'>;
   /** 含 env / headers 明文：解析结果只交给 worker（spawn-session 这一跳），不经 IPC */
   mcpServers: Pick<McpRegistry, 'list'>;
 }
@@ -23,9 +25,10 @@ export function createRoleResourceResolver(
   return async (role) => {
     const skillIds = [...new Set(role.skillIds)];
     const serverIds = [...new Set(role.mcpServerIds)];
-    const [skills, servers] = await Promise.all([
+    const [skills, servers, instructionFile] = await Promise.all([
       skillIds.length > 0 ? sources.skills.list() : [],
       serverIds.length > 0 ? sources.mcpServers.list() : [],
+      sources.instructions?.resolve(role.instructionFileId),
     ]);
     const warnings: string[] = [];
 
@@ -43,7 +46,12 @@ export function createRoleResourceResolver(
       }
       return server?.enabled ? [toAgentMcpServer(server)] : [];
     });
-    return { skills: skillPaths, mcpServers, warnings };
+    return {
+      skills: skillPaths,
+      mcpServers,
+      warnings,
+      ...(instructionFile ? { instructionFile } : {}),
+    };
   };
 }
 

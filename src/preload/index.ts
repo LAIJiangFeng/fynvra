@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createFilesApi } from './domains/files';
+import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
@@ -64,6 +65,7 @@ const api: FynvraApi = {
   providers: createProvidersApi(ipcRenderer, subscribe),
   roles: createRolesApi(ipcRenderer, subscribe),
   skills: createSkillsApi(ipcRenderer, subscribe),
+  instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
 };
