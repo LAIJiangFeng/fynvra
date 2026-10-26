@@ -51,6 +51,8 @@ const spec: SpawnSessionSpec = {
   ],
 };
 
+const screenshot = { data: 'iVBORw0KGgo=', mimeType: 'image/png' as const };
+
 const withSpec = (patch: Record<string, unknown>) => ({
   type: 'spawn-session',
   identity,
@@ -80,6 +82,14 @@ describe('parseAgentCommand', () => {
     },
     { type: 'spawn-session', identity, spec: { ...spec, inPlace: true } },
     { type: 'prompt', identity, text: 'Fix the build' },
+    { type: 'prompt', identity, text: 'What is wrong here?', images: [screenshot] },
+    // 只有图片：文本可以是空串
+    {
+      type: 'prompt',
+      identity,
+      text: '',
+      images: [screenshot, { ...screenshot, mimeType: 'image/webp' }],
+    },
     { type: 'steer', identity, text: 'Also update the docs' },
     { type: 'abort', identity },
     { type: 'dispose-session', identity },
@@ -155,6 +165,10 @@ describe('parseAgentCommand', () => {
     expect(
       parseAgentCommand({ type: 'set-approval-mode', identity, mode: 'full', role: 'orchestrator' })
     ).toEqual({ type: 'set-approval-mode', identity, mode: 'full' });
+    // steer 不带图片：多余的 images 与其他未知字段一样丢掉
+    expect(
+      parseAgentCommand({ type: 'steer', identity, text: 'look', images: [screenshot] })
+    ).toEqual({ type: 'steer', identity, text: 'look' });
   });
 
   it('keeps inPlace only when it is true (false is the default)', () => {
@@ -182,6 +196,28 @@ describe('parseAgentCommand', () => {
     ['a fractional generation', { type: 'abort', identity: { sessionId: 's', generation: 1.5 } }],
     ['a string generation', { type: 'abort', identity: { sessionId: 's', generation: '1' } }],
     ['an empty prompt', { type: 'prompt', identity, text: '' }],
+    [
+      'an empty prompt with an empty image list',
+      { type: 'prompt', identity, text: '', images: [] },
+    ],
+    ['a prompt with images but no text', { type: 'prompt', identity, images: [screenshot] }],
+    ['a prompt with a null image list', { type: 'prompt', identity, text: 'hi', images: null }],
+    [
+      'a prompt whose images are not a list',
+      { type: 'prompt', identity, text: 'hi', images: screenshot },
+    ],
+    [
+      'a prompt with an image in a format outside the whitelist',
+      { type: 'prompt', identity, text: 'hi', images: [{ ...screenshot, mimeType: 'image/bmp' }] },
+    ],
+    [
+      'a prompt with an image that is not base64',
+      { type: 'prompt', identity, text: 'hi', images: [{ ...screenshot, data: 'not base64!' }] },
+    ],
+    [
+      'a prompt with an image that has extra fields',
+      { type: 'prompt', identity, text: 'hi', images: [{ ...screenshot, name: 'a.png' }] },
+    ],
     ['a non-string steer', { type: 'steer', identity, text: 42 }],
     ['a role that fails parseRole', withSpec({ role: { id: 'worker', name: 'Worker' } })],
     ['an empty cwd', withSpec({ cwd: '' })],
