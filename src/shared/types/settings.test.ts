@@ -12,6 +12,7 @@ import {
   parseWorktreesRootInfoInput,
   SETTINGS_VERSION,
   sessionPreferencesOf,
+  sidebarOpenOf,
   timelinePreferencesOf,
 } from './settings';
 
@@ -387,6 +388,58 @@ describe('preferences.keybindings（快捷键覆盖表）', () => {
     ['有一条不合法', { 'new-session': 'ctrl+alt+n', send: 7 }],
   ])('parsePreferencesPatch 拒绝 %s', (_label, keybindings) => {
     expect(parsePreferencesPatch({ keybindings })).toBeNull();
+  });
+});
+
+describe('preferences.sidebarOpen（左栏开合）', () => {
+  it('parsePreferences 保留布尔值，没写过时不出现（按展开）', () => {
+    expect(parsePreferences({ sidebarOpen: false })).toEqual({
+      ...DEFAULT_PREFERENCES,
+      sidebarOpen: false,
+    });
+    expect(parsePreferences({ sidebarOpen: true })).toEqual({
+      ...DEFAULT_PREFERENCES,
+      sidebarOpen: true,
+    });
+    expect(parsePreferences({})).not.toHaveProperty('sidebarOpen');
+    expect(DEFAULT_PREFERENCES).not.toHaveProperty('sidebarOpen');
+    expect(parseSettings({ preferences: { sidebarOpen: false } }).preferences.sidebarOpen).toBe(
+      false
+    );
+  });
+
+  it('parsePreferences 丢弃非布尔值', () => {
+    for (const sidebarOpen of ['false', 0, 1, null, [], {}]) {
+      expect(parsePreferences({ sidebarOpen })).not.toHaveProperty('sidebarOpen');
+    }
+  });
+
+  it('生效值：缺省或非法值按展开，只有 false 是收起', () => {
+    expect(sidebarOpenOf(DEFAULT_PREFERENCES)).toBe(true);
+    expect(sidebarOpenOf(parsePreferences({}))).toBe(true);
+    expect(sidebarOpenOf(parsePreferences({ sidebarOpen: 'false' }))).toBe(true);
+    expect(sidebarOpenOf(parsePreferences({ sidebarOpen: null }))).toBe(true);
+    expect(sidebarOpenOf(parsePreferences({ sidebarOpen: true }))).toBe(true);
+    expect(sidebarOpenOf(parsePreferences({ sidebarOpen: false }))).toBe(false);
+  });
+
+  it('parsePreferencesPatch 接受布尔值', () => {
+    expect(parsePreferencesPatch({ sidebarOpen: false })).toEqual({ sidebarOpen: false });
+    expect(parsePreferencesPatch({ theme: 'dark', sidebarOpen: true })).toEqual({
+      theme: 'dark',
+      sidebarOpen: true,
+    });
+  });
+
+  it.each([
+    ['字符串', 'false'],
+    ['数字', 0],
+    ['null', null],
+    ['undefined', undefined],
+    ['对象', { open: false }],
+  ])('parsePreferencesPatch 拒绝%s', (_label, sidebarOpen) => {
+    expect(parsePreferencesPatch({ sidebarOpen })).toBeNull();
+    expect(parsePreferencesPatch({ theme: 'dark', sidebarOpen })).toBeNull();
   });
 });
 

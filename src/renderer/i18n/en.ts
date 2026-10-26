@@ -58,6 +58,8 @@ export const en: MessagesShape<typeof zhCN> = {
     name: 'Name',
   },
   app: {
+    showSidebar: 'Show sidebar',
+    hideSidebar: 'Hide sidebar',
     showSidePanel: 'Show side panel',
     hideSidePanel: 'Hide side panel',
     sidePanel: 'Files and orchestration',
@@ -715,6 +717,7 @@ export const en: MessagesShape<typeof zhCN> = {
       'new-session': 'New session',
       'open-settings': 'Open settings',
       'toggle-side-panel': 'Toggle side panel',
+      'toggle-sidebar': 'Toggle sidebar',
       'focus-composer': 'Focus composer',
       'prev-session': 'Previous session',
       'next-session': 'Next session',

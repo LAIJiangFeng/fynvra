@@ -24,13 +24,14 @@ function cycleSession(direction: 1 | -1): void {
 
 /**
  * 全局快捷键：在窗口上监听按键、按动作表派发，在 App 里挂一次。
- * 打开设置、切换右侧面板、上一个 / 下一个会话在这里处理；新建会话、聚焦输入框、搜索会话
+ * 打开设置、切换左栏与右侧面板、上一个 / 下一个会话在这里处理；新建会话、聚焦输入框、搜索会话
  * 由负责的组件经 useActionHandler 登记，它们不在界面上时这些键不拦截。
  */
 export function KeybindingProvider() {
   useKeybindings();
   useActionHandler('open-settings', () => useSettingsViewStore.getState().show());
   useActionHandler('toggle-side-panel', () => useSettingsStore.getState().toggleSidePanel());
+  useActionHandler('toggle-sidebar', () => useSettingsStore.getState().toggleSidebar());
   useActionHandler('prev-session', () => cycleSession(-1));
   useActionHandler('next-session', () => cycleSession(1));
   return null;

@@ -58,6 +58,8 @@ export const zhCN = {
     name: '名称',
   },
   app: {
+    showSidebar: '展开左侧栏',
+    hideSidebar: '收起左侧栏',
     showSidePanel: '展开右侧面板',
     hideSidePanel: '收起右侧面板',
     sidePanel: '文件与编排面板',
@@ -704,6 +706,7 @@ export const zhCN = {
       'new-session': '新建会话',
       'open-settings': '打开设置',
       'toggle-side-panel': '切换右侧面板',
+      'toggle-sidebar': '切换左侧栏',
       'focus-composer': '聚焦输入框',
       'prev-session': '上一个会话',
       'next-session': '下一个会话',

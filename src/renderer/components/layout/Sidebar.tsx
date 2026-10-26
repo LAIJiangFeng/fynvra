@@ -12,14 +12,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 /** 左栏：工作区列表；选中的工作区下面列出它的会话。 */
 export function Sidebar() {
-  useSessionsWorkspaceSync();
   const workspaces = useWorkspacesStore((state) => state.workspaces);
   const selectedId = useWorkspacesStore((state) => state.selectedId);
   const adding = useWorkspacesStore((state) => state.adding);
