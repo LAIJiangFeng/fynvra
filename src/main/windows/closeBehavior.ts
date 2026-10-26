@@ -1,6 +1,7 @@
 import { IPC_CHANNELS, type IpcResult, type WindowCloseAction } from '@shared/types/ipc';
 import { app, type BrowserWindow, Menu, nativeImage, Tray } from 'electron';
-import appIcon from '../../../resources/icon.png?asset';
+import winIcon from '../../../resources/icon.ico?asset';
+import pngIcon from '../../../resources/icon.png?asset';
 import { translate } from '../i18n';
 
 const responders = new WeakMap<BrowserWindow, (action: WindowCloseAction) => IpcResult>();
@@ -21,7 +22,12 @@ export function registerCloseBehavior(win: BrowserWindow, isQuitRequested: () =>
   };
   const hideToTray = () => {
     if (!tray) {
-      tray = new Tray(nativeImage.createFromPath(appIcon).resize({ width: 16, height: 16 }));
+      // Windows 交给系统从 ico 中按 DPI 选托盘尺寸；其他平台缩放 png。
+      tray = new Tray(
+        process.platform === 'win32'
+          ? nativeImage.createFromPath(winIcon)
+          : nativeImage.createFromPath(pngIcon).resize({ width: 16, height: 16 })
+      );
       tray.setToolTip('Fynvra');
       tray.on('click', show);
       tray.on('double-click', show);
