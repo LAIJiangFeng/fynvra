@@ -845,6 +845,46 @@ describe('cleanupWorktree', () => {
     expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toMatchObject({ ok: true });
   });
 
+  it('git 删不掉超长路径（Filename too long）：兜底删目录 + prune，分支照样删', async () => {
+    const removed: string[] = [];
+    host = makeHost({
+      git: new GitWorktreeManager({
+        exec: fake.exec,
+        removeDir: async (path) => {
+          removed.push(path);
+        },
+      }),
+    });
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    fake.respond(({ args }) =>
+      args[0] === 'worktree' && args[1] === 'remove'
+        ? { code: 255, stderr: `error: failed to delete '${WORKTREE_PATH}': Filename too long` }
+        : undefined
+    );
+    fake.respond(({ args }) =>
+      args[0] === 'worktree' && args[1] === 'list'
+        ? {
+            stdout:
+              removed.length === 0
+                ? `worktree /repo\n\nworktree ${WORKTREE_PATH}\n\n`
+                : 'worktree /repo\n\n',
+          }
+        : undefined
+    );
+    const start = fake.calls.length;
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+      removedWorktree: true,
+      deletedBranch: true,
+    });
+    expect(removed).toEqual([WORKTREE_PATH]);
+    expect(commandsSince(start)).toEqual(
+      expect.arrayContaining(['git worktree prune', 'git branch -d fynvra/add-toggle'])
+    );
+    expect(store.worktrees.list()).toHaveLength(0);
+  });
+
   it('分支删不掉时 deletedBranch: false，worktree 照常清理', async () => {
     const first = await reported();
     await host.mergeWorktree({ dispatchId: first.dispatch.id });
