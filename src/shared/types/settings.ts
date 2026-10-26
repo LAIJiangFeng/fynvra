@@ -22,6 +22,59 @@ export type ArchiveIdleDays = (typeof ARCHIVE_IDLE_DAYS)[number];
 export const DELETE_ARCHIVED_DAYS = [0, 30, 90] as const;
 export type DeleteArchivedDays = (typeof DELETE_ARCHIVED_DAYS)[number];
 
+export const SHELL_KINDS = [
+  'pwsh',
+  'powershell',
+  'cmd',
+  'git-bash',
+  'wsl',
+  'login',
+  'bash',
+  'zsh',
+  'sh',
+] as const;
+export type ShellKind = (typeof SHELL_KINDS)[number];
+export type ShellPreference = { kind: ShellKind } | { kind: 'custom'; path: string };
+export type ShellTarget = 'agentShell' | 'terminalShell';
+
+export interface AvailableShell {
+  id: ShellKind;
+  label: string;
+  path: string;
+  agentSupported: boolean;
+}
+
+export interface AvailableShells {
+  shells: AvailableShell[];
+  defaultAgentPath?: string;
+  defaultTerminalPath: string;
+  agentPath?: string;
+  terminalPath: string;
+}
+export type AvailableShellsResult = IpcResult<AvailableShells>;
+export type PickShellResult = PreferencesResult | { ok: false; code: 'canceled'; error: string };
+
+/** Shell ids stay portable; custom paths must be absolute, without control characters. */
+export function parseShellPreference(raw: unknown, agent = false): ShellPreference | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const { kind } = record;
+  if (kind === 'custom') {
+    const path = typeof record.path === 'string' ? record.path.trim() : '';
+    if (
+      /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(path) &&
+      !Array.from(path).some((character) => character.charCodeAt(0) < 32)
+    ) {
+      return { kind, path };
+    }
+    return undefined;
+  }
+  if (typeof kind !== 'string' || !(SHELL_KINDS as readonly string[]).includes(kind))
+    return undefined;
+  if (agent && ['cmd', 'wsl', 'login'].includes(kind)) return undefined;
+  return { kind: kind as ShellKind };
+}
+
 /** Renderer 可读写的界面偏好，经 `settings:update` 合并落盘。 */
 export interface Preferences {
   theme: ThemeMode;
@@ -50,6 +103,10 @@ export interface Preferences {
    * 只能手改 settings.json：`settings:update` 不接受这个字段（Renderer 不传路径）。
    */
   shellPath?: string;
+  /** 本机 agent 命令壳；下次启动会话生效，旧 shellPath 始终优先。 */
+  agentShell?: ShellPreference;
+  /** 新终端使用的 shell；缺省沿用系统默认。 */
+  terminalShell?: ShellPreference;
   /**
    * worktree 根目录（绝对路径）：新建的 worktree 放在 `<worktreesRoot>/<仓库目录名>/<workspaceId>/<slug>`。
    * 未设置时放在仓库同级的 `<仓库目录名>-worktrees` 下。只经 `settings:pick-worktrees-root` 修改
@@ -258,6 +315,8 @@ export function parsePreferences(raw: unknown): Preferences {
   const sidePanelOpen = record?.sidePanelOpen;
   const sidebarOpen = record?.sidebarOpen;
   const shellPath = typeof record?.shellPath === 'string' ? record.shellPath.trim() : '';
+  const agentShell = parseShellPreference(record?.agentShell, true);
+  const terminalShell = parseShellPreference(record?.terminalShell);
   const worktreesRoot =
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
   const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
@@ -274,6 +333,8 @@ export function parsePreferences(raw: unknown): Preferences {
     ...parseSessionPreferences(record),
     ...parseTimelinePreferences(record),
     ...(shellPath ? { shellPath } : {}),
+    ...(agentShell ? { agentShell } : {}),
+    ...(terminalShell ? { terminalShell } : {}),
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
     ...(notifications ? { notifications } : {}),
@@ -316,6 +377,14 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
   for (const key of Object.keys(record)) {
     const value = record[key];
     switch (key) {
+      case 'agentShell':
+      case 'terminalShell': {
+        // An explicit undefined resets the preference; JSON persistence omits it.
+        const shell = parseShellPreference(value, key === 'agentShell');
+        if (value !== undefined && !shell) return null;
+        patch[key] = shell;
+        break;
+      }
       // --- sessions ---
       case 'archiveIdleDays':
         if (!isArchiveIdleDays(value)) return null;

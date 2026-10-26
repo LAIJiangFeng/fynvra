@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+  SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
+  SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */
   SETTINGS_CHANGED: 'settings:changed',
   /** 无参时 Main 弹目录选择框、校验后写入 worktreesRoot；`{ reset: true }` 恢复默认。Renderer 不传路径 */

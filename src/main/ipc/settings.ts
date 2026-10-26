@@ -2,6 +2,8 @@ import { dirname, join } from 'node:path';
 import { errorMessage } from '@shared/guards';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import {
+  type AvailableShellsResult,
+  type PickShellResult,
   type PickWorktreesRootResult,
   type PreferencesResult,
   parsePickWorktreesRootInput,
@@ -18,6 +20,7 @@ import {
   validateWorktreesRoot,
 } from '../services/orchestration/worktreesRoot';
 import { createSettingsFile, type SettingsFile } from '../services/settingsFile';
+import { describeShells, shellDetectionDeps, validShellPreference } from '../services/shells';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getOrchestrationRegistry } from './orchestration';
 
@@ -60,9 +63,62 @@ export function registerSettingsHandlers(): void {
     }
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS,
+    async (): Promise<AvailableShellsResult> => {
+      try {
+        return { ok: true, ...(await describeShells(getSettingsFile().read().preferences)) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SETTINGS_PICK_SHELL,
+    async (event, target: unknown): Promise<PickShellResult> => {
+      if (target !== 'agentShell' && target !== 'terminalShell') {
+        return { ok: false, error: translate('common.invalidArgs') };
+      }
+      try {
+        const options: OpenDialogOptions = { properties: ['openFile'] };
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const result = win
+          ? await dialog.showOpenDialog(win, options)
+          : await dialog.showOpenDialog(options);
+        const path = result.filePaths[0];
+        if (result.canceled || !path)
+          return { ok: false, code: 'canceled', error: translate('common.canceled') };
+        const preference = { kind: 'custom' as const, path };
+        const deps = shellDetectionDeps();
+        if (
+          !validShellPreference(preference, target === 'agentShell', deps) ||
+          !deps.existsSync(path)
+        ) {
+          return { ok: false, error: translate('settings.invalidPatch') };
+        }
+        const { settings, changed } = getSettingsFile().update((current) => ({
+          ...current,
+          preferences: { ...current.preferences, [target]: preference },
+        }));
+        if (changed) sendToAllWindows(IPC_CHANNELS.SETTINGS_CHANGED);
+        return { ok: true, preferences: settings.preferences };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE, (_event, raw: unknown): PreferencesResult => {
     const patch = parsePreferencesPatch(raw);
-    if (!patch) return { ok: false, error: translate('settings.invalidPatch') };
+    const deps = shellDetectionDeps();
+    if (
+      !patch ||
+      !validShellPreference(patch.agentShell, true, deps) ||
+      !validShellPreference(patch.terminalShell, false, deps)
+    ) {
+      return { ok: false, error: translate('settings.invalidPatch') };
+    }
     try {
       const { settings, changed } = getSettingsFile().update((current) => ({
         ...current,

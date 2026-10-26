@@ -73,6 +73,17 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_REMOVE, 'ws-1');
   });
 
+  it('shell settings use a no-input list and target-only file picker', async () => {
+    await api.settings.availableShells();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS);
+    await api.settings.pickShell('agentShell');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_PICK_SHELL, 'agentShell');
+    await api.settings.update({ terminalShell: undefined });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_UPDATE, {
+      terminalShell: undefined,
+    });
+  });
+
   it('exposes instruction operations with IDs and user values, and strips push events', async () => {
     await api.instructions.list();
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_LIST);

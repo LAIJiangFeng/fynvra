@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { TerminalEvent } from '@shared/types/terminal';
@@ -6,6 +5,8 @@ import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain, type WebContents } from 'electron';
 import type { IPty } from 'node-pty';
 import { translate } from '../i18n';
+import { availableShells, resolveTerminalShell, shellDetectionDeps } from '../services/shells';
+import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
 const terminals = new Map<string, { owner: WebContents; pty: IPty }>();
@@ -83,19 +84,13 @@ export function registerTerminalHandlers(): void {
       const workspace = getWorkspaceService().get(workspaceId);
       if (!workspace) return { ok: false, error: translate('common.workspaceNotFound') };
       const { spawn } = await import('node-pty');
+      const preference = getSettingsFile().read().preferences.terminalShell;
+      const deps = shellDetectionDeps();
+      const shells = preference ? await availableShells(deps) : [];
+      const shell = resolveTerminalShell(preference, shells, deps);
       if (owner.isDestroyed() || state.generation !== generation)
         return { ok: false, error: translate('common.windowClosed') };
-      const windows = process.platform === 'win32';
-      const shell = windows
-        ? join(
-            process.env.SystemRoot || 'C:\\Windows',
-            'System32',
-            'WindowsPowerShell',
-            'v1.0',
-            'powershell.exe'
-          )
-        : process.env.SHELL || '/bin/sh';
-      const pty = spawn(shell, windows ? ['-NoLogo', '-NoProfile'] : ['-l'], {
+      const pty = spawn(shell.path, shell.args, {
         name: 'xterm-256color',
         cwd: workspace.repoPath,
         cols: input.cols as number,

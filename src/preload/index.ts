@@ -28,6 +28,8 @@ const api: FynvraApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     update: (patch) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),
+    availableShells: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS),
+    pickShell: (target) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, target),
     pickWorktreesRoot: (input) =>
       input
         ? ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT, input)
