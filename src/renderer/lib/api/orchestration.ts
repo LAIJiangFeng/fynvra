@@ -13,10 +13,18 @@ export interface OrchestrationApi {
     dispatchId: string;
     cursor: number;
   }): Promise<IpcResult<{ text: string; total: number; done: boolean }>>;
-  reviewDiff(
-    dispatchId: string
-  ): Promise<
-    IpcResult<{ branch: string; baseCommit: string; files: string[]; stat: string; diff: string }>
+  reviewDiff(dispatchId: string): Promise<
+    IpcResult<{
+      branch: string;
+      baseCommit: string;
+      files: string[];
+      stat: string;
+      diff: string;
+      /** worker worktree 相对 HEAD 的工作区改动；worktree 已删除时 available 为 false */
+      uncommitted: { available: boolean; files: string[]; diff: string };
+      /** base..branch 的提交，新的在前 */
+      commits: { sha: string; subject: string; author: string; date: string }[];
+    }>
   >;
   onChanged(cb: (workspaceId: string) => void): Unsubscribe;
 }
@@ -202,6 +210,10 @@ export function createMockOrchestrationApi(
           branch: 'fynvra/sidebar-search',
           baseCommit: BASE_COMMIT,
           ...(committed ? searchDiff() : { files: [], stat: '', diff: '' }),
+          uncommitted: committed
+            ? { available: true, files: [], diff: '' }
+            : { available: true, files: searchDiff().files, diff: searchDiff().diff },
+          commits: committed ? searchCommits(start) : [],
         });
       }
       if (dispatchId === DISPATCH_TESTS_1 || dispatchId === DISPATCH_TESTS_2) {
@@ -210,6 +222,12 @@ export function createMockOrchestrationApi(
           branch: 'fynvra/filter-tests',
           baseCommit: BASE_COMMIT,
           ...testsDiff(),
+          uncommitted: {
+            available: true,
+            files: testsUncommitted().files,
+            diff: testsUncommitted().diff,
+          },
+          commits: testsCommits(start),
         });
       }
       return respond({ ok: false, error: `unknown dispatch ${dispatchId}` });
@@ -771,6 +789,72 @@ function testsDiff(): FakeDiff {
 function searchDiff(): FakeDiff {
   searchDiffCache ??= buildSearchDiff();
   return searchDiffCache;
+}
+
+let testsUncommittedCache: FakeDiff | null = null;
+
+function testsUncommitted(): FakeDiff {
+  testsUncommittedCache ??= fakeDiff([
+    {
+      path: 'src/renderer/lib/filterWorkspaces.ts',
+      kind: 'modified',
+      hunks: [
+        {
+          oldStart: 3,
+          newStart: 3,
+          lines: [
+            ' /** 去掉首尾空白（含全角空格）并转小写；与 locale 无关。 */',
+            ' export function normalizeQuery(query: string): string {',
+            "-  return query.replace(/\u3000/g, ' ').trim().toLowerCase();",
+            "+  return query.replace(/[\u3000s]+/g, ' ').trim().toLowerCase();",
+            ' }',
+          ],
+        },
+      ],
+    },
+    {
+      path: 'src/renderer/lib/__fixtures__/README.md',
+      kind: 'added',
+      hunks: [
+        {
+          oldStart: 0,
+          newStart: 1,
+          lines: ['+# Fixtures', '+', '+`workspaces.json`：600 条工作区，用于过滤性能与排序用例。'],
+        },
+      ],
+    },
+  ]);
+  return testsUncommittedCache;
+}
+
+const MOCK_AUTHOR = 'Fynvra Worker';
+
+function testsCommits(start: number) {
+  return [
+    {
+      sha: 'b81f04c2d9e3a7f56c1e0d4b8a2f9e7c3d5b6a10',
+      subject: 'test(renderer): cover filterWorkspaces edge cases',
+      author: MOCK_AUTHOR,
+      date: new Date(start - 4 * MINUTE).toISOString(),
+    },
+    {
+      sha: '3c9e7a15f02b84d6e1a9c7f3b5d2e8a0c4f6b912',
+      subject: 'refactor(renderer): extract normalizeQuery',
+      author: MOCK_AUTHOR,
+      date: new Date(start - 9 * MINUTE).toISOString(),
+    },
+  ];
+}
+
+function searchCommits(start: number) {
+  return [
+    {
+      sha: '7d2e9a1c5b0f83e4d6a2c9b7f1e5d3a8c0b4f627',
+      subject: 'feat(renderer): add workspace search to sidebar',
+      author: MOCK_AUTHOR,
+      date: new Date(start + MOCK_TIMELINE.commit).toISOString(),
+    },
+  ];
 }
 
 const buildTestsDiff = () =>

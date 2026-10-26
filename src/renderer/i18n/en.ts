@@ -432,6 +432,13 @@ export const en: MessagesShape<typeof zhCN> = {
     noCommits: 'No committed changes yet',
     noTextDiff: '(no text diff)',
     changedFiles: 'Changed files',
+    uncommittedChanges: 'Uncommitted changes',
+    committedChanges: 'Committed changes',
+    commitsSection: 'Commits',
+    noUncommitted: 'No uncommitted changes',
+    noCommitList: 'No commits yet',
+    worktreeRemoved: 'Worktree removed; uncommitted changes are unavailable',
+    folderFiles: '{count} files',
     fileStatus: {
       added: 'Added',
       deleted: 'Deleted',

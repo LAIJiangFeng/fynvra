@@ -422,6 +422,13 @@ export const zhCN = {
     noCommits: '还没有提交的改动',
     noTextDiff: '（没有文本 diff）',
     changedFiles: '改动文件',
+    uncommittedChanges: '未提交的更改',
+    committedChanges: '已提交的更改',
+    commitsSection: '提交',
+    noUncommitted: '没有未提交的更改',
+    noCommitList: '还没有提交',
+    worktreeRemoved: 'worktree 已移除，无法查看未提交的更改',
+    folderFiles: '{count} 个文件',
     fileStatus: {
       added: '新增',
       deleted: '删除',
