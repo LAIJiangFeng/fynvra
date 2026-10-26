@@ -34,7 +34,8 @@ interface TerminalsState {
 export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   tabs: [],
   selected: {},
-  select: (workspaceId, id) => set((state) => ({ selected: { ...state.selected, [workspaceId]: id } })),
+  select: (workspaceId, id) =>
+    set((state) => ({ selected: { ...state.selected, [workspaceId]: id } })),
   async create(workspaceId) {
     const api = window.fynvra.terminals;
     const id = crypto.randomUUID();
@@ -62,13 +63,17 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     terminal.onData((data) => {
       if (!resource.ready) return;
       for (let offset = 0; offset < data.length; offset += 65_536) {
-        void api.write(id, data.slice(offset, offset + 65_536)).then((result) => {
-          if (!result.ok) report(result.error);
-        }).catch(report);
+        void api
+          .write(id, data.slice(offset, offset + 65_536))
+          .then((result) => {
+            if (!result.ok) report(result.error);
+          })
+          .catch(report);
       }
     });
     terminal.onResize(({ cols, rows }) => {
-      if (resource.ready) void api.resize(id, Math.min(cols, 500), Math.min(rows, 300)).catch(report);
+      if (resource.ready)
+        void api.resize(id, Math.min(cols, 500), Math.min(rows, 300)).catch(report);
     });
     try {
       if (!listening) {
@@ -79,8 +84,12 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
           else {
             current.ready = false;
             current.terminal.options.disableStdin = true;
-            current.terminal.writeln(`\r\n${translate('terminals.exited', { code: event.exitCode })}`);
-            set((state) => ({ tabs: state.tabs.map((tab) => tab.id === event.id ? { ...tab, exited: true } : tab) }));
+            current.terminal.writeln(
+              `\r\n${translate('terminals.exited', { code: event.exitCode })}`
+            );
+            set((state) => ({
+              tabs: state.tabs.map((tab) => (tab.id === event.id ? { ...tab, exited: true } : tab)),
+            }));
           }
         });
         listening = true;
@@ -97,7 +106,9 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       await api.resize(id, Math.min(terminal.cols, 500), Math.min(terminal.rows, 300));
     } catch (error) {
       report(error);
-      set((state) => ({ tabs: state.tabs.map((tab) => tab.id === id ? { ...tab, exited: true } : tab) }));
+      set((state) => ({
+        tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, exited: true } : tab)),
+      }));
     }
   },
   async close(id) {
@@ -114,9 +125,10 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     terminalResources.delete(id);
     set((state) => ({
       tabs: state.tabs.filter((item) => item.id !== id),
-      selected: state.selected[tab.workspaceId] === id
-        ? { ...state.selected, [tab.workspaceId]: null }
-        : state.selected,
+      selected:
+        state.selected[tab.workspaceId] === id
+          ? { ...state.selected, [tab.workspaceId]: null }
+          : state.selected,
     }));
   },
 }));

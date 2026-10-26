@@ -17,9 +17,16 @@ function validId(value: unknown): value is string {
 }
 
 function validSize(cols: unknown, rows: unknown): boolean {
-  return Number.isInteger(cols) && Number.isInteger(rows) &&
-    typeof cols === 'number' && cols >= 2 && cols <= 500 &&
-    typeof rows === 'number' && rows >= 1 && rows <= 300;
+  return (
+    Number.isInteger(cols) &&
+    Number.isInteger(rows) &&
+    typeof cols === 'number' &&
+    cols >= 2 &&
+    cols <= 500 &&
+    typeof rows === 'number' &&
+    rows >= 1 &&
+    rows <= 300
+  );
 }
 
 function close(id: string): IpcResult {
@@ -80,7 +87,13 @@ export function registerTerminalHandlers(): void {
         return { ok: false, error: translate('common.windowClosed') };
       const windows = process.platform === 'win32';
       const shell = windows
-        ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+        ? join(
+            process.env.SystemRoot || 'C:\\Windows',
+            'System32',
+            'WindowsPowerShell',
+            'v1.0',
+            'powershell.exe'
+          )
         : process.env.SHELL || '/bin/sh';
       const pty = spawn(shell, windows ? ['-NoLogo', '-NoProfile'] : ['-l'], {
         name: 'xterm-256color',
@@ -104,13 +117,19 @@ export function registerTerminalHandlers(): void {
     }
   });
 
-  for (const channel of [IPC_CHANNELS.TERMINALS_WRITE, IPC_CHANNELS.TERMINALS_RESIZE, IPC_CHANNELS.TERMINALS_CLOSE]) {
+  for (const channel of [
+    IPC_CHANNELS.TERMINALS_WRITE,
+    IPC_CHANNELS.TERMINALS_RESIZE,
+    IPC_CHANNELS.TERMINALS_CLOSE,
+  ]) {
     ipcMain.handle(channel, (event, raw: unknown): IpcResult => {
       const input = asRecord(raw);
-      if (!input || !validId(input.id)) return { ok: false, error: translate('common.invalidArgs') };
+      if (!input || !validId(input.id))
+        return { ok: false, error: translate('common.invalidArgs') };
       const terminal = terminals.get(input.id);
       if (!terminal) return { ok: true }; // Already exited or closed.
-      if (terminal.owner !== event.sender) return { ok: false, error: translate('common.invalidArgs') };
+      if (terminal.owner !== event.sender)
+        return { ok: false, error: translate('common.invalidArgs') };
       try {
         if (channel === IPC_CHANNELS.TERMINALS_CLOSE) return close(input.id);
         if (channel === IPC_CHANNELS.TERMINALS_WRITE) {
@@ -118,7 +137,8 @@ export function registerTerminalHandlers(): void {
             return { ok: false, error: translate('common.invalidArgs') };
           terminal.pty.write(input.data);
         } else {
-          if (!validSize(input.cols, input.rows)) return { ok: false, error: translate('common.invalidArgs') };
+          if (!validSize(input.cols, input.rows))
+            return { ok: false, error: translate('common.invalidArgs') };
           terminal.pty.resize(input.cols as number, input.rows as number);
         }
         return { ok: true };
