@@ -19,7 +19,12 @@ import {
   type SessionIdentity,
   type SpawnSessionSpec,
 } from '@shared/types/agent';
-import type { ApprovalDecision, ModelThinkingCapability, SessionStatus } from '@shared/types/chat';
+import type {
+  ApprovalDecision,
+  ChatImage,
+  ModelThinkingCapability,
+  SessionStatus,
+} from '@shared/types/chat';
 import { ApprovalBroker } from './approvals';
 import {
   createHostInvoker,
@@ -36,8 +41,8 @@ export interface SupervisedSession {
   readonly warnings: readonly string[];
   /** 订阅归一化事件（seq 从 1 递增）；emit 把宿主事件注入同一条 seq 序列 */
   subscribe(listener: (event: FynvraSessionEvent) => void): SessionEvents;
-  /** 空闲时开始新一轮；运行中排到当前回合之后 */
-  prompt(text: string): Promise<void>;
+  /** 空闲时开始新一轮；运行中排到当前回合之后。images 是用户粘贴的图片，交给 pi 规整后随消息发出 */
+  prompt(text: string, images?: ChatImage[]): Promise<void>;
   steer(text: string): Promise<void>;
   /** 换模型 / 思考档位：下一次请求起生效，会话历史保留；失败抛错 */
   setModel(spec: ResolvedModelSpec): Promise<void>;
@@ -123,7 +128,7 @@ export class SessionSupervisor {
         this.#spawn(command.identity, command.spec);
         return;
       case 'prompt':
-        void this.#run(command.identity, command.text, 'prompt');
+        void this.#run(command.identity, command.text, 'prompt', command.images);
         return;
       case 'steer':
         void this.#run(command.identity, command.text, 'steer');
@@ -305,7 +310,12 @@ export class SessionSupervisor {
     }
   }
 
-  async #run(identity: SessionIdentity, text: string, mode: 'prompt' | 'steer'): Promise<void> {
+  async #run(
+    identity: SessionIdentity,
+    text: string,
+    mode: 'prompt' | 'steer',
+    images?: ChatImage[]
+  ): Promise<void> {
     const managed = this.#current(identity);
     if (!managed) {
       this.#reportMissing(identity, mode);
@@ -320,7 +330,7 @@ export class SessionSupervisor {
       this.#setStatus(managed, 'running');
     }
     try {
-      await (steering ? session.steer(text) : session.prompt(text));
+      await (steering ? session.steer(text) : session.prompt(text, images));
     } catch (error) {
       if (managed.closed) return;
       managed.failed = true;

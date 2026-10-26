@@ -11,7 +11,12 @@ import type {
   SessionIdentity,
   SpawnSessionSpec,
 } from '@shared/types/agent';
-import type { ApprovalDecision, ApprovalKind, ModelThinkingCapability } from '@shared/types/chat';
+import type {
+  ApprovalDecision,
+  ApprovalKind,
+  ChatImage,
+  ModelThinkingCapability,
+} from '@shared/types/chat';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   type OpenSession,
@@ -27,6 +32,8 @@ import {
 class FakeSession implements SupervisedSession {
   warnings: string[] = [];
   prompts: string[] = [];
+  /** 每次 prompt 带的图片，与 prompts 一一对应（没带时为 undefined） */
+  promptImages: (ChatImage[] | undefined)[] = [];
   steers: string[] = [];
   aborts = 0;
   disposals = 0;
@@ -63,8 +70,9 @@ class FakeSession implements SupervisedSession {
     }
   }
 
-  async prompt(text: string): Promise<void> {
+  async prompt(text: string, images?: ChatImage[]): Promise<void> {
     this.prompts.push(text);
+    this.promptImages.push(images);
     await this.promptImpl(text);
     if (!this.idle) return;
     this.idle = false;
@@ -287,6 +295,26 @@ describe('SessionSupervisor spawn and prompt', () => {
       fatal: true,
       error: expect.stringMatching(/not running/),
     });
+  });
+
+  it('hands the images of a prompt to the session, also when it queues behind a running turn', async () => {
+    const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+    const photo: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
+    const { supervisor, sessions } = setup();
+    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    supervisor.handle({ type: 'prompt', identity: id1, text: '', images: [screenshot] });
+    await settle();
+    const session = sessions[0] as FakeSession;
+    expect(session.prompts).toEqual(['']);
+    expect(session.promptImages).toEqual([[screenshot]]);
+
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'and this one', images: [photo] });
+    supervisor.handle({ type: 'prompt', identity: id1, text: 'text only' });
+    supervisor.handle({ type: 'steer', identity: id1, text: 'steer has no images' });
+    await settle();
+    expect(session.prompts).toEqual(['', 'and this one', 'text only']);
+    expect(session.promptImages).toEqual([[screenshot], [photo], undefined]);
+    expect(session.steers).toEqual(['steer has no images']);
   });
 
   it('runs steer as steer while busy and as a prompt while idle', async () => {
