@@ -39,6 +39,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import type { MessageId, T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
+import { useInstructionsStore } from '@/stores/instructions';
 import { useMcpStore } from '@/stores/mcp';
 import { useProvidersStore } from '@/stores/providers';
 import { useRolesStore } from '@/stores/roles';
@@ -276,6 +277,8 @@ export function RoleEditor({
           </Select>
         </Field>
       </div>
+
+      <InstructionField role={draft} disabled={saving} onChange={update} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <SkillToggles
@@ -592,6 +595,76 @@ function unknownThinkingHint(
     <span title={t('settings.roles.levelsUnavailableHint')}>
       {t('settings.roles.levelsUnavailable')}
     </span>
+  );
+}
+
+function InstructionField({
+  role,
+  disabled,
+  onChange,
+}: {
+  role: Role;
+  disabled: boolean;
+  onChange(role: Role): void;
+}) {
+  const t = useT();
+  const id = useId();
+  const entries = useInstructionsStore((state) => state.entries);
+  const refresh = useInstructionsStore((state) => state.refresh);
+  const error = useInstructionsStore((state) => state.error);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  // Sentinel values contain ':' so they cannot collide with registry IDs.
+  const current =
+    role.instructionFileId === undefined
+      ? ':global'
+      : role.instructionFileId === null
+        ? ':none'
+        : role.instructionFileId;
+  const items = [
+    { value: ':global', label: t('settings.instructions.followGlobal') },
+    { value: ':none', label: t('settings.instructions.noInstructions') },
+    ...entries.map((entry) => ({ value: entry.id, label: entry.name })),
+  ];
+  if (role.instructionFileId && !entries.some((entry) => entry.id === role.instructionFileId)) {
+    items.push({
+      value: role.instructionFileId,
+      label: `${role.instructionFileId} (${t('settings.roles.removedEntry')})`,
+    });
+  }
+  return (
+    <Field
+      label={t('settings.instructions.title')}
+      htmlFor={id}
+      hint={error ?? t('settings.instructions.roleHint')}
+    >
+      <Select
+        items={items}
+        value={current}
+        disabled={disabled}
+        onValueChange={(value) => {
+          if (typeof value !== 'string') return;
+          const { instructionFileId: _old, ...rest } = role;
+          onChange(
+            value === ':global'
+              ? rest
+              : { ...rest, instructionFileId: value === ':none' ? null : value }
+          );
+        }}
+      >
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
   );
 }
 

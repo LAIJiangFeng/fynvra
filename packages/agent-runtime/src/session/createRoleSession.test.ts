@@ -344,6 +344,40 @@ describe('createRoleSession end to end with a scripted model', () => {
 });
 
 describe('createRoleSession resources', () => {
+  it('appends resolved instructions once to the actual model prompt, preserving project AGENTS loading', async () => {
+    const cwd = path.join(tmp, 'instruction-project');
+    await mkdir(cwd);
+    await writeFile(path.join(cwd, 'AGENTS.md'), 'PROJECT_INSTRUCTIONS_MARKER');
+    const { session } = await open({
+      cwd,
+      role: role({ systemPrompt: 'ROLE_INSTRUCTIONS_MARKER' }),
+      resourcePaths: {
+        skills: [],
+        mcpServers: [],
+        instructionFile: {
+          name: 'CLAUDE "custom".md',
+          content: 'GLOBAL_INSTRUCTIONS_MARKER\nKeep source content.',
+        },
+      },
+    });
+    const prompts: string[] = [];
+    const response = (context: TranscriptContext) => {
+      prompts.push(systemText(context));
+      return fauxAssistantMessage('ok');
+    };
+    faux.setResponses([response, response]);
+    await session.prompt('first');
+    await session.prompt('second');
+    for (const prompt of prompts) {
+      expect(prompt).toContain('PROJECT_INSTRUCTIONS_MARKER');
+      expect(prompt).toContain('ROLE_INSTRUCTIONS_MARKER');
+      expect(prompt).toContain(
+        '<user_instructions source="CLAUDE &quot;custom&quot;.md">\nGLOBAL_INSTRUCTIONS_MARKER\nKeep source content.\n</user_instructions>'
+      );
+      expect(count(prompt, 'GLOBAL_INSTRUCTIONS_MARKER')).toBe(1);
+    }
+  });
+
   it('loads only the role skills and reports missing skill paths', async () => {
     const skillDir = path.join(tmp, 'skills', 'release-notes');
     await mkdir(skillDir, { recursive: true });

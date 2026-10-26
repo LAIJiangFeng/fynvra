@@ -62,6 +62,31 @@ function setup() {
 }
 
 describe('createRoleResourceResolver', () => {
+  it('resolves each role instruction choice on every spawn without caching the text', async () => {
+    const choices: (string | null | undefined)[] = [];
+    let content = 'first';
+    const resolve = createRoleResourceResolver({
+      skills: { list: async () => [] },
+      mcpServers: { list: async () => [] },
+      instructions: {
+        resolve: async (choice) => {
+          choices.push(choice);
+          return choice === null ? undefined : { name: choice ?? 'global', content };
+        },
+      },
+    });
+    const role = roleWith({ skillIds: [], mcpServerIds: [] });
+    expect((await resolve(role)).instructionFile).toEqual({ name: 'global', content: 'first' });
+    content = 'updated';
+    expect((await resolve(role)).instructionFile).toEqual({ name: 'global', content: 'updated' });
+    expect((await resolve({ ...role, instructionFileId: null })).instructionFile).toBeUndefined();
+    expect((await resolve({ ...role, instructionFileId: 'specific' })).instructionFile).toEqual({
+      name: 'specific',
+      content: 'updated',
+    });
+    expect(choices).toEqual([undefined, undefined, null, 'specific']);
+  });
+
   it('takes the paths of the enabled skills the role references, in role order', async () => {
     const { resolve } = setup();
     expect(

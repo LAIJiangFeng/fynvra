@@ -1,6 +1,8 @@
 import {
+  BarChart3,
   Bell,
   Boxes,
+  FileText,
   Keyboard,
   type LucideIcon,
   Palette,
@@ -18,6 +20,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { NotificationSettings } from './NotificationSettings';
@@ -25,6 +28,7 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
+import { UsageSettings } from './UsageSettings';
 
 /** 页头只有页名（字典 settings.sections.<value>），不加副标题 */
 interface SectionSpec {
@@ -40,10 +44,12 @@ const SECTIONS: SectionSpec[] = [
   { value: 'notifications', icon: Bell, Component: NotificationSettings },
   { value: 'providers', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
+  { value: 'instructions', icon: FileText, Component: InstructionsSettings },
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
+  { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },
 ];
 
 /**

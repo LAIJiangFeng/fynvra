@@ -158,6 +158,19 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
 
+  // --- instructions ---
+  INSTRUCTIONS_LIST: 'instructions:list',
+  INSTRUCTIONS_READ: 'instructions:read',
+  INSTRUCTIONS_SCAN: 'instructions:scan',
+  /** Only fixed scan candidate IDs; no renderer-supplied paths. */
+  INSTRUCTIONS_IMPORT: 'instructions:import',
+  /** Main opens a Markdown file picker. */
+  INSTRUCTIONS_PICK: 'instructions:pick',
+  INSTRUCTIONS_SAVE: 'instructions:save',
+  INSTRUCTIONS_REMOVE: 'instructions:remove',
+  INSTRUCTIONS_TOGGLE: 'instructions:toggle',
+  INSTRUCTIONS_CHANGED: 'instructions:changed',
+
   // --- notifications ---
   /** 立即弹一条测试通知（不看聚焦与启动静默期），无参 */
   NOTIFICATIONS_TEST: 'notifications:test',
@@ -165,6 +178,10 @@ export const IPC_CHANNELS = {
   NOTIFICATIONS_SET_VIEWING: 'notifications:set-viewing',
   /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
   SESSIONS_FOCUS: 'sessions:focus',
+
+  // --- usage ---
+  /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
+  USAGE_SUMMARY: 'usage:summary',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
