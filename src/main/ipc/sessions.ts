@@ -2,11 +2,13 @@ import { join } from 'node:path';
 import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { isApprovalDecision } from '@shared/types/agent';
-import type {
-  ChatMessage,
-  ModelOptions,
-  SessionModelRef,
-  SessionSummary,
+import {
+  type ChatImage,
+  type ChatMessage,
+  type ModelOptions,
+  parseChatImages,
+  type SessionModelRef,
+  type SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { sessionPreferencesOf } from '@shared/types/settings';
@@ -182,7 +184,7 @@ export function registerSessionHandlers(
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
     return input
-      ? guard(() => host().prompt(input.sessionId, input.text))
+      ? guard(() => host().prompt(input.sessionId, input.text, input.images))
       : invalid(translate('sessions.invalidPrompt'));
   });
 
@@ -309,13 +311,20 @@ function parseModelRef(raw: unknown): SessionModelRef | null {
   return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
 }
 
-/** `{ sessionId, text }`：文本不能全是空白，长度有上限，原样保留（不 trim） */
-export function parsePromptInput(raw: unknown): { sessionId: string; text: string } | null {
-  const record = strictRecord(raw, ['sessionId', 'text']);
+/**
+ * `{ sessionId, text, images? }`：文本原样保留（不 trim），长度有上限；不带图片时不能全是空白，带图片时可以为空。
+ * 图片按 parseChatImages 收窄（张数、格式、大小），有一张不合法就整条拒绝
+ */
+export function parsePromptInput(
+  raw: unknown
+): { sessionId: string; text: string; images?: ChatImage[] } | null {
+  const record = strictRecord(raw, ['sessionId', 'text', 'images']);
   const sessionId = parseSessionId(record?.sessionId);
   const text = record?.text;
-  if (!sessionId || typeof text !== 'string' || !text.trim()) return null;
-  return text.length <= MAX_PROMPT_CHARS ? { sessionId, text } : null;
+  if (!sessionId || typeof text !== 'string' || text.length > MAX_PROMPT_CHARS) return null;
+  if (record?.images === undefined) return text.trim() ? { sessionId, text } : null;
+  const images = parseChatImages(record.images);
+  return images ? { sessionId, text, images } : null;
 }
 
 export function parseRespondApprovalInput(raw: unknown): RespondApprovalInput | null {

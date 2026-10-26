@@ -2,6 +2,7 @@ import type { ApprovalMode } from '@fynvra/core';
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ChatImage,
   ChatMessage,
   ModelOptions,
   SessionEventEnvelope,
@@ -24,7 +25,11 @@ export interface SessionsApi {
     model?: SessionModelRef;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
   remove(sessionId: string): Promise<IpcResult>;
-  prompt(input: { sessionId: string; text: string }): Promise<IpcResult>;
+  /**
+   * 发消息；images 是粘贴的图片（最多 10 张，单张 20 MiB、合计 50 MiB 以内），带图片时 text 可以为空。
+   * 有一张图片不合法就整条拒绝
+   */
+  prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
@@ -66,7 +71,7 @@ export interface PreloadIpc {
   subscribe(channel: string, listener: (...args: unknown[]) => void): Unsubscribe;
 }
 
-/** `window.fynvra.sessions`：方法与通道一一对应，Renderer 只传 id 和文本 */
+/** `window.fynvra.sessions`：方法与通道一一对应，Renderer 只传 id、文本与粘贴的图片 */
 export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
   return {
     list: (workspaceId, options) =>

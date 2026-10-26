@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@shared/types/chat';
+import type { ChatImage, SessionSummary } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentHostService } from '../services/agentHost/agentHost';
@@ -55,6 +55,8 @@ const sweeper = {
 const invoke = (channel: string, ...args: unknown[]) =>
   mocks.handlers.get(channel)?.({ sender: {} }, ...args);
 
+const screenshot: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+
 beforeAll(async () => {
   const { registerSessionHandlers } = await import('./sessions');
   registerSessionHandlers(
@@ -84,6 +86,76 @@ function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummar
     ...patch,
   };
 }
+
+describe('parsePromptInput', () => {
+  let parsePromptInput: typeof import('./sessions').parsePromptInput;
+  let MAX_PROMPT_CHARS: number;
+
+  beforeAll(async () => {
+    ({ parsePromptInput, MAX_PROMPT_CHARS } = await import('./sessions'));
+  });
+
+  it('keeps the text as it is and takes the images along', () => {
+    expect(parsePromptInput({ sessionId: 's-1', text: '  keep spacing  ' })).toEqual({
+      sessionId: 's-1',
+      text: '  keep spacing  ',
+    });
+    expect(
+      parsePromptInput({ sessionId: 's-1', text: 'What is wrong?', images: [screenshot] })
+    ).toEqual({ sessionId: 's-1', text: 'What is wrong?', images: [screenshot] });
+  });
+
+  it('accepts a message with only images: the text may then be empty or blank', () => {
+    expect(parsePromptInput({ sessionId: 's-1', text: '', images: [screenshot] })).toEqual({
+      sessionId: 's-1',
+      text: '',
+      images: [screenshot],
+    });
+    expect(parsePromptInput({ sessionId: 's-1', text: ' \n', images: [screenshot] })).toEqual({
+      sessionId: 's-1',
+      text: ' \n',
+      images: [screenshot],
+    });
+  });
+
+  it('refuses an empty message: blank text without images', () => {
+    for (const text of ['', '   ', '\n\t']) {
+      expect(parsePromptInput({ sessionId: 's-1', text })).toBeNull();
+    }
+    expect(parsePromptInput({ sessionId: 's-1', text: '', images: [] })).toBeNull();
+  });
+
+  it('refuses the whole message when an image is not acceptable', () => {
+    const many = Array.from({ length: 11 }, () => screenshot);
+    for (const images of [
+      null,
+      screenshot,
+      [{ ...screenshot, mimeType: 'image/svg+xml' }],
+      [{ ...screenshot, data: 'data:image/png;base64,iVBORw0KGgo=' }],
+      [{ ...screenshot, name: 'shot.png' }],
+      [screenshot, 'not an image'],
+      many,
+    ]) {
+      expect(parsePromptInput({ sessionId: 's-1', text: 'look', images })).toBeNull();
+    }
+  });
+
+  it('still requires a string text within the limit and only the known keys', () => {
+    expect(parsePromptInput({ sessionId: 's-1', images: [screenshot] })).toBeNull();
+    expect(parsePromptInput({ sessionId: 's-1', text: 42, images: [screenshot] })).toBeNull();
+    expect(
+      parsePromptInput({
+        sessionId: 's-1',
+        text: 'x'.repeat(MAX_PROMPT_CHARS + 1),
+        images: [screenshot],
+      })
+    ).toBeNull();
+    expect(
+      parsePromptInput({ sessionId: 's-1', text: 'hi', images: [screenshot], cwd: '/' })
+    ).toBeNull();
+    expect(parsePromptInput({ sessionId: '../s', text: '', images: [screenshot] })).toBeNull();
+  });
+});
 
 describe('sessions IPC', () => {
   it('registers every sessions channel', () => {
@@ -185,7 +257,19 @@ describe('sessions IPC', () => {
     });
 
     await invoke(IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: '  keep spacing  ' });
-    expect(host.prompt).toHaveBeenCalledWith('s-1', '  keep spacing  ');
+    expect(host.prompt).toHaveBeenLastCalledWith('s-1', '  keep spacing  ', undefined);
+    await invoke(IPC_CHANNELS.SESSIONS_PROMPT, {
+      sessionId: 's-1',
+      text: 'What is wrong here?',
+      images: [screenshot],
+    });
+    expect(host.prompt).toHaveBeenLastCalledWith('s-1', 'What is wrong here?', [screenshot]);
+    await invoke(IPC_CHANNELS.SESSIONS_PROMPT, {
+      sessionId: 's-1',
+      text: '',
+      images: [screenshot],
+    });
+    expect(host.prompt).toHaveBeenLastCalledWith('s-1', '', [screenshot]);
     await invoke(IPC_CHANNELS.SESSIONS_ABORT, 's-1');
     expect(host.abort).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');
@@ -250,6 +334,11 @@ describe('sessions IPC', () => {
     [IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: 'x'.repeat(1_000_001) }],
     [IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: '../s', text: 'hi' }],
     [IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: 'hi', cwd: '/' }],
+    [IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: '', images: [] }],
+    [
+      IPC_CHANNELS.SESSIONS_PROMPT,
+      { sessionId: 's-1', text: 'hi', images: [{ ...screenshot, mimeType: 'image/bmp' }] },
+    ],
     [IPC_CHANNELS.SESSIONS_ABORT, 42],
     [IPC_CHANNELS.SESSIONS_HISTORY, 'C:\\data\\agent\\sessions\\x.jsonl'],
     [IPC_CHANNELS.SESSIONS_REMOVE, ''],
