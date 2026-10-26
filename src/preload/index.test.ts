@@ -35,6 +35,7 @@ describe('preload bridge', () => {
       'sessions',
       'settings',
       'skills',
+      'terminals',
       'updates',
       'window',
       'workspaces',
