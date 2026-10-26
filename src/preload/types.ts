@@ -1,4 +1,4 @@
-import type { IpcResult } from '@shared/types/ipc';
+import type { IpcResult, WindowCloseAction } from '@shared/types/ipc';
 import type {
   PickWorktreesRootResult,
   Preferences,
@@ -43,6 +43,8 @@ export interface WindowApi {
   minimize(): Promise<IpcResult>;
   toggleMaximize(): Promise<IpcResult>;
   close(): Promise<IpcResult>;
+  respondClose(action: WindowCloseAction): Promise<IpcResult>;
+  onCloseRequested(callback: () => void): Unsubscribe;
   isMaximized(): Promise<IpcResult<{ maximized: boolean }>>;
   onMaximizedChange(callback: (maximized: boolean) => void): Unsubscribe;
 }

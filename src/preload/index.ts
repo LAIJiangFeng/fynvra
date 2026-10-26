@@ -48,6 +48,9 @@ const api: FynvraApi = {
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),
     toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TOGGLE_MAXIMIZE),
     close: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CLOSE),
+    respondClose: (action) => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_RESPOND_CLOSE, action),
+    onCloseRequested: (callback) =>
+      subscribe(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, () => callback()),
     isMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_IS_MAXIMIZED),
     onMaximizedChange: (callback) =>
       subscribe(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, (maximized) => callback(maximized === true)),

@@ -222,11 +222,12 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.3 关闭窗口与运行时图标
 
-- 用户关闭窗口（标题栏关闭按钮、系统关窗）先由 Main 原生确认框提供「取消 / 最小化到托盘 / 退出」，默认取消。最小化到托盘只隐藏窗口，不丢编辑草稿、不停止 agent；普通最小化按钮仍缩到任务栏。
+- 用户关闭窗口（标题栏关闭按钮、系统关窗）由 Main 拦截，通过 `window:close-requested` 仅通知发起关窗的 Renderer，复用应用内 Dialog 显示「取消 / 最小化到托盘 / 退出」；不使用系统消息框。外观参照圆角卡片、灰色说明和右下角三按钮，跟随明暗主题；默认聚焦取消，Esc / 点击遮罩等同取消。
+- Renderer 通过 `window:respond-close` 只回传 `cancel | tray | quit`，Main 收窄未知参数并绑定 IPC sender 的窗口；没有待处理关窗、窗口已销毁或正在退出时忽略迟到回答。操作失败保留弹窗并就地提示。最小化到托盘只隐藏窗口，不丢编辑草稿、不停止 agent；普通最小化按钮仍缩到任务栏。
 - 托盘使用现有 Fynvra 图标，点击可恢复窗口，菜单提供显示窗口与退出；单实例唤醒和 macOS 激活也必须恢复隐藏窗口。真正退出仍先确认未保存文件，再等 agent 及编排收尾，并销毁托盘。
 - 明确退出与更新安装绕过关窗选择，不重复弹出托盘选项；未保存确认取消后，后续用户关窗仍会询问。托盘创建失败时保持窗口可见并提示，不留下无法找回的隐藏窗口。
 - 窗口、托盘及开发模式的 macOS Dock 复用 `resources/icon.png`，通过 electron-vite 资源导入包含在构建产物中；Windows 直接设置 Fynvra AppUserModelId，开发版与正式版分组隔离，不使用 Electron 默认身份。
-- 范围限于 Main `index.ts`、`windows/{createAppWindow,quitGuard,closeBehavior}.ts`、Main 中英文字典、`electron.vite.config.ts` 的图标资源输出和对应测试/验证脚本；不新增 IPC、持久化关闭偏好、图片生成或手机连接能力。`pnpm build && node scripts/verify-window.cjs` 使用临时数据验证真实托盘、窗口恢复、图标资源、未保存确认及退出收尾（原生确认框由脚本代答）。
+- 应用内确认框改动限于 Main `windows/closeBehavior.ts` / `ipc/window.ts`、shared IPC / Main 字典、preload typed 出口、Renderer `CloseWindowDialog.tsx` / `App.tsx` 挂载点 / `ui/dialog.tsx` 遮罩样式参数 / 中英文字典和对应测试；不改图标、退出收尾或未保存确认机制，不新增持久化关闭偏好、图片生成或手机连接能力。`pnpm build && node scripts/verify-window.cjs` 使用临时数据点击真实 UI、记录明暗截图，验证托盘、窗口恢复、图标资源和退出收尾（仅未保存原生确认框由脚本代答）。
 
 ## 8. 分阶段
 

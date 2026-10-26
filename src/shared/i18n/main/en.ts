@@ -21,11 +21,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   },
   app: {
     startFailed: 'Fynvra failed to start',
-    closeTitle: 'Confirm quit',
-    closeMessage: 'Close Fynvra?',
-    closeDetail:
-      'Quitting closes the app and stops running tasks. Minimizing to the tray keeps tasks running in the background and preserves unsaved edits.',
-    minimizeToTray: 'Minimize to tray',
     showWindow: 'Show Fynvra',
     quit: 'Quit',
     closeFailed:

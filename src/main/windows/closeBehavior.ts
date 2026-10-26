@@ -1,10 +1,17 @@
-import { app, type BrowserWindow, dialog, Menu, nativeImage, Tray } from 'electron';
+import { IPC_CHANNELS, type IpcResult, type WindowCloseAction } from '@shared/types/ipc';
+import { app, type BrowserWindow, Menu, nativeImage, Tray } from 'electron';
 import appIcon from '../../../resources/icon.png?asset';
 import { translate } from '../i18n';
 
-/** 普通关窗先选择；明确退出/更新安装仍交给 quitGuard 和未保存文件保护。 */
+const responders = new WeakMap<BrowserWindow, (action: WindowCloseAction) => IpcResult>();
+
+export function respondToClose(win: BrowserWindow, action: WindowCloseAction): IpcResult {
+  return responders.get(win)?.(action) ?? { ok: false, error: translate('common.windowClosed') };
+}
+
+/** Main 保留窗口控制权；Renderer 只展示选择，明确退出仍走原有保护。 */
 export function registerCloseBehavior(win: BrowserWindow, isQuitRequested: () => boolean): void {
-  let prompting = false;
+  let pending = false;
   let tray: Tray | undefined;
   const show = () => {
     if (win.isDestroyed() || isQuitRequested()) return;
@@ -36,39 +43,29 @@ export function registerCloseBehavior(win: BrowserWindow, isQuitRequested: () =>
     win.hide();
   };
 
+  responders.set(win, (action) => {
+    if (!pending || win.isDestroyed() || isQuitRequested()) return { ok: true };
+    try {
+      if (action === 'tray') hideToTray();
+      pending = false;
+      if (action === 'quit') app.quit();
+      return { ok: true };
+    } catch (error: unknown) {
+      pending = true;
+      console.error('[fynvra] 关闭窗口失败', error);
+      return { ok: false, error: translate('app.closeFailed') };
+    }
+  });
   win.on('close', (event) => {
     if (isQuitRequested()) return;
     event.preventDefault();
-    if (prompting) return;
-    prompting = true;
-    void dialog
-      .showMessageBox(win, {
-        type: 'question',
-        title: translate('app.closeTitle'),
-        message: translate('app.closeMessage'),
-        detail: translate('app.closeDetail'),
-        buttons: [
-          translate('common.cancel'),
-          translate('app.minimizeToTray'),
-          translate('app.quit'),
-        ],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      })
-      .then(({ response }) => {
-        if (win.isDestroyed() || isQuitRequested()) return;
-        if (response === 1) hideToTray();
-        else if (response === 2) app.quit();
-      })
-      .catch((error: unknown) => {
-        console.error('[fynvra] 关闭窗口失败', error);
-        if (!win.isDestroyed() && !isQuitRequested())
-          dialog.showErrorBox(translate('app.closeTitle'), translate('app.closeFailed'));
-      })
-      .finally(() => {
-        prompting = false;
-      });
+    pending = true;
+    show();
+    // 重复通知只打开同一个受控 Dialog；Renderer 重载后也能再次关窗。
+    win.webContents.send(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED);
   });
-  win.once('closed', () => tray?.destroy());
+  win.once('closed', () => {
+    responders.delete(win);
+    tray?.destroy();
+  });
 }

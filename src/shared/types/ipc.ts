@@ -49,6 +49,10 @@ export const IPC_CHANNELS = {
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
   WINDOW_CLOSE: 'window:close',
+  /** Main → 当前 Renderer：显示应用内关窗选择 */
+  WINDOW_CLOSE_REQUESTED: 'window:close-requested',
+  /** Renderer 只回传 cancel / tray / quit；Main 绑定 sender 窗口 */
+  WINDOW_RESPOND_CLOSE: 'window:respond-close',
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
   /** Main → Renderer：窗口最大化状态变化 */
   WINDOW_MAXIMIZED_CHANGED: 'window:maximized-changed',
@@ -154,6 +158,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+export type WindowCloseAction = 'cancel' | 'tray' | 'quit';
 
 /** 跨 IPC 边界的统一返回形状：handler 不抛异常，失败时带可展示的错误信息。 */
 export type IpcResult<T extends object = object> =

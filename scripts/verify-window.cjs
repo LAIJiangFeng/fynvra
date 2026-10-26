@@ -1,5 +1,5 @@
 // pnpm build && node scripts/verify-window.cjs
-// 隔离数据，真实窗口 / 托盘 / worker / IPC，仅代答原生确认框，不操作用户的工作区。
+// 隔离数据，点击真实应用内关闭弹窗并截图；仅代答未保存文件确认，不操作用户的工作区。
 const assert = require('node:assert/strict');
 const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -18,7 +18,7 @@ if (!process.versions.electron) {
     join(userData, 'settings.json'),
     JSON.stringify({
       version: 1,
-      preferences: { language: 'zh-CN', sidePanelOpen: true },
+      preferences: { language: 'zh-CN', theme: 'light', sidePanelOpen: true },
       workspaces: [{ id: 'window-test', name: '窗口验证', repoPath: workspace, vcs: 'none' }],
     })
   );
@@ -50,7 +50,6 @@ if (!process.versions.electron) {
   let appId;
   let tray;
   let trayMenu;
-  let closeResponse = 0;
   let discardResponse = 0;
   let closePrompts = 0;
   let discardPrompts = 0;
@@ -79,12 +78,8 @@ if (!process.versions.electron) {
     child.once('exit', () => workers.delete(child));
     return child;
   };
-  dialog.showMessageBox = async (_window, options) => {
-    assert.deepEqual(options.buttons, ['取消', '最小化到托盘', '退出']);
-    assert.equal(options.defaultId, 0);
-    assert.equal(options.cancelId, 0);
-    closePrompts += 1;
-    return { response: closeResponse, checkboxChecked: false };
+  dialog.showMessageBox = async () => {
+    fail(new Error('关闭选择不应使用系统消息框'));
   };
   dialog.showMessageBoxSync = (_window, options) => {
     assert.equal(options.title, '文件修改尚未保存');
@@ -100,9 +95,11 @@ if (!process.versions.electron) {
   app.on('browser-window-created', (_event, win) => {
     let shown = 0;
     let hidden = 0;
-    // 不打断用户当前窗口；保留真实 hide / close / unload 和系统托盘。
+    // 焦点圈与 Tab 回绕需要原生窗口实际可见；只显示脚本的临时工作区。
+    const show = win.show.bind(win);
     win.show = () => {
       shown += 1;
+      show();
     };
     const hide = win.hide.bind(win);
     win.hide = () => {
@@ -110,6 +107,11 @@ if (!process.versions.electron) {
       hide();
     };
     const wc = win.webContents;
+    const send = wc.send.bind(wc);
+    wc.send = (channel, ...args) => {
+      if (channel === 'window:close-requested') closePrompts += 1;
+      send(channel, ...args);
+    };
     wc.on('console-message', (event) => {
       if (event.level === 'error') errors.push(event.message);
     });
@@ -121,14 +123,58 @@ if (!process.versions.electron) {
           if (await (typeof condition === 'function' ? condition() : evaluate(condition))) return;
           await new Promise((done) => setTimeout(done, 30));
         }
+        console.error(
+          await evaluate(`(() => {
+          const popup = document.querySelector('[data-testid="close-window-dialog"]');
+          return popup ? { html: popup.outerHTML, visibility: document.visibilityState, active: document.activeElement?.outerHTML,
+            style: { opacity: getComputedStyle(popup).opacity, scale: getComputedStyle(popup).scale },
+            buttons: [...popup.querySelectorAll('button')].map(b => ({ text: b.textContent, color: getComputedStyle(b).backgroundColor, font: getComputedStyle(b).fontWeight })) } : 'no popup';
+        })()`)
+        );
         throw new Error(`等待失败: ${label}`);
       };
       const click = async (selector) => {
         const expression = `document.querySelector(${JSON.stringify(selector)})`;
         await waitFor(`!!${expression}`, selector);
-        await evaluate(`${expression}.click()`);
+        const point = await evaluate(`(() => {
+          const rect = ${expression}.getBoundingClientRect();
+          return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+        })()`);
+        wc.sendInputEvent({ type: 'mouseMove', ...point });
+        wc.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point });
+        wc.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...point });
       };
-      const close = () => evaluate('window.fynvra.window.close()');
+      const popup = '[data-testid="close-window-dialog"][data-open]';
+      const popupElement = `document.querySelector(${JSON.stringify(popup)})`;
+      const close = async () => {
+        await evaluate('window.fynvra.window.close()');
+        await waitFor(`!!${popupElement}`, '应用内关闭弹窗');
+        await waitFor(
+          `${popupElement}.contains(document.activeElement) && document.activeElement.textContent === '取消'`,
+          '弹窗焦点就绪'
+        );
+      };
+      const choose = async (label) => {
+        await evaluate(
+          `[...${popupElement}.querySelectorAll('button')].find(e => e.textContent === ${JSON.stringify(label)}).click()`
+        );
+        await waitFor(`!${popupElement}`, '选择后关闭弹窗');
+      };
+      const screenshot = async (name) => {
+        // 截最终样式，避免主题切换中的按钮颜色被定格在过渡首帧。
+        await evaluate(`(() => {
+          const elements = [${popupElement}, ...document.querySelectorAll('[data-slot="dialog-overlay"]')];
+          elements.forEach(element => element.getAnimations({ subtree: true }).forEach(animation => animation.finish()));
+          return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        })()`);
+        await waitFor(`getComputedStyle(${popupElement}).opacity === '1'`, '弹窗动画结束');
+        const bounds = await evaluate(`(() => {
+          const rect = ${popupElement}.getBoundingClientRect();
+          return { x: Math.round(rect.x) - 24, y: Math.round(rect.y) - 24, width: Math.round(rect.width) + 48, height: Math.round(rect.height) + 48 };
+        })()`);
+        const image = await wc.capturePage(bounds);
+        writeFileSync(join(base, `${name}.png`), image.resize({ width: bounds.width }).toPNG());
+      };
       const draftExists = () =>
         evaluate('document.querySelector(".cm-content")?.textContent.includes("未保存草稿")');
       try {
@@ -141,16 +187,62 @@ if (!process.versions.electron) {
         await evaluate('document.querySelector(".cm-content").focus()');
         await wc.insertText('未保存草稿');
         await waitFor(draftExists, '文件草稿');
+        await click('header button[aria-label="关闭"]');
+        await waitFor(`!!${popupElement}`, '标题栏打开应用内关闭弹窗');
+        await waitFor('document.activeElement?.textContent === "取消"', '默认聚焦取消');
+        assert.deepEqual(
+          await evaluate(`[...${popupElement}.querySelectorAll('button')].map(e => e.textContent)`),
+          ['取消', '最小化到托盘', '退出']
+        );
+        assert.equal(await evaluate(`${popupElement}.querySelectorAll('svg').length`), 0);
+        assert.equal(await evaluate(`getComputedStyle(${popupElement}).borderRadius`), '16px');
+        assert.equal(await evaluate(`parseFloat(getComputedStyle(${popupElement}).width)`), 500);
+        await screenshot('close-dialog-light');
+        await evaluate('window.fynvra.settings.update({ theme: "dark" })');
+        await waitFor('document.documentElement.classList.contains("dark")', '深色主题');
+        await screenshot('close-dialog-dark');
+        await evaluate('window.fynvra.settings.update({ theme: "light" })');
         await close();
-        await waitFor(() => closePrompts === 1, '关闭确认');
+        assert.equal(
+          await evaluate(`document.querySelectorAll(${JSON.stringify(popup)}).length`),
+          1
+        );
+        await choose('取消');
         assert.equal(hidden, 0);
         assert(!win.isDestroyed());
         assert(workers.size > 0);
         assert(await draftExists());
-        checks.push('标题栏关闭经真实 IPC 询问三种选择，默认取消，保留草稿和 worker');
+        checks.push(
+          '标题栏打开应用内圆角卡片、三按钮与明暗截图；无系统消息框，重复关窗不叠层，取消保留草稿和 worker'
+        );
 
-        closeResponse = 1;
         await close();
+        for (const label of ['最小化到托盘', '退出', '取消']) {
+          wc.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
+          wc.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
+          await waitFor(
+            `document.activeElement?.textContent === ${JSON.stringify(label)}`,
+            'Tab 焦点限制在弹窗内'
+          );
+        }
+        wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+        wc.sendInputEvent({ type: 'char', keyCode: '\r' });
+        wc.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+        await waitFor(`!${popupElement}`, '默认回车取消');
+        checks.push('焦点默认取消，Tab 只在三个按钮之间循环，默认回车不会退出');
+
+        await close();
+        wc.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+        wc.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+        await waitFor(`!${popupElement}`, 'Esc 取消');
+        await close();
+        wc.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, x: 10, y: 100 });
+        wc.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: 10, y: 100 });
+        await waitFor(`!${popupElement}`, '遮罩点击取消');
+        checks.push('Esc 与点击遮罩只取消，不隐藏、不退出');
+
+        await close();
+        await choose('最小化到托盘');
         await waitFor(() => hidden === 1, '隐藏到托盘');
         assert(tray && !tray.isDestroyed());
         assert.equal(discardPrompts, 0);
@@ -171,6 +263,7 @@ if (!process.versions.electron) {
         for (const event of ['second-instance', 'activate']) {
           const beforeHide = hidden;
           await close();
+          await choose('最小化到托盘');
           await waitFor(() => hidden > beforeHide, '再次隐藏');
           const beforeShow = shown;
           app.emit(event);
@@ -178,15 +271,16 @@ if (!process.versions.electron) {
         }
         checks.push('重复隐藏复用托盘，单实例唤醒及应用激活均能恢复隐藏窗口');
 
-        closeResponse = 2;
         win.close();
+        await waitFor(`!!${popupElement}`, '系统关窗也使用应用内弹窗');
+        await choose('退出');
         await waitFor(() => discardPrompts === 1, '退出前确认未保存文件');
         assert(!win.isDestroyed());
         assert(workers.size > 0);
         assert(await draftExists());
-        closeResponse = 0;
         const beforeRetry = closePrompts;
         await close();
+        await choose('取消');
         await waitFor(() => closePrompts > beforeRetry, '取消退出后仍可询问');
         checks.push('系统关窗选择退出后仍保护未保存文件，取消后继续可用且下次关窗仍询问');
 

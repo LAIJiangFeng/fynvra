@@ -67,6 +67,12 @@ export const en: MessagesShape<typeof zhCN> = {
     sidePanel: 'Files and orchestration',
     resizeSidePanel: 'Resize side panel',
     resizeSidePanelHint: 'Drag to resize, double-click to reset',
+    closeTitle: 'Confirm quit',
+    closeDetail:
+      'Quitting closes the app and stops running tasks. Minimize to the tray to keep it running in the background',
+    minimizeToTray: 'Minimize to tray',
+    quit: 'Quit',
+    closeFailed: 'The window action failed. Please retry',
     minimize: 'Minimize',
     maximize: 'Maximize',
     restore: 'Restore',
