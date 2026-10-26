@@ -48,6 +48,10 @@ export interface OrchestrationRegistry {
   coordinatorOf(workspaceId: string, runId: string): string | undefined;
   /** 持有该 dispatch 的服务（先打开全部工作区）。 */
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
+  /** 收件箱里发给该会话、未确认的消息（跨工作区查找，不消费）。协调者唤醒器用。 */
+  pendingMessagesTo(sessionId: string): Message[];
+  /** 确认已投递的消息（各服务尽力而为）。 */
+  ackMessages(ids: readonly string[]): void;
   flushAll(): Promise<void>;
   /**
    * 订阅各工作区收件箱新投递的消息（含之后才打开的服务；从快照恢复的不算），桌面通知用。
@@ -154,6 +158,16 @@ export function createOrchestrationRegistry(
     },
     async flushAll() {
       await Promise.all([...services.values()].map((service) => service.flush()));
+    },
+    pendingMessagesTo(sessionId: string): Message[] {
+      for (const service of services.values()) {
+        const pending = service.pendingMessagesTo(sessionId);
+        if (pending.length > 0) return pending;
+      }
+      return [];
+    },
+    ackMessages(ids: readonly string[]): void {
+      for (const service of services.values()) service.ackMessages(ids);
     },
     onMessage(listener) {
       messageListeners.add(listener);

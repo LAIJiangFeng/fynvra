@@ -159,7 +159,10 @@ export interface Message {
 
 1. 用户在 Orchestrator 会话输入需求。
 2. 主 agent 调 `dispatch_task`（可多次、并行）→ Main：建 worktree（`fynvra/<slug>`）→ 新建 worker 会话（指定角色或 `worker`）→ 投递任务书（含 `report_done` 契约）。
-3. 主 agent `wait_for_workers`；期间 `question` 到达时用 `send_to_worker` 回答。
+3. 主 agent 结束回合，继续与用户对话（可再派发）；不阻塞等待。Main 的协调者唤醒器在收件箱出现
+   `worker_done` / `question` / `escalation` 且主 agent 会话空闲时，把消息合成一条注入 prompt 唤醒它
+   （与 `wait_for_workers` 的交付一样确认消息）；主 agent 忙碌时消息留在收件箱，回合结束后再投。
+   `wait_for_workers` 仍可用，但只在需要显式阻塞等待时调用。期间 `question` 到达时用 `send_to_worker` 回答。
 4. `worker_done` → 主 agent `review_diff` + `run_checks`（如 `pnpm typecheck && pnpm lint && pnpm test`）→ 判定：
    - 通过：`merge_worktree`（no-ff 合并到主 agent 所在分支）→ `cleanup_worktree` → 向用户汇报。
    - 不通过：`reject_work` 把意见发回 worker，回到 3。

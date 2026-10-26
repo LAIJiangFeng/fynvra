@@ -142,6 +142,22 @@ describe('createOrchestrationService', () => {
     expect(service.coordinatorOf('run_missing')).toBeUndefined();
   });
 
+  it('pendingMessagesTo / ackMessages：读出发给主 agent 的未确认消息，确认后不再出现', async () => {
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    expect(service.pendingMessagesTo('session_coord')).toEqual([]);
+
+    const worker = service.workerHostFor(dispatch.workerSessionId);
+    expect(await worker?.reportDone('succeeded', 'All green.')).toEqual({ ok: true });
+
+    const pending = service.pendingMessagesTo('session_coord');
+    expect(pending.map((message) => [message.type, message.dispatchId])).toEqual([
+      ['worker_done', dispatch.id],
+    ]);
+    service.ackMessages(pending.map((message) => message.id));
+    expect(service.pendingMessagesTo('session_coord')).toEqual([]);
+  });
+
   it('快照加载完成前 workerHostFor 返回 null，加载后能找到磁盘上的 worker 会话', async () => {
     const first = make();
     await dispatchOn(first);

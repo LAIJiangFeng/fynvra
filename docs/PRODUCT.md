@@ -15,7 +15,7 @@ Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) S
 默认 **Orchestrator（主 agent）** 使用编排工具策略，用户可以按需调整角色配置。默认主 agent：
 - 把用户的需求拆成任务，为每个任务 **开一个 git worktree**，启动一个 worker agent（可指定角色；未指定则用 `worker`），把任务书发给它。
 - **自己不改代码**：工具集被限制为只读（读文件、git 只读、orchestration 工具），不能写文件 / 执行任意 shell。
-- **监控** worker：收件箱收到 `worker_done` / `question` / `escalation`，回答问题、等待完成。
+- **监控** worker：派发后不阻塞等待，可继续与用户对话；收件箱收到 `worker_done` / `question` / `escalation` 时由 Fynvra 自动唤醒主 agent，回答问题、验收结果。
 - **验收合并**：worker 完成后读 diff、跑检查命令、判断是否达标；达标则把 worker 分支合并到主 agent 所在分支，再删 worktree；不达标则把意见发回让 worker 继续改。
 - 向用户汇报每个任务的结果与证据。
 

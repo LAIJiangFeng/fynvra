@@ -550,19 +550,19 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     };
   }
 
-  /** 普通目录：改动已经在目录里，没有可合并的分支；验收通过即完成。 */
-  function acceptInPlace(task: Task): HostResult<MergeWorktreeOutput> {
+  /** 普通目录：改动已经在目录里，没有可合并的分支；验收通过即完成（随后同样补派排队任务）。 */
+  async function acceptInPlace(task: Task): Promise<HostResult<MergeWorktreeOutput>> {
     if (task.status !== 'in-review') return fail(notMergeable(task, true));
     const completed = store.tasks.update(task.id, { status: 'completed' });
     if (!completed.ok) return completed;
+    await advanceQueue();
     return { ok: true, merged: true, targetBranch: '', mode: 'in-place' };
   }
-
   async function mergeWorktree(input: DispatchRef): Promise<HostResult<MergeWorktreeOutput>> {
     const found = resolve(input.dispatchId);
     if (!found.ok) return found;
     const { task, dispatch, worktree } = found;
-    if (isInPlace(dispatch)) return acceptInPlace(task);
+    if (isInPlace(dispatch)) return await acceptInPlace(task);
     if (worktree === undefined) return fail(cleanedUp(dispatch));
     if (task.status !== 'in-review') return fail(notMergeable(task, false));
 
@@ -605,6 +605,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         `${worktree.branch} was merged into ${coordinatorBranch}, but the task could not be marked completed: ${completed.error}`
       );
     }
+    // 依赖本任务的任务现在全部满足：立即补派（主 agent 派发后不再阻塞等待，不会马上回来调 wait/list）
+    await advanceQueue();
     return {
       ok: true,
       merged: true,

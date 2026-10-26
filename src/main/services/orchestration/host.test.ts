@@ -279,7 +279,8 @@ describe('listWorkers 与排队派发', () => {
     expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
       merged: true,
     });
-    expect(launcher.createWorkerSession).toHaveBeenCalledTimes(1);
+    // 合并即补派（主 agent 不再阻塞等待，不会马上回来调 list/wait）
+    expect(launcher.createWorkerSession).toHaveBeenCalledTimes(2);
 
     listed = await host.listWorkers();
     const second = listed.ok ? listed.workers[1] : undefined;
@@ -314,9 +315,9 @@ describe('listWorkers 与排队派发', () => {
       dependsOn: [first.task.id],
     });
     await worker(first.dispatch.id).reportDone('succeeded', 'Done.');
-    await host.mergeWorktree({ dispatchId: first.dispatch.id });
 
     launcher.createWorkerSession.mockResolvedValueOnce({ ok: false, error: 'quota exceeded' });
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
     await host.listWorkers();
     await host.listWorkers();
     expect(launcher.createWorkerSession).toHaveBeenCalledTimes(2);
@@ -594,6 +595,28 @@ describe('mergeWorktree', () => {
     ]);
     expect(store.tasks.get(first.task.id)?.status).toBe('completed');
     expect(store.dispatches.get(first.dispatch.id)).toMatchObject({ outcome: 'succeeded' });
+  });
+
+  it('合并完成后推进排队任务：依赖完成的 queued 任务随即启动 worker', async () => {
+    const first = await dispatch('First');
+    const queued = await host.dispatchTask({
+      title: 'Second',
+      spec: 'S',
+      roleId: 'worker',
+      dependsOn: [first.task.id],
+    });
+    expect(queued).toMatchObject({ ok: true, task: { status: 'todo' } });
+    expect(await worker(first.dispatch.id).reportDone('succeeded', 'Done.')).toEqual({ ok: true });
+
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+
+    const second = queued.ok ? queued.task.id : '';
+    expect(store.tasks.get(second)?.status).toBe('in-progress');
+    expect(launcher.createWorkerSession).toHaveBeenCalledTimes(2);
+    expect(store.dispatches.list((dispatch) => dispatch.taskId === second)).toHaveLength(1);
   });
 
   it('worker 还没汇报时拒绝合并', async () => {

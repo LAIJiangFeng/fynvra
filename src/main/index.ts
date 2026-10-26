@@ -8,6 +8,7 @@ import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
+import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { getUpdateService } from './services/updates';
 import { createAppWindow } from './windows/createAppWindow';
 import { createQuitGuard } from './windows/quitGuard';
@@ -94,6 +95,8 @@ if (!app.requestSingleInstanceLock()) {
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
+      // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
+      installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
       agentHost.start();
       showMainWindow();
       getUpdateService().start();

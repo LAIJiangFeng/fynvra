@@ -78,6 +78,10 @@ export interface OrchestrationService {
   cleanupMergedWorktree(sessionId: string): Promise<MergedCleanupResult>;
   /** 等待所有落盘完成并写入当前状态。 */
   flush(): Promise<void>;
+  /** 收件箱里发给该会话、未确认的消息（不消费）；状态未加载时为空。协调者唤醒器用。 */
+  pendingMessagesTo(sessionId: string): Message[];
+  /** 确认已投递的消息（尽力而为，幂等）。 */
+  ackMessages(ids: readonly string[]): void;
 }
 
 function observe<T extends { id: string }>(
@@ -325,6 +329,12 @@ export function createOrchestrationService(
     async flush() {
       await ready;
       await persist();
+    },
+
+    pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
+
+    ackMessages: (ids) => {
+      for (const id of ids) inbox.ack(id);
     },
   };
 }
