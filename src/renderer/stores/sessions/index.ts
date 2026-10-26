@@ -4,7 +4,7 @@ import { filesStoreFor } from '../files';
 import { useWorkspacesStore } from '../workspaces';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
-export type { SessionsState } from './createSessionsStore';
+export type { ImageRejection, SessionsState } from './createSessionsStore';
 export type { PendingApproval, SessionRuntime, TimelineMessage, UsageTotals } from './reducer';
 export * from './selectors';
 

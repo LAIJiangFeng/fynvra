@@ -2,6 +2,7 @@ import { type FynvraSessionEvent, type FynvraSessionEventBody, getBuiltinRole } 
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ChatImage,
   ChatMessage,
   ChatToolCall,
   ModelProviderOption,
@@ -163,8 +164,15 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
   }
 
   /** 一轮对话的脚本；中止时由 prompt 统一收尾 */
-  async function play(session: MockSession, text: string, signal: AbortSignal): Promise<void> {
+  async function play(
+    session: MockSession,
+    text: string,
+    images: ChatImage[] | undefined,
+    signal: AbortSignal
+  ): Promise<void> {
     const sessionId = session.summary.id;
+    // 只有图片的消息没有文字可复述
+    const request = summarize(text) || translate('chat.imageOnly');
     const orchestrator = session.summary.roleId === 'orchestrator';
     // 中止时收尾要用：已流出但还没 message_end 的正文、正在执行的工具
     const progress: { streamed: string; tool: { id: string; name: string } | null } = {
@@ -250,15 +258,16 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         sessionId,
         role: 'user',
         text,
+        ...(images?.length ? { images } : {}),
         toolCalls: [],
         createdAt: now(),
         streaming: false,
       });
 
-      const thinking = `用户的请求是「${summarize(text)}」。先列目录、读 package.json，再申请运行测试。`;
+      const thinking = `用户的请求是「${request}」。先列目录、读 package.json，再申请运行测试。`;
       await stream('thinking_delta', thinking);
       const intro = [
-        `收到，我来处理「${summarize(text)}」。`,
+        `收到，我来处理「${request}」。`,
         '',
         '> 当前是 **mock 模式**：没有连接真实模型，下面的流式输出、工具调用和审批都是演示数据。',
         '',
@@ -531,18 +540,24 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true };
     },
 
-    async prompt({ sessionId, text }) {
+    async prompt({ sessionId, text, images }) {
       const session = sessions.get(sessionId);
       if (!session) return missing();
-      if (!text.trim()) return { ok: false, error: translate('sessions.errors.emptyMessage') };
+      // 与 Main 相同：只有图片也能发，文字与图片都没有才算空消息
+      if (!text.trim() && !images?.length) {
+        return { ok: false, error: translate('sessions.errors.emptyMessage') };
+      }
       if (session.run) return { ok: false, error: translate('sessions.errors.busy') };
       const run = new AbortController();
       session.run = run;
-      if (session.history.length === 0) {
-        session.summary = { ...session.summary, title: summarize(text) };
-      }
+      // 与 Main 相同：第一条有文字的消息作标题，只有图片的消息不算
+      const title = summarize(text);
+      const titled = session.history.some(
+        (message) => message.role === 'user' && summarize(message.text)
+      );
+      if (title && !titled) session.summary = { ...session.summary, title };
       changed(session, 'running');
-      void play(session, text, run.signal).finally(() => {
+      void play(session, text, images, run.signal).finally(() => {
         if (session.run === run) session.run = null;
       });
       return { ok: true };

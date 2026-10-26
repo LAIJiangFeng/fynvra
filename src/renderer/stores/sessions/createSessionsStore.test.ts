@@ -1,6 +1,7 @@
 import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
+  ChatImage,
   ChatMessage,
   ModelOptions,
   ModelProviderOption,
@@ -15,6 +16,7 @@ import { connectSessionsStore, createSessionsStore } from './createSessionsStore
 import {
   findSession,
   selectArchivedSessionsOf,
+  selectDraftImagesOf,
   selectMessagesOf,
   selectSessionsOf,
   selectStatusOf,
@@ -91,7 +93,11 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
     }),
     remove: vi.fn(async (): Promise<IpcResult> => ({ ok: true })),
     prompt: vi.fn(
-      async (_input: { sessionId: string; text: string }): Promise<IpcResult> => ({
+      async (_input: {
+        sessionId: string;
+        text: string;
+        images?: ChatImage[];
+      }): Promise<IpcResult> => ({
         ok: true,
       })
     ),
@@ -469,6 +475,163 @@ describe('createSessionsStore · send', () => {
     expect(store.getState().drafts).toEqual({ s1: '写了一半', s2: '另一个' });
     store.getState().setDraft('s1', '');
     expect(store.getState().drafts).toEqual({ s2: '另一个' });
+  });
+});
+
+describe('createSessionsStore · 粘贴的图片', () => {
+  const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+  const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
+  const MiB = 1024 * 1024;
+  /** 解码后正好 bytes 字节的图片（内容无关紧要，只看 base64 的长度与末尾的 =） */
+  const sized = (bytes: number): ChatImage => {
+    const groups = Math.ceil(bytes / 3);
+    const padding = groups * 3 - bytes;
+    return { data: 'A'.repeat(groups * 4 - padding) + '='.repeat(padding), mimeType: 'image/png' };
+  };
+  const RESIZED =
+    '[Image: original 3773x1017, displayed at 2000x539. Multiply coordinates by 1.89 to map to original image.]';
+
+  it('草稿图片按会话保存，切换会话不丢；可以逐张移除', async () => {
+    const { store } = await setup([summary('s1'), summary('s2')]);
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    expect(state().attachImages('s1', [SHOT, PHOTO])).toBeUndefined();
+    await state().selectSession('s2');
+    expect(state().attachImages('s2', [PHOTO])).toBeUndefined();
+    await state().selectSession('s1');
+
+    expect(selectDraftImagesOf('s1')(state())).toEqual([SHOT, PHOTO]);
+    expect(selectDraftImagesOf('s2')(state())).toEqual([PHOTO]);
+    expect(selectDraftImagesOf('s3')(state())).toEqual([]);
+    state().removeDraftImage('s1', 0);
+    expect(selectDraftImagesOf('s1')(state())).toEqual([PHOTO]);
+    state().removeDraftImage('s1', 0);
+    expect(state().draftImages).toEqual({ s2: [PHOTO] });
+  });
+
+  it('超过张数、单张或合计大小上限的不加并给出原因，放得下的照加', async () => {
+    const { store } = await setup();
+    const state = () => store.getState();
+
+    expect(
+      state().attachImages(
+        's1',
+        Array.from({ length: 12 }, () => SHOT)
+      )
+    ).toBe('count');
+    expect(selectDraftImagesOf('s1')(state())).toHaveLength(10);
+    expect(state().attachImages('s1', [PHOTO])).toBe('count');
+    expect(selectDraftImagesOf('s1')(state())).toHaveLength(10);
+
+    expect(state().attachImages('s2', [sized(20 * MiB + 1), SHOT])).toBe('size');
+    expect(selectDraftImagesOf('s2')(state())).toEqual([SHOT]);
+
+    const big = [sized(20 * MiB), sized(20 * MiB)];
+    expect(state().attachImages('s3', big)).toBeUndefined();
+    expect(state().attachImages('s3', [sized(10 * MiB + 1)])).toBe('size');
+    // 合计正好 50 MiB 还放得下，再多 1 字节就不行（SHOT 解码后 8 字节）
+    expect(state().attachImages('s3', [sized(10 * MiB - 7), SHOT])).toBe('size');
+    expect(selectDraftImagesOf('s3')(state()).map((image) => image.data.length)).toEqual([
+      ...big.map((image) => image.data.length),
+      sized(10 * MiB - 7).data.length,
+    ]);
+    expect(state().attachImages('s5', [...big, sized(10 * MiB)])).toBeUndefined();
+
+    // 读出来的不是可用的图片（空文件、不是 base64、格式不在白名单里）
+    expect(
+      state().attachImages('s4', [
+        { data: '', mimeType: 'image/png' },
+        { data: 'not base64!', mimeType: 'image/png' },
+        { data: SHOT.data, mimeType: 'image/bmp' as ChatImage['mimeType'] },
+      ])
+    ).toBe('invalid');
+    expect(state().draftImages.s4).toBeUndefined();
+  });
+
+  it('只有图片也能发：回显带图片，prompt 带上图片，文字与图片草稿都清空', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().attachImages('s1', [SHOT, PHOTO]);
+
+    expect(await state().send('')).toBe(true);
+    expect(api.prompt).toHaveBeenCalledWith({ sessionId: 's1', text: '', images: [SHOT, PHOTO] });
+    expect(selectMessagesOf('s1')(state())).toEqual([
+      expect.objectContaining({ role: 'user', text: '', images: [SHOT, PHOTO], optimistic: true }),
+    ]);
+    expect(state().draftImages).toEqual({});
+    expect(selectStatusOf('s1')(state())).toBe('running');
+  });
+
+  it('文字加图片一起发；没有图片时 prompt 不带 images', async () => {
+    const { store, api, emitEvent } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().setDraft('s1', '哪里不对？');
+    state().attachImages('s1', [SHOT]);
+    expect(await state().send('哪里不对？\n')).toBe(true);
+    expect(api.prompt).toHaveBeenLastCalledWith({
+      sessionId: 's1',
+      text: '哪里不对？',
+      images: [SHOT],
+    });
+    expect(state().drafts.s1).toBeUndefined();
+
+    emitEvent(1, { type: 'message_end', role: 'user', text: `哪里不对？\n\n${RESIZED}` });
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    expect(selectMessagesOf('s1')(state())).toEqual([
+      expect.objectContaining({ role: 'user', text: '哪里不对？', images: [SHOT] }),
+    ]);
+    expect(selectMessagesOf('s1')(state())[0]?.optimistic).toBeUndefined();
+
+    expect(await state().send('只有文字')).toBe(true);
+    expect(api.prompt.mock.calls.at(-1)?.[0]).toEqual({ sessionId: 's1', text: '只有文字' });
+  });
+
+  it('没有文字也没有图片时不发', async () => {
+    const { store, api } = await setup();
+    await store.getState().selectSession('s1');
+    expect(await store.getState().send(' \n')).toBe(false);
+    expect(api.prompt).not.toHaveBeenCalled();
+  });
+
+  it('发送失败：文字与图片都放回草稿', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().attachImages('s1', [SHOT]);
+    api.prompt.mockResolvedValueOnce({ ok: false, error: '没有可用的模型' });
+
+    expect(await state().send('看看这张')).toBe(false);
+    expect(selectMessagesOf('s1')(state())).toEqual([]);
+    expect(state().drafts.s1).toBe('看看这张');
+    expect(selectDraftImagesOf('s1')(state())).toEqual([SHOT]);
+    expect(state().runtimeBySession.s1?.error).toBe('没有可用的模型');
+
+    // 只有图片：没有文字可放回，只放回图片
+    api.prompt.mockResolvedValueOnce({ ok: false, error: '没有可用的模型' });
+    state().setDraft('s1', '');
+    expect(await state().send('')).toBe(false);
+    expect(state().drafts).toEqual({});
+    expect(selectDraftImagesOf('s1')(state())).toEqual([SHOT]);
+  });
+
+  it('发送失败时用户已经开始写新草稿：新的文字、新的图片都不被覆盖', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().attachImages('s1', [SHOT]);
+    const answer = deferred<IpcResult>();
+    api.prompt.mockReturnValueOnce(answer.promise);
+
+    const sending = state().send('第一条');
+    state().setDraft('s1', '新写的');
+    state().attachImages('s1', [PHOTO]);
+    answer.resolve({ ok: false, error: '没有可用的模型' });
+    expect(await sending).toBe(false);
+
+    expect(state().drafts.s1).toBe('新写的');
+    expect(selectDraftImagesOf('s1')(state())).toEqual([PHOTO]);
   });
 });
 

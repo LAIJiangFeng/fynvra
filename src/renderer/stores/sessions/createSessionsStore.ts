@@ -1,12 +1,18 @@
 import type { ApprovalMode } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
-import type {
-  ApprovalDecision,
-  ApprovalRequest,
-  ModelProviderOption,
-  SessionEventEnvelope,
-  SessionModelRef,
-  SessionSummary,
+import {
+  type ApprovalDecision,
+  type ApprovalRequest,
+  base64ByteLength,
+  type ChatImage,
+  isChatImageMimeType,
+  MAX_CHAT_IMAGE_BYTES,
+  MAX_CHAT_IMAGES,
+  MAX_CHAT_IMAGES_TOTAL_BYTES,
+  type ModelProviderOption,
+  type SessionEventEnvelope,
+  type SessionModelRef,
+  type SessionSummary,
 } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
 import { create, type StoreApi } from 'zustand';
@@ -26,6 +32,12 @@ import {
 } from './reducer';
 import { findSession, isBusy, statusOf } from './selectors';
 
+/**
+ * 粘贴的图片没加进草稿的原因：`count` 超过每条消息的张数上限，`size` 超过单张或合计的大小上限，
+ * `invalid` 不是可用的图片（空的、不是 base64、格式不在白名单里）
+ */
+export type ImageRejection = 'count' | 'size' | 'invalid';
+
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
   workspaceId: string | null;
@@ -36,6 +48,8 @@ export interface SessionsState extends ChatProjection {
   activeSessionId: string | null;
   /** 输入框草稿，按会话保存 */
   drafts: Record<string, string>;
+  /** 输入框里粘贴的图片，按会话保存（与 drafts 并列，切换会话不丢） */
+  draftImages: Record<string, ChatImage[]>;
   /** 正在拉 history 的会话 */
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
@@ -61,11 +75,20 @@ export interface SessionsState extends ChatProjection {
   ): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 选中会话并拉 history（权威投影）替换本地正文 */
   selectSession(sessionId: string | null): Promise<void>;
-  /** 向选中的会话发送；空文本、会话运行中或上一条还在途时返回 false */
+  /**
+   * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片、会话运行中或上一条还在途时返回 false
+   */
   send(text: string): Promise<boolean>;
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
+  /**
+   * 往会话的草稿里加粘贴的图片：按顺序收下放得下的（张数、单张、合计大小都在上限内），其余不加。
+   * 返回第一张没加进去的原因；都加进去时为 undefined
+   */
+  attachImages(sessionId: string, images: readonly ChatImage[]): ImageRejection | undefined;
+  /** 从会话的草稿里移除第 index 张图片 */
+  removeDraftImage(sessionId: string, index: number): void;
   dismissNotice(): void;
   /** 读可选模型；传工作区时一并读它上一次用过的模型（缺省为当前工作区） */
   loadModelOptions(workspaceId?: string | null): Promise<void>;
@@ -291,6 +314,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       archivedByWorkspace: {},
       activeSessionId: null,
       drafts: {},
+      draftImages: {},
       loadingHistory: {},
       listErrors: {},
       notice: null,
@@ -401,27 +425,39 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async send(text) {
         const sessionId = get().activeSessionId;
+        if (!sessionId) return false;
         const body = normalizePrompt(text);
-        if (!sessionId || !body.trim()) return false;
+        const images = get().draftImages[sessionId] ?? [];
+        if (!body.trim() && images.length === 0) return false;
         const previous = statusOf(get(), sessionId);
         if (sending.has(sessionId) || isBusy(previous)) return false;
 
         sending.add(sessionId);
         const id = `local-${++localSeq}`;
         set((state) => ({
-          ...addOptimisticMessage(state, sessionId, { id, text: body, createdAt: now() }),
+          ...addOptimisticMessage(state, sessionId, { id, text: body, images, createdAt: now() }),
           drafts: omitKey(state.drafts, sessionId),
+          draftImages: omitKey(state.draftImages, sessionId),
         }));
         try {
-          const result = await safely(() => api.prompt({ sessionId, text: body }));
+          const result = await safely(() =>
+            api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
+          );
           if (result.ok) return true;
           set((state) => ({
             ...withdrawOptimisticMessage(state, sessionId, id, {
               status: previous,
               error: result.error,
             }),
-            // 没送出去的文字放回输入框（用户已经开始写新草稿时不覆盖）
-            drafts: state.drafts[sessionId] ? state.drafts : { ...state.drafts, [sessionId]: text },
+            // 没送出去的文字与图片放回输入框（用户已经开始写新草稿时不覆盖，文字与图片各看各的）
+            drafts:
+              !text || state.drafts[sessionId]
+                ? state.drafts
+                : { ...state.drafts, [sessionId]: text },
+            draftImages:
+              images.length === 0 || state.draftImages[sessionId]
+                ? state.draftImages
+                : { ...state.draftImages, [sessionId]: images },
           }));
           return false;
         } finally {
@@ -459,6 +495,46 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set((state) => ({
           drafts: text ? { ...state.drafts, [sessionId]: text } : omitKey(state.drafts, sessionId),
         }));
+      },
+
+      attachImages(sessionId, images) {
+        const current = get().draftImages[sessionId] ?? [];
+        let total = current.reduce((sum, image) => sum + (base64ByteLength(image.data) ?? 0), 0);
+        const added: ChatImage[] = [];
+        let rejected: ImageRejection | undefined;
+        for (const { data, mimeType } of images) {
+          const bytes = isChatImageMimeType(mimeType) ? base64ByteLength(data) : null;
+          if (!bytes) {
+            rejected ??= 'invalid';
+          } else if (current.length + added.length >= MAX_CHAT_IMAGES) {
+            rejected ??= 'count';
+          } else if (bytes > MAX_CHAT_IMAGE_BYTES || total + bytes > MAX_CHAT_IMAGES_TOTAL_BYTES) {
+            rejected ??= 'size';
+          } else {
+            added.push({ data, mimeType });
+            total += bytes;
+          }
+        }
+        if (added.length > 0) {
+          set((state) => ({
+            draftImages: { ...state.draftImages, [sessionId]: [...current, ...added] },
+          }));
+        }
+        return rejected;
+      },
+
+      removeDraftImage(sessionId, index) {
+        set((state) => {
+          const images = state.draftImages[sessionId];
+          if (!images || index < 0 || index >= images.length) return {};
+          const rest = images.filter((_image, at) => at !== index);
+          return {
+            draftImages:
+              rest.length > 0
+                ? { ...state.draftImages, [sessionId]: rest }
+                : omitKey(state.draftImages, sessionId),
+          };
+        });
       },
 
       dismissNotice() {
