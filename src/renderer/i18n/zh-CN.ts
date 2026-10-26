@@ -4,6 +4,12 @@
  * 参数写成 `{name}`；`{n|单数|复数}` 是英文的单复数写法，中文写一种即可。
  */
 export const zhCN = {
+  terminals: {
+    exited: '进程已退出，退出码 {code}',
+    finished: '已结束',
+    closeTitle: '关闭终端',
+    closeHint: '关闭将终止此终端及其中运行的脚本，是否继续？',
+  },
   updates: {
     title: '应用更新',
     current: '当前版本 {version}',
@@ -98,6 +104,8 @@ export const zhCN = {
     preview: '文件预览',
     workspace: '对话与文件工作区',
     chat: '对话',
+    newTab: '新建对话或终端',
+    terminal: '终端',
     opened: '对话与已打开文件',
     refresh: '刷新目录和未修改文件',
     emptyDirectory: '空目录',

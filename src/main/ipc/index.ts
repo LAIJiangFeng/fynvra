@@ -7,6 +7,7 @@ import { registerRoleHandlers } from './roles';
 import { registerSessionHandlers } from './sessions';
 import { registerSettingsHandlers } from './settings';
 import { registerSkillHandlers } from './skills';
+import { registerTerminalHandlers } from './terminals';
 import { registerUpdateHandlers } from './updates';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
@@ -17,6 +18,7 @@ export function registerIpcHandlers(): void {
   registerSettingsHandlers();
   registerWorkspaceHandlers();
   registerFilesHandlers();
+  registerTerminalHandlers();
   registerOrchestrationHandlers();
   registerWindowHandlers();
   registerSessionHandlers();

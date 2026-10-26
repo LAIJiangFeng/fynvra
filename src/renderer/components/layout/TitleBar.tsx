@@ -23,7 +23,7 @@ export function TitleBar() {
   const toggleSidePanel = useSettingsStore((state) => state.toggleSidePanel);
   const sidebarOpen = useSettingsStore(sidebarOpenOf);
   const toggleSidebar = useSettingsStore((state) => state.toggleSidebar);
-  const workspaceName = useWorkspacesStore((state) => selectSelectedWorkspace(state)?.name);
+  const workspace = useWorkspacesStore(selectSelectedWorkspace);
   const t = useT();
   const panelLabel = t(sidePanelOpen ? 'app.hideSidePanel' : 'app.showSidePanel');
   const sidebarLabel = t(sidebarOpen ? 'app.hideSidebar' : 'app.showSidebar');
@@ -52,10 +52,10 @@ export function TitleBar() {
 
       <div className="flex min-w-0 items-center gap-2 text-sm">
         <span className="font-semibold">Fynvra</span>
-        {workspaceName && (
+        {workspace && (
           <>
             <span className="text-muted-foreground">/</span>
-            <span className="truncate text-muted-foreground">{workspaceName}</span>
+            <span className="truncate text-muted-foreground">{workspace.name}</span>
           </>
         )}
       </div>

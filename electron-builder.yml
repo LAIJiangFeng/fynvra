@@ -9,6 +9,8 @@ directories:
 files:
   - out/**
   - '!**/*.map'
+asarUnpack:
+  - node_modules/node-pty/**
 win:
   target: nsis
 nsis:

@@ -229,6 +229,14 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 窗口、托盘及开发模式的 macOS Dock 复用 `resources/icon.png`，通过 electron-vite 资源导入包含在构建产物中；Windows 直接设置 Fynvra AppUserModelId，开发版与正式版分组隔离，不使用 Electron 默认身份。
 - 应用内确认框改动限于 Main `windows/closeBehavior.ts` / `ipc/window.ts`、shared IPC / Main 字典、preload typed 出口、Renderer `CloseWindowDialog.tsx` / `App.tsx` 挂载点 / `ui/dialog.tsx` 遮罩样式参数 / 中英文字典和对应测试；不改图标、退出收尾或未保存确认机制，不新增持久化关闭偏好、图片生成或手机连接能力。`pnpm build && node scripts/verify-window.cjs` 使用临时数据点击真实 UI、记录明暗截图，验证托盘、窗口恢复、图标资源和退出收尾（仅未保存原生确认框由脚本代答）。
 
+### 7.4 工作区内嵌终端
+
+- 中央标签栏「＋ → 终端」创建真正的终端标签，与对话、文件并排；内容在应用内显示，不启动外部终端窗口。「＋ → 对话」复用新建会话流程。
+- Main 用 node-pty 托管 PTY，Windows 启动 PowerShell，其他平台启动登录 shell；cwd 从工作区 id 查注册表，Renderer 不传路径、shell 或环境变量。
+- `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
+- Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
+- 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。

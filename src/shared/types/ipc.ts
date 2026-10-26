@@ -22,6 +22,12 @@ export const IPC_CHANNELS = {
   /** Main 弹目录选择框并校验；Renderer 不传路径 */
   WORKSPACES_ADD: 'workspaces:add',
   WORKSPACES_REMOVE: 'workspaces:remove',
+  TERMINALS_CREATE: 'terminals:create',
+  TERMINALS_WRITE: 'terminals:write',
+  TERMINALS_RESIZE: 'terminals:resize',
+  TERMINALS_CLOSE: 'terminals:close',
+  /** PTY 输出 / 退出仅发送给创建它的窗口 */
+  TERMINALS_EVENT: 'terminals:event',
   /** Main → Renderer：工作区列表已变更 */
   WORKSPACES_CHANGED: 'workspaces:changed',
 

@@ -8,6 +8,7 @@ import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
 import { createSkillsApi } from './domains/skills';
+import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import type { FynvraApi, Unsubscribe } from './types';
 
@@ -43,6 +44,7 @@ const api: FynvraApi = {
   },
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),
+  terminals: createTerminalsApi(ipcRenderer, subscribe),
   window: {
     platform: process.platform,
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_MINIMIZE),

@@ -8,6 +8,7 @@ packages:
 # @google/genai 的 preinstall 只是 echo no-op（prepare 不会对 registry 包执行，脚本文件也不随包发布）；
 # protobufjs 的 postinstall 只检查依赖方 package.json 里的版本前缀并打印提示，不产出文件。
 allowBuilds:
+  node-pty: true
   electron-winstaller: false
   '@google/genai': false
   protobufjs: false

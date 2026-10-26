@@ -3,6 +3,12 @@ import type { zhCN } from './zh-CN';
 
 /** 界面文案（English）：与 ./zh-CN.ts 同形，同样极简 */
 export const en: MessagesShape<typeof zhCN> = {
+  terminals: {
+    exited: 'Process exited with code {code}',
+    finished: 'Exited',
+    closeTitle: 'Close terminal',
+    closeHint: 'Closing will stop this terminal and its running scripts. Continue?',
+  },
   updates: {
     title: 'App updates',
     current: 'Current version {version}',
@@ -99,6 +105,8 @@ export const en: MessagesShape<typeof zhCN> = {
     preview: 'File preview',
     workspace: 'Chat and file workspace',
     chat: 'Chat',
+    newTab: 'New chat or terminal',
+    terminal: 'Terminal',
     opened: 'Chat and open files',
     refresh: 'Refresh folders and unmodified files',
     emptyDirectory: 'Empty folder',
