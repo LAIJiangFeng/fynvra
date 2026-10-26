@@ -37,12 +37,18 @@ describe('preload bridge', () => {
       'skills',
       'terminals',
       'updates',
+      'usage',
       'window',
       'workspaces',
     ]);
     const members = Object.values(api).flatMap(Object.keys);
     expect(members).not.toContain('invoke');
     expect(members).not.toContain('send');
+  });
+
+  it('用量出口只传范围并映射到 summary 通道', async () => {
+    await api.usage.summary({ range: '7d' });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.USAGE_SUMMARY, { range: '7d' });
   });
 
   it('方法映射到对应通道；挂入工作区、选 worktree 根目录都不传路径，移除只传 id', async () => {
