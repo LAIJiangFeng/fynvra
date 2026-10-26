@@ -1,8 +1,7 @@
 # Fynvra 产品定义
 
-Fynvra 是一个基于 Electron + [pi](https://github.com/earendil-works/pi) SDK 的本地桌面 AI 编程工作台。
-它参考 [EnsoCode](https://github.com/J3n5en/EnsoCode)（本机参考源码：`D:\project\EnsoCode`）的工程形态，
-并把 Orca 式的多 agent 协同（worktree 隔离、任务派发、消息收件箱、验收合并）做成产品内建的一等公民。
+Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) SDK 的本地桌面 AI 编程工作台。
+内置多 Agent 协作能力，将 worktree 隔离、任务派发、消息收件箱与验收合并整合为完整的开发流程。
 
 ## 核心思想
 
@@ -26,11 +25,11 @@ Fynvra 是一个基于 Electron + [pi](https://github.com/earendil-works/pi) SDK
 ## 一句话用户旅程
 挂入仓库 → 在该仓库开一个 Orchestrator 会话 → 说「做 X，Y 用测试工程师角色」→ 侧栏出现多个 worker 卡片（各自 worktree、实时输出、状态）→ 主 agent 验收合并 → 用户在自己的浏览器/终端验证效果。
 
-## 从 EnsoCode 借鉴什么
-- 工程骨架：electron-vite 三段构建、Zustand、Tailwind 4、Biome、Vitest、settings.json 持久化。
-- IPC 安全边界、agentHost worker 边界、会话 jsonl 为权威源等约定（见 `AGENTS.md`）。
-- Providers / Skills / MCP 设置页与扫描导入思路（可导入本机 Claude Code / Codex 配置）。
-- 内嵌 Diff、三档审批、Git Checkpoint。
+## 工程与安全边界
+- 分层构建：electron-vite 三段构建，结合 Zustand、Tailwind 4、Biome 与 Vitest；应用元数据通过 settings.json 持久化。
+- 进程隔离：明确 IPC 与 Agent Worker 的安全边界，会话 jsonl 为正文权威源（见 `AGENTS.md`）。
+- 资源配置：统一管理 Providers、Skills 与 MCP，支持扫描导入本机工具配置。
+- 任务验收：内置差异查看、三档审批与 worktree 验收合并流程。
 
 ## 明确不做（v1）
 手机伴侣、远程节点、SSH 项目、语音、内嵌浏览器。

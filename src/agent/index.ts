@@ -7,7 +7,7 @@ import { SessionSupervisor } from './supervisor';
 /**
  * Agent worker 入口，跑在 Electron utilityProcess 里（Main 经 `?modulePath` 单独构建后 fork）。
  *
- * 与 Main 的通道是 Electron 注入的 `process.parentPort`，与 EnsoCode 相同；node:worker_threads 的
+ * 与 Main 的通道是 Electron 注入的 `process.parentPort`；node:worker_threads 的
  * parentPort 只属于 worker 线程，在 utilityProcess 里是 null。本目录不 import electron，这里只声明用到的两个方法。
  */
 interface ParentPort {

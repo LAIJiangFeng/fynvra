@@ -44,7 +44,7 @@ Renderer ⇄ preload ⇄ Main ── OrchestrationService（@fynvra/core：Orche
                        └─ worker 会话 × N：createRoleSession({ workerHost: WorkerHost 代理, cwd: worktree })
 ```
 
-工具只调用注入的接口，不碰 git / 进程（与 EnsoCode 的 `AgentControlInvoker` 同构）。真正的实现在 Main，
+工具只调用注入的接口，不直接操作 git / 进程。真正的实现在 Main，
 worker 进程里只放一个转发代理。
 
 ### 1. Main：实现编排逻辑
@@ -162,8 +162,7 @@ await dispose();                          // 先发 session_shutdown（关闭 MC
 - MCP 服务器经 `loadConfig` 注入、`/mcp` 的修改不落盘；未声明 `exposure` 时默认 `direct`
   （pi 默认的 `codemode` 需要 codemode 扩展）。服务器的 env / headers 由 Main 经 parentPort 交给 worker 进程，
   不经过 Renderer。
-- pi 默认系统提示词以 “operating inside pi” 开头并带 pi 文档段；需要 fynvra 自己的人设时可在适配层替换
-  （EnsoCode 的 `replacePersonaParagraph` 做法）。
+- pi 默认系统提示词以 “operating inside pi” 开头并带 pi 文档段；需要 Fynvra 专属的人设时，可在适配层定制该段落。
 
 ## 升级复检点（`src/pi/`）
 

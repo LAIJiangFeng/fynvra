@@ -12,7 +12,7 @@ export async function bindSessionExtensions(
  * 通知扩展会话结束：MCP 扩展借此关闭连接并结束 stdio 服务器进程。永不抛异常。
  *
  * 升级复检点：pi 1.4.0 的 `AgentSession.dispose()` 不发 session_shutdown（只有 CLI 的切换 / 退出流程发），
- * 这里经 `session.extensionRunner` 补发，与 EnsoCode 的做法相同。
+ * 这里经 `session.extensionRunner` 补发。
  */
 export async function emitSessionShutdown(
   session: Pick<AgentSession, 'extensionRunner'>

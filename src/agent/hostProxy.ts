@@ -47,7 +47,7 @@ interface PendingCall {
 }
 
 /**
- * worker 进程里的 Host 调用表（EnsoCode agentControl 的 requestId 模式）：
+ * worker 进程里的 Host 调用表：
  * 每次调用一个进程内唯一的 callId；放弃等待（中止 / 超时）时补发 host-cancel，让 Main 也停下。
  */
 export function createHostInvoker(

@@ -195,7 +195,7 @@ const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
 
 /**
- * Main 侧的 agent 会话管理（EnsoCode agentHost 的精简版）：
+ * Main 侧的 agent 会话管理：
  * - 托管一个 agent worker 进程（workerClient：fork、ready 握手、崩溃重启）；
  * - 会话注册表在 sessions.json，正文在 pi jsonl；会话首次使用时才在 worker 里 spawn（新 generation）；
  * - worker 事件已由 workerClient 收窄，这里再丢弃过期 generation / 重复 seq，改写为会话级 seq 后推给 Renderer；

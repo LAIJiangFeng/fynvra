@@ -105,7 +105,7 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
 ]);
 
 /**
- * 按角色审批档位拦截工具调用（EnsoCode ApprovalGate 的语义，挂在 pi 的 tool_call 上）：
+ * 在 pi 的 tool_call 上按角色审批档位拦截工具调用：
  * - `supervised` 审批命令、文件写 / 改、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行；
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；

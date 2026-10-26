@@ -160,6 +160,15 @@ describe('createMockOrchestrationApi', () => {
     );
   });
 
+  it('演示工作区使用通用项目名称，筛选示例与数据一致', async () => {
+    const { api } = setup();
+    const result = await api.reviewDiff(MOCK_IDS.dispatches.inReview);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.diff.includes('"name": "web-app-2"')).toBe(true);
+    expect(result.diff.includes('"name": "api-server-4"')).toBe(true);
+    expect(result.diff.includes("filterWorkspaces(fixtures, 'api-server')")).toBe(true);
+  });
+
   it('reports a cleaned-up worktree and unknown dispatches as errors', async () => {
     const { api } = setup();
     await expect(api.reviewDiff(MOCK_IDS.dispatches.completed)).resolves.toMatchObject({

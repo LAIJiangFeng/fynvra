@@ -1,4 +1,4 @@
-/** {@link renderBrief} 入参：Orca 式五段任务书 + 派发信息。 */
+/** {@link renderBrief} 入参：五段任务书与派发信息。 */
 export interface BriefInput {
   /** 任务标题（会被压成一行）。 */
   title: string;

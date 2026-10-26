@@ -1,9 +1,9 @@
 # Fynvra 架构
 
 > 本文是所有 agent 实现时的共同契约。改动契约必须先改本文。
-> 参考实现：`D:\project\EnsoCode`（可直接读其源码学习模式，但 **不要复制粘贴大段代码**，fynvra 要保持精简）。
+> 架构以 Fynvra 的产品需求为边界，保持模块精简、职责清晰。
 
-## 1. 技术栈（与 EnsoCode 对齐）
+## 1. 技术栈
 
 | 项 | 选择 |
 |---|---|
@@ -31,7 +31,7 @@ fynvra/
     core/            纯 TS 领域库（无 Electron）：角色、编排状态机、git worktree、消息收件箱
     agent-runtime/   纯 Node 库：pi SDK 封装、fynvra 工具（orchestration 工具、worker 工具）、事件归一化
   docs/            PRODUCT.md、ARCHITECTURE.md
-  .workflow/       多 agent 协作：specs/（规范）、scratch/<主题>/task-*.md（任务书）
+  .workflow/       本地开发任务与验收记录（已忽略，不纳入版本控制）
 ```
 
 包名：根 `fynvra`，`@fynvra/core`，`@fynvra/agent-runtime`。renderer 通过 Vite alias `@` → `src/renderer`，`@shared` → `src/shared`，`@fynvra/core` → `packages/core/src/index.ts`（源码直接打包）。
@@ -46,7 +46,7 @@ Renderer(React) ⇄ preload(typed API) ⇄ Main(ipc/*, services/*) ⇄ Agent Wor
 ```
 
 - Main 是权威：settings、roles、workspaces、orchestration 状态、worktree 注册表都在 Main 持久化。
-- 一个 Agent Worker 进程托管多个 pi 会话（EnsoCode 的 `agentHost` 模式）。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
+- 一个 Agent Worker 进程托管多个 pi 会话。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
 - Renderer 只持有投影；pi jsonl 是会话正文权威源。
 
 ## 4. 领域模型（`packages/core`，`@fynvra/core`）
@@ -61,7 +61,7 @@ export interface Role {
   name: string;
   description?: string;
   builtin?: boolean;
-  systemPrompt?: string;      // 追加到 pi 系统提示词后（EnsoCode: before_agent_start 追加）
+  systemPrompt?: string;      // 在 before_agent_start 中追加到 pi 系统提示词后
   model?: { providerId: string; modelId: string; thinking?: ThinkingLevel };
   skillIds: string[];
   mcpServerIds: string[];
@@ -79,7 +79,7 @@ export interface SessionRef {
   worktreeId?: string; parentSessionId?: string;
 }
 
-// 编排（Orca 语义）：Run 是命名空间 + 收件箱；Task 是工作；Dispatch 是一次权威尝试
+// 编排：Run 是命名空间 + 收件箱；Task 是工作；Dispatch 是一次权威尝试
 export type TaskStatus = 'todo' | 'in-progress' | 'in-review' | 'completed' | 'failed' | 'abandoned';
 export interface Run { id: string; workspaceId: string; coordinatorSessionId: string; objective: string; createdAt: number; }
 export interface Task { id: string; runId: string; title: string; spec: string; roleId: string; status: TaskStatus; dependsOn: string[]; }
@@ -151,7 +151,7 @@ export interface Message {
   - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止按 deny，拒绝以可读文本作为工具结果返回模型。worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main，再发 `approval_request` 会话事件。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id }`。
-  工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现），与 EnsoCode `AgentControlInvoker` 同构。`OrchestrationHost` 的方法名与上述工具一一对应。
+  工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
 - worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（每轮只能成功调用一次，同一轮再次调用返回错误；新的 agent run 开始时重新开放，因此 Main 要把 `reject_work` 的 feedback 作为新 prompt 发给 worker，worker 才能再次汇报）。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
 
@@ -174,7 +174,7 @@ export interface Message {
 - 提示词：Main 在 spawn 时按工作区给 spawn spec 带 `inPlace: true`，orchestrator 在工具说明后追加非 git 模式一段，
   worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 
-## 7. IPC 规则（照搬 EnsoCode）
+## 7. IPC 规则
 
 - 新增 IPC 三件事必须同步：`src/shared/types/ipc.ts` 通道常量（`domain:action`）、`src/main/ipc/<domain>.ts` handler 并在 `ipc/index.ts` 注册、`src/preload/index.ts` 按领域暴露 typed API。
 - 入参按 `unknown` 收窄；Renderer 只传 id 不传路径；返回 `{ ok, ... }` 不跨边界抛异常；不暴露通用 `invoke`。

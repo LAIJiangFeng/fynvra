@@ -91,7 +91,7 @@ interface ManagedSession {
 }
 
 /**
- * Agent worker 进程里的多会话托管（EnsoCode supervisor 的精简版）。
+ * Agent worker 进程里的多会话托管。
  * 命令先由入口经 parseAgentCommand 收窄；identity 的 generation 必须与当前会话一致，过期的命令丢弃。
  */
 export class SessionSupervisor {

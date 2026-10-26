@@ -747,7 +747,16 @@ function renameLabel(from: string, to: string): string {
     : `${from} => ${to}`;
 }
 
-const FIXTURE_NAMES = ['fynvra', 'EnsoCode', 'pi', 'orca', 'dotfiles', 'blog', 'infra', 'notes'];
+const FIXTURE_NAMES = [
+  'fynvra',
+  'web-app',
+  'pi',
+  'api-server',
+  'dotfiles',
+  'blog',
+  'infra',
+  'notes',
+];
 
 type FakeDiff = ReturnType<typeof fakeDiff>;
 let testsDiffCache: FakeDiff | null = null;
@@ -789,7 +798,7 @@ const buildTestsDiff = () =>
           section: "describe('filterWorkspaces', () => {",
           lines: [
             "   it('matches the display path', () => {",
-            "     expect(filterWorkspaces(list, 'code/en').map((w) => w.id)).toEqual(['b']);",
+            "     expect(filterWorkspaces(list, 'code/web').map((w) => w.id)).toEqual(['b']);",
             '   });',
             '+',
             "+  it('returns everything for an empty query', () => {",
@@ -809,7 +818,7 @@ const buildTestsDiff = () =>
             '+',
             "+  it('handles a 600-item list', () => {",
             '+    expect(fixtures).toHaveLength(600);',
-            "+    expect(filterWorkspaces(fixtures, 'orca')).toHaveLength(75);",
+            "+    expect(filterWorkspaces(fixtures, 'api-server')).toHaveLength(75);",
             '+  });',
             '+',
             "+  it('returns an empty list when nothing matches', () => {",

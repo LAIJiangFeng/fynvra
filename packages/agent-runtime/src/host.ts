@@ -138,7 +138,7 @@ export interface CleanupWorktreeOutput {
  * 编排工具背后的宿主接口，方法与 orchestrator 工具一一对应（见 {@link ORCHESTRATION_TOOL_METHODS}）。
  *
  * 工具不直接操作 git / 进程；由 Main 实现（agent worker 进程里是转发到 Main 的代理），
- * 与 EnsoCode 的 `AgentControlInvoker` 同构。`signal` 在模型本轮被中止时触发，阻塞类方法应尽快返回。
+ * `signal` 在模型本轮被中止时触发，阻塞类方法应尽快返回。
  */
 export interface OrchestrationHost {
   dispatchTask(

@@ -12,7 +12,7 @@ describe('parseSkillFrontmatter', () => {
       '---',
       'name: computer-use',
       'description: >-',
-      '  Drives the GUI of a visible local app window through `orca computer`: accessibility',
+      '  Drives a visible local app window through desktop controls: accessibility',
       '  tree, clicks, typing, menus.',
       '',
       '  Use only when needed.',
@@ -24,7 +24,7 @@ describe('parseSkillFrontmatter', () => {
     expect(parseSkillFrontmatter(text)).toEqual({
       name: 'computer-use',
       description:
-        'Drives the GUI of a visible local app window through `orca computer`: accessibility tree, clicks, typing, menus.\nUse only when needed.',
+        'Drives a visible local app window through desktop controls: accessibility tree, clicks, typing, menus.\nUse only when needed.',
     });
   });
 

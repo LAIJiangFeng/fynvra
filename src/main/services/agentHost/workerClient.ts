@@ -45,7 +45,7 @@ export interface WorkerClient {
 }
 
 /**
- * Main 侧的 agent worker 进程管理（EnsoCode agentHost 的 fork / ready 握手 / 补发队列）：
+ * Main 侧的 agent worker 进程管理：
  * fork 后等 worker 发 ready 再发命令；意外退出时在窗口内有限次自动重启，
  * 发给已退出进程的排队命令随之丢弃，由调用方在 onStarted 里重新 spawn 会话。
  */

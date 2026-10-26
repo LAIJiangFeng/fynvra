@@ -69,7 +69,7 @@ const worktrees = new GitWorktreeManager({ exec });
 
 **Dispatch**：同一任务同时最多一个未结算的 dispatch；`settleDispatch` / 结算后的 dispatch 不可再改。打回后在同一 worktree 上继续工作应新建一次 dispatch（新的权威尝试）。
 
-**`reclaimableDispatches(runId)`**：对应 Orca 的「还欠一次清理决定」——已结算、worktree 仍登记在 `store.worktrees`、且该 worktree 上没有进行中的后续尝试；同一 worktree 只报最近一次。`cleanup_worktree` 完成后把 worktree 从表里删掉即可。
+**`reclaimableDispatches(runId)`**：返回仍需决定是否清理的已结算派发，其 worktree 仍登记在 `store.worktrees`，且该 worktree 上没有进行中的后续尝试；同一 worktree 只报最近一次。`cleanup_worktree` 完成后把 worktree 从表里删掉即可。
 
 **Inbox**：消息在 `ack` 之前一直可见，`peek` / `waitFor` 都不消费；`waitFor` 已有匹配时立即返回最早一条，否则等到 `post`，超时返回 `null`，从不 reject。
 
