@@ -149,8 +149,11 @@ export type AgentCommand =
    * 不带图片时 text 不能为空
    */
   | { type: 'prompt'; identity: SessionIdentity; text: string; images?: ChatImage[] }
-  /** 会话运行中插话（当前工具调用结束后送达）；空闲时等同 prompt */
-  | { type: 'steer'; identity: SessionIdentity; text: string }
+  /**
+   * 会话运行中插话（当前工具调用结束后送达）；空闲时等同 prompt。图片规则同 prompt：
+   * 带图片时 text 可以是空串，不带图片时 text 不能为空
+   */
+  | { type: 'steer'; identity: SessionIdentity; text: string; images?: ChatImage[] }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -271,8 +274,13 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       const images = parseChatImages(record.images);
       return images ? { type: 'prompt', identity, text, images } : null;
     }
-    case 'steer':
-      return isNonEmptyString(record.text) ? { type: 'steer', identity, text: record.text } : null;
+    case 'steer': {
+      const { text } = record;
+      if (typeof text !== 'string') return null;
+      if (record.images === undefined) return text ? { type: 'steer', identity, text } : null;
+      const images = parseChatImages(record.images);
+      return images ? { type: 'steer', identity, text, images } : null;
+    }
     case 'abort':
       return { type: 'abort', identity };
     case 'dispose-session':

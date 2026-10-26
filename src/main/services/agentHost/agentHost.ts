@@ -139,6 +139,8 @@ export interface AgentHostService extends AgentHost {
    * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
    */
   prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
+  /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
+  steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
@@ -711,7 +713,20 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
-  async function prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+  function prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+    return deliverMessage('prompt', sessionId, text, images);
+  }
+
+  function steer(sessionId: string, text: string, images?: ChatImage[]): Promise<Result> {
+    return deliverMessage('steer', sessionId, text, images);
+  }
+
+  async function deliverMessage(
+    type: 'prompt' | 'steer',
+    sessionId: string,
+    text: string,
+    images?: ChatImage[]
+  ): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
@@ -721,7 +736,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
       const identity = identityOf(sessionId, state);
-      if (!send({ type: 'prompt', identity, text, ...(images?.length ? { images } : {}) })) {
+      if (!send({ type, identity, text, ...(images?.length ? { images } : {}) })) {
         return fail(translate('agent.workerUnavailable'));
       }
       state.running = true;
@@ -999,6 +1014,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     remove,
     prompt,
+    steer,
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = live.get(sessionId);

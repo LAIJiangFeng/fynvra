@@ -43,7 +43,8 @@ export interface SupervisedSession {
   subscribe(listener: (event: FynvraSessionEvent) => void): SessionEvents;
   /** 空闲时开始新一轮；运行中排到当前回合之后。images 是用户粘贴的图片，交给 pi 规整后随消息发出 */
   prompt(text: string, images?: ChatImage[]): Promise<void>;
-  steer(text: string): Promise<void>;
+  /** 运行中插话；images 同 prompt */
+  steer(text: string, images?: ChatImage[]): Promise<void>;
   /** 换模型 / 思考档位：下一次请求起生效，会话历史保留；失败抛错 */
   setModel(spec: ResolvedModelSpec): Promise<void>;
   /** 换审批档位：从下一次需要审批的工具调用起生效，回合进行中也可以；失败抛错 */
@@ -131,7 +132,7 @@ export class SessionSupervisor {
         void this.#run(command.identity, command.text, 'prompt', command.images);
         return;
       case 'steer':
-        void this.#run(command.identity, command.text, 'steer');
+        void this.#run(command.identity, command.text, 'steer', command.images);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -330,7 +331,7 @@ export class SessionSupervisor {
       this.#setStatus(managed, 'running');
     }
     try {
-      await (steering ? session.steer(text) : session.prompt(text, images));
+      await (steering ? session.steer(text, images) : session.prompt(text, images));
     } catch (error) {
       if (managed.closed) return;
       managed.failed = true;

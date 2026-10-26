@@ -165,10 +165,18 @@ describe('parseAgentCommand', () => {
     expect(
       parseAgentCommand({ type: 'set-approval-mode', identity, mode: 'full', role: 'orchestrator' })
     ).toEqual({ type: 'set-approval-mode', identity, mode: 'full' });
-    // steer 不带图片：多余的 images 与其他未知字段一样丢掉
+    // steer 与 prompt 一样可以带图片；带图片时 text 可以为空
     expect(
       parseAgentCommand({ type: 'steer', identity, text: 'look', images: [screenshot] })
-    ).toEqual({ type: 'steer', identity, text: 'look' });
+    ).toEqual({ type: 'steer', identity, text: 'look', images: [screenshot] });
+    expect(parseAgentCommand({ type: 'steer', identity, text: '', images: [screenshot] })).toEqual({
+      type: 'steer',
+      identity,
+      text: '',
+      images: [screenshot],
+    });
+    expect(parseAgentCommand({ type: 'steer', identity, text: '' })).toBeNull();
+    expect(parseAgentCommand({ type: 'steer', identity, text: 'x', images: [] })).toBeNull();
   });
 
   it('keeps inPlace only when it is true (false is the default)', () => {
