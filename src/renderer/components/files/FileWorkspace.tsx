@@ -41,7 +41,8 @@ export function FileWorkspace({
   const terminals = allTerminals.filter((tab) => tab.workspaceId === workspaceId);
   const terminalId = useTerminalsStore((state) => state.selected[workspaceId] ?? null);
   const [closingTerminal, setClosingTerminal] = useState<string | null>(null);
-  const selectTerminal = (id: string | null) => useTerminalsStore.getState().select(workspaceId, id);
+  const selectTerminal = (id: string | null) =>
+    useTerminalsStore.getState().select(workspaceId, id);
   const showChat = () => {
     selectTerminal(null);
     store.getState().showChat();
@@ -58,9 +59,10 @@ export function FileWorkspace({
   }, [selectedId]);
 
   useEffect(
-    () => store.subscribe((state) => {
-      if (state.selectedId) useTerminalsStore.getState().select(workspaceId, null);
-    }),
+    () =>
+      store.subscribe((state) => {
+        if (state.selectedId) useTerminalsStore.getState().select(workspaceId, null);
+      }),
     [store, workspaceId]
   );
 
@@ -164,7 +166,9 @@ export function FileWorkspace({
               >
                 <SquareTerminal className="size-3.5" />
                 {t('files.terminal')} {tab.number}
-                {tab.exited && <span className="text-muted-foreground">{t('terminals.finished')}</span>}
+                {tab.exited && (
+                  <span className="text-muted-foreground">{t('terminals.finished')}</span>
+                )}
               </button>
               <Button
                 size="icon-xs"
@@ -216,7 +220,12 @@ export function FileWorkspace({
           </NewSessionButton>
         </div>
       </nav>
-      <div className={cn('min-h-0 flex-1 flex-col', selectedId === null && !terminalId ? 'flex' : 'hidden')}>
+      <div
+        className={cn(
+          'min-h-0 flex-1 flex-col',
+          selectedId === null && !terminalId ? 'flex' : 'hidden'
+        )}
+      >
         {children}
       </div>
       {opened.map((file) => (
@@ -238,23 +247,38 @@ export function FileWorkspace({
       {terminals.map((tab) => (
         <div
           key={tab.id}
-          className={cn('min-h-0 min-w-0 flex-1 flex-col', terminalId === tab.id ? 'flex' : 'hidden')}
+          className={cn(
+            'min-h-0 min-w-0 flex-1 flex-col',
+            terminalId === tab.id ? 'flex' : 'hidden'
+          )}
         >
           <TerminalPane id={tab.id} active={terminalId === tab.id} />
         </div>
       ))}
-      <Dialog open={closingTerminal !== null} onOpenChange={(open) => { if (!open) setClosingTerminal(null); }}>
+      <Dialog
+        open={closingTerminal !== null}
+        onOpenChange={(open) => {
+          if (!open) setClosingTerminal(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('terminals.closeTitle')}</DialogTitle>
             <DialogDescription>{t('terminals.closeHint')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setClosingTerminal(null)}>{t('common.cancel')}</Button>
-            <Button variant="destructive" onClick={() => {
-              if (closingTerminal) void useTerminalsStore.getState().close(closingTerminal);
-              setClosingTerminal(null);
-            }}>{t('terminals.closeTitle')}</Button>
+            <Button variant="outline" onClick={() => setClosingTerminal(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (closingTerminal) void useTerminalsStore.getState().close(closingTerminal);
+                setClosingTerminal(null);
+              }}
+            >
+              {t('terminals.closeTitle')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
