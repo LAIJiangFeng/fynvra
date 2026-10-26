@@ -66,6 +66,17 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_REMOVE, 'ws-1');
   });
 
+  it('shell settings use a no-input list and target-only file picker', async () => {
+    await api.settings.availableShells();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS);
+    await api.settings.pickShell('agentShell');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_PICK_SHELL, 'agentShell');
+    await api.settings.update({ terminalShell: undefined });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_UPDATE, {
+      terminalShell: undefined,
+    });
+  });
+
   it('文件浏览出口完整接入，目录和预览只传工作区与条目 id', async () => {
     expect(Object.keys(api.files).sort()).toEqual([
       'copy',

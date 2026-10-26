@@ -232,7 +232,9 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 ### 7.4 工作区内嵌终端
 
 - 中央标签栏「＋ → 终端」创建真正的终端标签，与对话、文件并排；内容在应用内显示，不启动外部终端窗口。「＋ → 对话」复用新建会话流程。
-- Main 用 node-pty 托管 PTY，Windows 启动 PowerShell，其他平台启动登录 shell；cwd 从工作区 id 查注册表，Renderer 不传路径、shell 或环境变量。
+- Main 用 node-pty 托管 PTY，Windows 默认启动 PowerShell（`-NoLogo -NoProfile`），其他平台启动登录 shell；cwd 从工作区 id 查注册表，创建终端的 IPC 不接收路径、shell 或环境变量。
+- 通用设置的 `agentShell` / `terminalShell` 存 shell id 或自定义绝对路径；Main 检测可执行文件并通过 `settings:available-shells` 返回可选项与生效路径，`settings:pick-shell` 仅接收设置目标 id，由 Main 选择文件。终端选择失效时回到系统默认；显式选择 PowerShell 使用 `-NoLogo`（加载用户 profile），Git Bash 使用 `--login -i`，cmd / WSL / 自定义不附加参数。仅新终端生效。
+- Windows agent 默认只探测 Git Bash，缺失时报错，禁止交给 pi 自动选到 WSL。手写 `shellPath` 仍优先；否则按 `agentShell` 选择，缺失时退回 Git Bash。pi 1.4 的 bash 工具通过 `spawn(shellPath, ['-c', command])` 执行（没有 shell args 设置，`shellCommandPrefix` 仅追加命令文本），故支持 Git Bash / PowerShell 7 / Windows PowerShell，不提供 cmd / WSL；自定义须兼容 `-c`。非 bash 的语法说明经既有 role systemPrompt 追加路径传给 pi，不改 pi 内部或角色持久化。仅下次启动会话生效，非 Windows 隐藏 agent 选项。
 - `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
 - 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。

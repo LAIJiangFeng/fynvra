@@ -146,16 +146,56 @@ describe('createShellPathResolver', () => {
     expect(env.checked).toEqual([]);
   });
 
-  it('detects once and reuses the result, warning only once', async () => {
+  it('fails closed without Git Bash, caching the failed detection rather than letting pi pick WSL', async () => {
     const env = probe(null, []);
     const resolve = createShellPathResolver({
       ...env.deps,
       settings: { read: () => settingsWith() },
     });
-    expect(await Promise.all([resolve(), resolve()])).toEqual([undefined, undefined]);
-    expect(await resolve()).toBeUndefined();
+    const attempts = await Promise.allSettled([resolve(), resolve()]);
+    expect(attempts.map((attempt) => attempt.status)).toEqual(['rejected', 'rejected']);
+    await expect(resolve()).rejects.toThrow('No Git Bash found');
     expect(env.exec).toHaveBeenCalledTimes(1);
     expect(env.logs.filter((line) => line.startsWith('warn:'))).toHaveLength(1);
+  });
+
+  it('uses the current preference at each spawn, but preserves legacy precedence', async () => {
+    const pwsh = 'D:\\PowerShell\\pwsh.exe';
+    const env = probe(null, [pwsh, PROGRAM_FILES_BASH], {
+      exec: async (_file, args) => (args[0] === 'pwsh.exe' ? pwsh : ''),
+    });
+    let settings = parseSettings({ preferences: { agentShell: { kind: 'pwsh' } } });
+    const resolve = createShellPathResolver({ ...env.deps, settings: { read: () => settings } });
+    expect(await resolve()).toBe(pwsh);
+    settings = parseSettings({
+      preferences: { agentShell: { kind: 'pwsh' }, shellPath: 'legacy' },
+    });
+    expect(await resolve()).toBe('legacy');
+    settings = parseSettings({
+      preferences: { agentShell: { kind: 'custom', path: 'D:\\gone.exe' } },
+    });
+    expect(await resolve()).toBe(PROGRAM_FILES_BASH);
+    settings = settingsWith();
+    expect(await resolve()).toBe(PROGRAM_FILES_BASH);
+  });
+
+  it('ignores Windows choices on Unix and rechecks removed default executables', async () => {
+    const unix = probe(null, [], { platform: 'linux' });
+    const resolveUnix = createShellPathResolver({
+      ...unix.deps,
+      settings: { read: () => parseSettings({ preferences: { agentShell: { kind: 'pwsh' } } }) },
+    });
+    expect(await resolveUnix()).toBeUndefined();
+    expect(unix.exec).not.toHaveBeenCalled();
+    const files = [PROGRAM_FILES_BASH];
+    const env = probe(null, files);
+    const resolve = createShellPathResolver({
+      ...env.deps,
+      settings: { read: () => settingsWith() },
+    });
+    expect(await resolve()).toBe(PROGRAM_FILES_BASH);
+    files.pop();
+    await expect(resolve()).rejects.toThrow('No Git Bash found');
   });
 
   it('reads the override on every call, so a later edit wins over the cached detection', async () => {

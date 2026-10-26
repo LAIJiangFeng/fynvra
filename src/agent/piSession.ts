@@ -11,7 +11,7 @@ import {
 import type { Role } from '@fynvra/core';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import type { ChatImage } from '@shared/types/chat';
-import { createSessionSettings } from './shell';
+import { createSessionSettings, roleWithShellPrompt } from './shell';
 import type { OpenSession } from './supervisor';
 
 /** dispose 前先中止进行中的回合（pi 的 bash 是独立进程组，只在中止时整树结束），最多等这么久 */
@@ -44,7 +44,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     );
     let gate: ApprovalGate | undefined;
     const created = await createRoleSession({
-      role: spec.role,
+      role: roleWithShellPrompt(spec.role, spec.shellPath),
       cwd: spec.cwd,
       model,
       sessionManager,
