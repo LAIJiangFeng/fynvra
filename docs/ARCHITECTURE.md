@@ -309,7 +309,8 @@ export interface SessionsApi {
   换不成功时 worker 关掉该会话并报 fatal `session-error`，Main 下次使用前按记录重新 spawn。
 - **可选档位**（`sessions:model-options`）：Main 不加载 pi，经进程级的 `describe-models` / `models-described` 问 worker，结果按
   （协议, 模型 id, reasoning 标记）缓存；worker 用的是与注册模型同一份目录模板（同 id 同协议时官方 provider 的条目优先）。
-- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。
+- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。审批档位随主 agent：
+  按派发时主 agent 会话的当前档位（用户可能切过），没有主 agent 时才用角色自己的。
 
 ### 9.4 `window.fynvra.orchestration`（归属：orchestration-host；orchestration-ui 消费）
 ```ts

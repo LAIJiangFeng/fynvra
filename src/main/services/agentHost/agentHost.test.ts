@@ -157,7 +157,7 @@ describe('createAgentHost sessions', () => {
     expect(env.sent()).toEqual([]);
   });
 
-  it("records the role's approval mode; a dispatched worker takes its own role's, not the orchestrator's", async () => {
+  it("records the role's approval mode; a dispatched worker inherits the coordinator's current one", async () => {
     const careful: Role = { ...tester, id: 'careful', name: 'Careful', approvalMode: 'supervised' };
     const env = setup({
       roles: {
@@ -170,19 +170,31 @@ describe('createAgentHost sessions', () => {
     expect((await createSession(env, 'careful')).approvalMode).toBe('supervised');
 
     env.host.setCoordinatorLookup(() => coordinator.id);
-    const created = await env.host.implementsLauncher().createWorkerSession({
-      workspaceId: 'ws-1',
-      runId: 'run_1',
-      dispatchId: 'dsp_1',
-      roleId: 'tester',
-      cwd: '/worktrees/ws-1/a',
-      worktreeId: 'wt_1',
-      brief: '# A',
+    const dispatch = async () => {
+      const created = await env.host.implementsLauncher().createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId: `dsp_${env.host.list('ws-1').length}`,
+        roleId: 'tester',
+        cwd: '/worktrees/ws-1/a',
+        worktreeId: 'wt_1',
+        brief: '# A',
+      });
+      if (!created.ok) throw new Error(created.error);
+      return env.host.list('ws-1').find((session) => session.id === created.sessionId);
+    };
+    // 主 agent 当前是 full：worker 带过去的是 full，不是角色自己的 auto-edits
+    expect(await dispatch()).toMatchObject({
+      parentSessionId: coordinator.id,
+      approvalMode: 'full',
     });
-    if (!created.ok) throw new Error(created.error);
-    const worker = env.host.list('ws-1').find((session) => session.id === created.sessionId);
-    expect(worker).toMatchObject({ parentSessionId: coordinator.id, approvalMode: 'auto-edits' });
-    // 落盘的也是它
+    // 主 agent 切成 supervised 后再派：新 worker 跟随新档位
+    await env.host.setApprovalMode({ sessionId: coordinator.id, mode: 'supervised' });
+    expect(await dispatch()).toMatchObject({ approvalMode: 'supervised' });
+    // 没有主 agent（未接线）：回落角色自己的档位
+    env.host.setCoordinatorLookup(() => undefined);
+    expect(await dispatch()).toMatchObject({ approvalMode: 'auto-edits' });
+    // 落盘的也是它们
     expect(env.store.flush()).toBe(true);
     const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
     expect(
@@ -191,8 +203,10 @@ describe('createAgentHost sessions', () => {
         session.approvalMode,
       ])
     ).toEqual([
-      ['orchestrator', 'full'],
+      ['orchestrator', 'supervised'],
       ['careful', 'supervised'],
+      ['tester', 'full'],
+      ['tester', 'supervised'],
       ['tester', 'auto-edits'],
     ]);
   });

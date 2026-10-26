@@ -818,8 +818,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model: sessionModelOf(resolved.ref, requested?.thinking),
-        // 按派出的角色自己的档位，不继承主 agent 会话的
-        approvalMode: role.approvalMode,
+        // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
+        approvalMode:
+          (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
+          role.approvalMode,
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
