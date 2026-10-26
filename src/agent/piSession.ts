@@ -62,7 +62,11 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
             },
           }
         : {}),
-      resourcePaths: { skills: spec.skills, mcpServers: spec.mcpServers.map(toMcpServerConfig) },
+      resourcePaths: {
+        skills: spec.skills,
+        mcpServers: spec.mcpServers.map(toMcpServerConfig),
+        ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
+      },
       agentDir: options.agentDir,
       roles: spec.roles,
       ...(spec.inPlace ? { inPlace: true } : {}),

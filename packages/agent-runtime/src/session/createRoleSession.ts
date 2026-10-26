@@ -43,6 +43,7 @@ export interface RoleResourcePaths {
   /** skill 目录或 SKILL.md 路径；会话只加载这些 skill */
   skills: string[];
   mcpServers: McpServerConfig[];
+  instructionFile?: { name: string; content: string };
 }
 
 export interface CreateRoleSessionOptions {
@@ -113,6 +114,9 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   const promptAppend = buildRolePromptAppend(role, {
     worker: workerToolset !== undefined,
     inPlace: options.inPlace === true,
+    ...(options.resourcePaths.instructionFile
+      ? { instructionFile: options.resourcePaths.instructionFile }
+      : {}),
   });
   const gate = createApprovalGate({
     mode: role.approvalMode,

@@ -27,6 +27,7 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
       'files',
+      'instructions',
       'mcp',
       'notifications',
       'orchestration',
@@ -70,6 +71,41 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_ADD);
     await api.workspaces.remove('ws-1');
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_REMOVE, 'ws-1');
+  });
+
+  it('exposes instruction operations with IDs and user values, and strips push events', async () => {
+    await api.instructions.list();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_LIST);
+    await api.instructions.scan();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_SCAN);
+    await api.instructions.pick();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_PICK);
+    await api.instructions.import({ candidateIds: ['claude'] });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_IMPORT, {
+      candidateIds: ['claude'],
+    });
+    await api.instructions.save({ name: 'Mine', content: 'text' });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_SAVE, {
+      name: 'Mine',
+      content: 'text',
+    });
+    await api.instructions.read('file-id');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_READ, 'file-id');
+    await api.instructions.remove('file-id');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_REMOVE, 'file-id');
+    await api.instructions.toggle({ id: 'file-id', enabled: true });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.INSTRUCTIONS_TOGGLE, {
+      id: 'file-id',
+      enabled: true,
+    });
+    const callback = vi.fn();
+    const unsubscribe = api.instructions.onChanged(callback);
+    const [channel, listener] = mocks.on.mock.calls.at(-1) ?? [];
+    expect(channel).toBe(IPC_CHANNELS.INSTRUCTIONS_CHANGED);
+    listener({ sender: {} });
+    expect(callback).toHaveBeenCalledWith();
+    unsubscribe();
+    expect(mocks.removeListener).toHaveBeenLastCalledWith(channel, listener);
   });
 
   it('文件浏览出口完整接入，目录和预览只传工作区与条目 id', async () => {

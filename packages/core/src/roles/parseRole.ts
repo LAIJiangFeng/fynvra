@@ -24,7 +24,7 @@ export function isValidRoleId(value: unknown): value is string {
 /**
  * 把任意输入（JSON 文件、IPC 入参）收窄为 {@link Role}，不抛异常。
  *
- * - 只读自有属性，未知字段丢弃；可选字段为 `null` 视同缺省。
+ * - 只读自有属性，未知字段丢弃；可选字段为 `null` 视同缺省（instructionFileId 的 null 表示不使用）。
  * - `skillIds` / `mcpServerIds` 缺省为 `[]`，去重并保持顺序；`name` 去首尾空白。
  * - `tools` / `approvalMode` 必填：权限相关字段缺失时拒绝，而不是猜一个默认值。
  */
@@ -105,6 +105,15 @@ function readRole(input: unknown): Role {
   const rawModel = field(input, 'model');
   const model = rawModel === undefined ? undefined : readModel(rawModel);
   const skillIds = readIdList(input, 'skillIds');
+  const instructionFileId = Object.hasOwn(input, 'instructionFileId')
+    ? (input as Record<string, unknown>).instructionFileId
+    : undefined;
+  check(
+    instructionFileId === undefined ||
+      instructionFileId === null ||
+      isValidRoleId(instructionFileId),
+    'role.instructionFileId must be a registry ID or null'
+  );
   const mcpServerIds = readIdList(input, 'mcpServerIds');
   const tools = field(input, 'tools');
   check(isToolPolicy(tools), `role.tools must be one of ${oneOf(TOOL_POLICIES)}`);
@@ -120,6 +129,9 @@ function readRole(input: unknown): Role {
     ...(systemPrompt === undefined ? {} : { systemPrompt }),
     ...(model === undefined ? {} : { model }),
     skillIds,
+    ...(instructionFileId === undefined
+      ? {}
+      : { instructionFileId: instructionFileId as string | null }),
     mcpServerIds,
     tools,
     approvalMode,

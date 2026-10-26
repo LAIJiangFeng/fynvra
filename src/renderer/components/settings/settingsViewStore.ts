@@ -5,6 +5,7 @@ export const SETTINGS_SECTIONS = [
   'notifications',
   'providers',
   'roles',
+  'instructions',
   'skills',
   'mcp',
   'appearance',
