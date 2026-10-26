@@ -140,6 +140,8 @@ export interface SessionsState extends ChatProjection {
   archiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 恢复归档的会话：同上；恢复算一次更新，会话回到列表顶部 */
   unarchiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 从列表移除会话并清空本地投影；运行中拒绝，失败时恢复。底层记录文件保留。 */
+  removeSession(sessionId: string): Promise<IpcResult>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -258,6 +260,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   let localSeq = 0;
   /** prompt 调用还在途的会话：列表刷新不覆盖它们的乐观 running */
   const sending = new Set<string>();
+  /** 正在删除或已删除的会话：晚到的列表、history 与事件不能把它们放回来；失败时撤销。 */
+  const removedSessions = new Set<string>();
   /** 每个工作区 / 会话最近一次请求的序号：回包晚于更新的请求时丢弃 */
   const listRequests = new Map<string, number>();
   const historyRequests = new Map<string, number>();
@@ -448,14 +452,17 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           set((state) => ({ listErrors: { ...state.listErrors, [workspaceId]: result.error } }));
           return;
         }
-        const sessions = [...result.sessions].sort(byRecent).map((session) => {
-          const pending = modelSwitches.get(session.id);
-          const switching = approvalSwitches.get(session.id);
-          const withPendingModel = pending ? withModel(session, pending.model) : session;
-          return switching
-            ? { ...withPendingModel, approvalMode: switching.mode }
-            : withPendingModel;
-        });
+        const sessions = [...result.sessions]
+          .filter((session) => !removedSessions.has(session.id))
+          .sort(byRecent)
+          .map((session) => {
+            const pending = modelSwitches.get(session.id);
+            const switching = approvalSwitches.get(session.id);
+            const withPendingModel = pending ? withModel(session, pending.model) : session;
+            return switching
+              ? { ...withPendingModel, approvalMode: switching.mode }
+              : withPendingModel;
+          });
         set((state) => {
           const active = state.activeSessionId;
           // 选中的会话被删了才取消选中；它被归档（挪到另一份列表）时照常开着
@@ -505,6 +512,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       async selectSession(sessionId) {
+        if (sessionId && removedSessions.has(sessionId)) return;
         set({ activeSessionId: sessionId });
         if (!sessionId) return;
         const request = ++requestSeq;
@@ -813,6 +821,74 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       unarchiveSession: (sessionId) => setArchived(sessionId, false),
 
+      async removeSession(sessionId) {
+        // 先归并已收到的事件，避免 16ms 攒批期间把刚开始运行的会话当成空闲。
+        flushEvents();
+        const before = get();
+        const session = findSession(before, sessionId);
+        if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
+        if (sending.has(sessionId) || isBusy(statusOf(before, sessionId))) {
+          const error = translate('sessions.errors.removeWhileBusy');
+          set({ notice: error });
+          return { ok: false, error };
+        }
+        const { workspaceId } = session;
+        const lists = placeSessions(
+          before,
+          workspaceId,
+          allSessionsOf(before, workspaceId).filter((item) => item.id !== sessionId)
+        );
+        const wasActive = before.activeSessionId === sessionId;
+        const nextId = allSessionsOf(lists, workspaceId)[0]?.id ?? null;
+        removedSessions.add(sessionId);
+        historyRequests.delete(sessionId);
+        const wasHeld = heldQueues.delete(sessionId);
+        set({
+          ...lists,
+          drafts: omitKey(before.drafts, sessionId),
+          draftImages: omitKey(before.draftImages, sessionId),
+          queuedBySession: omitKey(before.queuedBySession, sessionId),
+          messagesBySession: omitKey(before.messagesBySession, sessionId),
+          runtimeBySession: omitKey(before.runtimeBySession, sessionId),
+          pendingApprovals: omitKey(before.pendingApprovals, sessionId),
+          loadingHistory: omitKey(before.loadingHistory, sessionId),
+          ...(wasActive ? { activeSessionId: nextId } : {}),
+          ...(before.modelPickerFor === sessionId ? { modelPickerFor: null } : {}),
+        });
+        if (wasActive && nextId) void get().selectSession(nextId);
+        const result = await safely(() => api.remove(sessionId));
+        if (result.ok) {
+          modelSwitches.delete(sessionId);
+          approvalSwitches.delete(sessionId);
+          return result;
+        }
+        removedSessions.delete(sessionId);
+        if (wasHeld) heldQueues.add(sessionId);
+        const restore = <T>(current: Record<string, T>, previous: Record<string, T>) => {
+          const value = previous[sessionId];
+          return value === undefined ? current : { ...current, [sessionId]: value };
+        };
+        // 只恢复被删会话；用户已切到别的会话或工作区时，不抢回选中。
+        const restoreActive =
+          wasActive && get().workspaceId === before.workspaceId && get().activeSessionId === nextId;
+        set((state) => ({
+          ...placeSessions(state, workspaceId, [
+            ...allSessionsOf(state, workspaceId).filter((item) => item.id !== sessionId),
+            session,
+          ]),
+          drafts: restore(state.drafts, before.drafts),
+          draftImages: restore(state.draftImages, before.draftImages),
+          queuedBySession: restore(state.queuedBySession, before.queuedBySession),
+          messagesBySession: restore(state.messagesBySession, before.messagesBySession),
+          runtimeBySession: restore(state.runtimeBySession, before.runtimeBySession),
+          pendingApprovals: restore(state.pendingApprovals, before.pendingApprovals),
+          ...(restoreActive ? { activeSessionId: sessionId } : {}),
+          notice: translate('sessions.errors.removeFailed', { error: result.error }),
+        }));
+        if (restoreActive && before.loadingHistory[sessionId]) void get().selectSession(sessionId);
+        return result;
+      },
+
       openModelPicker(sessionId) {
         set({ modelPickerFor: sessionId });
       },
@@ -822,6 +898,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       receiveEvent(envelope) {
+        if (removedSessions.has(envelope.sessionId)) return;
         pending.push(envelope);
         if (scheduled) return;
         scheduled = true;
@@ -829,6 +906,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       receiveApproval(request) {
+        if (removedSessions.has(request.sessionId)) return;
         flushEvents();
         set((state) => enqueueApproval(state, request));
       },

@@ -175,6 +175,9 @@ export const zhCN = {
     archived: '已归档',
     archive: '归档',
     unarchive: '恢复',
+    remove: '删除会话',
+    removeTitle: '删除会话？',
+    removeHint: '会话从列表中移除，底层记录文件保留',
     search: '搜索会话',
     searchHint: '搜索会话 {chord}',
     clearSearch: '清空',
@@ -195,6 +198,8 @@ export const zhCN = {
     errors: {
       switchWhileBusy: '会话正在运行，等本轮结束再切换模型',
       archiveWhileBusy: '会话正在运行，结束后再归档',
+      removeWhileBusy: '会话正在运行，结束后再删除',
+      removeFailed: '删除会话失败：{error}',
       notFound: '会话不存在',
       archiveFailed: '归档失败：{error}',
       unarchiveFailed: '恢复失败：{error}',

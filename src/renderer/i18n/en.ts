@@ -182,6 +182,10 @@ export const en: MessagesShape<typeof zhCN> = {
     archived: 'Archived',
     archive: 'Archive',
     unarchive: 'Restore',
+    remove: 'Delete session',
+    removeTitle: 'Delete session?',
+    removeHint:
+      'The session will be removed from the list. Its underlying record file will be kept',
     search: 'Search sessions',
     searchHint: 'Search sessions {chord}',
     clearSearch: 'Clear',
@@ -202,6 +206,8 @@ export const en: MessagesShape<typeof zhCN> = {
     errors: {
       switchWhileBusy: 'Session is running; switch models after this turn',
       archiveWhileBusy: 'Session is running; archive it after it finishes',
+      removeWhileBusy: 'Session is running; delete it after it finishes',
+      removeFailed: 'Failed to delete session: {error}',
       notFound: 'Session not found',
       archiveFailed: 'Failed to archive: {error}',
       unarchiveFailed: 'Failed to restore: {error}',
