@@ -13,10 +13,16 @@ asarUnpack:
   - node_modules/node-pty/**
 win:
   target: nsis
+  # 显式提供多尺寸 ico，避免依赖构建时由 png 转换；exe 资源图标需要 signAndEditExecutable（默认开启）。
+  icon: resources/icon.ico
+  signAndEditExecutable: true
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   include: resources/installer.nsh
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
   artifactName: ${productName}-${version}-${arch}-setup.${ext}
   deleteAppDataOnUninstall: false
 mac:
