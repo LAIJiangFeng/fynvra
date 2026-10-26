@@ -65,6 +65,7 @@ export interface FynvraApi {
   instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
   notifications: import('./domains/notifications').NotificationsApi;
+  usage: import('./domains/usage').UsageApi;
 }
 
 declare global {

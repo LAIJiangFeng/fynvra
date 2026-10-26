@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Bell,
   Boxes,
   FileText,
@@ -27,6 +28,7 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
+import { UsageSettings } from './UsageSettings';
 
 /** 页头只有页名（字典 settings.sections.<value>），不加副标题 */
 interface SectionSpec {
@@ -47,6 +49,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'mcp', icon: Plug, Component: McpSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
+  { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },
 ];
 
 /**
