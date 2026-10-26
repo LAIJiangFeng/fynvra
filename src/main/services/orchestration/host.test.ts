@@ -885,6 +885,68 @@ describe('cleanupWorktree', () => {
     expect(store.worktrees.list()).toHaveLength(0);
   });
 
+  describe('git 已注销的残留目录（之前的删除做了一半）', () => {
+    let removed: string[];
+    const notATree = {
+      code: 128,
+      stderr: `fatal: '${WORKTREE_PATH}' is not a working tree`,
+    };
+
+    function leftoverHost(overrides: Partial<OrchestrationHostDeps> = {}): OrchestrationHost {
+      removed = [];
+      return makeHost({
+        git: new GitWorktreeManager({
+          exec: fake.exec,
+          removeDir: async (path) => {
+            removed.push(path);
+          },
+          pathKind: async (path) => (path === WORKTREE_PATH ? 'directory' : 'missing'),
+        }),
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'remove' ? notATree : undefined
+      );
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'list' ? { stdout: 'worktree /repo\n\n' } : undefined
+      );
+    });
+
+    it('在托管根目录内：删目录 + prune，记录清掉，分支照样删', async () => {
+      host = leftoverHost();
+      const first = await reported();
+      const start = fake.calls.length;
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual({
+        ok: true,
+        removedWorktree: true,
+        deletedBranch: true,
+      });
+      expect(removed).toEqual([WORKTREE_PATH]);
+      expect(commandsSince(start)).toEqual(
+        expect.arrayContaining(['git worktree prune', 'git branch -D fynvra/add-toggle'])
+      );
+      expect(store.worktrees.list()).toHaveLength(0);
+    });
+
+    it('记录路径不在当前托管根目录下：不担保，拒绝并说明原因，记录保留', async () => {
+      host = leftoverHost();
+      const first = await reported();
+      host = leftoverHost({ resolveWorktreesRoot: async () => '/elsewhere/worktrees' });
+      const result = await host.cleanupWorktree({ dispatchId: first.dispatch.id });
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(
+          'fallback skipped: path is not a registered worktree (no owned worktrees root)'
+        ),
+      });
+      expect(removed).toEqual([]);
+      expect(store.worktrees.list()).toHaveLength(1);
+    });
+  });
+
   it('分支删不掉时 deletedBranch: false，worktree 照常清理', async () => {
     const first = await reported();
     await host.mergeWorktree({ dispatchId: first.dispatch.id });
