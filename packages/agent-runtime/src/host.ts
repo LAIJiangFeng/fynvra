@@ -1,4 +1,4 @@
-import type { Dispatch, Message, MessageType, Task } from '@fynvra/core';
+import type { Dispatch, Message, MessageType, Task, ThinkingLevel } from '@fynvra/core';
 
 /**
  * Host 调用结果。Host 不向工具抛异常：失败一律 `{ ok: false, error }`，
@@ -21,6 +21,10 @@ export interface DispatchTaskInput {
   roleId: string;
   /** 必须先完成（合并）的 task id */
   dependsOn: string[];
+  /** worker 用的模型：`modelId` 或 `providerId/modelId`；缺省按角色 / 主 agent 的模型 */
+  model?: string;
+  /** worker 的思考档位；缺省按模型 / 角色 / 主 agent 的默认 */
+  thinking?: ThinkingLevel;
 }
 export interface DispatchTaskOutput {
   task: Task;

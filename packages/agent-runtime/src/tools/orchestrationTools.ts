@@ -1,6 +1,13 @@
 import { type Static, StringEnum, type TSchema, Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { Dispatch, Message, Role, Task } from '@fynvra/core';
+import {
+  type Dispatch,
+  type Message,
+  normalizeThinkingLevel,
+  type Role,
+  type Task,
+  THINKING_LEVELS,
+} from '@fynvra/core';
 import type {
   CleanupWorktreeOutput,
   DispatchRef,
@@ -426,6 +433,19 @@ function dispatchTaskSchema(roles: readonly RoleOption[]) {
             'task_ids from earlier dispatch_task results that must be completed (merged) before this task starts.',
         })
       ),
+      model: Type.Optional(
+        Type.String({
+          description:
+            'Model for the worker: a configured model id (e.g. "gpt-5.5") or "providerId/modelId" to disambiguate. ' +
+            "Only set it when the user names a model for this task; omitted = the role's model, else your current model.",
+        })
+      ),
+      thinking: Type.Optional(
+        StringEnum([...THINKING_LEVELS], {
+          description:
+            'Thinking level for the worker. Only set it when the user names one; omitted = the default of the model, role or your session.',
+        })
+      ),
     },
     { additionalProperties: false }
   );
@@ -449,6 +469,7 @@ function isStringArray(value: unknown): value is string[] {
 
 function normalizeRole(value: unknown, roles: readonly RoleOption[]): unknown {
   if (value === undefined || value === null) return DEFAULT_ROLE_ID;
+  if (value === null) return undefined;
   if (typeof value !== 'string') return value;
   const wanted = value.trim();
   if (!wanted) return DEFAULT_ROLE_ID;
@@ -468,7 +489,23 @@ function normalizeDispatchArgs(raw: unknown, roles: readonly RoleOption[]): ArgR
     spec: trimmed(pick(args, 'spec')),
     role: normalizeRole(pick(args, 'role', 'role_id', 'roleId'), roles),
     depends_on: stringList(pick(args, 'depends_on', 'dependsOn')) ?? [],
+    model: emptyToUndefined(trimmed(pick(args, 'model', 'model_id', 'modelId'))),
+    thinking: normalizeThinking(
+      pick(args, 'thinking', 'thinking_level', 'thinkingLevel', 'reasoning_effort')
+    ),
   });
+}
+
+function emptyToUndefined(value: unknown): unknown {
+  return value === '' || value === null ? undefined : value;
+}
+
+/** 档位不区分大小写、去空白；`none` 归一为 `off`；认不出的原样留给校验报错 */
+function normalizeThinking(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const wanted = value.trim().toLowerCase();
+  if (wanted === '') return undefined;
+  return normalizeThinkingLevel(wanted) ?? wanted;
 }
 
 function parseDispatchArgs(
@@ -491,9 +528,23 @@ function parseDispatchArgs(
   if (!isStringArray(args.depends_on)) {
     return { ok: false, error: 'depends_on must be an array of task ids' };
   }
+  if (args.model !== undefined && typeof args.model !== 'string') {
+    return { ok: false, error: 'model must be a model id string' };
+  }
+  const thinking = args.thinking === undefined ? undefined : normalizeThinkingLevel(args.thinking);
+  if (args.thinking !== undefined && thinking === undefined) {
+    return { ok: false, error: `thinking must be one of ${THINKING_LEVELS.join(', ')}` };
+  }
   return {
     ok: true,
-    value: { title: title.value, spec: spec.value, roleId: role.value, dependsOn: args.depends_on },
+    value: {
+      title: title.value,
+      spec: spec.value,
+      roleId: role.value,
+      dependsOn: args.depends_on,
+      ...(args.model !== undefined ? { model: args.model } : {}),
+      ...(thinking !== undefined ? { thinking } : {}),
+    },
   };
 }
 
@@ -583,6 +634,13 @@ function firstLine(text: string): string {
   return text.trim().split('\n', 1)[0] ?? '';
 }
 
+/** 派发时指定了模型或思考档位才显示 */
+function modelLines(task: Task): string[] {
+  if (task.model === undefined && task.thinking === undefined) return [];
+  const thinking = task.thinking ? ` · thinking: ${task.thinking}` : '';
+  return [`- model: ${task.model ?? 'default'}${thinking}`];
+}
+
 function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
   if (!dispatch) {
     return [
@@ -590,6 +648,7 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
       `- task_id: ${code(task.id)}`,
       `- title: ${task.title}`,
       `- role: ${task.roleId}`,
+      ...modelLines(task),
       `- status: ${task.status}`,
       `- depends_on: ${task.dependsOn.map(code).join(', ') || 'none'}`,
       '',
@@ -603,6 +662,7 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
     `- dispatch_id: ${code(dispatch.id)}`,
     `- title: ${task.title}`,
     `- role: ${task.roleId}`,
+    ...modelLines(task),
     inPlace
       ? '- works in: the workspace directory itself (no git: no worktree or branch)'
       : `- branch: ${code(dispatch.branch)}`,
@@ -622,6 +682,7 @@ function formatWorkers(workers: readonly WorkerEntry[]): string {
     const lines = [
       `### ${code(task.id)} · ${task.title}`,
       `- status: ${task.status} · role: ${task.roleId}`,
+      ...modelLines(task),
     ];
     if (task.dependsOn.length > 0)
       lines.push(`- depends_on: ${task.dependsOn.map(code).join(', ')}`);

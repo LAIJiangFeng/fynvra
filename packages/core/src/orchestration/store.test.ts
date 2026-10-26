@@ -335,6 +335,17 @@ describe('parseOrchestrationSnapshot', () => {
     });
   });
 
+  it('keeps the model / thinking chosen at dispatch and rejects an unknown thinking level', () => {
+    const chosen = { ...task, model: 'openai/gpt-6-astra', thinking: 'max' };
+    expect(parseOrchestrationSnapshot({ version: 1, tasks: [chosen] })).toMatchObject({
+      ok: true,
+      snapshot: { tasks: [chosen] },
+    });
+    expect(
+      parseOrchestrationSnapshot({ version: 1, tasks: [{ ...task, thinking: 'ultra' }] })
+    ).toMatchObject({ ok: false, error: expect.stringContaining('thinking') });
+  });
+
   it.each([null, 'HEAD', {}, { baseCommit: 42, headCommit: 'abc' }, { baseCommit: 'abc' }])(
     '拒绝非法的 mergedDiff %j',
     (mergedDiff) => {

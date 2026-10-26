@@ -289,6 +289,30 @@ describe('listWorkers 与排队派发', () => {
     expect(launcher.created()[1]).toMatchObject({ roleId: 'tester' });
   });
 
+  it('keeps the model / thinking chosen at dispatch on the Task and launches the queued worker with it', async () => {
+    const first = await dispatch('First');
+    expect(launcher.created()[0]).not.toHaveProperty('model');
+    expect(launcher.created()[0]).not.toHaveProperty('thinking');
+    const queued = await host.dispatchTask({
+      title: 'Second',
+      spec: 'S',
+      roleId: 'worker',
+      dependsOn: [first.task.id],
+      model: ' gpt-6-astra ',
+      thinking: 'max',
+    });
+    expect(queued).toMatchObject({
+      ok: true,
+      task: { status: 'todo', model: 'gpt-6-astra', thinking: 'max' },
+    });
+    const queuedId = queued.ok ? queued.task.id : '';
+    expect(store.tasks.get(queuedId)).toMatchObject({ model: 'gpt-6-astra', thinking: 'max' });
+
+    await worker(first.dispatch.id).reportDone('succeeded', 'Done.');
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    expect(launcher.created()[1]).toMatchObject({ model: 'gpt-6-astra', thinking: 'max' });
+  });
+
   it('依赖被放弃：排队任务随之放弃，并给主 agent 投 escalation', async () => {
     const first = await dispatch('First');
     const queued = await host.dispatchTask({

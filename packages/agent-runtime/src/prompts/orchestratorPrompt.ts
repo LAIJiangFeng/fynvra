@@ -13,7 +13,7 @@ This section explains how your tools work; your role instructions cover how you 
 read, grep, find, ls and git_readonly are read-only: use them to understand the code, write briefs and review results. You have no write, edit or shell tool; every change goes through the tools below.
 
 ## Starting work
-- dispatch_task { title, spec, role?, depends_on? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background. After dispatching you are free to end your turn: you will be woken automatically when it reports, asks or escalates.
+- dispatch_task { title, spec, role?, depends_on?, model?, thinking? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background. After dispatching you are free to end your turn: you will be woken automatically when it reports, asks or escalates. Set model (a configured model id, or providerId/modelId) and thinking (off/minimal/low/medium/high/xhigh/max) only when the user names a model or thinking level for the task; otherwise omit them and the worker uses its role's model or your current one.
   - title: short (under 80 characters); names the worker card and the branch.
   - spec: the brief, the worker's only context (it has not seen this conversation). Write it for a capable colleague, in these sections:
     - **Target**: the goal and why it matters.
