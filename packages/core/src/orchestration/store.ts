@@ -1,5 +1,5 @@
 import { type CoreFs, isNotFoundError } from '../fs';
-import { isDispatchOutcome, isMessageType, isTaskStatus } from '../guards';
+import { isDispatchOutcome, isMessageType, isTaskStatus, isThinkingLevel } from '../guards';
 import { errorMessage, parentDir, writeFileAtomic } from '../internal/files';
 import type { Dispatch, Message, Run, Task, Worktree } from '../types';
 import { canTransitionTask, isDispatchSettled } from './transitions';
@@ -343,6 +343,8 @@ const TASK_SCHEMA: Schema<Task> = {
   roleId: isString,
   status: isTaskStatus,
   dependsOn: isStringArray,
+  model: { optional: isString },
+  thinking: { optional: isThinkingLevel },
   mergedDiff: {
     optional: (value) =>
       isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),

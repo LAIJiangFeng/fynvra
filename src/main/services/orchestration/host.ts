@@ -242,6 +242,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         roleId: task.roleId,
         cwd: worktree?.path ?? repoPath,
         ...(worktree ? { worktreeId: worktree.id } : {}),
+        // 派发时指定的模型 / 档位记在 Task 上：排队启动与驳回重试都沿用
+        ...(task.model !== undefined ? { model: task.model } : {}),
+        ...(task.thinking !== undefined ? { thinking: task.thinking } : {}),
         brief,
       });
     } catch (error) {
@@ -371,6 +374,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
 
     const existing = findRun();
     const dependsOn = [...new Set(input.dependsOn)];
+    const model = input.model?.trim();
     for (const id of dependsOn) {
       const dependency = store.tasks.get(id);
       if (dependency === undefined || dependency.runId !== existing?.id) {
@@ -400,6 +404,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       roleId: role.id,
       status: 'todo',
       dependsOn,
+      ...(model ? { model } : {}),
+      ...(input.thinking !== undefined ? { thinking: input.thinking } : {}),
     };
     if (!dependsOn.every((id) => store.tasks.get(id)?.status === 'completed')) {
       return { ok: true, task: unwrap(store.tasks.insert(task)).value };
