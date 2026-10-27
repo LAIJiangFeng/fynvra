@@ -745,7 +745,7 @@ export const zhCN = {
       modelsMore: '模型：{names} 等 {count} 个',
       modelsList: '模型：{names}',
       imported: '已导入 {count} 个模型服务',
-      importModelsTitle: '为「{name}」选择模型（{position}/{total}）',
+      importModelsTitle: '为「{name}」选择模型 ({position}/{total})',
       importModelsHint: '选择并加入需要的模型，再保存并继续；也可以跳过此服务',
       saveModelsAndContinue: '保存并继续',
       skipModels: '跳过',
