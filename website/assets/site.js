@@ -134,13 +134,20 @@
     const rect = event.currentTarget.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const radius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    );
     const transition = document.startViewTransition(commit);
     transition.ready
       .then(() => {
         root.animate(
           { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
-          { duration: 520, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', pseudoElement: '::view-transition-new(root)' }
+          {
+            duration: 520,
+            easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
+            pseudoElement: '::view-transition-new(root)',
+          }
         );
       })
       .catch(() => {
@@ -253,7 +260,9 @@
       root.classList.toggle('menu-open', open);
       syncControls();
     };
-    button.addEventListener('click', () => setOpen(button.getAttribute('aria-expanded') !== 'true'));
+    button.addEventListener('click', () =>
+      setOpen(button.getAttribute('aria-expanded') !== 'true')
+    );
     menu.addEventListener('click', (event) => {
       if (event.target instanceof Element && event.target.closest('a')) setOpen(false);
     });
@@ -313,7 +322,10 @@
     const reveal = (link) => {
       const behavior = reducedMotion.matches ? 'auto' : 'smooth';
       if (list.scrollWidth > list.clientWidth) {
-        list.scrollTo({ left: link.offsetLeft - (list.clientWidth - link.offsetWidth) / 2, behavior });
+        list.scrollTo({
+          left: link.offsetLeft - (list.clientWidth - link.offsetWidth) / 2,
+          behavior,
+        });
       } else if (toc.scrollHeight > toc.clientHeight) {
         toc.scrollTo({ top: link.offsetTop - toc.clientHeight / 2, behavior });
       }

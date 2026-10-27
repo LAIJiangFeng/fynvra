@@ -542,7 +542,11 @@ kbd {
   width: min(1100px, 92vw);
   height: 440px;
   transform: translateX(-50%);
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--ink) 8%, transparent), transparent);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--ink) 8%, transparent),
+    transparent
+  );
   filter: blur(36px);
   opacity: 0.7;
 }
@@ -725,20 +729,6 @@ kbd {
 .bench-panel[hidden],
 [data-side][hidden] {
   display: none;
-}
-
-.bench-panel .chat-stream {
-  flex: 1;
-}
-
-.bench-panel .step {
-  opacity: 0;
-}
-
-.bench-panel.is-play .step,
-[data-side].is-play .step {
-  animation: scene-in 0.4s var(--ease) forwards;
-  animation-delay: calc(var(--d, 0) * 0.32s);
 }
 
 .bench-hint,
@@ -964,6 +954,10 @@ kbd {
   overflow: hidden;
   padding: 16px 18px;
   mask-image: linear-gradient(to bottom, transparent, #000 48px);
+}
+
+.bench-panel .chat-stream {
+  flex: 1;
 }
 
 .msg {
@@ -1906,6 +1900,16 @@ kbd {
   padding: 26px 22px 0 0;
 }
 
+.bench-panel .step {
+  opacity: 0;
+}
+
+.bench-panel.is-play .step,
+[data-side].is-play .step {
+  animation: scene-in 0.4s var(--ease) forwards;
+  animation-delay: calc(var(--d, 0) * 0.32s);
+}
+
 .step::before {
   content: "";
   position: absolute;
@@ -2760,16 +2764,16 @@ kbd {
   animation-delay: calc(var(--d) * 0.42s);
 }
 
-.scene.is-play .scene-empty {
-  animation: scene-leave 2.4s var(--ease) forwards;
-}
-
 .scene-empty {
   padding: 10px 12px;
   border: 1px dashed var(--app-line);
   border-radius: 8px;
   color: var(--ink-3);
   font-size: 13px;
+}
+
+.scene.is-play .scene-empty {
+  animation: scene-leave 2.4s var(--ease) forwards;
 }
 
 .scene-toast {
