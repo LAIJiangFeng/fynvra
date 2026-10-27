@@ -1,8 +1,33 @@
 import { MODEL_CATALOG } from '@shared/modelCatalog';
-import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
+import type {
+  ModelProviderView,
+  ProviderImportCandidate,
+  ProviderImportSource,
+} from '@shared/types/llm';
 import { translate } from '../../i18n';
 
 // 「从本机导入」弹窗的纯逻辑：不碰 DOM 与 window.fynvra，在 node 下测试。
+
+export interface ImportModelQueue {
+  providers: readonly ModelProviderView[];
+  index: number;
+}
+
+/** 只为成功导入的服务排队；顺序沿用 Main 的导入结果，不包含跳过的候选。 */
+export function createImportModelQueue(
+  imported: readonly ModelProviderView[]
+): ImportModelQueue | null {
+  return imported.length > 0 ? { providers: [...imported], index: 0 } : null;
+}
+
+/** 保存成功或跳过当前服务后进入下一项；全部跳过 / 已到末尾则结束。 */
+export function advanceImportModelQueue(
+  queue: ImportModelQueue,
+  action: 'saved' | 'skip' | 'skip-all'
+): ImportModelQueue | null {
+  const index = queue.index + 1;
+  return action === 'skip-all' || index >= queue.providers.length ? null : { ...queue, index };
+}
 
 /** 导入结果一行：导入了几个，有跳过的再列出「名称（原因）」；MCP 导入共用 */
 export function skippedSummary(
