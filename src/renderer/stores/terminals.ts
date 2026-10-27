@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { create } from 'zustand';
+import { attachTerminalClipboard } from '@/components/terminal/terminalClipboard';
 import { translate } from '@/i18n';
 
 interface TerminalTab {
@@ -17,6 +18,8 @@ interface TerminalResource {
   container: HTMLDivElement;
   opened: boolean;
   ready: boolean;
+  copySelection(): Promise<void>;
+  pasteClipboard(): Promise<void>;
 }
 
 export const terminalResources = new Map<string, TerminalResource>();
@@ -51,15 +54,20 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     terminal.loadAddon(fit);
     const container = document.createElement('div');
     container.style.height = '100%';
-    const resource = { terminal, fit, container, opened: false, ready: false };
+    const report = (error: unknown) => {
+      if (terminalResources.has(id)) terminal.writeln(`\r\n${errorMessage(error)}`);
+    };
+    const clipboard = attachTerminalClipboard(terminal, {
+      isMac: window.fynvra.window.platform === 'darwin',
+      isAlive: () => terminalResources.get(id)?.terminal === terminal,
+      onError: report,
+    });
+    const resource = { terminal, fit, container, opened: false, ready: false, ...clipboard };
     terminalResources.set(id, resource);
     set((state) => ({
       tabs: [...state.tabs, { id, workspaceId, number: nextNumber++, exited: false }],
       selected: { ...state.selected, [workspaceId]: id },
     }));
-    const report = (error: unknown) => {
-      if (terminalResources.has(id)) terminal.writeln(`\r\n${errorMessage(error)}`);
-    };
     terminal.onData((data) => {
       if (!resource.ready) return;
       for (let offset = 0; offset < data.length; offset += 65_536) {

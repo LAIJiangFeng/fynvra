@@ -5,6 +5,12 @@
  */
 export const zhCN = {
   terminals: {
+    copy: '复制',
+    paste: '粘贴',
+    selectAll: '全选',
+    clear: '清屏',
+    copyFailed: '无法复制终端选中文本',
+    pasteFailed: '无法读取剪贴板',
     exited: '进程已退出，退出码 {code}',
     finished: '已结束',
     closeTitle: '关闭终端',

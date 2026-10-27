@@ -4,6 +4,12 @@ import type { zhCN } from './zh-CN';
 /** 界面文案（English）：与 ./zh-CN.ts 同形，同样极简 */
 export const en: MessagesShape<typeof zhCN> = {
   terminals: {
+    copy: 'Copy',
+    paste: 'Paste',
+    selectAll: 'Select all',
+    clear: 'Clear',
+    copyFailed: 'Could not copy terminal selection',
+    pasteFailed: 'Could not read the clipboard',
     exited: 'Process exited with code {code}',
     finished: 'Exited',
     closeTitle: 'Close terminal',
