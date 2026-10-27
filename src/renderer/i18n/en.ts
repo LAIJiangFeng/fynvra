@@ -498,7 +498,7 @@ export const en: MessagesShape<typeof zhCN> = {
     noUncommitted: 'No uncommitted changes',
     noCommitList: 'No commits yet',
     currentWorktreeRemoved:
-      'This conversation’s worktree has been removed. Saved task history can be reviewed from the task drawer.',
+      'This conversation’s worktree has been removed. Saved task history can be reviewed from the task drawer',
     worktreeRemoved: 'Worktree removed; uncommitted changes are unavailable',
     folderFiles: '{count} files',
     fileStatus: {

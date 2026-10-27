@@ -208,7 +208,7 @@ describe('notifications IPC', () => {
       kind: 'command',
       title: 'bash',
       detail: 'git push',
-      expiresAt: 0,
+      expiresAt: Date.now() + 60_000,
     } satisfies ApprovalRequest);
     onMessage('ws-1', {
       id: 'msg_1',
