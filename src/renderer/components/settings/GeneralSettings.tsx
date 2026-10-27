@@ -95,7 +95,6 @@ export function GeneralSettings() {
     <div className="grid gap-8">
       <LanguageSection />
       <ShellsSection />
-      <UpdateSettings />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>
@@ -158,6 +157,7 @@ export function GeneralSettings() {
 
       <SessionsSection />
       <TimelineSection />
+      <UpdateSettings />
     </div>
   );
 }
