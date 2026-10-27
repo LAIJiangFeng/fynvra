@@ -1,5 +1,6 @@
 import { basename, dirname } from 'node:path';
 import type {
+  CleanupWorktreeInput,
   CleanupWorktreeOutput,
   DispatchRef,
   DispatchTaskInput,
@@ -47,6 +48,7 @@ import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
+import { mergedCleanupBlocker } from './worktreeCleanup';
 import { isInsideDirectory } from './worktreesRoot';
 
 /** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
@@ -116,7 +118,7 @@ function notMergeable(task: Task, inPlace: boolean): string {
     case 'in-progress':
       return `task ${task.id} is still in progress: its worker has not reported done; call wait_for_workers first`;
     case 'failed':
-      return `the worker reported task ${task.id} as failed; reject_work to retry it or cleanup_worktree to abandon it`;
+      return `the worker reported task ${task.id} as failed; reject_work to retry it or cleanup_worktree with abandon: true to abandon it`;
     case 'completed':
       return `task ${task.id} is already ${inPlace ? 'accepted' : 'merged'}; call cleanup_worktree`;
     default:
@@ -191,6 +193,19 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       );
     }
     return { ok: true, run, task, dispatch, worktree: store.worktrees.get(dispatch.worktreeId) };
+  }
+
+  /** 验收和清理必须指向最新尝试，旧汇报不能验收或取消重试中的工作。 */
+  function resolveCurrent(dispatchId: string): HostResult<Resolved> {
+    const found = resolve(dispatchId);
+    if (!found.ok) return found;
+    const current = latestDispatch(found.task.id);
+    if (current?.id !== dispatchId) {
+      return fail(
+        `dispatch ${dispatchId} is not the current attempt; use dispatch_id "${current?.id}" from list_workers`
+      );
+    }
+    return found;
   }
 
   async function promptWorker(sessionId: string, text: string) {
@@ -594,7 +609,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return { ok: true, merged: true, targetBranch: '', mode: 'in-place' };
   }
   async function mergeWorktree(input: DispatchRef): Promise<HostResult<MergeWorktreeOutput>> {
-    const found = resolve(input.dispatchId);
+    const found = resolveCurrent(input.dispatchId);
     if (!found.ok) return found;
     const { task, dispatch, worktree } = found;
     if (isInPlace(dispatch)) return await acceptInPlace(task);
@@ -726,7 +741,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return { ok: true, messageId: instruction.message.id };
   }
 
-  /** 未完成的任务被清理即放弃：进行中的尝试按 failed 结算。 */
+  /** 显式放弃：进行中的尝试按 failed 结算，已有的汇报保持原样。 */
   function abandon(task: Task): void {
     const active = store.activeDispatch(task.id);
     if (active !== undefined) {
@@ -739,28 +754,60 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (task.status !== 'abandoned') unwrap(store.tasks.update(task.id, { status: 'abandoned' }));
   }
 
-  async function cleanupWorktree(input: DispatchRef): Promise<HostResult<CleanupWorktreeOutput>> {
-    const found = resolve(input.dispatchId);
+  async function cleanupWorktree(
+    input: CleanupWorktreeInput
+  ): Promise<HostResult<CleanupWorktreeOutput>> {
+    if (input.abandon !== undefined && typeof input.abandon !== 'boolean') {
+      return fail('abandon must be a boolean');
+    }
+    const found = resolveCurrent(input.dispatchId);
     if (!found.ok) return found;
     const { task, dispatch, worktree } = found;
+    const completed = task.status === 'completed';
+    if (!completed && task.status !== 'abandoned') {
+      if (input.abandon !== true) {
+        return fail(
+          `task ${task.id} is ${task.status}; cleanup does not accept or abandon work. Review successful reports and call merge_worktree to accept (including clean no-change tasks), reject_work to retry reported work, or cleanup_worktree with abandon: true to explicitly cancel and discard it`
+        );
+      }
+      // 取消意图先落盘：即使资源删除失败，任务也确实已被主动放弃，重试清理不改变汇报。
+      abandon(task);
+    }
     if (isInPlace(dispatch)) {
-      // 普通目录没有 worktree 和分支可删：只停 worker；没完成的任务照样放弃，改动留在目录里
-      if (task.status !== 'completed') abandon(task);
+      // 普通目录只停 worker，改动留在目录里；验收与取消仍遵循相同的状态契约。
       await disposeWorker(dispatch.workerSessionId);
       return { ok: true, removedWorktree: false, deletedBranch: false, mode: 'in-place' };
     }
-    if (worktree === undefined) return fail(cleanedUp(dispatch));
-    const merged = task.status === 'completed';
-    if (!merged) abandon(task);
-    // 先停 worker：它的进程可能还占着 worktree 里的文件
+    if (worktree === undefined) {
+      // 不再按旧 branch 名称删分支：它可能已被后续任务复用。
+      if (!completed) await disposeWorker(dispatch.workerSessionId);
+      return { ok: true, removedWorktree: false, deletedBranch: false };
+    }
+    if (completed) {
+      const status = await git.status(worktree);
+      if (!status.ok) return fail(`could not read the worktree status: ${status.error}`);
+      const blocker = mergedCleanupBlocker(task.status, status.status);
+      if (blocker !== null) {
+        return fail(
+          `cannot clean up completed task ${task.id}: ${blocker}; preserve and resolve the remaining work before retrying cleanup`
+        );
+      }
+    }
+    // 先停 worker：它的进程可能还占着 worktree 里的文件。
     await disposeWorker(dispatch.workerSessionId);
-    const removed = await removeWorktree(worktree);
+    const removed = completed
+      ? await git.remove({ repoPath, path: worktree.path })
+      : await removeWorktree(worktree);
     if (!removed.ok) {
       return fail(`could not remove the worktree ${worktree.path}: ${removed.error}`);
     }
     store.worktrees.delete(worktree.id);
-    // 已合并的分支用 -d（git 再确认一次确实合进去了）；放弃的分支连同未合并提交一起删
-    const deleted = await git.deleteBranch({ repoPath, branch: worktree.branch, force: !merged });
+    // 已验收任务只用 -d，且不用 --force 删目录，保护验收之后的新改动。
+    const deleted = await git.deleteBranch({
+      repoPath,
+      branch: worktree.branch,
+      force: !completed,
+    });
     return { ok: true, removedWorktree: true, deletedBranch: deleted.ok };
   }
 

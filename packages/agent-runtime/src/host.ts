@@ -131,6 +131,11 @@ export interface RejectWorkOutput {
   messageId: string;
 }
 
+export interface CleanupWorktreeInput extends DispatchRef {
+  /** 显式放弃未完成的任务并丢弃 worktree；缺省只清理 completed / abandoned，永不改变 completed。 */
+  abandon?: boolean;
+}
+
 export interface CleanupWorktreeOutput {
   removedWorktree: boolean;
   deletedBranch: boolean;
@@ -167,7 +172,7 @@ export interface OrchestrationHost {
   mergeWorktree(input: DispatchRef, signal?: AbortSignal): Promise<HostResult<MergeWorktreeOutput>>;
   rejectWork(input: RejectWorkInput, signal?: AbortSignal): Promise<HostResult<RejectWorkOutput>>;
   cleanupWorktree(
-    input: DispatchRef,
+    input: CleanupWorktreeInput,
     signal?: AbortSignal
   ): Promise<HostResult<CleanupWorktreeOutput>>;
 }

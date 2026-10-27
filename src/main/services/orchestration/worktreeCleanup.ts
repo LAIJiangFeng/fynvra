@@ -37,7 +37,7 @@ export interface MergedCleanupDeps {
 
 /**
  * 删掉 dispatch 的 worktree 与分支，前提是已合并且干净（{@link mergedCleanupBlocker}）；否则原样保留。
- * 与 cleanup_worktree 对已合并任务的处理相同，但更保守：不加 --force，检查之后又有了改动时 git 会拒绝。
+ * 与 cleanup_worktree 对已合并任务的处理相同：不加 --force，检查之后又有了改动时 git 会拒绝。
  */
 export async function cleanupMergedWorktree(
   deps: MergedCleanupDeps,

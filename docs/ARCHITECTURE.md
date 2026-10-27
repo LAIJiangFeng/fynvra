@@ -153,7 +153,7 @@ export interface Message {
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
   - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止按 deny，拒绝以可读文本作为工具结果返回模型。worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main，再发 `approval_request` 会话事件。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
-  `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id }`。
+  `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
 - worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（每轮只能成功调用一次，同一轮再次调用返回错误；新的 agent run 开始时重新开放，因此 Main 要把 `reject_work` 的 feedback 作为新 prompt 发给 worker，worker 才能再次汇报）。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
@@ -171,6 +171,13 @@ export interface Message {
    - 不通过：`reject_work` 把意见发回 worker，回到 3。
 5. 全部任务 settled 后向用户给出每个任务的结果、证据、未解决项。
 
+**验收与清理**：worker 汇报 succeeded 只将任务置于 `in-review`；只有 `merge_worktree` 验收后才是 `completed`，
+包括经审查的只读 / 空改动任务（Git 可以无新增合并提交）。验收与清理要求当前 dispatch，旧尝试不能操作新的重试。
+`cleanup_worktree` 默认只清理已验收或已放弃任务；未完成时无副作用地返回错误，提示验收、打回或显式 `abandon: true` 取消。
+显式取消先记录 `abandoned`（已有汇报保留，进行中尝试结算为 failed），即使删除失败也保持取消状态，资源记录保留供重试。
+`completed` 在任何清理路径上都不变；清理前检查干净且无新增未合并提交，以非强制删除目录和分支保护验收后的改动。
+只有放弃的任务才强制丢弃 worktree / 分支；清理不自动验收或合并。无 worktree 记录的重复清理不按旧分支名删资源。
+
 **改动的生命周期**：`review_diff` 与面板共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
 合并时将创建基准和 worker 提交 SHA 写入 Task 的可选 `mergedDiff`，随编排快照保存；正常清理、归档清理、重启后仍读这对提交，
 不拿主仓库当前 HEAD 代替 worker 提交。旧快照没有此字段时，沿用尚存的 worktree 基准与 worker 分支；两者已清理且无历史范围时明确报不可用。
@@ -182,7 +189,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - `dispatch_task` 不建 worktree，worker 的 cwd 是工作区目录（并行的 worker 共用它，工具结果建议一次只派一个），
   Dispatch 记 `mode: 'in-place'`；`review_diff` 没有 diff，给出 worker 在 `report_done` 里汇报的改动文件；
   `run_checks` 在工作区目录里跑；`merge_worktree` 无需合并，把 in-review 的任务记为 completed；
-  `cleanup_worktree` 只停 worker（未完成的任务照样放弃，改动留在目录里）。
+  `cleanup_worktree` 只停 worker，状态规则与 Git 模式相同：未完成任务需显式 `abandon: true`，已完成任务保持 completed，改动留在目录里。
 - 提示词：Main 在 spawn 时按工作区给 spawn spec 带 `inPlace: true`，orchestrator 在工具说明后追加非 git 模式一段，
   worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 

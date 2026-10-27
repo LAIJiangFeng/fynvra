@@ -36,6 +36,7 @@ export {
 } from './events/normalize';
 export { type ExecFn, type ExecOptions, type ExecResult, nodeExec } from './exec';
 export {
+  type CleanupWorktreeInput,
   type CleanupWorktreeOutput,
   type DispatchOutcome,
   type DispatchRef,
