@@ -1,11 +1,11 @@
 import type { WorkspaceFileEntry } from '@shared/types/files';
 import { FileCode2, Loader2, RefreshCw, Save } from 'lucide-react';
 import { lazy, Suspense, useDeferredValue, useEffect, useEffectEvent } from 'react';
-import { Markdown } from '@/components/chat/Markdown';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type FileMode, type FilesStore, isFileDirty, isMarkdown } from '@/stores/files';
+import { FileMarkdownPreview } from './FileMarkdownPreview';
 
 const FileEditor = lazy(() => import('./FileEditor'));
 const MODES: FileMode[] = ['edit', 'preview', 'split'];
@@ -170,7 +170,7 @@ export function FilePane({
                 current.mode === 'split' && 'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
               )}
             >
-              <Markdown text={draft} className="mx-auto max-w-3xl [&_img]:max-w-full" />
+              <FileMarkdownPreview key={preview.version} file={file} store={store} text={draft} />
             </article>
           )}
         </div>
