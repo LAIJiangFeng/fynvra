@@ -6,7 +6,7 @@ import { bindDiffTabSelection, createDiffTabsStore, diffTabId, diffTabsStoreFor 
 import { createFilesStore, isFileDirty } from './files';
 
 const tab = {
-  dispatchId: 'dispatch-a',
+  source: { kind: 'dispatch' as const, workspaceId: 'workspace', dispatchId: 'dispatch-a' },
   section: 'committed' as const,
   path: 'src/a.ts',
   status: 'modified' as const,
@@ -43,11 +43,40 @@ describe('diff tabs', () => {
   it('keeps sections and dispatches distinct even when paths match', () => {
     const store = createDiffTabsStore('workspace');
     const uncommitted = { ...tab, section: 'uncommitted' as const };
-    const otherDispatch = { ...tab, dispatchId: 'dispatch-b' };
+    const otherDispatch = { ...tab, source: { ...tab.source, dispatchId: 'dispatch-b' } };
     for (const input of [tab, uncommitted, otherDispatch]) store.getState().open(input);
     expect(store.getState().opened.map((item) => item.id)).toEqual(
       [tab, uncommitted, otherDispatch].map(diffTabId)
     );
+  });
+
+  it('keeps current directories and historical review separate and preserves the original source on selection', () => {
+    const store = createDiffTabsStore('workspace');
+    const inputs = [
+      tab,
+      { ...tab, source: { kind: 'session' as const, workspaceId: 'workspace' } },
+      { ...tab, source: { kind: 'session' as const, workspaceId: 'workspace', sessionId: 'main' } },
+      {
+        ...tab,
+        source: { kind: 'session' as const, workspaceId: 'workspace', sessionId: 'worker-a' },
+      },
+      {
+        ...tab,
+        source: { kind: 'session' as const, workspaceId: 'workspace', sessionId: 'worker-b' },
+      },
+    ];
+    for (const input of inputs) store.getState().open(input);
+    expect(new Set(store.getState().opened.map((entry) => entry.id)).size).toBe(5);
+    store.getState().select(diffTabId(tab));
+    expect(
+      store.getState().opened.find((entry) => entry.id === store.getState().selectedId)?.source
+    ).toEqual(tab.source);
+    const main = inputs[1];
+    if (!main) throw new Error('fixture');
+    store.getState().select(diffTabId(main));
+    expect(
+      store.getState().opened.find((entry) => entry.id === store.getState().selectedId)?.source
+    ).toEqual({ kind: 'session', workspaceId: 'workspace' });
   });
 
   it('selects, ignores unknown ids, and closes tabs without stealing focus', () => {

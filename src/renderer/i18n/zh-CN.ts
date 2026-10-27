@@ -456,6 +456,15 @@ export const zhCN = {
     droppedChars: '…前面 {count} 个字符未保留',
     noOutput: '没有输出',
     waitingOutput: '等待输出…',
+    currentChanges: '查看当前对话改动',
+    historicalReview: '任务历史审查',
+    detachedHead: '游离 HEAD',
+    comparisonDefault: '与 {ref} 的共同祖先比较 · 列出该范围内最多 500 条提交',
+    comparison: {
+      'worker-base': '与 worker 创建基准比较 · 列出该范围内最多 500 条提交',
+      'latest-commit': '仅最近一次提交 · 与第一父提交比较（根提交与空树比较）',
+      unborn: '尚无提交',
+    },
     noChanges: '还没有待验收或已完成的改动',
     pickAttempt: '选择要查看的尝试',
     candidate: '[{status}] {title}',
@@ -475,6 +484,7 @@ export const zhCN = {
     commitsSection: '提交',
     noUncommitted: '没有未提交的更改',
     noCommitList: '还没有提交',
+    currentWorktreeRemoved: '此对话的 worktree 已移除，可从任务详情查看已保存的历史改动。',
     worktreeRemoved: 'worktree 已移除，无法查看未提交的更改',
     folderFiles: '{count} 个文件',
     fileStatus: {

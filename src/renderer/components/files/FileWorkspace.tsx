@@ -24,7 +24,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { bindDiffTabSelection, type DiffTab, diffTabsStoreFor } from '@/stores/diffTabs';
 import { filesStoreFor, isFileDirty } from '@/stores/files';
-import { useOrchestrationStore } from '@/stores/orchestration';
+import { useSourceDiff } from '@/stores/sessionChanges';
 import { useSessionsStore } from '@/stores/sessions';
 import { useTerminalsStore } from '@/stores/terminals';
 import { FilePane } from './FilePane';
@@ -377,14 +377,8 @@ function DiffWorkspaceTab({
   onSelect: () => void;
   onClose: () => void;
 }) {
-  const entry = useOrchestrationStore((state) => state.diffs[tab.dispatchId]);
-  const dispatchBranch = useOrchestrationStore(
-    (state) =>
-      state.snapshots[tab.workspaceId]?.view?.dispatches.find(
-        (dispatch) => dispatch.id === tab.dispatchId
-      )?.branch
-  );
-  const branch = entry?.status === 'ready' ? entry.data.branch : dispatchBranch;
+  const entry = useSourceDiff(tab.source);
+  const branch = entry?.status === 'ready' ? entry.data.branch : undefined;
   const name = tab.path.slice(tab.path.lastIndexOf('/') + 1);
   const path = tab.oldPath ? `${tab.oldPath} → ${tab.path}` : tab.path;
   const mark = STATUS_MARK[tab.status];

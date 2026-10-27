@@ -1,3 +1,4 @@
+import type { SessionChanges } from '@shared/types/orchestration';
 import {
   ChevronRight,
   CircleAlert,
@@ -13,111 +14,47 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useT } from '@/i18n/I18nProvider';
-import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
-import { type DiffSection, diffTabsStoreFor } from '@/stores/diffTabs';
 import {
-  type ReviewCandidate,
-  type ReviewDiffData,
-  useOrchestrationStore,
-} from '@/stores/orchestration';
+  type DiffSection,
+  type DiffSource,
+  diffSourceKey,
+  diffTabsStoreFor,
+} from '@/stores/diffTabs';
+import type { ReviewDiffData } from '@/stores/orchestration';
+import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
+import { useSessionsStore } from '@/stores/sessions';
+import { statusOf } from '@/stores/sessions/selectors';
 import { PanelMessage } from './common';
 import { type DiffFile, parseUnifiedDiff, statSummary } from './diff';
 import { LineCounts, STATUS_MARK } from './diffView';
 import { buildFileTree, type FileTreeNode } from './fileTree';
-import { formatRelative, oneLine, shortSha, taskStatusLabel } from './format';
+import { formatRelative, shortSha } from './format';
 
-/** 「改动」tab：选一个待验收 / 已完成任务的当前尝试，看它的改动概览。 */
-export function ChangesView({
-  view,
-  candidates,
-  selectedId,
-  onSelect,
-}: {
-  view: OrchestrationSnapshotView;
-  candidates: ReviewCandidate[];
-  selectedId: string | null;
-  onSelect: (dispatchId: string) => void;
-}) {
-  const t = useT();
-  if (candidates.length === 0) {
-    return <PanelMessage icon={GitCompareArrows} title={t('orchestration.noChanges')} />;
-  }
-  const selected =
-    candidates.find((candidate) => candidate.dispatch.id === selectedId) ?? candidates[0];
-  if (!selected) return null;
-  const workspaceId = view.runs.find((run) => run.id === selected.task.runId)?.workspaceId;
-  if (!workspaceId) return null;
-  const items = candidates.map(({ task, dispatch }) => ({
-    value: dispatch.id,
-    label: t('orchestration.candidate', {
-      status: taskStatusLabel(task.status, t),
-      title: oneLine(task.title, 48),
-    }),
-  }));
-  const worktreeAlive = view.worktrees.some(
-    (worktree) => worktree.id === selected.dispatch.worktreeId
-  );
-
-  return (
-    <div className="flex flex-col gap-3 p-3">
-      <Select
-        items={items}
-        value={selected.dispatch.id}
-        onValueChange={(value) => {
-          if (typeof value === 'string') onSelect(value);
-        }}
-      >
-        <SelectTrigger size="sm" className="text-xs" aria-label={t('orchestration.pickAttempt')}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value} className="text-xs">
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {selected.dispatch.mode === 'in-place' ? (
-        <PanelMessage icon={GitCompareArrows} title={t('common.noGit')} />
-      ) : (
-        <DispatchDiff
-          key={selected.dispatch.id}
-          workspaceId={workspaceId}
-          dispatchId={selected.dispatch.id}
-          worktreeAlive={worktreeAlive}
-        />
-      )}
-    </div>
-  );
-}
-
-function DispatchDiff({
-  workspaceId,
-  dispatchId,
-  worktreeAlive,
-}: {
-  workspaceId: string;
-  dispatchId: string;
-  worktreeAlive: boolean;
-}) {
-  const entry = useOrchestrationStore((state) => state.diffs[dispatchId]);
-  const loadDiff = useOrchestrationStore((state) => state.loadDiff);
+/** Current conversation by default; historical task review has an explicit, separate source. */
+export function ChangesView({ source }: { source: DiffSource }) {
+  const entry = useSourceDiff(source);
   const t = useT();
 
   useEffect(() => {
-    // 已合并的改动从主仓库里的固定提交读取，不以 worktree 是否还在决定能否加载。
-    void loadDiff(dispatchId);
-  }, [dispatchId, loadDiff]);
+    void loadSourceDiff(source, true);
+    const refresh = () => void loadSourceDiff(source, true);
+    window.addEventListener('focus', refresh);
+    const unsubscribe = useSessionsStore.subscribe((state, previous) => {
+      if (source.kind !== 'session' || !source.sessionId) return;
+      const status = statusOf(state, source.sessionId);
+      if (
+        status !== statusOf(previous, source.sessionId) &&
+        (status === 'idle' || status === 'error')
+      )
+        refresh();
+    });
+    return () => {
+      window.removeEventListener('focus', refresh);
+      unsubscribe();
+    };
+  }, [source]);
   if (!entry || entry.status === 'loading') {
     return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
   }
@@ -128,42 +65,46 @@ function DispatchDiff({
         title={t('orchestration.diffFailed')}
         description={entry.error}
       >
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void loadDiff(dispatchId, { force: true })}
-        >
+        <Button size="sm" variant="outline" onClick={() => void loadSourceDiff(source, true)}>
           <RefreshCw />
           {t('common.retry')}
         </Button>
       </PanelMessage>
     );
   }
+  if ('availability' in entry.data && entry.data.availability !== 'available') {
+    return (
+      <PanelMessage
+        icon={GitCompareArrows}
+        title={t(
+          entry.data.availability === 'no-git'
+            ? 'common.noGit'
+            : 'orchestration.currentWorktreeRemoved'
+        )}
+      />
+    );
+  }
   return (
-    <DiffContent
-      workspaceId={workspaceId}
-      dispatchId={dispatchId}
-      data={entry.data}
-      refreshing={entry.refreshing}
-      stale={!worktreeAlive}
-      onRefresh={() => void loadDiff(dispatchId, { force: true })}
-    />
+    <div className="p-3">
+      <DiffContent
+        source={source}
+        data={entry.data}
+        refreshing={entry.refreshing}
+        onRefresh={() => void loadSourceDiff(source, true)}
+      />
+    </div>
   );
 }
 
 function DiffContent({
-  workspaceId,
-  dispatchId,
+  source,
   data,
   refreshing,
-  stale,
   onRefresh,
 }: {
-  workspaceId: string;
-  dispatchId: string;
-  data: ReviewDiffData;
+  source: DiffSource;
+  data: ReviewDiffData | SessionChanges;
   refreshing: boolean;
-  stale: boolean;
   onRefresh: (() => void) | undefined;
 }) {
   const summary = statSummary(data.stat);
@@ -174,7 +115,10 @@ function DiffContent({
       <div className="rounded-md border bg-card px-2.5 py-2 text-xs">
         <div className="flex min-w-0 items-center gap-1.5">
           <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-mono">{data.branch}</span>
+          <span className="min-w-0 flex-1 truncate font-mono">
+            {data.branch || t('orchestration.detachedHead')}
+            {'headCommit' in data && data.headCommit && ` · ${shortSha(data.headCommit)}`}
+          </span>
           {onRefresh && (
             <Button
               size="icon-xs"
@@ -199,8 +143,15 @@ function DiffContent({
             </span>
           )}
         </p>
-        {stale && (
-          <p className="mt-1 text-amber-700 dark:text-amber-300">{t('orchestration.staleDiff')}</p>
+        {'comparison' in data && (
+          <p className="mt-1 text-muted-foreground">
+            {data.comparison.kind === 'default-branch'
+              ? t('orchestration.comparisonDefault', { ref: data.comparison.ref })
+              : t(`orchestration.comparison.${data.comparison.kind}`)}
+          </p>
+        )}
+        {source.kind === 'dispatch' && (
+          <p className="mt-1 text-muted-foreground">{t('orchestration.historicalReview')}</p>
         )}
         {data.stat && (
           <Collapsible className="mt-1.5">
@@ -219,8 +170,7 @@ function DiffContent({
 
       {data.uncommitted.available ? (
         <ChangeSet
-          workspaceId={workspaceId}
-          dispatchId={dispatchId}
+          source={source}
           section="uncommitted"
           title={t('orchestration.uncommittedChanges')}
           files={data.uncommitted.files}
@@ -233,8 +183,7 @@ function DiffContent({
         </SectionBox>
       )}
       <ChangeSet
-        workspaceId={workspaceId}
-        dispatchId={dispatchId}
+        source={source}
         section="committed"
         title={t('orchestration.committedChanges')}
         files={data.files}
@@ -288,16 +237,14 @@ function SectionNote({ children }: { children: ReactNode }) {
 
 /** 一组改动（未提交 / 已提交）：文件树，点击后在中央工作区打开 diff。 */
 function ChangeSet({
-  workspaceId,
-  dispatchId,
+  source,
   section,
   title,
   files: names,
   diff,
   empty,
 }: {
-  workspaceId: string;
-  dispatchId: string;
+  source: DiffSource;
   section: DiffSection;
   title: string;
   files: string[];
@@ -311,14 +258,18 @@ function ChangeSet({
     return names.filter((path) => !parsed.has(path));
   }, [names, files]);
   const tree = useMemo(() => buildFileTree(files), [files]);
-  const diffTabs = diffTabsStoreFor(workspaceId);
+  const diffTabs = diffTabsStoreFor(source.workspaceId);
   const selected = diffTabs((state) => state.opened.find((tab) => tab.id === state.selectedId));
   const activePath =
-    selected?.dispatchId === dispatchId && selected.section === section ? selected.path : null;
+    selected &&
+    diffSourceKey(selected.source) === diffSourceKey(source) &&
+    selected.section === section
+      ? selected.path
+      : null;
   const t = useT();
 
   const openFile = ({ path, oldPath, status }: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) =>
-    diffTabs.getState().open({ dispatchId, section, path, oldPath, status });
+    diffTabs.getState().open({ source, section, path, oldPath, status });
 
   return (
     <SectionBox title={title} count={files.length + extra.length}>

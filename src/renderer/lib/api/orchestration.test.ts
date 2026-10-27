@@ -16,6 +16,7 @@ afterEach(() => {
 
 function fakeBridge(): OrchestrationApi {
   return {
+    changes: vi.fn(),
     snapshot: vi.fn(),
     readWorkerOutput: vi.fn(),
     reviewDiff: vi.fn(),
@@ -55,6 +56,27 @@ describe('getOrchestrationApi', () => {
 });
 
 describe('createMockOrchestrationApi', () => {
+  it('keeps main, worker and removed-worker changes sources distinct', async () => {
+    const api = createMockOrchestrationApi({ latencyMs: 0 });
+    expect(await api.changes({ workspaceId: 'ws' })).toMatchObject({
+      ok: true,
+      branch: 'main',
+      comparison: { kind: 'latest-commit' },
+    });
+    expect(
+      await api.changes({ workspaceId: 'ws', sessionId: 'session_demo_search' })
+    ).toMatchObject({
+      ok: true,
+      branch: 'fynvra/sidebar-search',
+      comparison: { kind: 'worker-base' },
+    });
+    expect(await api.changes({ workspaceId: 'ws', sessionId: 'session_demo_tests' })).toMatchObject(
+      { ok: true, branch: 'fynvra/filter-tests' }
+    );
+    expect(
+      await api.changes({ workspaceId: 'ws', sessionId: 'session_demo_filter' })
+    ).toMatchObject({ ok: true, availability: 'worktree-removed', branch: '', files: [] });
+  });
   function setup(pageChars?: number) {
     let clock = 5_000_000;
     const api = createMockOrchestrationApi({ now: () => clock, latencyMs: 0, pageChars });

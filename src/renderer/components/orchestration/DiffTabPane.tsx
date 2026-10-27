@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import type { DiffTab } from '@/stores/diffTabs';
-import { useOrchestrationStore } from '@/stores/orchestration';
+import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
 import { PanelMessage } from './common';
 import { type DiffFile, parseUnifiedDiff } from './diff';
 import { LazyDiffBody, LineCounts, PathText, STATUS_MARK } from './diffView';
@@ -19,8 +19,7 @@ import { shortSha } from './format';
 
 /** 已打开的 diff 与文件编辑器一样，切换标签时保持挂载和滚动位置。 */
 export function DiffTabPane({ tab }: { tab: DiffTab }) {
-  const entry = useOrchestrationStore((state) => state.diffs[tab.dispatchId]);
-  const loadDiff = useOrchestrationStore((state) => state.loadDiff);
+  const entry = useSourceDiff(tab.source);
   const t = useT();
   const data = entry?.status === 'ready' ? entry.data : undefined;
   const section = tab.section === 'uncommitted' ? data?.uncommitted : data;
@@ -32,8 +31,8 @@ export function DiffTabPane({ tab }: { tab: DiffTab }) {
   );
 
   useEffect(() => {
-    if (!entry) void loadDiff(tab.dispatchId);
-  }, [entry, loadDiff, tab.dispatchId]);
+    if (!entry) void loadSourceDiff(tab.source);
+  }, [entry, tab.source]);
 
   if (!entry || entry.status === 'loading') {
     return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
@@ -45,15 +44,24 @@ export function DiffTabPane({ tab }: { tab: DiffTab }) {
         title={t('orchestration.diffFailed')}
         description={entry.error}
       >
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void loadDiff(tab.dispatchId, { force: true })}
-        >
+        <Button size="sm" variant="outline" onClick={() => void loadSourceDiff(tab.source, true)}>
           <RefreshCw />
           {t('common.retry')}
         </Button>
       </PanelMessage>
+    );
+  }
+
+  if ('availability' in entry.data && entry.data.availability !== 'available') {
+    return (
+      <PanelMessage
+        icon={GitCompareArrows}
+        title={t(
+          entry.data.availability === 'no-git'
+            ? 'common.noGit'
+            : 'orchestration.currentWorktreeRemoved'
+        )}
+      />
     );
   }
 
@@ -96,7 +104,7 @@ export function DiffTabPane({ tab }: { tab: DiffTab }) {
             aria-label={t('orchestration.reloadDiff')}
             title={t('orchestration.reloadDiff')}
             disabled={entry.refreshing}
-            onClick={() => void loadDiff(tab.dispatchId, { force: true })}
+            onClick={() => void loadSourceDiff(tab.source, true)}
           >
             <RefreshCw className={cn(entry.refreshing && 'animate-spin')} />
           </Button>
@@ -104,13 +112,25 @@ export function DiffTabPane({ tab }: { tab: DiffTab }) {
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
           <span className="flex min-w-0 items-center gap-1.5" title={entry.data.branch}>
             <GitBranch className="size-3.5 shrink-0" />
-            <span className="truncate font-mono">{entry.data.branch}</span>
+            <span className="truncate font-mono">
+              {entry.data.branch || t('orchestration.detachedHead')}
+              {'headCommit' in entry.data &&
+                entry.data.headCommit &&
+                ` · ${shortSha(entry.data.headCommit)}`}
+            </span>
           </span>
           <span className="flex items-center gap-1.5" title={entry.data.baseCommit}>
             <GitCommitHorizontal className="size-3.5 shrink-0" />
             {t('orchestration.base')}
             <span className="font-mono">{shortSha(entry.data.baseCommit)}</span>
           </span>
+          {'comparison' in entry.data && (
+            <span>
+              {entry.data.comparison.kind === 'default-branch'
+                ? t('orchestration.comparisonDefault', { ref: entry.data.comparison.ref })
+                : t(`orchestration.comparison.${entry.data.comparison.kind}`)}
+            </span>
+          )}
           <span>
             {t(
               tab.section === 'committed'

@@ -468,6 +468,16 @@ export const en: MessagesShape<typeof zhCN> = {
     droppedChars: '… {count} earlier chars not kept',
     noOutput: 'No output',
     waitingOutput: 'Waiting for output…',
+    currentChanges: 'Current conversation changes',
+    historicalReview: 'Task history review',
+    detachedHead: 'Detached HEAD',
+    comparisonDefault: 'Compared with merge base of {ref} · up to 500 commits in this range',
+    comparison: {
+      'worker-base': 'Compared with worker creation base · up to 500 commits in this range',
+      'latest-commit':
+        'Latest commit only · compared with its first parent (empty tree for root commit)',
+      unborn: 'No commits yet',
+    },
     noChanges: 'No changes in review or completed yet',
     pickAttempt: 'Choose an attempt to view',
     candidate: '[{status}] {title}',
@@ -487,6 +497,8 @@ export const en: MessagesShape<typeof zhCN> = {
     commitsSection: 'Commits',
     noUncommitted: 'No uncommitted changes',
     noCommitList: 'No commits yet',
+    currentWorktreeRemoved:
+      'This conversation’s worktree has been removed. Saved task history can be reviewed from the task drawer.',
     worktreeRemoved: 'Worktree removed; uncommitted changes are unavailable',
     folderFiles: '{count} files',
     fileStatus: {

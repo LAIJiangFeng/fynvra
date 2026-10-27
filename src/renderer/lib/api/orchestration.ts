@@ -1,12 +1,17 @@
 import type { Dispatch, Message, Run, Task, Worktree } from '@fynvra/core';
 import type { IpcResult } from '@shared/types/ipc';
-import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
+import type {
+  OrchestrationSnapshotView,
+  SessionChanges,
+  SessionChangesInput,
+} from '@shared/types/orchestration';
 import type { FynvraApi, Unsubscribe } from '../../../preload/types';
 
 export type { OrchestrationSnapshotView };
 
 /** `window.fynvra.orchestration`（ARCHITECTURE §9.4）。 */
 export interface OrchestrationApi {
+  changes(input: SessionChangesInput): Promise<IpcResult<SessionChanges>>;
   snapshot(workspaceId: string): Promise<IpcResult<OrchestrationSnapshotView>>;
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: {
@@ -178,6 +183,39 @@ export function createMockOrchestrationApi(
   };
 
   return {
+    changes({ sessionId }) {
+      if (sessionId === WORKER_FILTER)
+        return respond({
+          ok: true,
+          availability: 'worktree-removed',
+          branch: '',
+          headCommit: null,
+          baseCommit: '',
+          comparison: { kind: 'unborn' },
+          files: [],
+          stat: '',
+          diff: '',
+          uncommitted: { available: false, files: [], diff: '' },
+          commits: [],
+        });
+      const testsWorker = sessionId === WORKER_TESTS;
+      const worker = testsWorker || sessionId === WORKER_SEARCH;
+      return respond({
+        ok: true,
+        availability: 'available',
+        branch: testsWorker ? 'fynvra/filter-tests' : worker ? 'fynvra/sidebar-search' : 'main',
+        headCommit:
+          (testsWorker ? testsCommits(start)[0]?.sha : searchCommits(start)[0]?.sha) ?? BASE_COMMIT,
+        baseCommit: BASE_COMMIT,
+        comparison: { kind: worker ? 'worker-base' : 'latest-commit' },
+        ...(testsWorker ? testsDiff() : searchDiff()),
+        uncommitted: {
+          available: true,
+          ...(testsWorker ? testsUncommitted() : { files: [], diff: '' }),
+        },
+        commits: testsWorker ? testsCommits(start) : searchCommits(start),
+      });
+    },
     snapshot(workspaceId) {
       workspaces.add(workspaceId);
       schedule();

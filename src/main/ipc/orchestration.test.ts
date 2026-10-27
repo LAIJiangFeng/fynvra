@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +26,13 @@ vi.mock('electron', () => ({
   },
   dialog: { showOpenDialog: vi.fn() },
   nativeTheme: { themeSource: 'system', shouldUseDarkColors: false },
+}));
+
+vi.mock('./sessions', () => ({
+  getSessionStore: () => ({ get: () => undefined }),
+  getAgentHost: () => {
+    throw new Error('Changes must not start the agent host');
+  },
 }));
 
 const WORKSPACE_ID = 'ws-1';
@@ -71,6 +79,9 @@ const invoke = (channel: string, ...args: unknown[]) =>
 beforeAll(async () => {
   mocks.userData = mkdtempSync(join(tmpdir(), 'fynvra-ipc-orchestration-'));
   const repoPath = join(mocks.userData, 'repo');
+  mkdirSync(repoPath);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+  writeFileSync(join(repoPath, 'main-draft.txt'), 'main changes\n');
   SNAPSHOT.worktrees.push({
     id: 'wt_1',
     workspaceId: WORKSPACE_ID,
@@ -97,14 +108,17 @@ beforeAll(async () => {
   registerOrchestrationHandlers();
 });
 
-afterAll(() => {
+afterAll(async () => {
+  const { getOrchestrationRegistry } = await import('./orchestration');
+  await getOrchestrationRegistry().flushAll();
   rmSync(mocks.userData, { recursive: true, force: true });
 });
 
 describe('orchestration IPC', () => {
-  it('注册 §9.4 的三个通道', () => {
+  it('注册快照、输出、历史审查与当前目录改动通道', () => {
     expect([...mocks.handlers.keys()].sort()).toEqual(
       [
+        IPC_CHANNELS.ORCHESTRATION_CHANGES,
         IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT,
         IPC_CHANNELS.ORCHESTRATION_REVIEW_DIFF,
         IPC_CHANNELS.ORCHESTRATION_SNAPSHOT,
@@ -190,6 +204,52 @@ describe('orchestration IPC', () => {
       ok: false,
       error: expect.stringContaining('could not read the diff'),
     });
+  });
+
+  it.each([
+    null,
+    WORKSPACE_ID,
+    [],
+    { workspaceId: WORKSPACE_ID, cwd: '/tmp' },
+    { workspaceId: WORKSPACE_ID, path: '/tmp' },
+    { workspaceId: WORKSPACE_ID, branch: 'main' },
+    { workspaceId: WORKSPACE_ID, sessionId: '../escape' },
+    { workspaceId: WORKSPACE_ID, sessionId: null },
+  ])('changes rejects paths, unknown keys and invalid ids: %j', async (raw) => {
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_CHANGES, raw)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Invalid changes request'),
+    });
+  });
+
+  it('changes reads the registered main directory through the typed IPC result', async () => {
+    expect(
+      await invoke(IPC_CHANNELS.ORCHESTRATION_CHANGES, { workspaceId: WORKSPACE_ID })
+    ).toMatchObject({
+      ok: true,
+      availability: 'available',
+      branch: 'main',
+      headCommit: null,
+      comparison: { kind: 'unborn' },
+      uncommitted: {
+        available: true,
+        files: ['main-draft.txt'],
+        diff: expect.stringContaining('+main changes'),
+      },
+    });
+  });
+
+  it('changes resolves ids without starting a session and reports missing registrations', async () => {
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_CHANGES, { workspaceId: 'missing' })).toEqual({
+      ok: false,
+      error: 'Workspace not found',
+    });
+    expect(
+      await invoke(IPC_CHANNELS.ORCHESTRATION_CHANGES, {
+        workspaceId: WORKSPACE_ID,
+        sessionId: 'missing',
+      })
+    ).toEqual({ ok: false, error: 'Session does not belong to this workspace' });
   });
 
   it('编排状态变更后按 workspaceId 广播 orchestration:changed', async () => {
