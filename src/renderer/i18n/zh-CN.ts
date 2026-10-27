@@ -113,6 +113,8 @@ export const zhCN = {
     empty: '还没有工作区',
     pickToStart: '选择一个工作区开始',
     moreActions: '{name} 的更多操作',
+    expandSessions: '展开 {name} 的会话',
+    collapseSessions: '收起 {name} 的会话',
     removeFromList: '从列表移除',
     loadFailed: '读取工作区失败',
     addFailed: '无法挂入仓库',
