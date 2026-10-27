@@ -11,7 +11,6 @@ import type {
   ProviderTestResult,
 } from '../../preload/domains/providers';
 import { translate } from '../i18n';
-import { fetchImportedModels } from '../services/providers/import/fetchImportedModels';
 import {
   createProviderImporter,
   type ProviderImporter,
@@ -126,13 +125,10 @@ export function registerProviderHandlers(): void {
     IPC_CHANNELS.PROVIDERS_IMPORT,
     async (_event, raw: unknown): Promise<ProviderImportResult> => {
       const result = await getProviderImporter().import(raw);
-      if (!result.ok) return result;
-      const imported = await fetchImportedModels(result.imported, {
-        store: getProviderStore(),
-        fetch: (url, init) => net.fetch(url, init),
-      });
-      if (imported.length > 0) sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
-      return { ...result, imported };
+      if (result.ok && result.imported.length > 0) {
+        sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
+      }
+      return result;
     }
   );
 

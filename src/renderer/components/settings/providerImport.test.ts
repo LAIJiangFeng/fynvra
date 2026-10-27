@@ -1,7 +1,9 @@
-import type { ProviderImportCandidate } from '@shared/types/llm';
+import type { ModelProviderView, ProviderImportCandidate } from '@shared/types/llm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setCurrentLocale } from '../../i18n';
 import {
+  advanceImportModelQueue,
+  createImportModelQueue,
   defaultSelection,
   duplicateBadge,
   duplicateReason,
@@ -84,28 +86,66 @@ describe('providerImport', () => {
     expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('未写模型');
   });
 
-  it('导入结果的提示：每个服务的新增 / 总数、失败原因，以及跳过的候选', () => {
-    expect(
-      importSummary({
-        imported: [
-          { name: 'cursor', models: { added: 42, total: 43 } },
-          { name: '君', models: { error: 'HTTP 401' } },
-          { name: 'A', models: { added: 0, total: 1 } },
-        ],
-        skipped: [],
-      })
-    ).toBe(
-      '已导入 3 个模型服务；cursor：新增 42 个模型（共 43 个）；君：拉取模型失败（HTTP 401）；A：新增 0 个模型（共 1 个）'
+  it('导入结果的提示：导入数量，以及跳过了哪些、为什么', () => {
+    expect(importSummary({ imported: [{ name: 'A' }, { name: 'B' }], skipped: [] })).toBe(
+      '已导入 2 个模型服务'
     );
     expect(
       importSummary({
-        imported: [{ name: 'A', models: { added: 1, total: 2 } }],
+        imported: [{ name: 'A' }],
         skipped: [{ name: 'C', reason: '与「A」的地址和 API Key 都相同' }],
       })
-    ).toBe(
-      '已导入 1 个模型服务；A：新增 1 个模型（共 2 个）；跳过 1 个：C（与「A」的地址和 API Key 都相同）'
-    );
-    expect(importSummary({ imported: [], skipped: [] })).toBe('已导入 0 个模型服务');
+    ).toBe('已导入 1 个模型服务；跳过 1 个：C（与「A」的地址和 API Key 都相同）');
+  });
+});
+
+describe('导入后的模型选择队列', () => {
+  const imported: ModelProviderView[] = ['cursor', 'jun', 'codex'].map((id) => ({
+    id,
+    name: id,
+    api: 'openai-completions',
+    enabled: true,
+    hasApiKey: true,
+    models: [{ id: `${id}-default`, name: 'Default model' }],
+  }));
+
+  it('按成功导入的服务 id 排队，不包含跳过的候选；无导入结果时不打开选择器', () => {
+    const result = {
+      imported,
+      skipped: [{ id: 'duplicate-candidate', name: 'Old', reason: 'duplicate' }],
+    };
+    const queue = createImportModelQueue(result.imported);
+    expect(queue?.providers.map(({ id }) => id)).toEqual(['cursor', 'jun', 'codex']);
+    expect(queue?.index).toBe(0);
+    expect(createImportModelQueue([])).toBeNull();
+  });
+
+  it('保存成功或跳过都只前进一个服务，最后一个完成后结束，保持原队列与模型不变', () => {
+    const initial = createImportModelQueue(imported);
+    if (!initial) throw new Error('Missing queue');
+    const before = structuredClone(initial);
+    const second = advanceImportModelQueue(initial, 'saved');
+    expect(second?.index).toBe(1);
+    expect(second?.providers[second.index]?.id).toBe('jun');
+    if (!second) throw new Error('Missing second provider');
+    const third = advanceImportModelQueue(second, 'skip');
+    expect(third?.index).toBe(2);
+    expect(third?.providers[third.index]?.id).toBe('codex');
+    if (!third) throw new Error('Missing third provider');
+    expect(advanceImportModelQueue(third, 'saved')).toBeNull();
+    expect(advanceImportModelQueue(third, 'skip')).toBeNull();
+    expect(initial).toEqual(before);
+  });
+
+  it('全部跳过立即结束，不再进入后续服务，也不修改导入结果', () => {
+    const initial = createImportModelQueue(imported);
+    if (!initial) throw new Error('Missing queue');
+    const before = structuredClone(imported);
+    expect(advanceImportModelQueue(initial, 'skip-all')).toBeNull();
+    const second = advanceImportModelQueue(initial, 'skip');
+    if (!second) throw new Error('Missing second provider');
+    expect(advanceImportModelQueue(second, 'skip-all')).toBeNull();
+    expect(imported).toEqual(before);
   });
 });
 
@@ -119,16 +159,7 @@ describe('界面语言', () => {
     expect(duplicateReason(duplicate)).toBe('Same URL and API key as existing provider "Relay"');
     expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('No models listed');
     expect(
-      importSummary({
-        imported: [
-          { name: 'A', models: { added: 1, total: 2 } },
-          { name: 'B', models: { added: 2, total: 3 } },
-          { name: 'C', models: { error: 'HTTP 401' } },
-        ],
-        skipped: [{ name: 'D', reason: 'duplicate' }],
-      })
-    ).toBe(
-      'Imported 3 providers; A: added 1 model (2 total); B: added 2 models (3 total); C: failed to fetch models (HTTP 401); skipped 1: D (duplicate)'
-    );
+      importSummary({ imported: [{ name: 'A' }], skipped: [{ name: 'C', reason: 'duplicate' }] })
+    ).toBe('Imported 1 provider; skipped 1: C (duplicate)');
   });
 });

@@ -40,14 +40,8 @@ export interface ProviderImportSkipped {
   name: string;
   reason: string;
 }
-/** 导入并拉取模型后的摘要；不含 key、请求地址或服务端原始错误。 */
-export interface ProviderImportEntry {
-  id: string;
-  name: string;
-  models: { added: number; total: number } | { error: string };
-}
 export type ProviderImportResult = IpcResult<{
-  imported: ProviderImportEntry[];
+  imported: ModelProviderView[];
   skipped: ProviderImportSkipped[];
 }>;
 
@@ -83,7 +77,7 @@ export interface ProvidersApi {
   test(id: string): Promise<ProviderTestResult>;
   /** 只读扫描本机 Claude Code / Codex / CC Switch 的配置；候选已脱敏，含 key 的结果留在 Main 10 分钟 */
   scanImports(input?: ProviderScanImportsInput): Promise<ProviderScanImportsResult>;
-  /** 导入最近一次扫描里的候选并拉取全部远端模型；只传候选 id，key 由 Main 从扫描缓存取 */
+  /** 导入最近一次扫描里的候选；只传候选 id，key 由 Main 从扫描缓存取 */
   importCandidates(input: { candidateIds: string[] }): Promise<ProviderImportResult>;
   /** 拉取服务端的模型列表，不写盘；加入哪些由界面合并进表单、随保存提交 */
   listRemoteModels(input: ListRemoteModelsInput): Promise<ListRemoteModelsResult>;
