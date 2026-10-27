@@ -1,5 +1,10 @@
 import { providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
-import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
+import type {
+  ModelProviderView,
+  ProviderImportCandidate,
+  ProviderImportSource,
+  RemoteModelEntry,
+} from '@shared/types/llm';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +14,7 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -16,12 +22,17 @@ import {
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useProvidersStore } from '@/stores/providers';
+import type { ProviderImportResult } from '../../../preload/domains/providers';
 import { InlineMessage, WarningList } from './common';
+import { draftFromProvider, draftToUpsertInput } from './providerForm';
 import {
+  advanceImportModelQueue,
+  createImportModelQueue,
   defaultSelection,
   duplicateBadge,
   duplicateReason,
   IMPORT_SOURCES,
+  type ImportModelQueue,
   importSummary,
   invertSelection,
   modelSummary,
@@ -30,6 +41,8 @@ import {
   sourceLabel,
   toggleSource,
 } from './providerImport';
+import { RemoteModelsPicker } from './RemoteModelsPicker';
+import { mergeRemoteModels, type RemoteModelsRequest } from './remoteModels';
 import { maskSecrets } from './secretMask';
 
 export type ImportStatus = { tone: 'success' | 'error'; text: string };
@@ -49,25 +62,171 @@ export function ProviderImportDialog({
   const [shown, setShown] = useState(session);
   if (session !== null && session !== shown) setShown(session);
 
+  return shown === null ? null : (
+    <ImportSession key={shown} open={session !== null} onClose={onClose} onImported={onImported} />
+  );
+}
+
+type ImportedResult = Extract<ProviderImportResult, { ok: true }>;
+
+function ImportSession({
+  open,
+  onClose,
+  onImported,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImported: (status: ImportStatus) => void;
+}) {
+  const [queue, setQueue] = useState<ImportModelQueue | null>(null);
+  const [busy, setBusy] = useState(false);
+  const providers = useProvidersStore((state) => state.providers);
+  const queued = queue?.providers[queue.index];
+  const provider = queued && (providers.find(({ id }) => id === queued.id) ?? queued);
+
+  const advance = (action: 'saved' | 'skip' | 'skip-all') => {
+    if (!queue) return;
+    const next = advanceImportModelQueue(queue, action);
+    if (next) setQueue(next);
+    else onClose();
+  };
+
+  const imported = (result: ImportedResult) => {
+    onImported({
+      tone: result.imported.length > 0 ? 'success' : 'error',
+      text: importSummary(result),
+    });
+    const next = createImportModelQueue(result.imported);
+    if (next) setQueue(next);
+    else onClose();
+  };
+
   return (
     <Dialog
-      open={session !== null}
-      onOpenChange={(open) => {
-        if (!open) onClose();
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) return;
+        if (busy || queue) details.cancel();
+        if (busy) return;
+        // 关闭当前选择器（包括 Escape / 遮罩）等同于跳过当前服务。
+        if (queue) advance('skip');
+        else onClose();
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
-        {shown !== null && (
-          <ImportContent
-            key={shown}
-            onImported={(status) => {
-              onImported(status);
-              onClose();
-            }}
+      <DialogContent
+        className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl"
+        showCloseButton={!busy}
+      >
+        {provider && queue ? (
+          <ImportedProviderModels
+            key={provider.id}
+            provider={provider}
+            position={queue.index + 1}
+            total={queue.providers.length}
+            busy={busy}
+            onBusyChange={setBusy}
+            onSaved={() => advance('saved')}
+            onSkip={() => advance('skip')}
+            onSkipAll={() => advance('skip-all')}
           />
+        ) : (
+          <ImportContent onImported={imported} onBusyChange={setBusy} />
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 复用编辑服务时的选择器、合并与保存路径；跳过时只丢弃本地草稿。 */
+function ImportedProviderModels({
+  provider,
+  position,
+  total,
+  busy,
+  onBusyChange,
+  onSaved,
+  onSkip,
+  onSkipAll,
+}: {
+  provider: ModelProviderView;
+  position: number;
+  total: number;
+  busy: boolean;
+  onBusyChange: (busy: boolean) => void;
+  onSaved: () => void;
+  onSkip: () => void;
+  onSkipAll: () => void;
+}) {
+  const upsert = useProvidersStore((state) => state.upsert);
+  const loadModelOptions = useProvidersStore((state) => state.loadModelOptions);
+  const [draft, setDraft] = useState(() => draftFromProvider(provider));
+  // 已导入的服务只传 id，key 始终留在 Main；request 在当前服务内保持稳定。
+  const [request] = useState<RemoteModelsRequest>({
+    ok: true,
+    input: { providerId: provider.id },
+  });
+  const [reload, setReload] = useState(0);
+  const [added, setAdded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const t = useT();
+
+  useEffect(() => {
+    void loadModelOptions();
+  }, [loadModelOptions]);
+
+  const addRemote = (picked: RemoteModelEntry[]) => {
+    const result = mergeRemoteModels(draft.models, picked);
+    setDraft((current) => ({ ...current, models: result.models }));
+    if (result.added > 0) setAdded(true);
+    setError(null);
+    return result;
+  };
+
+  const save = async () => {
+    const result = draftToUpsertInput(draft);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    onBusyChange(true);
+    const saved = await upsert(result.input);
+    onBusyChange(false);
+    if (saved.ok) onSaved();
+    else setError(saved.error);
+  };
+
+  return (
+    <div className="grid min-w-0 gap-4">
+      <DialogHeader>
+        <DialogTitle>
+          {t('settings.providers.importModelsTitle', { name: provider.name, position, total })}
+        </DialogTitle>
+        <DialogDescription>{t('settings.providers.importModelsHint')}</DialogDescription>
+      </DialogHeader>
+      <fieldset disabled={busy} aria-busy={busy} className="grid min-w-0 gap-4">
+        <RemoteModelsPicker
+          key={reload}
+          request={request}
+          current={draft.models}
+          onAdd={addRemote}
+          onReload={() => setReload((current) => current + 1)}
+          onClose={onSkip}
+          closeLabel={t('settings.providers.skipModels')}
+        />
+        {error && <InlineMessage tone="error">{error}</InlineMessage>}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onSkipAll}>
+            {t('settings.providers.skipAllModels')}
+          </Button>
+          <Button variant="outline" onClick={onSkip}>
+            {t('settings.providers.skipModels')}
+          </Button>
+          <Button disabled={!added || busy} onClick={() => void save()}>
+            {t(busy ? 'common.saving' : 'settings.providers.saveModelsAndContinue')}
+          </Button>
+        </DialogFooter>
+      </fieldset>
+    </div>
   );
 }
 
@@ -76,7 +235,13 @@ type ScanState =
   | { phase: 'done'; candidates: ProviderImportCandidate[]; warnings: string[] }
   | { phase: 'failed'; error: string };
 
-function ImportContent({ onImported }: { onImported: (status: ImportStatus) => void }) {
+function ImportContent({
+  onImported,
+  onBusyChange,
+}: {
+  onImported: (result: ImportedResult) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const scanImports = useProvidersStore((state) => state.scanImports);
   const importCandidates = useProvidersStore((state) => state.importCandidates);
   const idPrefix = useId();
@@ -115,17 +280,16 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
 
   const runImport = async () => {
     setImporting(true);
+    onBusyChange(true);
     setImportError(null);
     const result = await importCandidates(orderedSelection(candidates, selected));
     setImporting(false);
+    onBusyChange(false);
     if (!result.ok) {
       setImportError(result.error);
       return;
     }
-    onImported({
-      tone: result.imported.length > 0 ? 'success' : 'error',
-      text: importSummary(result),
-    });
+    onImported(result);
   };
 
   return (
@@ -221,7 +385,9 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
+        <DialogClose render={<Button variant="outline" disabled={importing} />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}

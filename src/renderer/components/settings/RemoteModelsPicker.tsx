@@ -45,6 +45,7 @@ export function RemoteModelsPicker({
   onAdd,
   onReload,
   onClose,
+  closeLabel,
 }: {
   request: RemoteModelsRequest;
   /** 表单当前的模型列表：据此标「已添加」 */
@@ -52,6 +53,8 @@ export function RemoteModelsPicker({
   onAdd: (picked: RemoteModelEntry[]) => MergeResult;
   onReload: () => void;
   onClose: () => void;
+  /** 独立用于导入向导时，关闭当前选择器表示跳过该服务。 */
+  closeLabel?: string;
 }) {
   const listRemoteModels = useProvidersStore((state) => state.listRemoteModels);
   const savedProviders = useProvidersStore((state) => state.providers);
@@ -143,7 +146,7 @@ export function RemoteModelsPicker({
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label={t('settings.remoteModels.collapse')}
+            aria-label={closeLabel ?? t('settings.remoteModels.collapse')}
             onClick={onClose}
           >
             <X />
