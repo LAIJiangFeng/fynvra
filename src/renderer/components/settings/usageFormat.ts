@@ -21,6 +21,10 @@ export function formatCost(value: number): string {
   return Number.isFinite(value) ? `$${value.toFixed(2)}` : '—';
 }
 
+export function formatPercent(value: number): string {
+  return Number.isFinite(value) ? `${Number((value * 100).toFixed(1))}%` : '—';
+}
+
 export function formatDuration(milliseconds: number): string {
   if (!Number.isFinite(milliseconds)) return '—';
   const minutes = Math.floor(Math.max(0, milliseconds) / 60_000);

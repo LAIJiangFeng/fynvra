@@ -6,9 +6,6 @@ export type UsageRange = (typeof USAGE_RANGES)[number];
 export interface UsageTotals {
   cost: number;
   totalTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheTokens: number;
   activeMs: number;
   sessions: number;
   messages: number;
@@ -25,8 +22,45 @@ export interface UsagePeriod {
   end: number;
   totals: UsageTotals;
   daily: UsageDay[];
-  /** Message counts: weekday (Sunday first) × hour. */
-  heatmap: number[][];
+}
+
+export interface UsageAmount {
+  totalTokens: number;
+  cost: number;
+}
+
+export interface UsageRole extends UsageAmount {
+  /** null means the session is no longer in the registry. */
+  roleId: string | null;
+  sessions: number;
+}
+
+export interface UsageModel extends UsageAmount {
+  provider: string | null;
+  model: string | null;
+  /** Fraction of the current period's tokens. */
+  share: number;
+}
+
+export interface UsageWorkspace extends UsageAmount {
+  workspaceId: string | null;
+  /** Display name only, never a filesystem path. */
+  name: string | null;
+}
+
+/** Current outcomes of tasks first dispatched in the selected period, not merge events. */
+export interface UsageOrchestration {
+  dispatched: number;
+  completed: number;
+  abandoned: number;
+  failed: number;
+  /** Later attempts started within the period, including tasks first dispatched earlier. */
+  rejected: number;
+  /** Omitted when no tasks in the cohort have completed. */
+  firstPassRate?: number;
+  averageAttempts?: number;
+  /** Lifetime worker cost for the completed cohort / completed tasks; omitted if links are missing. */
+  workerCostPerMergedTask?: number;
 }
 
 export interface UsageSummary {
@@ -34,6 +68,15 @@ export interface UsageSummary {
   generatedAt: number;
   current: UsagePeriod;
   previous: UsagePeriod;
+  byRole: UsageRole[];
+  /** Ranked by tokens, then cost. */
+  byModel: UsageModel[];
+  byWorkspace: UsageWorkspace[];
+  orchestration: UsageOrchestration;
+  /** Messages per local hour of day (0–23) across the current period. */
+  hourly: number[];
+  /** cacheRead / (input + cacheRead); null when there is no input. */
+  cacheHitRate: number | null;
 }
 
 export type UsageSummaryResult = IpcResult<{ summary: UsageSummary }>;

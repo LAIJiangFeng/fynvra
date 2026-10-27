@@ -1,25 +1,32 @@
 import { asRecord } from '@shared/guards';
 import type {
+  UsageAmount,
   UsageDay,
+  UsageModel,
   UsagePeriod,
   UsageRange,
+  UsageRole,
   UsageSummary,
   UsageTotals,
+  UsageWorkspace,
 } from '@shared/types/usage';
+import type { StoredSession } from '../sessions/sessionStore';
+import { aggregateOrchestration, type UsageSnapshot } from './orchestration';
 
-interface UsageMessage {
+interface UsageMessage extends UsageAmount {
   timestamp: number;
   inputTokens: number;
-  outputTokens: number;
-  cacheTokens: number;
-  cost: number;
+  cacheRead: number;
+  model: { provider: string | null; model: string | null } | null;
 }
 
 interface FileDay {
   date: string;
-  weekday: number;
   totals: UsageTotals;
+  inputTokens: number;
+  cacheRead: number;
   hours: number[];
+  models: Omit<UsageModel, 'share'>[];
 }
 
 /** Cached data never includes message text, tools, or credentials. */
@@ -28,17 +35,19 @@ export interface FileUsage {
   spans: { start: number; end: number }[];
 }
 
+export interface SessionUsage extends FileUsage {
+  sessionId: string;
+}
+
+export type UsageSession = Pick<StoredSession, 'id' | 'roleId' | 'workspaceId' | 'dispatchId'>;
+export interface UsageContext {
+  sessions: readonly UsageSession[];
+  workspaces: readonly { id: string; name: string }[];
+  snapshots: readonly UsageSnapshot[];
+}
+
 export function emptyTotals(): UsageTotals {
-  return {
-    cost: 0,
-    totalTokens: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheTokens: 0,
-    activeMs: 0,
-    sessions: 0,
-    messages: 0,
-  };
+  return { cost: 0, totalTokens: 0, activeMs: 0, sessions: 0, messages: 0 };
 }
 
 export function localDateKey(date: Date): string {
@@ -57,6 +66,10 @@ function positiveNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+function modelName(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 /** All branches count: the work recorded in abandoned branches was still performed. */
 export function parseUsageLine(line: string): UsageMessage | null {
   try {
@@ -66,16 +79,28 @@ export function parseUsageLine(line: string): UsageMessage | null {
     const timestamp = timestampOf(message.timestamp) ?? timestampOf(entry?.timestamp);
     if (timestamp === null) return null;
     const usage = message.role === 'assistant' ? asRecord(message.usage) : null;
+    const inputTokens = positiveNumber(usage?.input);
+    const cacheRead = positiveNumber(usage?.cacheRead);
     return {
       timestamp,
-      inputTokens: positiveNumber(usage?.input),
-      outputTokens: positiveNumber(usage?.output),
-      cacheTokens: positiveNumber(usage?.cacheRead) + positiveNumber(usage?.cacheWrite),
+      inputTokens,
+      cacheRead,
+      totalTokens:
+        inputTokens + positiveNumber(usage?.output) + cacheRead + positiveNumber(usage?.cacheWrite),
       cost: positiveNumber(asRecord(usage?.cost)?.total),
+      model:
+        message.role === 'assistant'
+          ? { provider: modelName(message.provider), model: modelName(message.model) }
+          : null,
     };
   } catch {
     return null;
   }
+}
+
+function addAmount(target: UsageAmount, source: UsageAmount): void {
+  target.totalTokens += source.totalTokens;
+  target.cost += source.cost;
 }
 
 /** Incrementally reduce lines, retaining only daily aggregates and timestamps for gap detection. */
@@ -92,20 +117,29 @@ export function createFileAccumulator() {
       if (!day) {
         day = {
           date: key,
-          weekday: date.getDay(),
-          totals: emptyTotals(),
+          totals: { ...emptyTotals(), sessions: 1 },
+          inputTokens: 0,
+          cacheRead: 0,
           hours: Array(24).fill(0),
+          models: [],
         };
-        day.totals.sessions = 1;
         days.set(key, day);
       }
       day.totals.messages += 1;
-      day.totals.inputTokens += message.inputTokens;
-      day.totals.outputTokens += message.outputTokens;
-      day.totals.cacheTokens += message.cacheTokens;
-      day.totals.totalTokens += message.inputTokens + message.outputTokens + message.cacheTokens;
-      day.totals.cost += message.cost;
+      addAmount(day.totals, message);
+      day.inputTokens += message.inputTokens;
+      day.cacheRead += message.cacheRead;
       day.hours[date.getHours()] += 1;
+      if (message.model && (message.totalTokens > 0 || message.cost > 0)) {
+        let model = day.models.find(
+          (item) => item.provider === message.model?.provider && item.model === message.model.model
+        );
+        if (!model) {
+          model = { ...message.model, totalTokens: 0, cost: 0 };
+          day.models.push(model);
+        }
+        addAmount(model, message);
+      }
       timestamps.push(message.timestamp);
     },
     finish(): FileUsage {
@@ -139,7 +173,6 @@ function aggregatePeriod(files: readonly FileUsage[], start: number, end: number
     daily.set(date, { date, ...emptyTotals() });
   }
   const totals = emptyTotals();
-  const heatmap: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
   for (const file of files) {
     let hasMessages = false;
     for (const day of file.days) {
@@ -147,7 +180,6 @@ function aggregatePeriod(files: readonly FileUsage[], start: number, end: number
       if (!bucket) continue;
       hasMessages = true;
       addTotals(bucket, day.totals);
-      for (let hour = 0; hour < 24; hour += 1) heatmap[day.weekday][hour] += day.hours[hour];
     }
     if (hasMessages) totals.sessions += 1;
     for (const span of file.spans) {
@@ -166,22 +198,83 @@ function aggregatePeriod(files: readonly FileUsage[], start: number, end: number
   const sessions = totals.sessions;
   for (const day of daily.values()) addTotals(totals, day);
   totals.sessions = sessions;
-  return { start, end, totals, daily: [...daily.values()], heatmap };
+  return { start, end, totals, daily: [...daily.values()] };
+}
+
+function rank<T extends UsageAmount>(values: Iterable<T>): T[] {
+  return [...values].sort((a, b) => b.totalTokens - a.totalTokens || b.cost - a.cost);
 }
 
 export function aggregateUsage(
-  files: readonly FileUsage[],
+  files: readonly SessionUsage[],
   range: UsageRange,
-  now: number
+  now: number,
+  context: UsageContext = { sessions: [], workspaces: [], snapshots: [] }
 ): UsageSummary {
   const length = range === 'today' ? 1 : Number.parseInt(range, 10);
   const today = new Date(now);
   const end = midnightOffset(today, 1);
   const start = midnightOffset(today, 1 - length);
+  const current = aggregatePeriod(files, start, end);
+  const dates = new Set(current.daily.map((day) => day.date));
+  const sessions = new Map(context.sessions.map((session) => [session.id, session]));
+  const workspaces = new Map(context.workspaces.map((workspace) => [workspace.id, workspace]));
+  const roles = new Map<string | null, UsageRole>();
+  const models = new Map<string, UsageModel>();
+  const workspaceUsage = new Map<string | null, UsageWorkspace>();
+  const hourly: number[] = Array(24).fill(0);
+  let input = 0;
+  let cacheRead = 0;
+  for (const file of files) {
+    const days = file.days.filter((day) => dates.has(day.date));
+    if (!days.length) continue;
+    const session = sessions.get(file.sessionId);
+    const roleId = session?.roleId ?? null;
+    const role = roles.get(roleId) ?? { roleId, sessions: 0, totalTokens: 0, cost: 0 };
+    roles.set(roleId, role);
+    role.sessions += 1;
+    const workspace = session && workspaces.get(session.workspaceId);
+    const workspaceId = workspace?.id ?? null;
+    const byWorkspace = workspaceUsage.get(workspaceId) ?? {
+      workspaceId,
+      name: workspace?.name ?? null,
+      totalTokens: 0,
+      cost: 0,
+    };
+    workspaceUsage.set(workspaceId, byWorkspace);
+    for (const day of days) {
+      addAmount(role, day.totals);
+      addAmount(byWorkspace, day.totals);
+      input += day.inputTokens;
+      cacheRead += day.cacheRead;
+      for (let hour = 0; hour < 24; hour += 1) hourly[hour] += day.hours[hour];
+      for (const item of day.models) {
+        const key = JSON.stringify([item.provider, item.model]);
+        const model = models.get(key) ?? {
+          provider: item.provider,
+          model: item.model,
+          totalTokens: 0,
+          cost: 0,
+          share: 0,
+        };
+        addAmount(model, item);
+        models.set(key, model);
+      }
+    }
+  }
+  for (const model of models.values()) {
+    model.share = current.totals.totalTokens ? model.totalTokens / current.totals.totalTokens : 0;
+  }
   return {
     range,
     generatedAt: now,
-    current: aggregatePeriod(files, start, end),
+    current,
     previous: aggregatePeriod(files, midnightOffset(today, 1 - 2 * length), start),
+    byRole: rank(roles.values()),
+    byModel: rank(models.values()),
+    byWorkspace: rank(workspaceUsage.values()),
+    orchestration: aggregateOrchestration(context.snapshots, files, sessions, start, end),
+    hourly,
+    cacheHitRate: input + cacheRead ? cacheRead / (input + cacheRead) : null,
   };
 }
