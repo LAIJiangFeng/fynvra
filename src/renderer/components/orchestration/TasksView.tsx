@@ -1,7 +1,8 @@
 import type { Run, Task, TaskStatus } from '@fynvra/core';
 import { ChevronRight, GitBranch, Link2, Loader2, MessageSquare, Target } from 'lucide-react';
+import { type Ref, useRef, useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Progress, ProgressLabel } from '@/components/ui/progress';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -25,6 +26,7 @@ import {
   formatRelative,
   messageSummary,
   oneLine,
+  progressCounts,
   TASK_STATUS_ORDER,
   TASK_STATUS_TONE,
   taskStatusLabel,
@@ -46,9 +48,18 @@ export function TasksView({
   onOpenTask: (taskId: string, trigger: HTMLElement) => void;
 }) {
   const groups = tasksByStatus(view, run.id);
-  const total = TASK_STATUS_ORDER.reduce((sum, status) => sum + groups[status].length, 0);
+  const { completed, total, abandoned } = progressCounts(groups);
+  const [expandedAbandonedRunId, setExpandedAbandonedRunId] = useState<string | null>(null);
+  const abandonedGroupRef = useRef<HTMLDivElement>(null);
   const now = useNow(30_000);
   const t = useT();
+
+  const revealAbandoned = () => {
+    setExpandedAbandonedRunId(run.id);
+    requestAnimationFrame(() =>
+      abandonedGroupRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    );
+  };
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -56,11 +67,13 @@ export function TasksView({
         run={run}
         runs={runs}
         onSelectRun={onSelectRun}
-        completed={groups.completed.length}
+        completed={completed}
         total={total}
+        abandoned={abandoned}
+        onShowAbandoned={revealAbandoned}
         now={now}
       />
-      {total === 0 ? (
+      {total + abandoned === 0 ? (
         <p className="py-6 text-center text-muted-foreground text-xs">
           {t('orchestration.emptyRun')}
         </p>
@@ -73,6 +86,13 @@ export function TasksView({
             view={view}
             now={now}
             onOpenTask={onOpenTask}
+            {...(status === 'abandoned'
+              ? {
+                  groupRef: abandonedGroupRef,
+                  open: expandedAbandonedRunId === run.id,
+                  onOpenChange: (open: boolean) => setExpandedAbandonedRunId(open ? run.id : null),
+                }
+              : {})}
           />
         ))
       )}
@@ -86,6 +106,8 @@ function RunHeader({
   onSelectRun,
   completed,
   total,
+  abandoned,
+  onShowAbandoned,
   now,
 }: {
   run: Run;
@@ -93,6 +115,8 @@ function RunHeader({
   onSelectRun: (runId: string) => void;
   completed: number;
   total: number;
+  abandoned: number;
+  onShowAbandoned: () => void;
   now: number;
 }) {
   const t = useT();
@@ -111,14 +135,29 @@ function RunHeader({
           {formatRelative(run.createdAt, now, t)}
         </span>
       </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-1 text-muted-foreground text-xs">
+        <span>{t('orchestration.completedOf', { completed, total })}</span>
+        {abandoned > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="rounded outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              title={t('orchestration.showAbandoned')}
+              onClick={onShowAbandoned}
+            >
+              {t('orchestration.abandonedCount', { count: abandoned })}
+            </button>
+          </>
+        )}
+      </div>
       <Progress
-        className="mt-2"
+        className="mt-1"
         value={total === 0 ? 0 : (completed / total) * 100}
         aria-label={t('orchestration.progress')}
+        aria-valuetext={t('orchestration.completedOf', { completed, total })}
         indicatorClassName="bg-emerald-500"
-      >
-        <ProgressLabel>{t('orchestration.completedOf', { completed, total })}</ProgressLabel>
-      </Progress>
+      />
       {runs.length > 1 && (
         <Select
           items={items}
@@ -153,16 +192,27 @@ function TaskGroup({
   view,
   now,
   onOpenTask,
+  groupRef,
+  open,
+  onOpenChange,
 }: {
   status: TaskStatus;
   tasks: Task[];
   view: OrchestrationSnapshotView;
   now: number;
   onOpenTask: (taskId: string, trigger: HTMLElement) => void;
+  groupRef?: Ref<HTMLDivElement>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const t = useT();
   return (
-    <Collapsible defaultOpen={status !== 'abandoned'}>
+    <Collapsible
+      ref={groupRef}
+      defaultOpen={status !== 'abandoned'}
+      open={open}
+      onOpenChange={onOpenChange}
+    >
       <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-medium text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]:rotate-90" />
         <StatusDot status={status} />

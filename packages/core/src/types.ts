@@ -31,6 +31,8 @@ export interface Role {
   model?: { providerId: string; modelId: string; thinking?: ThinkingLevel };
   /** 启用的技能 id。 */
   skillIds: string[];
+  /** Absent: follow global; null: none; ID: use that instruction file. */
+  instructionFileId?: string | null;
   /** 启用的 MCP 服务器 id。 */
   mcpServerIds: string[];
   /** 工具策略。 */

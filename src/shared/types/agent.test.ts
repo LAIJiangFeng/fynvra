@@ -62,6 +62,19 @@ const withModel = (patch: Record<string, unknown>) =>
   withSpec({ model: { ...spec.model, ...patch } });
 
 describe('parseAgentCommand', () => {
+  it('preserves resolved instruction text and rejects malformed instruction specs', () => {
+    const instructionFile = { name: 'CLAUDE.md', content: 'Use these instructions.' };
+    expect(parseAgentCommand(withSpec({ instructionFile }))).toEqual(withSpec({ instructionFile }));
+    for (const invalid of [
+      null,
+      'path',
+      {},
+      { name: '', content: 'x' },
+      { name: 'x', content: 1 },
+    ]) {
+      expect(parseAgentCommand(withSpec({ instructionFile: invalid }))).toBeNull();
+    }
+  });
   const valid: AgentCommand[] = [
     { type: 'spawn-session', identity, spec },
     {

@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+  SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
+  SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */
   SETTINGS_CHANGED: 'settings:changed',
   /** 无参时 Main 弹目录选择框、校验后写入 worktreesRoot；`{ reset: true }` 恢复默认。Renderer 不传路径 */
@@ -22,6 +24,10 @@ export const IPC_CHANNELS = {
   /** Main 弹目录选择框并校验；Renderer 不传路径 */
   WORKSPACES_ADD: 'workspaces:add',
   WORKSPACES_REMOVE: 'workspaces:remove',
+  WORKSPACES_OPEN_WITH_APPS: 'workspaces:open-with-apps',
+  WORKSPACES_OPEN_IN: 'workspaces:open-in',
+  WORKSPACES_COPY: 'workspaces:copy',
+  WORKSPACES_PICK_APP: 'workspaces:pick-app',
   TERMINALS_CREATE: 'terminals:create',
   TERMINALS_WRITE: 'terminals:write',
   TERMINALS_RESIZE: 'terminals:resize',
@@ -156,6 +162,19 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
 
+  // --- instructions ---
+  INSTRUCTIONS_LIST: 'instructions:list',
+  INSTRUCTIONS_READ: 'instructions:read',
+  INSTRUCTIONS_SCAN: 'instructions:scan',
+  /** Only fixed scan candidate IDs; no renderer-supplied paths. */
+  INSTRUCTIONS_IMPORT: 'instructions:import',
+  /** Main opens a Markdown file picker. */
+  INSTRUCTIONS_PICK: 'instructions:pick',
+  INSTRUCTIONS_SAVE: 'instructions:save',
+  INSTRUCTIONS_REMOVE: 'instructions:remove',
+  INSTRUCTIONS_TOGGLE: 'instructions:toggle',
+  INSTRUCTIONS_CHANGED: 'instructions:changed',
+
   // --- notifications ---
   /** 立即弹一条测试通知（不看聚焦与启动静默期），无参 */
   NOTIFICATIONS_TEST: 'notifications:test',
@@ -163,6 +182,10 @@ export const IPC_CHANNELS = {
   NOTIFICATIONS_SET_VIEWING: 'notifications:set-viewing',
   /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
   SESSIONS_FOCUS: 'sessions:focus',
+
+  // --- usage ---
+  /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
+  USAGE_SUMMARY: 'usage:summary',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

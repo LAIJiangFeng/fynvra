@@ -5,10 +5,12 @@ export const SETTINGS_SECTIONS = [
   'notifications',
   'providers',
   'roles',
+  'instructions',
   'skills',
   'mcp',
   'appearance',
   'keybindings',
+  'usage',
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 

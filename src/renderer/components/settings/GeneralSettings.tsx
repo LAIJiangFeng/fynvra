@@ -1,10 +1,16 @@
+import { errorMessage } from '@shared/guards';
 import { isLanguage, LANGUAGES, type Language, type Locale } from '@shared/i18n';
 import {
   ARCHIVE_IDLE_DAYS,
+  type AvailableShells,
   DELETE_ARCHIVED_DAYS,
   isArchiveIdleDays,
   isDeleteArchivedDays,
   languageOf,
+  type Preferences,
+  parseShellPreference,
+  type ShellPreference,
+  type ShellTarget,
   type TimelinePreferences,
   type WorkspaceWorktreesInfo,
   type WorktreesRootInfo,
@@ -13,6 +19,7 @@ import { FolderOpen, FolderTree, RefreshCw, RotateCcw } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -87,7 +94,7 @@ export function GeneralSettings() {
   return (
     <div className="grid gap-8">
       <LanguageSection />
-      <UpdateSettings />
+      <ShellsSection />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>
@@ -150,6 +157,7 @@ export function GeneralSettings() {
 
       <SessionsSection />
       <TimelineSection />
+      <UpdateSettings />
     </div>
   );
 }
@@ -189,6 +197,229 @@ function LanguageSection() {
         </Select>
       </SectionHeader>
     </section>
+  );
+}
+
+// --- shells ---
+function ShellsSection() {
+  const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [available, setAvailable] = useState<AvailableShells | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const windows = window.fynvra.window.platform === 'win32';
+  const t = useT();
+
+  useEffect(() => {
+    let request = 0;
+    const load = () => {
+      const current = ++request;
+      void Promise.all([window.fynvra.settings.get(), window.fynvra.settings.availableShells()])
+        .then(([saved, shells]) => {
+          if (current !== request) return;
+          if (saved.ok) setPreferences(saved.preferences);
+          if (shells.ok) setAvailable(shells);
+          if (!saved.ok) setError(saved.error);
+          else if (!shells.ok) setError(shells.error);
+        })
+        .catch((failure) => {
+          if (current === request) setError(errorMessage(failure));
+        });
+    };
+    const unsubscribe = window.fynvra.settings.onChanged(load);
+    load();
+    return () => {
+      request += 1;
+      unsubscribe();
+    };
+  }, []);
+
+  const save = async (target: ShellTarget, value: ShellPreference | undefined, browse = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = browse
+        ? await window.fynvra.settings.pickShell(target)
+        : await window.fynvra.settings.update({ [target]: value });
+      if (result.ok) setPreferences(result.preferences);
+      else if (!('code' in result && result.code === 'canceled')) setError(result.error);
+    } catch (failure) {
+      setError(errorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <ul className="divide-y rounded-lg border">
+        {(windows ? (['agentShell', 'terminalShell'] as const) : (['terminalShell'] as const)).map(
+          (target) => (
+            <ShellPreferenceRow
+              key={target}
+              target={target}
+              preference={preferences?.[target]}
+              legacy={target === 'agentShell' ? preferences?.shellPath : undefined}
+              available={available}
+              disabled={busy || !preferences || !available}
+              windows={windows}
+              onSave={(value) => void save(target, value)}
+              onBrowse={() => void save(target, undefined, true)}
+            />
+          )
+        )}
+      </ul>
+      {error && (
+        <InlineMessage tone="error" className="mt-2">
+          {error}
+        </InlineMessage>
+      )}
+      {!available && !error && (
+        <p className="mt-2 text-muted-foreground text-xs">{t('common.loading')}</p>
+      )}
+    </section>
+  );
+}
+
+function ShellPreferenceRow({
+  target,
+  preference,
+  legacy,
+  available,
+  disabled,
+  windows,
+  onSave,
+  onBrowse,
+}: {
+  target: ShellTarget;
+  preference: ShellPreference | undefined;
+  legacy?: string;
+  available: AvailableShells | null;
+  disabled: boolean;
+  windows: boolean;
+  onSave: (value: ShellPreference | undefined) => void;
+  onBrowse: () => void;
+}) {
+  const t = useT();
+  const id = useId();
+  const agent = target === 'agentShell';
+  const [editingCustom, setEditingCustom] = useState(false);
+  const savedPath = preference?.kind === 'custom' ? preference.path : '';
+  const [path, setPath] = useState(savedPath);
+  useEffect(() => {
+    setPath(savedPath);
+  }, [savedPath]);
+  const custom = !legacy && (editingCustom || preference?.kind === 'custom');
+  const value = legacy || custom ? 'custom' : (preference?.kind ?? 'default');
+  const resolved = agent ? available?.agentPath : available?.terminalPath;
+  const items = [
+    {
+      value: 'default',
+      label: t(
+        agent
+          ? 'settings.general.agentShellDefault'
+          : windows
+            ? 'settings.general.terminalShellDefault'
+            : 'settings.general.loginShellDefault'
+      ),
+    },
+    ...(available?.shells ?? [])
+      .filter((shell) => !agent || shell.agentSupported)
+      .map((shell) => ({
+        value: shell.id,
+        label: shell.id === 'login' ? t('settings.general.loginShell') : shell.label,
+      })),
+    {
+      value: 'custom',
+      label: t(legacy ? 'settings.general.shellCustom' : 'settings.general.shellCustomChoose'),
+    },
+  ];
+  if (!items.some((item) => item.value === value)) {
+    items.push({ value, label: t('settings.general.shellUnavailable', { name: value }) });
+  }
+  const parsed = parseShellPreference({ kind: 'custom', path }, agent);
+  return (
+    <li className="flex items-start justify-between gap-4 px-4 py-3">
+      <div className="min-w-0 pt-1">
+        <label htmlFor={id} className="font-medium text-sm">
+          {t(agent ? 'settings.general.agentShell' : 'settings.general.terminalShell')}
+        </label>
+        <p className="mt-1 text-muted-foreground text-xs">
+          {t(agent ? 'settings.general.agentShellHint' : 'settings.general.terminalShellHint')}
+        </p>
+      </div>
+      <div className="grid w-64 shrink-0 gap-2">
+        <Select
+          items={items}
+          value={value}
+          disabled={disabled || Boolean(legacy)}
+          onValueChange={(next) => {
+            if (next === 'custom') {
+              setEditingCustom(true);
+              return;
+            }
+            const choice =
+              next === 'default' ? undefined : parseShellPreference({ kind: next }, agent);
+            if (next !== 'default' && !choice) return;
+            setEditingCustom(false);
+            onSave(choice);
+          }}
+        >
+          <SelectTrigger id={id} size="sm" className="w-full" title={legacy ?? resolved}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="truncate font-mono text-muted-foreground text-xs" title={legacy ?? resolved}>
+          {legacy ?? resolved ?? t('settings.general.shellNotFound')}
+        </p>
+        {legacy && (
+          <p className="text-muted-foreground text-xs">{t('settings.general.shellLegacyHint')}</p>
+        )}
+        {custom && (
+          <form
+            className="grid gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (parsed) onSave(parsed);
+            }}
+          >
+            <Input
+              aria-label={t('settings.general.shellPath')}
+              placeholder={t('settings.general.shellPath')}
+              value={path}
+              disabled={disabled}
+              onChange={(event) => setPath(event.target.value)}
+            />
+            {agent && (
+              <p className="text-muted-foreground text-xs">
+                {t('settings.general.shellCommandHint')}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled}
+                onClick={onBrowse}
+              >
+                <FolderOpen />
+                {t('settings.general.shellBrowse')}
+              </Button>
+              <Button type="submit" size="sm" disabled={disabled || !parsed}>
+                {t('common.save')}
+              </Button>
+            </div>
+          </form>
+        )}
+      </div>
+    </li>
   );
 }
 

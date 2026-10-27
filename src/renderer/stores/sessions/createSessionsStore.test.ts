@@ -92,7 +92,10 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       sessions = [...sessions, session];
       return { ok: true as const, session };
     }),
-    remove: vi.fn(async (): Promise<IpcResult> => ({ ok: true })),
+    remove: vi.fn(async (sessionId: string): Promise<IpcResult> => {
+      sessions = sessions.filter((session) => session.id !== sessionId);
+      return { ok: true };
+    }),
     prompt: vi.fn(
       async (_input: {
         sessionId: string;
@@ -398,6 +401,219 @@ describe('createSessionsStore · 归档', () => {
   });
 });
 
+describe('createSessionsStore · removeSession', () => {
+  const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+  const messages: ChatMessage[] = [
+    {
+      id: 'entry-1',
+      sessionId: 's1',
+      role: 'user',
+      text: 'history',
+      toolCalls: [],
+      createdAt: 1,
+      streaming: false,
+    },
+  ];
+
+  async function withCachedState(archivedAt?: number) {
+    const env = await setup([
+      summary('s1', archivedAt === undefined ? {} : { archivedAt }),
+      summary('s2'),
+    ]);
+    const { store, api } = env;
+    api.history.mockResolvedValueOnce({ ok: true, messages });
+    await store.getState().selectSession('s1');
+    store.getState().setDraft('s1', 'unfinished');
+    store.getState().attachImages('s1', [SHOT]);
+    store.setState({
+      queuedBySession: { s1: [{ id: 'queued-1', text: 'later', images: [SHOT] }] },
+      pendingApprovals: { s1: [] },
+    });
+    return env;
+  }
+
+  it.each([undefined, 50])(
+    'optimistically removes an active or archived session and clears its cached state (archivedAt=%s)',
+    async (archivedAt) => {
+      const { store, api } = await withCachedState(archivedAt);
+      const answer = deferred<IpcResult>();
+      api.remove.mockReturnValueOnce(answer.promise);
+      store.getState().openModelPicker('s1');
+      store.getState().setDraft('s2', 'keep this');
+
+      const removing = store.getState().removeSession('s1');
+      expect(findSession(store.getState(), 's1')).toBeUndefined();
+      expect(store.getState()).toMatchObject({
+        drafts: { s2: 'keep this' },
+        draftImages: {},
+        queuedBySession: {},
+        pendingApprovals: {},
+        modelPickerFor: null,
+        activeSessionId: 's2',
+      });
+      expect(store.getState().messagesBySession.s1).toBeUndefined();
+      expect(store.getState().runtimeBySession.s1).toBeUndefined();
+      expect(store.getState().loadingHistory.s1).toBeUndefined();
+      expect(api.remove).toHaveBeenCalledExactlyOnceWith('s1');
+      answer.resolve({ ok: true });
+      expect(await removing).toEqual({ ok: true });
+      expect(findSession(store.getState(), 's1')).toBeUndefined();
+    }
+  );
+
+  it.each(['running', 'waiting-approval'] as const)(
+    'refuses busy sessions, including archived sessions (%s)',
+    async (status) => {
+      const { store, api } = await setup([
+        summary('s1', { status }),
+        summary('s2', { status, archivedAt: 50 }),
+      ]);
+      for (const id of ['s1', 's2']) {
+        expect(await store.getState().removeSession(id)).toEqual({
+          ok: false,
+          error: '会话正在运行，结束后再删除',
+        });
+        expect(findSession(store.getState(), id)).toBeDefined();
+      }
+      expect(api.remove).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses a prompt still in flight even if the session has settled', async () => {
+    const { store, api, emitEvent } = await setup();
+    await store.getState().selectSession('s1');
+    const answer = deferred<IpcResult>();
+    api.prompt.mockReturnValueOnce(answer.promise);
+    const sending = store.getState().send('hello');
+    emitEvent(1, { type: 'agent_settled', aborted: false });
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
+
+    expect(await store.getState().removeSession('s1')).toMatchObject({ ok: false });
+    expect(api.remove).not.toHaveBeenCalled();
+    answer.resolve({ ok: true });
+    await sending;
+  });
+
+  it('checks buffered events before deciding whether the session is busy', async () => {
+    const { api } = fakeApi();
+    const store = createSessionsStore(api, { schedule: () => {} });
+    await store.getState().loadSessions(WS);
+    store.getState().receiveEvent({
+      sessionId: 's1',
+      event: { seq: 1, type: 'text_delta', delta: 'working' },
+    });
+    expect(await store.getState().removeSession('s1')).toMatchObject({ ok: false });
+    expect(api.remove).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 50])(
+    'restores the session, drafts, images, queue, timeline and selection after failure (archivedAt=%s)',
+    async (archivedAt) => {
+      const { store, api } = await withCachedState(archivedAt);
+      const before = store.getState();
+      const answer = deferred<IpcResult>();
+      api.remove.mockReturnValueOnce(answer.promise);
+      const removing = store.getState().removeSession('s1');
+      store.getState().setDraft('s2', 'new draft');
+      answer.resolve({ ok: false, error: 'disk unavailable' });
+
+      expect(await removing).toEqual({ ok: false, error: 'disk unavailable' });
+      const state = store.getState();
+      expect(findSession(state, 's1')).toEqual(findSession(before, 's1'));
+      expect(state.activeSessionId).toBe('s1');
+      expect(state.drafts).toEqual({ s1: 'unfinished', s2: 'new draft' });
+      expect(state.draftImages.s1).toEqual(before.draftImages.s1);
+      expect(state.queuedBySession.s1).toEqual(before.queuedBySession.s1);
+      expect(state.messagesBySession.s1).toEqual(before.messagesBySession.s1);
+      expect(state.runtimeBySession.s1).toEqual(before.runtimeBySession.s1);
+      expect(state.pendingApprovals.s1).toEqual(before.pendingApprovals.s1);
+      expect(state.notice).toBe('删除会话失败：disk unavailable');
+      // A failed deletion can be retried.
+      expect(await state.removeSession('s1')).toEqual({ ok: true });
+    }
+  );
+
+  it('handles thrown errors and preserves a subsequent user selection on rollback', async () => {
+    const { store, api } = await setup([summary('s1'), summary('s2'), summary('s3')]);
+    await store.getState().selectSession('s1');
+    api.remove.mockRejectedValueOnce(new Error('IPC disconnected'));
+    const removing = store.getState().removeSession('s1');
+    await store.getState().selectSession('s3');
+    expect(await removing).toEqual({ ok: false, error: 'IPC disconnected' });
+    expect(findSession(store.getState(), 's1')).toBeDefined();
+    expect(store.getState().activeSessionId).toBe('s3');
+    expect(store.getState().notice).toContain('IPC disconnected');
+  });
+
+  it.each([
+    { others: [summary('s2'), summary('archived', { archivedAt: 50 })], next: 's2' },
+    { others: [summary('archived', { archivedAt: 50 })], next: 'archived' },
+    { others: [], next: null },
+  ])('selects $next after deleting the active session', async ({ others, next }) => {
+    const { store, api } = await setup([summary('s1'), ...others]);
+    await store.getState().selectSession('s1');
+    api.history.mockClear();
+    await store.getState().removeSession('s1');
+    expect(store.getState().activeSessionId).toBe(next);
+    if (next) expect(api.history).toHaveBeenCalledExactlyOnceWith(next);
+    else expect(api.history).not.toHaveBeenCalled();
+  });
+
+  it('keeps the active session when removing another and refuses unknown ids', async () => {
+    const { store, api } = await setup([summary('s1'), summary('s2')]);
+    await store.getState().selectSession('s2');
+    await store.getState().removeSession('s1');
+    expect(store.getState().activeSessionId).toBe('s2');
+    expect(await store.getState().removeSession('missing')).toEqual({
+      ok: false,
+      error: '会话不存在',
+    });
+    expect(api.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores late history, list responses and events during and after deletion', async () => {
+    const { store, api, emitEvent, emitApproval } = await setup();
+    const history = deferred<IpcResult<{ messages: ChatMessage[] }>>();
+    const list = deferred<{ ok: true; sessions: SessionSummary[] }>();
+    const answer = deferred<IpcResult>();
+    api.history.mockReturnValueOnce(history.promise);
+    api.remove.mockReturnValueOnce(answer.promise);
+    const selecting = store.getState().selectSession('s1');
+    const removing = store.getState().removeSession('s1');
+
+    // Refreshing while Main has not removed the record must not undo the optimistic removal.
+    await store.getState().loadSessions(WS);
+    expect(findSession(store.getState(), 's1')).toBeUndefined();
+    expect(store.getState().loadingHistory).toEqual({});
+    api.list.mockReturnValueOnce(list.promise);
+    const loading = store.getState().loadSessions(WS);
+    answer.resolve({ ok: true });
+    await removing;
+    list.resolve({ ok: true, sessions: [summary('s1')] });
+    history.resolve({ ok: true, messages });
+    await Promise.all([loading, selecting]);
+    emitEvent(1, { type: 'text_delta', delta: 'late' });
+    emitApproval({
+      id: 'req-late',
+      sessionId: 's1',
+      kind: 'command',
+      title: 'bash',
+      detail: 'echo late',
+      expiresAt: 0,
+    });
+    await store.getState().selectSession('s1');
+    expect(findSession(store.getState(), 's1')).toBeUndefined();
+    expect(store.getState()).toMatchObject({
+      activeSessionId: null,
+      messagesBySession: {},
+      runtimeBySession: {},
+      pendingApprovals: {},
+      loadingHistory: {},
+      notice: null,
+    });
+  });
+});
+
 describe('createSessionsStore · send', () => {
   it('拒绝空文本与纯空白，不调用 prompt', async () => {
     const { store, api } = await setup();
@@ -488,6 +704,48 @@ describe('createSessionsStore · send', () => {
     expect(store.getState().drafts).toEqual({ s1: '写了一半', s2: '另一个' });
     store.getState().setDraft('s1', '');
     expect(store.getState().drafts).toEqual({ s2: '另一个' });
+  });
+});
+
+describe('createSessionsStore · setDraftImages', () => {
+  const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+  const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
+
+  it('replaces images exactly for one session, preserving other drafts', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const { setDraft, setDraftImages } = store.getState();
+    setDraft('s1', 'unfinished');
+    setDraftImages('s1', [SHOT]);
+    setDraftImages('s2', [PHOTO]);
+    const before = store.getState();
+
+    setDraftImages('s1', [PHOTO, SHOT]);
+
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual([PHOTO, SHOT]);
+    expect(store.getState().draftImages.s2).toBe(before.draftImages.s2);
+    expect(store.getState().drafts).toBe(before.drafts);
+    expect(before.draftImages.s1).toEqual([SHOT]);
+  });
+
+  it('clears the session key for an empty array, including an already empty draft', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const { setDraftImages } = store.getState();
+    setDraftImages('s1', [SHOT]);
+    setDraftImages('s2', [PHOTO]);
+
+    setDraftImages('s1', []);
+    setDraftImages('missing', []);
+
+    expect(store.getState().draftImages).toEqual({ s2: [PHOTO] });
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual([]);
+  });
+
+  it('restores all images without applying attachment limits', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const images = Array.from({ length: 12 }, () => SHOT);
+    store.getState().setDraftImages('s1', images);
+
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual(images);
   });
 });
 

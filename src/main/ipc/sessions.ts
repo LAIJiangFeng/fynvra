@@ -42,6 +42,7 @@ import {
   type SessionStore,
 } from '../services/sessions/sessionStore';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
 import { getOrchestrationRegistry } from './orchestration';
 import { getProviderStore } from './providers';
@@ -66,7 +67,7 @@ export function getAgentHost(): AgentHostService {
 }
 
 /** 会话注册表 sessions.json：agent host 与归档共用同一份 */
-function getSessionStore(): SessionStore {
+export function getSessionStore(): SessionStore {
   sessionStore ??= createSessionStore({
     filePath: join(app.getPath('userData'), 'sessions.json'),
   });
@@ -121,6 +122,7 @@ function createAppAgentHost(): AgentHostService {
     branches: createBranchTracker({ read: (cwd) => readGitBranch(cwd) }),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
+      instructions: getInstructionRegistry(),
       mcpServers: getMcpRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),

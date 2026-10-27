@@ -97,6 +97,14 @@ export const IN_PLACE_WORKER_CONTRACT_PROMPT = [
   ...WORKER_SHARED_RULES,
 ].join('\n');
 
+function escapeInstructionSource(name: string): string {
+  return name
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /**
  * 角色会话追加到 pi 系统提示词的全文：角色自己的 systemPrompt（人设与工作循环），
  * 只有 `tools: 'orchestrator'` 时加编排工具说明，worker 会话再加 worker 契约
@@ -105,12 +113,19 @@ export const IN_PLACE_WORKER_CONTRACT_PROMPT = [
  */
 export function buildRolePromptAppend(
   role: Pick<Role, 'systemPrompt' | 'tools'>,
-  options: { worker: boolean; inPlace?: boolean }
+  options: {
+    worker: boolean;
+    inPlace?: boolean;
+    instructionFile?: { name: string; content: string };
+  }
 ): string {
   const orchestrator = role.tools === 'orchestrator';
   const inPlace = options.inPlace === true;
   return [
     role.systemPrompt?.trim(),
+    options.instructionFile?.content.trim()
+      ? `<user_instructions source="${escapeInstructionSource(options.instructionFile.name)}">\n${options.instructionFile.content}\n</user_instructions>`
+      : undefined,
     orchestrator ? ORCHESTRATOR_PROMPT : undefined,
     orchestrator && inPlace ? IN_PLACE_ORCHESTRATOR_PROMPT : undefined,
     options.worker

@@ -1,8 +1,16 @@
 import * as nodeFs from 'node:fs/promises';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import type { CoreFs, ExecFn, Message, RoleStore, Workspace } from '@fynvra/core';
+import {
+  type CoreFs,
+  type ExecFn,
+  type Message,
+  parseOrchestrationSnapshot,
+  type RoleStore,
+  type Workspace,
+} from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
+import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
 import type { CheckCommandPolicy } from './checkCommand';
 import type { RunChecksFn } from './host';
 import type { WorkerSessionLauncher } from './launcher';
@@ -38,6 +46,8 @@ export interface OrchestrationRegistry {
   setLauncher(launcher: WorkerSessionLauncher): void;
   /** 工作区的服务，首次访问时创建并开始加载快照；工作区不存在时 `undefined`。 */
   serviceFor(workspaceId: string): OrchestrationService | undefined;
+  /** Read current/persisted state without opening a service or repairing files. */
+  readSnapshot(workspaceId: string): Promise<OrchestrationSnapshotView | undefined>;
   /** 打开全部工作区并等快照加载完：{@link OrchestrationRegistry.workerHostFor} 只认已加载的状态。 */
   openAll(): Promise<void>;
   /** 给 `agentHost.setOrchestrationHostFactory`。 */
@@ -141,6 +151,24 @@ export function createOrchestrationRegistry(
       launcher = next;
     },
     serviceFor,
+    async readSnapshot(workspaceId) {
+      const existing = services.get(workspaceId);
+      if (existing) return existing.snapshot();
+      if (!options.listWorkspaces().some((workspace) => workspace.id === workspaceId))
+        return undefined;
+      try {
+        const text = await fs.readFile(
+          join(options.userDataPath, 'orchestration', `${workspaceId}.json`),
+          'utf8'
+        );
+        const parsed = parseOrchestrationSnapshot(JSON.parse(text));
+        if (!parsed.ok) return undefined;
+        const { version: _version, ...snapshot } = parsed.snapshot;
+        return snapshot;
+      } catch {
+        return undefined;
+      }
+    },
     openAll,
     hostFor: (coordinatorSessionId, workspaceId) =>
       serviceFor(workspaceId)?.hostFor(coordinatorSessionId) ?? null,

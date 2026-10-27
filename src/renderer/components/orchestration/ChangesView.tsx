@@ -10,7 +10,7 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
-import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
@@ -23,41 +23,19 @@ import {
 import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
+import { type DiffSection, diffTabsStoreFor } from '@/stores/diffTabs';
 import {
   type ReviewCandidate,
   type ReviewDiffData,
   useOrchestrationStore,
 } from '@/stores/orchestration';
 import { PanelMessage } from './common';
-import {
-  type DiffFile,
-  type DiffFileStatus,
-  type DiffLine,
-  diffLineCount,
-  parseUnifiedDiff,
-  statSummary,
-} from './diff';
+import { type DiffFile, parseUnifiedDiff, statSummary } from './diff';
+import { LineCounts, STATUS_MARK } from './diffView';
 import { buildFileTree, type FileTreeNode } from './fileTree';
 import { formatRelative, oneLine, shortSha, taskStatusLabel } from './format';
-import { useSeenOnce } from './hooks';
 
-/** 默认展开的文件：单个不超过这么多行，且累计不超过 {@link OPEN_BUDGET}。 */
-const OPEN_FILE_LINES = 400;
-const OPEN_BUDGET = 1_500;
-/** 一个文件每次多渲染这么多行。 */
-const LINE_CHUNK = 400;
-const LINE_HEIGHT_PX = 18;
-
-/** 状态字母与配色；读屏与悬停的名称在字典 orchestration.fileStatus */
-const STATUS_MARK: Record<DiffFileStatus, { letter: string; className: string }> = {
-  added: { letter: 'A', className: 'text-emerald-600 dark:text-emerald-400' },
-  deleted: { letter: 'D', className: 'text-red-600 dark:text-red-400' },
-  modified: { letter: 'M', className: 'text-amber-600 dark:text-amber-400' },
-  renamed: { letter: 'R', className: 'text-sky-600 dark:text-sky-400' },
-  copied: { letter: 'C', className: 'text-sky-600 dark:text-sky-400' },
-};
-
-/** 「改动」tab：选一个待验收 / 已完成任务的当前尝试，看它的 diff。 */
+/** 「改动」tab：选一个待验收 / 已完成任务的当前尝试，看它的改动概览。 */
 export function ChangesView({
   view,
   candidates,
@@ -76,6 +54,8 @@ export function ChangesView({
   const selected =
     candidates.find((candidate) => candidate.dispatch.id === selectedId) ?? candidates[0];
   if (!selected) return null;
+  const workspaceId = view.runs.find((run) => run.id === selected.task.runId)?.workspaceId;
+  if (!workspaceId) return null;
   const items = candidates.map(({ task, dispatch }) => ({
     value: dispatch.id,
     label: t('orchestration.candidate', {
@@ -112,6 +92,7 @@ export function ChangesView({
       ) : (
         <DispatchDiff
           key={selected.dispatch.id}
+          workspaceId={workspaceId}
           dispatchId={selected.dispatch.id}
           worktreeAlive={worktreeAlive}
         />
@@ -121,9 +102,11 @@ export function ChangesView({
 }
 
 function DispatchDiff({
+  workspaceId,
   dispatchId,
   worktreeAlive,
 }: {
+  workspaceId: string;
   dispatchId: string;
   worktreeAlive: boolean;
 }) {
@@ -158,6 +141,8 @@ function DispatchDiff({
   }
   return (
     <DiffContent
+      workspaceId={workspaceId}
+      dispatchId={dispatchId}
       data={entry.data}
       refreshing={entry.refreshing}
       stale={!worktreeAlive}
@@ -167,11 +152,15 @@ function DispatchDiff({
 }
 
 function DiffContent({
+  workspaceId,
+  dispatchId,
   data,
   refreshing,
   stale,
   onRefresh,
 }: {
+  workspaceId: string;
+  dispatchId: string;
   data: ReviewDiffData;
   refreshing: boolean;
   stale: boolean;
@@ -230,6 +219,9 @@ function DiffContent({
 
       {data.uncommitted.available ? (
         <ChangeSet
+          workspaceId={workspaceId}
+          dispatchId={dispatchId}
+          section="uncommitted"
           title={t('orchestration.uncommittedChanges')}
           files={data.uncommitted.files}
           diff={data.uncommitted.diff}
@@ -241,6 +233,9 @@ function DiffContent({
         </SectionBox>
       )}
       <ChangeSet
+        workspaceId={workspaceId}
+        dispatchId={dispatchId}
+        section="committed"
         title={t('orchestration.committedChanges')}
         files={data.files}
         diff={data.diff}
@@ -291,13 +286,19 @@ function SectionNote({ children }: { children: ReactNode }) {
   return <p className="py-3 text-center text-muted-foreground text-xs">{children}</p>;
 }
 
-/** 一组改动（未提交 / 已提交）：目录树 + 下面逐文件的 diff，点树里的文件展开并滚到它的 diff。 */
+/** 一组改动（未提交 / 已提交）：文件树，点击后在中央工作区打开 diff。 */
 function ChangeSet({
+  workspaceId,
+  dispatchId,
+  section,
   title,
   files: names,
   diff,
   empty,
 }: {
+  workspaceId: string;
+  dispatchId: string;
+  section: DiffSection;
   title: string;
   files: string[];
   diff: string;
@@ -310,24 +311,14 @@ function ChangeSet({
     return names.filter((path) => !parsed.has(path));
   }, [names, files]);
   const tree = useMemo(() => buildFileTree(files), [files]);
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => defaultOpenFiles(files));
-  const sectionRefs = useRef(new Map<string, HTMLElement>());
+  const diffTabs = diffTabsStoreFor(workspaceId);
+  const selected = diffTabs((state) => state.opened.find((tab) => tab.id === state.selectedId));
+  const activePath =
+    selected?.dispatchId === dispatchId && selected.section === section ? selected.path : null;
   const t = useT();
 
-  const toggle = (key: string, next: boolean) =>
-    setOpen((current) => {
-      const updated = new Set(current);
-      if (next) updated.add(key);
-      else updated.delete(key);
-      return updated;
-    });
-
-  const reveal = (key: string) => {
-    toggle(key, true);
-    requestAnimationFrame(() =>
-      sectionRefs.current.get(key)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    );
-  };
+  const openFile = ({ path, oldPath, status }: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) =>
+    diffTabs.getState().open({ dispatchId, section, path, oldPath, status });
 
   return (
     <SectionBox title={title} count={files.length + extra.length}>
@@ -335,29 +326,23 @@ function ChangeSet({
         <SectionNote>{empty}</SectionNote>
       ) : (
         <>
-          {files.length > 0 && <FileTree nodes={tree} onReveal={reveal} />}
-          {files.map((file) => {
-            const key = fileKey(file);
-            return (
-              <DiffFileSection
-                key={key}
-                file={file}
-                open={open.has(key)}
-                onOpenChange={(next) => toggle(key, next)}
-                sectionRef={(element) => {
-                  if (element) sectionRefs.current.set(key, element);
-                  else sectionRefs.current.delete(key);
-                }}
-              />
-            );
-          })}
+          {files.length > 0 && <FileTree nodes={tree} activePath={activePath} onOpen={openFile} />}
           {extra.map((path) => (
-            <p key={path} className="rounded-md border px-2 py-1.5 font-mono text-[11px]">
+            <button
+              key={path}
+              type="button"
+              aria-pressed={activePath === path}
+              className={cn(
+                'rounded-md border px-2 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
+                activePath === path && 'bg-accent'
+              )}
+              onClick={() => openFile({ path, status: 'modified' })}
+            >
               {path}{' '}
               <span className="font-sans text-muted-foreground">
                 {t('orchestration.noTextDiff')}
               </span>
-            </p>
+            </button>
           ))}
         </>
       )}
@@ -365,27 +350,18 @@ function ChangeSet({
   );
 }
 
-/** 同一路径可能出现两次（类型变更 = 删除 + 新增），按状态 + 路径区分。 */
-function fileKey(file: DiffFile): string {
-  return `${file.status}:${file.oldPath ?? ''}:${file.path}`;
-}
-
-function defaultOpenFiles(files: DiffFile[]): Set<string> {
-  const open = new Set<string>();
-  let budget = OPEN_BUDGET;
-  for (const file of files) {
-    const lines = diffLineCount(file);
-    if (lines === 0 || lines > OPEN_FILE_LINES || lines > budget) continue;
-    open.add(fileKey(file));
-    budget -= lines;
-  }
-  return open;
-}
-
 const TREE_INDENT_PX = 12;
 
-/** VS Code 式目录树：目录行折叠 / 展开，文件行点击展开并滚到它的 diff。 */
-function FileTree({ nodes, onReveal }: { nodes: FileTreeNode[]; onReveal: (key: string) => void }) {
+/** VS Code 式目录树：目录行折叠 / 展开，文件行点击打开中央 diff 标签。 */
+function FileTree({
+  nodes,
+  activePath,
+  onOpen,
+}: {
+  nodes: FileTreeNode[];
+  activePath: string | null;
+  onOpen: (file: DiffFile) => void;
+}) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const t = useT();
   const toggleFolder = (path: string) =>
@@ -432,16 +408,20 @@ function FileTree({ nodes, onReveal }: { nodes: FileTreeNode[]; onReveal: (key: 
       }
       const { file } = node;
       const mark = STATUS_MARK[file.status];
-      const key = fileKey(file);
       rows.push(
-        <li key={`f:${key}`}>
+        // 同一路径可能出现两次（类型变更 = 删除 + 新增），按状态 + 路径区分。
+        <li key={`f:${file.status}:${file.oldPath ?? ''}:${file.path}`}>
           <button
             type="button"
-            className="flex w-full items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent"
+            aria-pressed={activePath === file.path}
+            className={cn(
+              'flex w-full items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
+              activePath === file.path && 'bg-accent'
+            )}
             // 与目录行的 chevron（size-3 + gap）对齐
             style={{ paddingLeft: indent + 16 }}
             title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
-            onClick={() => onReveal(key)}
+            onClick={() => onOpen(file)}
           >
             <File className="size-3.5 shrink-0 text-muted-foreground" />
             <span
@@ -502,193 +482,3 @@ function CommitList({ commits }: { commits: ReviewDiffData['commits'] }) {
     </ul>
   );
 }
-
-function LineCounts({ file }: { file: DiffFile }) {
-  const t = useT();
-  if (file.binary) {
-    return <span className="shrink-0 text-muted-foreground">{t('orchestration.binary')}</span>;
-  }
-  return (
-    <span className="shrink-0 font-mono tabular-nums">
-      <span className="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>{' '}
-      <span className="text-red-600 dark:text-red-400">−{file.deletions}</span>
-    </span>
-  );
-}
-
-function DiffFileSection({
-  file,
-  open,
-  onOpenChange,
-  sectionRef,
-}: {
-  file: DiffFile;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  sectionRef: (element: HTMLElement | null) => void;
-}) {
-  const mark = STATUS_MARK[file.status];
-  const t = useT();
-  return (
-    <section ref={sectionRef} aria-label={file.path} className="scroll-mt-2 rounded-md border">
-      <Collapsible open={open} onOpenChange={onOpenChange}>
-        <CollapsibleTrigger className="group sticky top-0 z-[1] flex w-full items-center gap-1.5 rounded-t-md bg-card px-2 py-1.5 text-left text-xs outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[panel-open]:border-b">
-          <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
-          <span
-            className={cn('shrink-0 font-mono font-semibold', mark.className)}
-            title={t(`orchestration.fileStatus.${file.status}`)}
-          >
-            {mark.letter}
-          </span>
-          <span className="min-w-0 flex-1 break-words font-mono text-[11px]">
-            {file.oldPath && (
-              <span className="text-muted-foreground">
-                <PathText path={file.oldPath} />
-                {' → '}
-              </span>
-            )}
-            <PathText path={file.path} />
-          </span>
-          <LineCounts file={file} />
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <LazyDiffBody file={file} />
-        </CollapsibleContent>
-      </Collapsible>
-    </section>
-  );
-}
-
-/** 路径只在 `/` 之后换行，窄面板里不会把文件名拦腰截断。 */
-function PathText({ path }: { path: string }) {
-  return path.split('/').map((segment, index, segments) => (
-    // biome-ignore lint/suspicious/noArrayIndexKey: 路径段的位置就是它的身份
-    <span key={index}>
-      {segment}
-      {index < segments.length - 1 && (
-        <>
-          /<wbr />
-        </>
-      )}
-    </span>
-  ));
-}
-
-/** 展开后、接近视口时才渲染行；超长文件每次多显示 {@link LINE_CHUNK} 行。 */
-function LazyDiffBody({ file }: { file: DiffFile }) {
-  const placeholderRef = useRef<HTMLDivElement>(null);
-  const seen = useSeenOnce(placeholderRef);
-  const [limit, setLimit] = useState(LINE_CHUNK);
-  const total = diffLineCount(file);
-  const t = useT();
-
-  if (file.binary) {
-    return (
-      <p className="px-3 py-2 text-muted-foreground text-xs">{t('orchestration.binaryFile')}</p>
-    );
-  }
-  if (total === 0) {
-    const detail =
-      file.meta.length > 0
-        ? file.meta.join(' · ')
-        : file.status === 'renamed'
-          ? t('orchestration.renameOnly')
-          : t('orchestration.noTextChanges');
-    return <p className="px-3 py-2 text-muted-foreground text-xs">{detail}</p>;
-  }
-  if (!seen) {
-    return (
-      <div
-        ref={placeholderRef}
-        aria-hidden
-        style={{ height: Math.min(total, LINE_CHUNK) * LINE_HEIGHT_PX }}
-      />
-    );
-  }
-  const rest = total - limit;
-  return (
-    <div>
-      {file.meta.length > 0 && (
-        <p className="border-b px-3 py-1 font-mono text-[11px] text-muted-foreground">
-          {file.meta.join(' · ')}
-        </p>
-      )}
-      <DiffLines file={file} limit={limit} />
-      {rest > 0 && (
-        <div className="border-t px-2 py-1.5 text-center">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            onClick={() => setLimit((current) => current + LINE_CHUNK)}
-          >
-            {t('orchestration.showMore', { count: Math.min(LINE_CHUNK, rest), rest })}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const ROW_TONE: Record<DiffLine['kind'], string> = {
-  add: 'bg-emerald-500/10 dark:bg-emerald-400/10',
-  del: 'bg-red-500/10 dark:bg-red-400/10',
-  context: '',
-  note: 'text-muted-foreground italic',
-};
-const MARKER: Record<DiffLine['kind'], { text: string; className: string }> = {
-  add: { text: '+', className: 'text-emerald-700 dark:text-emerald-300' },
-  del: { text: '-', className: 'text-red-700 dark:text-red-300' },
-  context: { text: ' ', className: '' },
-  note: { text: '', className: '' },
-};
-
-const DiffLines = memo(function DiffLines({ file, limit }: { file: DiffFile; limit: number }) {
-  const lastHunk = file.hunks.at(-1);
-  const maxLine = lastHunk
-    ? Math.max(lastHunk.oldStart + lastHunk.oldLines, lastHunk.newStart + lastHunk.newLines)
-    : 1;
-  const gutter = { width: `calc(${String(maxLine).length}ch + 0.75rem)` };
-  const rows: ReactNode[] = [];
-  let count = 0;
-  for (const [hunkIndex, hunk] of file.hunks.entries()) {
-    if (count >= limit) break;
-    rows.push(
-      <div
-        key={`h${hunkIndex}`}
-        className="truncate bg-sky-500/10 px-2 text-sky-800 dark:text-sky-300"
-        title={hunk.header}
-      >
-        {hunk.header}
-      </div>
-    );
-    for (const [lineIndex, line] of hunk.lines.entries()) {
-      if (count >= limit) break;
-      count += 1;
-      const marker = MARKER[line.kind];
-      rows.push(
-        <div key={`${hunkIndex}:${lineIndex}`} className={cn('flex', ROW_TONE[line.kind])}>
-          <span
-            className="shrink-0 select-none pr-1 text-right text-muted-foreground/70"
-            style={gutter}
-          >
-            {line.oldLine}
-          </span>
-          <span
-            className="shrink-0 select-none border-r pr-1 text-right text-muted-foreground/70"
-            style={gutter}
-          >
-            {line.newLine}
-          </span>
-          <span className={cn('w-4 shrink-0 select-none text-center', marker.className)}>
-            {marker.text}
-          </span>
-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2">
-            {line.text === '' ? ' ' : line.text}
-          </span>
-        </div>
-      );
-    }
-  }
-  return <div className="font-mono text-[11px] leading-[18px]">{rows}</div>;
-});

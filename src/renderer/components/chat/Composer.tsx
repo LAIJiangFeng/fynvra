@@ -7,7 +7,7 @@ import {
   MAX_CHAT_IMAGES_TOTAL_BYTES,
   nextApprovalMode,
 } from '@shared/types/chat';
-import { CircleStop, ListPlus, SendHorizontal, X } from 'lucide-react';
+import { CircleStop, ImagePlus, ListPlus, SendHorizontal, X } from 'lucide-react';
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -21,6 +21,7 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
 import {
@@ -43,8 +44,10 @@ import {
   useSessionsStore,
 } from '@/stores/sessions';
 import { ApprovalModePicker } from './ApprovalModePicker';
+import { caretOnLineEdge } from './caretLine';
+import { ImagePreview } from './ImagePreview';
 import {
-  currentText,
+  currentEntry,
   down,
   type InputHistory,
   isBrowsing,
@@ -56,16 +59,75 @@ import { ModelPicker } from './ModelPicker';
 
 type Caret = 'start' | 'end';
 
-/** 光标（没有选区）在第一行：它前面没有换行 */
-function caretOnFirstLine(input: HTMLTextAreaElement): boolean {
-  const { selectionStart, selectionEnd, value } = input;
-  return selectionStart === selectionEnd && !value.slice(0, selectionStart).includes('\n');
+/** DOM adapter for the pure boundary check (node tests intentionally have no DOM types). */
+function caretOnVisualLineEdge(input: HTMLTextAreaElement, edge: 'first' | 'last'): boolean {
+  return caretOnLineEdge(input, edge, (caret, boundary) => {
+    const document = input.ownerDocument;
+    const view = document.defaultView;
+    if (!view || !document.body || !input.clientWidth) return null;
+    const computed = view.getComputedStyle(input);
+    const mirror = document.createElement('div');
+    mirror.setAttribute('aria-hidden', 'true');
+    for (const property of [
+      'font-family',
+      'font-size',
+      'font-weight',
+      'font-style',
+      'font-variant',
+      'font-stretch',
+      'line-height',
+      'letter-spacing',
+      'word-spacing',
+      'text-transform',
+      'text-indent',
+      'text-align',
+      'tab-size',
+      'direction',
+      'white-space',
+      'overflow-wrap',
+      'word-break',
+      'padding-top',
+      'padding-right',
+      'padding-bottom',
+      'padding-left',
+    ]) {
+      mirror.style.setProperty(property, computed.getPropertyValue(property));
+    }
+    Object.assign(mirror.style, {
+      position: 'fixed',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      top: '0',
+      left: '0',
+      boxSizing: 'border-box',
+      // clientWidth is the padding box, excluding borders and the vertical scrollbar.
+      width: `${input.clientWidth}px`,
+      whiteSpace: input.wrap === 'off' ? 'pre' : computed.whiteSpace || 'pre-wrap',
+    });
+    const marker = document.createElement('span');
+    const topAt = (position: number) => {
+      mirror.textContent = input.value.slice(0, position);
+      // Keep the suffix: dropping it changes word wrapping before the caret. A zero-width
+      // sentinel gives an empty/trailing-newline row a box without adding a character's width.
+      marker.textContent = input.value.slice(position) || '\u200b';
+      mirror.append(marker);
+      return marker.offsetTop;
+    };
+    document.body.append(mirror);
+    try {
+      // Both positions use the same unscrolled mirror, regardless of textarea.scrollTop.
+      return { caret: topAt(caret), edge: topAt(boundary) };
+    } finally {
+      mirror.remove();
+    }
+  });
 }
 
-/** 光标（没有选区）在最后一行：它后面没有换行 */
-function caretOnLastLine(input: HTMLTextAreaElement): boolean {
-  const { selectionStart, selectionEnd, value } = input;
-  return selectionStart === selectionEnd && !value.slice(selectionEnd).includes('\n');
+/** Picker and paste share the same MIME filter and ingestion path. */
+function supportedImages(files: File[]) {
+  return files.flatMap((file) =>
+    isChatImageMimeType(file.type) ? [{ file, mimeType: file.type }] : []
+  );
 }
 
 /** 图片提示显示多久 */
@@ -86,7 +148,7 @@ function readBase64(file: File): Promise<string | null> {
   });
 }
 
-/** 粘贴的图片没加进去时的提示 */
+/** 图片没加进去时的提示 */
 function imageProblem(problem: ImageRejection | 'unsupported', t: T): string {
   switch (problem) {
     case 'count':
@@ -105,9 +167,9 @@ function imageProblem(problem: ImageRejection | 'unsupported', t: T): string {
 
 /**
  * 输入框：多行，Enter 发送、Shift+Enter 换行；运行中显示「停止」。草稿按会话存在 store。
- * 左下角是模型胶囊与审批胶囊；Shift+Tab 循环切换审批档位。
- * ↑ / ↓ 像终端一样翻这个会话发过的消息：输入框为空或光标在第一行时 ↑ 取上一条，
- * 在最后一行时 ↓ 取下一条，翻过最新一条回到草稿；Esc 直接回到草稿；翻到的内容一经编辑就成为新的草稿。
+ * 左下角是图片按钮、模型胶囊与审批胶囊；Shift+Tab 循环切换审批档位。
+ * ↑ / ↓ 像终端一样翻这个会话发过的消息：输入框为空或光标在视觉第一行时 ↑ 取上一条，
+ * 在视觉最后一行时 ↓ 取下一条，翻过最新一条回到草稿；Esc 直接回到草稿；翻到的内容一经编辑就成为新的草稿。
  * 这些都是默认键：按键经动作表（设置 → 快捷键）判断，另有运行中 Esc 停止、Ctrl+M（macOS ⌘M）打开模型选择器。
  * Ctrl/⌘+V 粘贴图片：剪贴板里有 PNG / JPEG / GIF / WebP 文件时以图片为准，缩略图挂在输入框顶部
  * （草稿，按会话存在 store），只有图片也能发；没有图片文件时照常粘贴文字。
@@ -119,6 +181,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const approvalMode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
+  const setDraftImages = useSessionsStore((state) => state.setDraftImages);
   const send = useSessionsStore((state) => state.send);
   const steer = useSessionsStore((state) => state.steer);
   const removeQueued = useSessionsStore((state) => state.removeQueued);
@@ -133,17 +196,21 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const steerLabel = useChordLabel('steer-now');
   const t = useT();
   const input = useRef<HTMLTextAreaElement>(null);
+  const imagePicker = useRef<HTMLInputElement>(null);
   useActionHandler('focus-composer', () => input.current?.focus());
   /** 正在翻的历史；null 表示没在浏览（输入框里是草稿） */
   const history = useRef<InputHistory | null>(null);
   /** 翻到新内容后光标放哪：↑ 放开头（接着按 ↑ 继续往前翻），↓ 放末尾 */
   const pendingCaret = useRef<Caret | null>(null);
-  /** 粘贴的图片没加进去时的提示；每次设成新对象，同样的提示再出现也重新计时 */
+  /** 图片没加进去时的提示；每次设成新对象，同样的提示再出现也重新计时 */
   const [imageHint, setImageHint] = useState<{ text: string } | null>(null);
 
   // 历史来源：这个会话里 user 的消息，含 history 回放的与这次发出去的（都在 store 的时间线里）
   const sent = useMemo(
-    () => messages.filter((message) => message.role === 'user').map((message) => message.text),
+    () =>
+      messages
+        .filter((message) => message.role === 'user')
+        .map((message) => ({ text: message.text, images: message.images ?? [] })),
     [messages]
   );
 
@@ -175,16 +242,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
   /** 换成历史里的另一条（或回到草稿） */
   const browse = (next: InputHistory, caret: Caret) => {
     history.current = isBrowsing(next) ? next : null;
-    const text = currentText(next);
-    if (text === draft) {
+    const entry = currentEntry(next);
+    setDraftImages(sessionId, entry.images);
+    if (entry.text === draft) {
       placeCaret(caret);
       return;
     }
     pendingCaret.current = caret;
-    setDraft(sessionId, text);
+    setDraft(sessionId, entry.text);
   };
 
-  /** 读出粘贴的图片加进草稿；格式不支持、太大、超过张数、读不出来的不加，给出提示 */
+  /** 读出图片加进草稿；格式不支持、太大、超过张数、读不出来的不加，给出提示 */
   const ingestImages = async (
     files: { file: File; mimeType: ChatImageMimeType }[],
     unsupported: boolean
@@ -203,13 +271,20 @@ export function Composer({ sessionId }: { sessionId: string }) {
     );
     const pasted = read.filter((image) => image !== null);
     if (pasted.length < read.length) problem ??= 'invalid';
+    const previousImages = useSessionsStore.getState().draftImages[sessionId];
     problem = attachImages(sessionId, pasted) ?? problem;
+    const state = useSessionsStore.getState();
+    // 只在确实加了图片时结束浏览；读文件期间可能已经切到别的会话。
+    if (state.activeSessionId === sessionId && state.draftImages[sessionId] !== previousImages) {
+      history.current = null;
+    }
     setImageHint(problem ? { text: imageProblem(problem, t) } : null);
   };
 
   // × 按钮随图片一起消失：焦点放回输入框，不掉到 body 上
   const removeImage = useCallback(
     (index: number) => {
+      history.current = null;
       removeDraftImage(sessionId, index);
       input.current?.focus();
     },
@@ -234,9 +309,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files);
-    const pasted = files.flatMap((file) =>
-      isChatImageMimeType(file.type) ? [{ file, mimeType: file.type }] : []
-    );
+    const pasted = supportedImages(files);
     if (pasted.length === 0) {
       // 剪贴板里的图片格式不支持（BMP、SVG 等）：文字照常粘贴，提示一下
       if (files.some((file) => file.type.startsWith('image/'))) {
@@ -258,8 +331,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
       if (approvalMode) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
       return;
     }
-    if (matchAction(event, 'history-prev') && caretOnFirstLine(textarea)) {
-      const state = history.current ?? startHistory(sent, draft);
+    if (matchAction(event, 'history-prev') && caretOnVisualLineEdge(textarea, 'first')) {
+      const state = history.current ?? startHistory(sent, { text: draft, images });
       const next = up(state);
       if (next === state) return;
       event.preventDefault();
@@ -267,7 +340,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     if (matchAction(event, 'history-next') && history.current) {
-      if (!caretOnLastLine(textarea)) return;
+      if (!caretOnVisualLineEdge(textarea, 'last')) return;
       event.preventDefault();
       browse(down(history.current), 'end');
       return;
@@ -326,9 +399,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
   useEffect(
     () => () => {
       const browsing = history.current;
-      if (browsing) setDraft(sessionId, browsing.draft);
+      history.current = null;
+      if (browsing) {
+        setDraft(sessionId, browsing.draft.text);
+        setDraftImages(sessionId, browsing.draft.images);
+      }
     },
-    [sessionId, setDraft]
+    [sessionId, setDraft, setDraftImages]
   );
 
   return (
@@ -365,6 +442,31 @@ export function Composer({ sessionId }: { sessionId: string }) {
         />
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <div className="flex min-w-0 items-center gap-2">
+            <input
+              ref={imagePicker}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              hidden
+              onChange={(event) => {
+                const files = Array.from(event.currentTarget.files ?? []);
+                event.currentTarget.value = '';
+                if (files.length === 0) return;
+                const supported = supportedImages(files);
+                void ingestImages(supported, supported.length < files.length);
+                input.current?.focus();
+              }}
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={<Button variant="ghost" size="icon-sm" />}
+                aria-label={t('chat.addImages')}
+                onClick={() => imagePicker.current?.click()}
+              >
+                <ImagePlus />
+              </TooltipTrigger>
+              <TooltipContent>{t('chat.addImages')}</TooltipContent>
+            </Tooltip>
             <ModelPicker sessionId={sessionId} />
             <ApprovalModePicker sessionId={sessionId} />
             {busy && (
@@ -412,17 +514,25 @@ const DraftImages = memo(function DraftImages({
   onRemove: (index: number) => void;
 }) {
   const t = useT();
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   if (images.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2 px-3 pt-3">
       {images.map((image, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: 草稿图片没有 id，同一张图也可能粘贴两次；移除按位置
         <div key={index} className="relative size-16 shrink-0">
-          <img
-            src={`data:${image.mimeType};base64,${image.data}`}
-            alt={t('chat.image', { index: index + 1 })}
-            className="size-16 rounded-md border object-cover"
-          />
+          <button
+            type="button"
+            aria-label={t('chat.previewImage', { index: index + 1 })}
+            onClick={() => setPreviewIndex(index)}
+            className="rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <img
+              src={`data:${image.mimeType};base64,${image.data}`}
+              alt={t('chat.image', { index: index + 1 })}
+              className="size-16 rounded-md border object-cover"
+            />
+          </button>
           <button
             type="button"
             aria-label={t('chat.removeImage', { index: index + 1 })}
@@ -434,6 +544,7 @@ const DraftImages = memo(function DraftImages({
           </button>
         </div>
       ))}
+      <ImagePreview images={images} index={previewIndex} onIndexChange={setPreviewIndex} />
     </div>
   );
 });

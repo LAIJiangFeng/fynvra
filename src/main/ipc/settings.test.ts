@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   showOpenDialog: vi.fn(),
   nativeTheme: { themeSource: 'light', shouldUseDarkColors: false },
+  describeShells: vi.fn(async () => ({
+    shells: [],
+    defaultTerminalPath: '/bin/sh',
+    terminalPath: '/bin/sh',
+  })),
 }));
 
 vi.mock('electron', () => ({
@@ -35,6 +40,11 @@ vi.mock('electron', () => ({
   },
   dialog: { showOpenDialog: mocks.showOpenDialog },
   nativeTheme: mocks.nativeTheme,
+}));
+
+vi.mock('../services/shells', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  describeShells: mocks.describeShells,
 }));
 
 const invoke = (channel: string, ...args: unknown[]) =>
@@ -159,6 +169,73 @@ describe('settings IPC', () => {
     const disk = JSON.parse(readFileSync(join(mocks.userData, 'settings.json'), 'utf8'));
     expect(disk.preferences).toEqual({ theme: 'dark', sidePanelOpen: true, sidebarOpen: false });
     expect(parseSettings(disk).preferences.sidebarOpen).toBe(false);
+  });
+});
+
+describe('shell settings IPC', () => {
+  beforeEach(() => {
+    mocks.send.mockClear();
+    mocks.showOpenDialog.mockReset();
+  });
+
+  it('returns Main-detected shells without accepting renderer paths', async () => {
+    expect(await invoke(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS)).toEqual({
+      ok: true,
+      shells: [],
+      defaultTerminalPath: '/bin/sh',
+      terminalPath: '/bin/sh',
+    });
+    expect(mocks.describeShells).toHaveBeenCalledWith(preferences());
+  });
+
+  it('saves, broadcasts and resets shell choices', () => {
+    expect(
+      invoke(IPC_CHANNELS.SETTINGS_UPDATE, {
+        agentShell: { kind: 'pwsh' },
+        terminalShell: { kind: 'cmd' },
+      })
+    ).toMatchObject({
+      ok: true,
+      preferences: { agentShell: { kind: 'pwsh' }, terminalShell: { kind: 'cmd' } },
+    });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+    expect(
+      invoke(IPC_CHANNELS.SETTINGS_UPDATE, { agentShell: undefined, terminalShell: undefined })
+    ).toMatchObject({ ok: true });
+    expect(preferences()).not.toHaveProperty('agentShell');
+    expect(preferences()).not.toHaveProperty('terminalShell');
+  });
+
+  it.each([
+    { agentShell: { kind: 'cmd' } },
+    { agentShell: { kind: 'wsl' } },
+    { terminalShell: { kind: 'other' } },
+    { terminalShell: { kind: 'custom', path: 'relative' } },
+    { agentShell: { kind: 'custom', path: 'C:\\Windows\\System32\\cmd.exe' } },
+  ])('rejects invalid shell settings without broadcasting: %j', (patch) => {
+    expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch)).toMatchObject({ ok: false });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('opens a file picker for a target id, saves an absolute path and handles cancellation', async () => {
+    expect(await invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, { path: '/tmp/a' })).toMatchObject({
+      ok: false,
+    });
+    expect(mocks.showOpenDialog).not.toHaveBeenCalled();
+    pick(null);
+    expect(await invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, 'terminalShell')).toMatchObject({
+      ok: false,
+      code: 'canceled',
+    });
+    expect(mocks.send).not.toHaveBeenCalled();
+    pick(process.execPath);
+    expect(await invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, 'terminalShell')).toMatchObject({
+      ok: true,
+      preferences: { terminalShell: { kind: 'custom', path: process.execPath } },
+    });
+    expect(mocks.showOpenDialog).toHaveBeenLastCalledWith({ properties: ['openFile'] });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+    invoke(IPC_CHANNELS.SETTINGS_UPDATE, { terminalShell: undefined });
   });
 });
 

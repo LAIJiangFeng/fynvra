@@ -8,6 +8,7 @@ import type {
 } from '@shared/types/files';
 import { create } from 'zustand';
 import type { FilesApi } from '../../preload/domains/files';
+import { diffTabsStoreFor } from './diffTabs';
 
 export const ROOT_DIRECTORY_ID = 'root';
 type FilesViewError = FileError | 'restartRequired';
@@ -210,6 +211,7 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
       },
 
       showChat() {
+        diffTabsStoreFor(workspaceId).getState().select(null);
         set({ selectedId: null });
       },
 

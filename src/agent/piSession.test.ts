@@ -81,11 +81,35 @@ describe('createPiSessionFactory', () => {
     // 工作区没有 git：inPlace 原样交给 createRoleSession（提示词按它追加）
     await open({
       identity: { sessionId: 'session-2', generation: 1 },
-      spec: { ...spec, inPlace: true },
+      spec: {
+        ...spec,
+        inPlace: true,
+        instructionFile: { name: 'CLAUDE.md', content: 'Selected text' },
+      },
       host: null,
       workerHost: null,
     });
-    expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({ inPlace: true });
+    expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({
+      inPlace: true,
+      resourcePaths: { instructionFile: { name: 'CLAUDE.md', content: 'Selected text' } },
+    });
+
+    await open({
+      identity: { sessionId: 'session-3', generation: 1 },
+      spec: {
+        ...spec,
+        shellPath: 'C:\\PowerShell\\pwsh.exe',
+        role: { ...spec.role, systemPrompt: 'Keep the role instructions.' },
+      },
+      host: null,
+      workerHost: null,
+    });
+    const powershell = mocks.createRoleSession.mock.calls[2]?.[0];
+    expect(powershell.role.systemPrompt).toBe(
+      'Keep the role instructions.\n\nOn this machine the bash tool runs commands with PowerShell 7 via -c; write PowerShell syntax.'
+    );
+    expect(powershell.settingsManager.getShellPath()).toBe('C:\\PowerShell\\pwsh.exe');
+    expect(spec.role.systemPrompt).toBeUndefined();
   });
 });
 

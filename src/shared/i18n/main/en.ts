@@ -43,6 +43,13 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     discard: 'Discard changes and leave',
   },
   workspaces: {
+    explorer: 'File Explorer',
+    finder: 'Finder',
+    fileManager: 'File Manager',
+    pickApp: 'Choose a custom application',
+    appUnavailable: 'Application unavailable; choose an executable again',
+    branchUnavailable: 'Could not read the current branch or commit',
+    actionFailed: 'Workspace action failed: {error}',
     add: 'Add folder',
     addButton: 'Add',
     insideRepo: 'This folder is inside a git repository',

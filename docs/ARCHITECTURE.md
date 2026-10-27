@@ -195,6 +195,10 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.1 工作区文件浏览与编辑
 
+- 侧栏工作区菜单支持「打开于」及复制路径 / 文件夹名称 / 当前 git 分支（detached HEAD 为短 sha），右键与省略号共用菜单。`workspaces:open-with-apps` 列出目标（可传 `{ refresh: true }` 刷新 VS Code 探测缓存）；`workspaces:open-in` 只接收 `{ workspaceId, appId }`；`workspaces:copy` 只接收 `{ workspaceId, what }`，Main 从注册表解析路径并启动应用或写剪贴板。
+- `workspaces:pick-app` 由 Main 原生选择器签发自定义应用 id、路径与建议名称；`settings:update` 保存 / 移除 `preferences.openWithApps`（最多 20 项），新增或改路径须匹配本窗口已选择的应用，已存项可改名称。Renderer 通过重新选择修改路径，不传工作区路径或任意命令。Windows 仅接受自定义 `.exe`，VS Code 的 `code.cmd` 只用于定位真实 `Code.exe`；macOS `.app` 交给 `/usr/bin/open`；启动参数独立传递且禁用 shell。
+- 此功能仅改 workspace IPC / Main 应用探测启动 helper、typed preload、settings 校验、侧栏菜单 / 自定义应用对话框 / Base UI 子菜单封装、中英文字典及测试；不改会话、文件编辑或终端能力。
+
 - 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与固定的「对话」标签并列，支持多开、切换和关闭。
 - `files:list` 接收 `{ workspaceId, directoryId? }`，省略目录 id 时列出工作区根目录；`files:read` 接收 `{ workspaceId, fileId }`；`files:write` 接收 `{ workspaceId, fileId, version, text }`，版本是读取时的文件内容摘要。
 - Main 根据工作区记录定位根目录，为列出的条目签发不透明 id；Renderer 只能回传这些 id，展示用相对路径不能作为访问参数。
@@ -232,10 +236,29 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 ### 7.4 工作区内嵌终端
 
 - 中央标签栏「＋ → 终端」创建真正的终端标签，与对话、文件并排；内容在应用内显示，不启动外部终端窗口。「＋ → 对话」复用新建会话流程。
-- Main 用 node-pty 托管 PTY，Windows 启动 PowerShell，其他平台启动登录 shell；cwd 从工作区 id 查注册表，Renderer 不传路径、shell 或环境变量。
+- Main 用 node-pty 托管 PTY，Windows 默认启动 PowerShell（`-NoLogo -NoProfile`），其他平台启动登录 shell；cwd 从工作区 id 查注册表，创建终端的 IPC 不接收路径、shell 或环境变量。
+- 通用设置的 `agentShell` / `terminalShell` 存 shell id 或自定义绝对路径；Main 检测可执行文件并通过 `settings:available-shells` 返回可选项与生效路径，`settings:pick-shell` 仅接收设置目标 id，由 Main 选择文件。终端选择失效时回到系统默认；显式选择 PowerShell 使用 `-NoLogo`（加载用户 profile），Git Bash 使用 `--login -i`，cmd / WSL / 自定义不附加参数。仅新终端生效。
+- Windows agent 默认依次探测 Git Bash → Windows PowerShell 5.1 → PowerShell 7；未安装 Git 时以警告日志说明 PowerShell 回退，保证无 git 工作区也能启动会话。只有三者均不可用时才报错，禁止交给 pi 自动选到 WSL。手写 `shellPath` 仍优先；否则按 `agentShell` 选择，失效时按上述默认顺序回退。pi 1.4 的 bash 工具通过 `spawn(shellPath, ['-c', command])` 执行（没有 shell args 设置，`shellCommandPrefix` 仅追加命令文本），故支持 Git Bash / PowerShell 7 / Windows PowerShell，不提供 cmd / WSL；自定义须兼容 `-c`。非 bash 的语法说明经既有 role systemPrompt 追加路径传给 pi，不改 pi 内部或角色持久化。仅下次启动会话生效，非 Windows 隐藏 agent 选项。
 - `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
 - 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
+
+### 7.5 指令文件
+
+- `instructions:list|read|scan|import|pick|save|remove|toggle` 与 `instructions:changed` 提供指令文件管理；Renderer 只传条目 / 候选 id 或名称与编辑文本，任意 Markdown 文件由 Main 的打开对话框选择。
+- Main 在 `userData/instructions.json` 存元数据，在 `userData/instructions/*.md` 存本地副本，均原子写入；大文本不进 settings.json。链接每次使用时读原文件，缺失 / 不可读时显示警告且不注入。删除只移除 Fynvra 条目；编辑链接转为本地副本并保留 importedFrom，绝不写改用户源文件。
+- 全局至多一个条目启用，也可全关。`Role.instructionFileId` 缺省跟随全局，`null` 不使用，字符串指定条目（不受全局开关影响）；已删除的引用不回退到全局。
+- 每次 spawn，Main 的角色资源解析器选择文件并读取 `{ name, content }`，经 `SpawnSessionSpec.instructionFile` → piSession → createRoleSession → buildRolePromptAppend，作为 `<user_instructions source="…">` 段追加系统提示词。沿用 pi 的项目 AGENTS.md 加载，不热更新已运行会话。
+- 改动层：Main 注册表 / IPC / spawn 接线、preload typed API、core 角色字段、agent-runtime 提示词、Renderer 设置页 / 角色选项与文案；不改其他资源的加载或权限策略。
+
+### 7.6 本机用量统计
+
+- `usage:summary` 只接收 `{ range: 'today' | '7d' | '30d' | '90d' }`，返回当前及前一等长日历周期的总计、每日序列，以及当前周期的角色 / 模型 / 工作区分组、缓存命中率、24 小时消息分布和编排统计；范围含今天，日界线按本地时间计算。
+- Main 的 `services/usage` 只读流式扫描 `userData/agent/sessions/*.jsonl`（含归档及已从列表删除的会话），跳过坏行和不可读文件，以路径、mtime、size 缓存每文件每日 / 模型 / 小时聚合；按文件名的 sessionId 在汇总时关联实时 session registry，未知 / 已删除会话保留在独立分组，工作区只返回名称。模型取 assistant 消息上的 provider/model，按 Token 再按费用排名；不向 Renderer 返回路径、正文或密钥，不写回 transcript。
+- Token 总量为 input + output + cacheRead + cacheWrite，费用累计 pi 记录的 cost.total；缓存命中率为 cacheRead / (input + cacheRead)，无输入时为空。消息仅计 user / assistant；活跃时长累加同一周期内每会话相邻消息不超过 5 分钟的间隔。
+- 编排展示「本期派发任务的当前结果」：按首次 dispatch.startedAt 归组，统计当前 completed / abandoned / failed 状态；快照无合并 / 放弃时间，不将 settledAt 伪装成合并时间。一次验收通过率和平均尝试数只计该组已合并任务；打回次数为本期开始的非首次 dispatch（含旧任务）。每个合并任务的 Worker 费用取该组已合并任务经 dispatchId 关联的会话全量费用（含跨期和重试，同一会话只计一次），关联或 transcript 缺失则省略，无已合并任务时省略比率。
+- 用量 IPC 注入 session / workspace / orchestration getters；编排 registry 的 readSnapshot 读取已打开服务的当前快照，或只读解析持久化 JSON，绝不因用量查询打开服务、修复或重命名文件。页面为响应式双栏总览、SVG 趋势、角色 / 缓存卡片和排名，活动仅为紧凑小时条。
+- 改动层限于 shared 用量类型、Main 服务 / handler 与两个只读访问出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
 
 ## 8. 分阶段
 

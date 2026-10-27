@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createFilesApi } from './domains/files';
+import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
@@ -10,6 +11,8 @@ import { createSessionsApi } from './domains/sessions';
 import { createSkillsApi } from './domains/skills';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
+import { createUsageApi } from './domains/usage';
+import { createWorkspacesApi } from './domains/workspaces';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -26,6 +29,8 @@ const api: FynvraApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
     update: (patch) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),
+    availableShells: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS),
+    pickShell: (target) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, target),
     pickWorktreesRoot: (input) =>
       input
         ? ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_PICK_WORKTREES_ROOT, input)
@@ -36,12 +41,7 @@ const api: FynvraApi = {
         : ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO),
     onChanged: (callback) => subscribe(IPC_CHANNELS.SETTINGS_CHANGED, () => callback()),
   },
-  workspaces: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_LIST),
-    add: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_ADD),
-    remove: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_REMOVE, id),
-    onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, () => callback()),
-  },
+  workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),
   terminals: createTerminalsApi(ipcRenderer, subscribe),
@@ -64,8 +64,10 @@ const api: FynvraApi = {
   providers: createProvidersApi(ipcRenderer, subscribe),
   roles: createRolesApi(ipcRenderer, subscribe),
   skills: createSkillsApi(ipcRenderer, subscribe),
+  instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
+  usage: createUsageApi(ipcRenderer),
 };
 
 contextBridge.exposeInMainWorld('fynvra', api);

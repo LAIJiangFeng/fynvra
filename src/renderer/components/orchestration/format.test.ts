@@ -1,4 +1,4 @@
-import type { Dispatch, Message } from '@fynvra/core';
+import type { Dispatch, Message, Task, TaskStatus } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import { translatorOf } from '../../i18n';
 import {
@@ -9,7 +9,9 @@ import {
   isFromWorker,
   messageSummary,
   outputLineKind,
+  progressCounts,
   reportOutcome,
+  TASK_STATUS_ORDER,
 } from './format';
 
 const zh = translatorOf('zh-CN');
@@ -37,6 +39,56 @@ const dispatch: Dispatch = {
   branch: 'fynvra/x',
   startedAt: 0,
 };
+
+describe('progressCounts', () => {
+  function taskGroups(counts: Partial<Record<TaskStatus, number>>) {
+    const groups: Record<TaskStatus, Task[]> = {
+      todo: [],
+      'in-progress': [],
+      'in-review': [],
+      completed: [],
+      failed: [],
+      abandoned: [],
+    };
+    for (const status of TASK_STATUS_ORDER) {
+      groups[status] = Array.from({ length: counts[status] ?? 0 }, (_, index) => ({
+        id: `${status}_${index}`,
+        runId: 'run_1',
+        title: 'Task',
+        spec: '',
+        roleId: 'worker',
+        status,
+        dependsOn: [],
+      }));
+    }
+    return groups;
+  }
+
+  it.each([
+    {
+      name: 'excludes abandoned tasks from a completed run',
+      counts: { completed: 11, abandoned: 1 },
+      expected: { completed: 11, total: 11, abandoned: 1 },
+    },
+    {
+      name: 'includes every other status in the total',
+      counts: { todo: 2, 'in-progress': 3, 'in-review': 4, completed: 5, failed: 6, abandoned: 7 },
+      expected: { completed: 5, total: 20, abandoned: 7 },
+    },
+    {
+      name: 'returns abandoned tasks even when no tasks count toward progress',
+      counts: { abandoned: 2 },
+      expected: { completed: 0, total: 0, abandoned: 2 },
+    },
+    {
+      name: 'returns zero counts for an empty run',
+      counts: {},
+      expected: { completed: 0, total: 0, abandoned: 0 },
+    },
+  ])('$name', ({ counts, expected }) => {
+    expect(progressCounts(taskGroups(counts))).toEqual(expected);
+  });
+});
 
 describe('formatDuration', () => {
   it('uses seconds, minutes and hours', () => {

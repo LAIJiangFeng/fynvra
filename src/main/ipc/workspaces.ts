@@ -1,4 +1,5 @@
-import { errorMessage } from '@shared/guards';
+import { basename } from 'node:path';
+import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   parseWorkspaceId,
@@ -7,12 +8,22 @@ import {
 } from '@shared/types/workspace';
 import {
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   type MessageBoxOptions,
   type OpenDialogOptions,
+  shell,
 } from 'electron';
+import type { OpenWithAppsResult, PickAppResult } from '../../preload/domains/workspaces';
 import { translate } from '../i18n';
+import {
+  detectVsCode,
+  launchApplication,
+  rememberPickedApp,
+  validCustomAppPath,
+} from '../services/openWith';
+import { readGitBranch } from '../services/sessions/branches';
 import { createWorkspaceService, type WorkspaceService } from '../services/workspaces';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getSettingsFile } from './settings';
@@ -32,6 +43,7 @@ const canceled = (): WorkspaceAddResult => ({
 });
 
 export function registerWorkspaceHandlers(): void {
+  registerWorkspaceMenuHandlers();
   ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, (): WorkspaceListResult => {
     try {
       return { ok: true, workspaces: getWorkspaceService().list() };
@@ -65,6 +77,149 @@ export function registerWorkspaceHandlers(): void {
       return { ok: false, error: errorMessage(error) };
     }
   });
+}
+
+function registerWorkspaceMenuHandlers(): void {
+  ipcMain.handle(
+    IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS,
+    async (_event, raw: unknown): Promise<OpenWithAppsResult> => {
+      const input = asRecord(raw);
+      if (
+        raw !== undefined &&
+        (!input ||
+          Object.keys(input).some((key) => key !== 'refresh') ||
+          typeof input.refresh !== 'boolean')
+      ) {
+        return { ok: false, error: translate('common.invalidArgs') };
+      }
+      try {
+        const code = await detectVsCode(input?.refresh === true);
+        const apps: OpenWithAppsResult = {
+          ok: true,
+          apps: [
+            ...(code ? [{ id: 'vscode', name: 'VS Code', kind: 'vscode' as const }] : []),
+            {
+              id: 'explorer',
+              name: translate(
+                process.platform === 'darwin'
+                  ? 'workspaces.finder'
+                  : process.platform === 'win32'
+                    ? 'workspaces.explorer'
+                    : 'workspaces.fileManager'
+              ),
+              kind: 'explorer',
+            },
+            ...(getSettingsFile().read().preferences.openWithApps ?? []).map(({ id, name }) => ({
+              id,
+              name,
+              kind: 'custom' as const,
+            })),
+          ],
+        };
+        return apps;
+      } catch (error) {
+        return workspaceActionFailed(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORKSPACES_OPEN_IN,
+    async (_event, raw: unknown): Promise<IpcResult> => {
+      const input = asRecord(raw);
+      const id = parseWorkspaceId(input?.workspaceId);
+      if (!id) return { ok: false, error: translate('common.invalidWorkspaceId') };
+      if (
+        !input ||
+        typeof input.appId !== 'string' ||
+        Object.keys(input).some((key) => key !== 'workspaceId' && key !== 'appId')
+      ) {
+        return { ok: false, error: translate('common.invalidArgs') };
+      }
+      try {
+        const workspace = getWorkspaceService().get(id);
+        if (!workspace) return { ok: false, error: translate('common.workspaceNotFound') };
+        if (input.appId === 'explorer') {
+          const error = await shell.openPath(workspace.repoPath);
+          return error ? workspaceActionFailed(error) : { ok: true };
+        }
+        const application =
+          input.appId === 'vscode'
+            ? await detectVsCode()
+            : getSettingsFile()
+                .read()
+                .preferences.openWithApps?.find((app) => app.id === input.appId)?.path;
+        if (!application || !validCustomAppPath(application)) {
+          return { ok: false, error: translate('workspaces.appUnavailable') };
+        }
+        await launchApplication(application, workspace.repoPath);
+        return { ok: true };
+      } catch (error) {
+        return workspaceActionFailed(error);
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACES_COPY, async (_event, raw: unknown): Promise<IpcResult> => {
+    const input = asRecord(raw);
+    const id = parseWorkspaceId(input?.workspaceId);
+    if (!id) return { ok: false, error: translate('common.invalidWorkspaceId') };
+    const what = input?.what;
+    if (
+      !input ||
+      !['path', 'name', 'branch'].includes(typeof what === 'string' ? what : '') ||
+      Object.keys(input).some((key) => key !== 'workspaceId' && key !== 'what')
+    ) {
+      return { ok: false, error: translate('common.invalidArgs') };
+    }
+    try {
+      const workspace = getWorkspaceService().get(id);
+      if (!workspace) return { ok: false, error: translate('common.workspaceNotFound') };
+      const text =
+        what === 'path'
+          ? workspace.repoPath
+          : what === 'name'
+            ? basename(workspace.repoPath) || workspace.repoPath
+            : workspace.vcs === 'git'
+              ? await readGitBranch(workspace.repoPath)
+              : undefined;
+      if (!text) return { ok: false, error: translate('workspaces.branchUnavailable') };
+      clipboard.writeText(text);
+      return { ok: true };
+    } catch (error) {
+      return workspaceActionFailed(error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKSPACES_PICK_APP, async (event): Promise<PickAppResult> => {
+    try {
+      const options: OpenDialogOptions = {
+        title: translate('workspaces.pickApp'),
+        properties: ['openFile'],
+        ...(process.platform === 'win32'
+          ? { filters: [{ name: 'Application', extensions: ['exe'] }] }
+          : process.platform === 'darwin'
+            ? { filters: [{ name: 'Application', extensions: ['app'] }] }
+            : {}),
+      };
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options);
+      const path = result.filePaths[0];
+      if (result.canceled || !path)
+        return { ok: false, code: 'canceled', error: translate('common.canceled') };
+      if (!validCustomAppPath(path))
+        return { ok: false, error: translate('workspaces.appUnavailable') };
+      return { ok: true, app: rememberPickedApp(path, event.sender.id) };
+    } catch (error) {
+      return workspaceActionFailed(error);
+    }
+  });
+}
+
+function workspaceActionFailed(error: unknown): { ok: false; error: string } {
+  return { ok: false, error: translate('workspaces.actionFailed', { error: errorMessage(error) }) };
 }
 
 /** 仓库子目录先问用户：改挂仓库根目录（用 worktree），还是把子目录按普通目录挂入。 */

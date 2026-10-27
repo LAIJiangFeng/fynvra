@@ -1,12 +1,17 @@
 import type { IpcResult, WindowCloseAction } from '@shared/types/ipc';
 import type {
+  AvailableShellsResult,
+  PickShellResult,
   PickWorktreesRootResult,
   Preferences,
   PreferencesResult,
+  ShellTarget,
   WorktreesRootInfoResult,
 } from '@shared/types/settings';
-import type { WorkspaceAddResult, WorkspaceListResult } from '@shared/types/workspace';
 import type { OrchestrationApi } from './domains/orchestration';
+import type { WorkspacesApi } from './domains/workspaces';
+
+export type { WorkspacesApi } from './domains/workspaces';
 
 /**
  * preload 暴露给 Renderer 的 API 形状。本文件只有类型、不 import electron，
@@ -20,20 +25,13 @@ export interface SettingsApi {
   get(): Promise<PreferencesResult>;
   /** 合并更新界面偏好；Main 逐字段校验后防抖写入 settings.json */
   update(patch: Partial<Preferences>): Promise<PreferencesResult>;
+  availableShells(): Promise<AvailableShellsResult>;
+  pickShell(target: ShellTarget): Promise<PickShellResult>;
   /** 无参：Main 弹目录选择框、校验后写入 worktree 根目录；`{ reset: true }`：恢复默认。不传路径 */
   pickWorktreesRoot(input?: { reset: true }): Promise<PickWorktreesRootResult>;
   /** 生效的 worktree 根目录与各工作区占用；`{ usage: false }` 只取路径，不统计目录大小 */
   worktreesRootInfo(input?: { usage: boolean }): Promise<WorktreesRootInfoResult>;
   /** 偏好被（任一窗口）修改后触发 */
-  onChanged(callback: () => void): Unsubscribe;
-}
-
-export interface WorkspacesApi {
-  list(): Promise<WorkspaceListResult>;
-  /** Main 弹出目录选择框并校验是 git 仓库根目录；Renderer 不传路径 */
-  add(): Promise<WorkspaceAddResult>;
-  /** 只从列表移除，不会删除磁盘上的仓库 */
-  remove(id: string): Promise<IpcResult>;
   onChanged(callback: () => void): Unsubscribe;
 }
 
@@ -62,8 +60,10 @@ export interface FynvraApi {
   providers: import('./domains/providers').ProvidersApi;
   roles: import('./domains/roles').RolesApi;
   skills: import('./domains/skills').SkillsApi;
+  instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
   notifications: import('./domains/notifications').NotificationsApi;
+  usage: import('./domains/usage').UsageApi;
 }
 
 declare global {
