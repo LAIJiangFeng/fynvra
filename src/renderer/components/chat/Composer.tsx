@@ -47,7 +47,7 @@ import { ApprovalModePicker } from './ApprovalModePicker';
 import { caretOnLineEdge } from './caretLine';
 import { ImagePreview } from './ImagePreview';
 import {
-  currentText,
+  currentEntry,
   down,
   type InputHistory,
   isBrowsing,
@@ -181,6 +181,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const approvalMode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
+  const setDraftImages = useSessionsStore((state) => state.setDraftImages);
   const send = useSessionsStore((state) => state.send);
   const steer = useSessionsStore((state) => state.steer);
   const removeQueued = useSessionsStore((state) => state.removeQueued);
@@ -206,7 +207,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
   // 历史来源：这个会话里 user 的消息，含 history 回放的与这次发出去的（都在 store 的时间线里）
   const sent = useMemo(
-    () => messages.filter((message) => message.role === 'user').map((message) => message.text),
+    () =>
+      messages
+        .filter((message) => message.role === 'user')
+        .map((message) => ({ text: message.text, images: message.images ?? [] })),
     [messages]
   );
 
@@ -238,13 +242,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
   /** 换成历史里的另一条（或回到草稿） */
   const browse = (next: InputHistory, caret: Caret) => {
     history.current = isBrowsing(next) ? next : null;
-    const text = currentText(next);
-    if (text === draft) {
+    const entry = currentEntry(next);
+    setDraftImages(sessionId, entry.images);
+    if (entry.text === draft) {
       placeCaret(caret);
       return;
     }
     pendingCaret.current = caret;
-    setDraft(sessionId, text);
+    setDraft(sessionId, entry.text);
   };
 
   /** 读出图片加进草稿；格式不支持、太大、超过张数、读不出来的不加，给出提示 */
@@ -266,13 +271,20 @@ export function Composer({ sessionId }: { sessionId: string }) {
     );
     const pasted = read.filter((image) => image !== null);
     if (pasted.length < read.length) problem ??= 'invalid';
+    const previousImages = useSessionsStore.getState().draftImages[sessionId];
     problem = attachImages(sessionId, pasted) ?? problem;
+    const state = useSessionsStore.getState();
+    // 只在确实加了图片时结束浏览；读文件期间可能已经切到别的会话。
+    if (state.activeSessionId === sessionId && state.draftImages[sessionId] !== previousImages) {
+      history.current = null;
+    }
     setImageHint(problem ? { text: imageProblem(problem, t) } : null);
   };
 
   // × 按钮随图片一起消失：焦点放回输入框，不掉到 body 上
   const removeImage = useCallback(
     (index: number) => {
+      history.current = null;
       removeDraftImage(sessionId, index);
       input.current?.focus();
     },
@@ -320,7 +332,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     if (matchAction(event, 'history-prev') && caretOnVisualLineEdge(textarea, 'first')) {
-      const state = history.current ?? startHistory(sent, draft);
+      const state = history.current ?? startHistory(sent, { text: draft, images });
       const next = up(state);
       if (next === state) return;
       event.preventDefault();
@@ -387,9 +399,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
   useEffect(
     () => () => {
       const browsing = history.current;
-      if (browsing) setDraft(sessionId, browsing.draft);
+      history.current = null;
+      if (browsing) {
+        setDraft(sessionId, browsing.draft.text);
+        setDraftImages(sessionId, browsing.draft.images);
+      }
     },
-    [sessionId, setDraft]
+    [sessionId, setDraft, setDraftImages]
   );
 
   return (

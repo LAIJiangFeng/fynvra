@@ -105,6 +105,8 @@ export interface SessionsState extends ChatProjection {
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
+  /** 恢复已发送的图片或保存的草稿：原样替换，不重新检查上限 */
+  setDraftImages(sessionId: string, images: ChatImage[]): void;
   /**
    * 往会话的草稿里加粘贴的图片：按顺序收下放得下的（张数、单张、合计大小都在上限内），其余不加。
    * 返回第一张没加进去的原因；都加进去时为 undefined
@@ -676,6 +678,15 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       setDraft(sessionId, text) {
         set((state) => ({
           drafts: text ? { ...state.drafts, [sessionId]: text } : omitKey(state.drafts, sessionId),
+        }));
+      },
+
+      setDraftImages(sessionId, images) {
+        set((state) => ({
+          draftImages:
+            images.length > 0
+              ? { ...state.draftImages, [sessionId]: images }
+              : omitKey(state.draftImages, sessionId),
         }));
       },
 
