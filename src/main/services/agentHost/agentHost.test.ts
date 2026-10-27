@@ -137,6 +137,95 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+describe('automatic coordinator continuation delivery', () => {
+  it('sends one prompt only while idle, without treating it as a user continuation', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    const activity = vi.fn();
+    env.host.observe({ activity });
+    const first = env.host.promptWhenIdle(session.id, 'Review the worker');
+    expect(await env.host.promptWhenIdle(session.id, 'Duplicate')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    expect(await first).toEqual({ ok: true, delivered: true });
+    expect(env.sent('prompt')).toHaveLength(1);
+    expect(activity).not.toHaveBeenCalledWith(session.id, 'prompt');
+    expect(await env.host.promptWhenIdle(session.id, 'Still busy')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({ type: 'session-status', identity, status: 'waiting-approval' });
+    expect(await env.host.promptWhenIdle(session.id, 'Approval pending')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    expect(activity).toHaveBeenCalledWith(session.id, 'idle');
+    expect(await env.host.promptWhenIdle(session.id, 'Continue review')).toEqual({
+      ok: true,
+      delivered: true,
+    });
+    expect(env.sent('prompt')).toHaveLength(2);
+  });
+
+  it.each(['prompt', 'steer'] as const)(
+    'lets a user %s during spawn supersede automatic delivery',
+    async (method) => {
+      const env = setup();
+      const session = await createSession(env, 'orchestrator');
+      const activity = vi.fn();
+      env.host.observe({ activity });
+      const automatic = env.host.promptWhenIdle(session.id, 'Automatic review');
+      const user = env.host[method](session.id, 'New instructions');
+      expect(await automatic).toEqual({ ok: true, delivered: false });
+      expect(await user).toEqual({ ok: true });
+      expect(env.sent(method)).toEqual([
+        expect.objectContaining({ type: method, text: 'New instructions' }),
+      ]);
+      expect(
+        env
+          .sent('prompt')
+          .some((command) => command.type === 'prompt' && command.text === 'Automatic review')
+      ).toBe(false);
+      expect(activity).toHaveBeenCalledWith(session.id, 'prompt');
+    }
+  );
+
+  it('invalidates a pending automatic spawn immediately on abort, even before a worker exists', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    const activity = vi.fn();
+    env.host.observe({ activity });
+    const automatic = env.host.promptWhenIdle(session.id, 'Automatic review');
+    expect(await env.host.abort(session.id)).toEqual({ ok: true });
+    expect(activity).toHaveBeenCalledWith(session.id, 'abort');
+    expect(await automatic).toEqual({ ok: true, delivered: false });
+    expect(env.sent('prompt')).toEqual([]);
+  });
+
+  it('does not revive archived/error sessions or send a prompt after disposal during spawn', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    env.store.update(session.id, { archivedAt: 1 });
+    expect(await env.host.promptWhenIdle(session.id, 'Archived')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    env.store.update(session.id, { archivedAt: undefined, status: 'error' });
+    expect(await env.host.promptWhenIdle(session.id, 'Error')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    env.store.update(session.id, { status: 'idle' });
+    const automatic = env.host.promptWhenIdle(session.id, 'Automatic review');
+    await env.host.implementsLauncher().disposeSession(session.id);
+    expect(await automatic).toEqual({ ok: true, delivered: false });
+    expect(env.sent('prompt')).toEqual([]);
+  });
+});
+
 describe('createAgentHost sessions', () => {
   it('creates a session from workspace, role and model without touching the worker', async () => {
     const env = setup();

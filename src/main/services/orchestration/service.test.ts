@@ -158,6 +158,79 @@ describe('createOrchestrationService', () => {
     expect(service.pendingMessagesTo('session_coord')).toEqual([]);
   });
 
+  it('coordinatorWork retains acked reviews, excludes stale attempts, and follows a rejected retry', async () => {
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    const worker = service.workerHostFor(dispatch.workerSessionId);
+    const host = service.hostFor('session_coord');
+    await worker?.reportDone('succeeded', 'Audit complete, no code changes.');
+    const before = await service.snapshot();
+    expect(service.coordinatorWork('session_other')).toEqual({ messages: [], reviews: [] });
+    expect(service.coordinatorWork('session_coord')).toMatchObject({
+      messages: [{ dispatchId: dispatch.id }],
+      reviews: [{ dispatch: { id: dispatch.id, summary: 'Audit complete, no code changes.' } }],
+    });
+    expect(await service.snapshot()).toEqual(before); // Read-only projection.
+
+    expect(await host.waitForWorkers({ timeoutMs: 0, until: 'all' })).toMatchObject({
+      ok: true,
+      messages: [{ dispatchId: dispatch.id }],
+    });
+    expect(service.coordinatorWork('session_coord')).toMatchObject({
+      messages: [],
+      reviews: [{ dispatch: { id: dispatch.id } }],
+    });
+    // A follow-up is not a new dispatch. Once rejected, neither old report should wake review.
+    await worker?.reportDone('succeeded', 'Follow-up evidence.');
+    expect(service.coordinatorWork('session_coord').messages).toHaveLength(1);
+    const rejected = await host.rejectWork({
+      dispatchId: dispatch.id,
+      feedback: 'Check once more.',
+    });
+    expect(rejected.ok).toBe(true);
+    expect(service.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
+    await worker?.reportDone('succeeded', 'Second attempt.');
+    const work = service.coordinatorWork('session_coord');
+    expect(work.reviews).toHaveLength(1);
+    const retryId = work.reviews[0]?.dispatch.id ?? '';
+    expect(retryId).not.toBe(dispatch.id);
+    expect(work.messages.map((message) => message.dispatchId)).toEqual([retryId]);
+    expect(await host.mergeWorktree({ dispatchId: retryId })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    expect(service.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
+    await service.flush();
+  });
+
+  it('coordinatorWork routes current failures but never projects them as successful reviews', async () => {
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('failed', 'Cannot compile.');
+    expect(service.coordinatorWork('session_coord')).toMatchObject({
+      messages: [{ dispatchId: dispatch.id, subject: 'failed' }],
+      reviews: [],
+    });
+    await service.flush();
+  });
+
+  it.each(['completed', 'abandoned', 'in-progress'] as const)(
+    'coordinatorWork ignores stale successful reports when restored task status is %s',
+    async (status) => {
+      const first = make();
+      const dispatch = await dispatchOn(first);
+      await first.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+      await first.flush();
+      const snapshot = JSON.parse(readFileSync(statePath, 'utf8'));
+      snapshot.tasks[0].status = status;
+      writeFileSync(statePath, JSON.stringify(snapshot));
+      const restored = make();
+      expect(restored.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
+      await restored.ready;
+      expect(restored.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
+    }
+  );
+
   it('快照加载完成前 workerHostFor 返回 null，加载后能找到磁盘上的 worker 会话', async () => {
     const first = make();
     await dispatchOn(first);

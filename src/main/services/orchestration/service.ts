@@ -54,6 +54,18 @@ export interface OrchestrationServiceOptions {
   now?: () => number;
 }
 
+/** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
+export interface PendingCoordinatorReview {
+  taskId: string;
+  title: string;
+  dispatch: Dispatch;
+}
+
+export interface CoordinatorWork {
+  messages: Message[];
+  reviews: PendingCoordinatorReview[];
+}
+
 /** 一个工作区的编排状态与它的 Host 们（ARCHITECTURE §9.5 中 Main 一侧的实现）。 */
 export interface OrchestrationService {
   readonly workspace: Workspace;
@@ -86,6 +98,8 @@ export interface OrchestrationService {
   flush(): Promise<void>;
   /** 收件箱里发给该会话、未确认的消息（不消费）；状态未加载时为空。协调者唤醒器用。 */
   pendingMessagesTo(sessionId: string): Message[];
+  /** Current attempts only; acknowledged reports remain reviewable until the task changes state. */
+  coordinatorWork(sessionId: string): CoordinatorWork;
   /** 确认已投递的消息（尽力而为，幂等）。 */
   ackMessages(ids: readonly string[]): void;
 }
@@ -350,6 +364,45 @@ export function createOrchestrationService(
     },
 
     pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
+
+    coordinatorWork(sessionId) {
+      if (!loaded) return { messages: [], reviews: [] };
+      const runIds = new Set(
+        store.runs.list((run) => run.coordinatorSessionId === sessionId).map((run) => run.id)
+      );
+      const tasks = store.tasks.list(
+        (task) =>
+          runIds.has(task.runId) && task.status !== 'completed' && task.status !== 'abandoned'
+      );
+      // Match host.latestDispatch: insertion order also disambiguates retries with equal timestamps.
+      const latest = new Map(
+        store.dispatches.list().map((dispatch) => [dispatch.taskId, dispatch])
+      );
+      const current = new Map(
+        tasks.flatMap((task) => {
+          const dispatch = store.activeDispatch(task.id) ?? latest.get(task.id);
+          return dispatch ? [[dispatch.id, { task, dispatch }] as const] : [];
+        })
+      );
+      const messages = inbox.peek({ to: sessionId }).filter((message) => {
+        if (!runIds.has(message.runId)) return false;
+        if (!['worker_done', 'question', 'escalation'].includes(message.type)) return false;
+        if (!message.dispatchId) return message.type === 'escalation';
+        const attempt = current.get(message.dispatchId);
+        if (!attempt || attempt.task.runId !== message.runId) return false;
+        return (
+          message.type !== 'worker_done' ||
+          attempt.task.status === 'in-review' ||
+          attempt.task.status === 'failed'
+        );
+      });
+      const reviews = [...current.values()].flatMap(({ task, dispatch }) =>
+        task.status === 'in-review' && dispatch.outcome === 'succeeded'
+          ? [{ taskId: task.id, title: task.title, dispatch }]
+          : []
+      );
+      return { messages, reviews };
+    },
 
     ackMessages: (ids) => {
       for (const id of ids) inbox.ack(id);
