@@ -1,7 +1,9 @@
-import type { ProviderImportCandidate } from '@shared/types/llm';
+import type { ModelProviderView, ProviderImportCandidate } from '@shared/types/llm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setCurrentLocale } from '../../i18n';
 import {
+  advanceImportModelQueue,
+  createImportModelQueue,
   defaultSelection,
   duplicateBadge,
   duplicateReason,
@@ -94,6 +96,56 @@ describe('providerImport', () => {
         skipped: [{ name: 'C', reason: '与「A」的地址和 API Key 都相同' }],
       })
     ).toBe('已导入 1 个模型服务；跳过 1 个：C（与「A」的地址和 API Key 都相同）');
+  });
+});
+
+describe('导入后的模型选择队列', () => {
+  const imported: ModelProviderView[] = ['cursor', 'jun', 'codex'].map((id) => ({
+    id,
+    name: id,
+    api: 'openai-completions',
+    enabled: true,
+    hasApiKey: true,
+    models: [{ id: `${id}-default`, name: 'Default model' }],
+  }));
+
+  it('按成功导入的服务 id 排队，不包含跳过的候选；无导入结果时不打开选择器', () => {
+    const result = {
+      imported,
+      skipped: [{ id: 'duplicate-candidate', name: 'Old', reason: 'duplicate' }],
+    };
+    const queue = createImportModelQueue(result.imported);
+    expect(queue?.providers.map(({ id }) => id)).toEqual(['cursor', 'jun', 'codex']);
+    expect(queue?.index).toBe(0);
+    expect(createImportModelQueue([])).toBeNull();
+  });
+
+  it('保存成功或跳过都只前进一个服务，最后一个完成后结束，保持原队列与模型不变', () => {
+    const initial = createImportModelQueue(imported);
+    if (!initial) throw new Error('Missing queue');
+    const before = structuredClone(initial);
+    const second = advanceImportModelQueue(initial, 'saved');
+    expect(second?.index).toBe(1);
+    expect(second?.providers[second.index]?.id).toBe('jun');
+    if (!second) throw new Error('Missing second provider');
+    const third = advanceImportModelQueue(second, 'skip');
+    expect(third?.index).toBe(2);
+    expect(third?.providers[third.index]?.id).toBe('codex');
+    if (!third) throw new Error('Missing third provider');
+    expect(advanceImportModelQueue(third, 'saved')).toBeNull();
+    expect(advanceImportModelQueue(third, 'skip')).toBeNull();
+    expect(initial).toEqual(before);
+  });
+
+  it('全部跳过立即结束，不再进入后续服务，也不修改导入结果', () => {
+    const initial = createImportModelQueue(imported);
+    if (!initial) throw new Error('Missing queue');
+    const before = structuredClone(imported);
+    expect(advanceImportModelQueue(initial, 'skip-all')).toBeNull();
+    const second = advanceImportModelQueue(initial, 'skip');
+    if (!second) throw new Error('Missing second provider');
+    expect(advanceImportModelQueue(second, 'skip-all')).toBeNull();
+    expect(imported).toEqual(before);
   });
 });
 

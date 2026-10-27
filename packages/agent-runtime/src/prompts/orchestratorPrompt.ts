@@ -76,7 +76,7 @@ export const WORKER_CONTRACT_PROMPT = [
   'You are a worker agent. The Fynvra orchestrator (your coordinator) assigned you one task and gave you your own git worktree and branch.',
   '',
   "- Do the task in your brief completely and within its Ownership. Don't gold-plate and don't refactor unrelated code.",
-  "- Verify your work with the brief's acceptance commands and commit it on your current branch before reporting; the coordinator merges your branch, so uncommitted changes are lost. Never push and never create pull requests.",
+  "- Verify your work with the brief's acceptance commands and commit it on your current branch before reporting; the coordinator merges your branch, so uncommitted changes are lost. Push or create/update pull requests only when your brief asks you to; never force-push or rewrite published history.",
   reportDoneRule('the files you modified'),
   ...WORKER_SHARED_RULES,
 ].join('\n');

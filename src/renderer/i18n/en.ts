@@ -763,6 +763,11 @@ export const en: MessagesShape<typeof zhCN> = {
       modelsMore: 'Models: {names}, … ({count})',
       modelsList: 'Models: {names}',
       imported: 'Imported {count} {count|provider|providers}',
+      importModelsTitle: 'Choose models for "{name}" ({position}/{total})',
+      importModelsHint: 'Add the models you want, then save and continue, or skip this provider',
+      saveModelsAndContinue: 'Save and continue',
+      skipModels: 'Skip',
+      skipAllModels: 'Skip all',
     },
     import: {
       fromLocal: 'Import from this computer…',
