@@ -164,6 +164,85 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(JSON.parse(readFileSync(statePath, 'utf8')).tasks[0].status).toBe('completed');
   });
 
+  it('成功汇报后的默认清理保留待验收状态、提交与未提交文件；显式取消才删除', async () => {
+    const { task, dispatch: attempt, worktree } = await dispatch('Pending review');
+    commitFile(worktree.path, 'worker.txt', 'done\n', 'worker change');
+    await report(attempt.workerSessionId);
+    writeFileSync(join(worktree.path, 'draft.txt'), 'uncommitted\n');
+    const before = await service.snapshot();
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('merge_worktree'),
+    });
+    expect(await service.snapshot()).toEqual(before);
+    expect(before.tasks.find((entry) => entry.id === task.id)?.status).toBe('in-review');
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(readFileSync(join(worktree.path, 'draft.txt'), 'utf8')).toBe('uncommitted\n');
+    expect(git(repo, 'branch', '--list', worktree.branch)).toContain(worktree.branch);
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id, abandon: true })).toMatchObject({
+      ok: true,
+      removedWorktree: true,
+      deletedBranch: true,
+    });
+    expect(existsSync(worktree.path)).toBe(false);
+    const after = await service.snapshot();
+    expect(after.tasks.find((entry) => entry.id === task.id)?.status).toBe('abandoned');
+    expect(after.dispatches).toEqual(before.dispatches);
+  });
+
+  it('只读任务空 diff 经 merge_worktree 验收完成；重复清理不删除后来复用的分支', async () => {
+    const { task, dispatch: attempt, worktree } = await dispatch('Read only');
+    const head = git(repo, 'rev-parse', 'HEAD');
+    await report(attempt.workerSessionId, 'Reviewed the code; no change needed.');
+    expect(await host.reviewDiff({ dispatchId: attempt.id })).toMatchObject({
+      ok: true,
+      files: [],
+      diff: '',
+    });
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({ ok: false });
+    expect(await host.mergeWorktree({ dispatchId: attempt.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    expect(git(repo, 'rev-parse', 'HEAD')).toBe(head);
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({
+      ok: true,
+      removedWorktree: true,
+    });
+    git(repo, 'branch', worktree.branch);
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id, abandon: true })).toEqual({
+      ok: true,
+      removedWorktree: false,
+      deletedBranch: false,
+    });
+    expect(git(repo, 'branch', '--list', worktree.branch)).toContain(worktree.branch);
+    expect((await service.snapshot()).tasks.find((entry) => entry.id === task.id)?.status).toBe(
+      'completed'
+    );
+  });
+
+  it('验收后新增未跟踪文件或提交：清理拒绝并保留 completed 与文件', async () => {
+    const { task, dispatch: attempt, worktree } = await dispatch('Later edits');
+    await report(attempt.workerSessionId);
+    await host.mergeWorktree({ dispatchId: attempt.id });
+    writeFileSync(join(worktree.path, 'later.txt'), 'keep me\n');
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('dirty'),
+    });
+    git(worktree.path, 'add', 'later.txt');
+    git(worktree.path, 'commit', '-q', '-m', 'later work');
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id, abandon: true })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('unmerged-commits'),
+    });
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(readFileSync(join(worktree.path, 'later.txt'), 'utf8')).toBe('keep me\n');
+    expect((await service.snapshot()).tasks.find((entry) => entry.id === task.id)?.status).toBe(
+      'completed'
+    );
+  });
+
   it('旧记录的 worktree 已注销但残留目录还在：工具和面板从主仓库读取 worker 分支', async () => {
     const { dispatch: attempt, worktree } = await dispatch('Removed directory');
     commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
@@ -201,7 +280,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     git(repo, 'worktree', 'prune');
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('leftover-directory');
 
-    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toEqual({
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id, abandon: true })).toEqual({
       ok: true,
       removedWorktree: true,
       deletedBranch: true,
@@ -479,7 +558,9 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect(git(path, 'branch', '--show-current')).toBe('fynvra/next-to-repo');
     expect(existsSync(join(root, 'userData', 'worktrees'))).toBe(false);
 
-    expect(await coordinator.cleanupWorktree({ dispatchId: result.dispatch.id })).toMatchObject({
+    expect(
+      await coordinator.cleanupWorktree({ dispatchId: result.dispatch.id, abandon: true })
+    ).toMatchObject({
       ok: true,
       removedWorktree: true,
     });
@@ -569,6 +650,13 @@ describe('编排全流程（普通目录，没有 git）', () => {
     const checks = await host.runChecks({ dispatchId: attempt.id, command: 'node check.js' });
     expect(checks).toMatchObject({ ok: true, exitCode: 0 });
     expect(checks.ok && checks.output).toContain('hello');
+
+    const pending = await service.snapshot();
+    expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toMatchObject({ ok: false });
+    expect(await service.snapshot()).toEqual(pending);
+    expect(pending.tasks[0]?.status).toBe('in-review');
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(readFileSync(join(notes, 'hello.txt'), 'utf8')).toBe('hello\n');
 
     expect(await host.mergeWorktree({ dispatchId: attempt.id })).toEqual({
       ok: true,

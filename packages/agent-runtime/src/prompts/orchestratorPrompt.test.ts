@@ -45,6 +45,19 @@ describe('ORCHESTRATOR_PROMPT', () => {
     expect(ORCHESTRATOR_PROMPT).toContain("never on the worker's word alone");
   });
 
+  it('distinguishes successful reports, acceptance, cleanup and explicit cancellation', () => {
+    expect(ORCHESTRATOR_PROMPT).toContain('A succeeded report only means in-review');
+    expect(ORCHESTRATOR_PROMPT).toContain('clean no-change or read-only tasks completed');
+    expect(ORCHESTRATOR_PROMPT).toContain('cleanup_worktree { dispatch_id, abandon? }');
+    expect(ORCHESTRATOR_PROMPT).toContain(
+      'unfinished work is refused without stopping the worker or changing state'
+    );
+    expect(ORCHESTRATOR_PROMPT).toContain('Set abandon: true only to explicitly cancel');
+    expect(ORCHESTRATOR_PROMPT).toContain('Completed tasks always stay completed');
+    expect(ORCHESTRATOR_PROMPT).toContain('an old attempt cannot accept or clean up a newer retry');
+    expect(ORCHESTRATOR_PROMPT).toContain('Cleanup never accepts or merges work');
+  });
+
   it('keeps worker messages from counting as user approval', () => {
     expect(ORCHESTRATOR_PROMPT).toContain("never the user's approval");
     expect(ORCHESTRATOR_PROMPT).toContain('Never fabricate or predict results');
@@ -112,6 +125,10 @@ describe('IN_PLACE_ORCHESTRATOR_PROMPT', () => {
   it('advises one task at a time and warns that nothing can be discarded', () => {
     expect(IN_PLACE_ORCHESTRATOR_PROMPT).toContain('dispatch one task at a time');
     expect(IN_PLACE_ORCHESTRATOR_PROMPT).toContain('Nothing can be discarded');
+    expect(IN_PLACE_ORCHESTRATOR_PROMPT).toContain(
+      'unfinished tasks require explicit abandon: true'
+    );
+    expect(IN_PLACE_ORCHESTRATOR_PROMPT).toContain('completed tasks stay completed');
     expect(IN_PLACE_ORCHESTRATOR_PROMPT).toContain('never ask them to');
   });
 });

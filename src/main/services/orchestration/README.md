@@ -71,11 +71,15 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   尝试已结算且没有新尝试时（`send_to_worker` 之后的追加汇报）只转发一条 `worker_done`（subject 带 `(follow-up)`）。
 - **`reject_work`**：`in-review` 或 `failed` 的任务都可以打回，同一 worktree / 会话上新建 Dispatch，反馈作为新 prompt；
   投递失败整体回滚。
-- **`merge_worktree`**：要求 `in-review`、worktree 干净（含未跟踪文件）；冲突返回 `{ merged: false, conflicts }`
-  （不是错误），task 保持 `in-review`。
-- **`cleanup_worktree`**：先 `disposeSession`，再 `worktree remove --force`、从 store 删 worktree，最后删分支：
-  已合并用 `-d`，未完成的任务视为放弃（进行中的尝试按 failed 结算、task → `abandoned`）用 `-D`。删 worktree 失败时
-  返回错误并保留记录，可以重试。合并时在 Task 保存 `mergedDiff`（基准 / worker 提交），清理后 `review_diff` 与面板仍从主仓库读这对提交。
+- **`merge_worktree`**：要求当前 dispatch、`in-review`、worktree 干净（含未跟踪文件）；验收通过后记为 `completed`，
+  包括已审查的只读 / 空改动任务（Git 无需产生合并提交）。冲突返回 `{ merged: false, conflicts }`（不是错误），task 保持 `in-review`。
+- **`cleanup_worktree { dispatch_id, abandon? }`**：只操作当前 dispatch，默认仅允许 `completed` / `abandoned`；
+  未验收任务返回操作指引，不停 worker、不删资源、不改状态。成功汇报仍需 `merge_worktree` 验收或 `reject_work` 打回。
+  显式 `abandon: true` 才放弃未完成任务（进行中的尝试按 failed 结算，已有汇报保留），再停止 worker、
+  `worktree remove --force` 丢弃目录与未提交改动、`-D` 删分支；删除失败仍保持主动放弃的状态，保留记录供重试。
+  已验收任务始终保持 `completed`（包括显式 abandon、失败和重复清理），要求干净且无新增未合并提交；
+  停 worker 后不加 force 删除目录、用 `-d` 删分支。记录已清理时返回无资源可删，不按旧分支名删除可能被复用的分支。
+  合并时在 Task 保存 `mergedDiff`（基准 / worker 提交），清理后 `review_diff` 与面板仍从主仓库读这对提交。
   旧记录没有固定范围时，使用尚存的 worktree 基准和 worker 分支，不在已注销的 worktree 目录里跑 diff。
 - **`run_checks` 白名单**：每一段（`&&`、`;`、`|` 分隔）以 pnpm / npm / yarn / bun / node / npx / git / cargo / go /
   python / pytest / make 开头，其余 shell 元字符一律拒绝；默认另外只放行 git 只读子命令、拒绝 npm publish 之类的发布命令。

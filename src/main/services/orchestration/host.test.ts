@@ -58,6 +58,7 @@ beforeEach(() => {
   store = new InMemoryOrchestrationStore();
   inbox = new Inbox({ messages: store.messages });
   fake = createFakeExec();
+  fake.respond(({ args }) => (args[0] === 'rev-list' ? { stdout: '0\t0\n' } : undefined));
   launcher = createFakeLauncher();
   runChecks = vi.fn(async () => ({ exitCode: 0, output: 'all good', durationMs: 7 }));
   host = makeHost();
@@ -187,7 +188,7 @@ describe('dispatchTask', () => {
 
   it('依赖已被放弃时拒绝派发', async () => {
     const first = await dispatch('First');
-    await host.cleanupWorktree({ dispatchId: first.dispatch.id });
+    await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true });
     const result = await host.dispatchTask({
       title: 'Second',
       spec: 'S',
@@ -321,7 +322,7 @@ describe('listWorkers 与排队派发', () => {
       roleId: 'worker',
       dependsOn: [first.task.id],
     });
-    await host.cleanupWorktree({ dispatchId: first.dispatch.id });
+    await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true });
     await host.listWorkers();
 
     expect(queued.ok && store.tasks.get(queued.task.id)?.status).toBe('abandoned');
@@ -637,12 +638,19 @@ describe('mergeWorktree', () => {
     expect(queued).toMatchObject({ ok: true, task: { status: 'todo' } });
     expect(await worker(first.dispatch.id).reportDone('succeeded', 'Done.')).toEqual({ ok: true });
 
+    const second = queued.ok ? queued.task.id : '';
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: false,
+    });
+    await host.listWorkers();
+    expect(store.tasks.get(second)?.status).toBe('todo');
+    expect(launcher.createWorkerSession).toHaveBeenCalledTimes(1);
+
     expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
       ok: true,
       merged: true,
     });
 
-    const second = queued.ok ? queued.task.id : '';
     expect(store.tasks.get(second)?.status).toBe('in-progress');
     expect(launcher.createWorkerSession).toHaveBeenCalledTimes(2);
     expect(store.dispatches.list((dispatch) => dispatch.taskId === second)).toHaveLength(1);
@@ -788,7 +796,7 @@ describe('rejectWork', () => {
 });
 
 describe('cleanupWorktree', () => {
-  it('已合并：关闭 worker 会话、强删 worktree、-d 删分支，从 store 删除 worktree', async () => {
+  it('已合并：检查干净、关闭 worker 会话、非强制删 worktree、-d 删分支', async () => {
     const first = await reported();
     await host.mergeWorktree({ dispatchId: first.dispatch.id });
     const start = fake.calls.length;
@@ -799,7 +807,10 @@ describe('cleanupWorktree', () => {
     });
     expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1');
     expect(commandsSince(start)).toEqual([
-      `git worktree remove --force -- ${WORKTREE_PATH}`,
+      'git status --porcelain',
+      'git rev-parse --verify --quiet main^{commit}',
+      `git rev-list --left-right --count ${BASE_COMMIT}...HEAD`,
+      `git worktree remove -- ${WORKTREE_PATH}`,
       'git branch -d fynvra/add-toggle',
     ]);
     expect(store.worktrees.list()).toEqual([]);
@@ -807,10 +818,12 @@ describe('cleanupWorktree', () => {
     expect(store.reclaimableDispatches(first.task.runId)).toEqual([]);
   });
 
-  it('未完成的任务：结算进行中的尝试为 failed、task → abandoned，分支连同提交 -D 删除', async () => {
+  it('显式放弃：结算进行中的尝试为 failed、task → abandoned，分支连同提交 -D 删除', async () => {
     const first = await dispatch();
     const start = fake.calls.length;
-    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+    expect(
+      await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+    ).toMatchObject({
       ok: true,
     });
     expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
@@ -822,7 +835,7 @@ describe('cleanupWorktree', () => {
     expect(commandsSince(start)).toContain('git branch -D fynvra/add-toggle');
   });
 
-  it('删 worktree 失败：返回错误并保留记录，可以重试；清理过的 dispatch 再清理报错', async () => {
+  it('删 worktree 失败保留记录与 completed，重试和重复清理均保持 completed', async () => {
     const first = await reported();
     await host.mergeWorktree({ dispatchId: first.dispatch.id });
     fake.respond(({ args }) =>
@@ -833,15 +846,22 @@ describe('cleanupWorktree', () => {
       error: expect.stringContaining('locked'),
     });
     expect(store.worktrees.list()).toHaveLength(1);
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
 
     fake.respond(({ args }) => (args[0] === 'worktree' && args[1] === 'remove' ? {} : undefined));
-    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+    expect(
+      await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+    ).toMatchObject({
       ok: true,
     });
-    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('already cleaned up'),
+    const afterCleanup = fake.calls.length;
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual({
+      ok: true,
+      removedWorktree: false,
+      deletedBranch: false,
     });
+    expect(commandsSince(afterCleanup)).toEqual([]);
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
     expect(await host.reviewDiff({ dispatchId: first.dispatch.id })).toMatchObject({ ok: true });
   });
 
@@ -915,11 +935,11 @@ describe('cleanupWorktree', () => {
       );
     });
 
-    it('在托管根目录内：删目录 + prune，记录清掉，分支照样删', async () => {
+    it('显式放弃托管根目录内的残留：删目录 + prune，记录清掉，分支照样删', async () => {
       host = leftoverHost();
       const first = await reported();
       const start = fake.calls.length;
-      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual({
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })).toEqual({
         ok: true,
         removedWorktree: true,
         deletedBranch: true,
@@ -935,7 +955,7 @@ describe('cleanupWorktree', () => {
       host = leftoverHost();
       const first = await reported();
       host = leftoverHost({ resolveWorktreesRoot: async () => '/elsewhere/worktrees' });
-      const result = await host.cleanupWorktree({ dispatchId: first.dispatch.id });
+      const result = await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true });
       expect(result).toMatchObject({
         ok: false,
         error: expect.stringContaining(
@@ -945,6 +965,70 @@ describe('cleanupWorktree', () => {
       expect(removed).toEqual([]);
       expect(store.worktrees.list()).toHaveLength(1);
     });
+  });
+
+  it.each([
+    ['dirty', 'status', { stdout: '?? new.txt\n' }],
+    ['unmerged-commits', 'rev-list', { stdout: '0\t1\n' }],
+    ['could not read', 'status', { code: 1, stderr: 'unavailable' }],
+  ])('已验收但 %s：包括 abandon:true 都保留资源和 completed', async (error, command, response) => {
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    fake.respond(({ args }) => (args[0] === command ? response : undefined));
+    const start = fake.calls.length;
+    for (const abandon of [false, true]) {
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(error),
+      });
+    }
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(commandsSince(start).some((command) => command.startsWith('git worktree remove'))).toBe(
+      false
+    );
+    expect(store.worktrees.list()).toHaveLength(1);
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
+  });
+
+  it('显式取消后删除失败仍是 abandoned，保留成功汇报且默认调用可重试', async () => {
+    const first = await reported();
+    const report = store.dispatches.get(first.dispatch.id);
+    fake.respond(({ args }) =>
+      args[0] === 'worktree' && args[1] === 'remove' ? { code: 1, stderr: 'locked' } : undefined
+    );
+    expect(
+      await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('locked'),
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+    expect(store.worktrees.list()).toHaveLength(1);
+    fake.respond(({ args }) => (args[0] === 'worktree' && args[1] === 'remove' ? {} : undefined));
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+    });
+    expect(store.dispatches.get(first.dispatch.id)).toEqual(report);
+    expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+  });
+
+  it('缺少 worktree 记录也不能把未验收任务默认放弃；显式取消可停止 worker', async () => {
+    const first = await reported();
+    store.worktrees.delete(first.dispatch.worktreeId);
+    const start = fake.calls.length;
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: false,
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('in-review');
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })).toEqual({
+      ok: true,
+      removedWorktree: false,
+      deletedBranch: false,
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+    expect(launcher.disposeSession).toHaveBeenCalledWith(first.dispatch.workerSessionId);
+    expect(commandsSince(start)).toEqual([]);
   });
 
   it('分支删不掉时 deletedBranch: false，worktree 照常清理', async () => {
@@ -958,6 +1042,119 @@ describe('cleanupWorktree', () => {
       removedWorktree: true,
       deletedBranch: false,
     });
+  });
+});
+
+describe.each(['git', 'none'] as const)('清理与验收状态契约（vcs: %s）', (vcs) => {
+  beforeEach(() => {
+    host = makeHost({
+      workspace: { ...WORKSPACE, vcs },
+      coordinatorBranch: vcs === 'git' ? 'main' : '',
+    });
+  });
+
+  it.each([undefined, 'succeeded', 'failed'] as const)(
+    '默认清理拒绝 %s 汇报的未完成任务，所有资源和状态保持原样',
+    async (outcome) => {
+      const first = await dispatch();
+      if (outcome !== undefined) await worker(first.dispatch.id).reportDone(outcome, 'Report.');
+      const task = store.tasks.get(first.task.id);
+      const attempt = store.dispatches.get(first.dispatch.id);
+      const trees = store.worktrees.list();
+      const start = fake.calls.length;
+      for (const abandon of [undefined, false]) {
+        expect(
+          await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon })
+        ).toMatchObject({
+          ok: false,
+          error: expect.stringContaining('abandon: true'),
+        });
+      }
+      expect(store.tasks.get(first.task.id)).toEqual(task);
+      expect(store.dispatches.get(first.dispatch.id)).toEqual(attempt);
+      expect(store.worktrees.list()).toEqual(trees);
+      expect(launcher.disposeSession).not.toHaveBeenCalled();
+      expect(commandsSince(start)).toEqual([]);
+    }
+  );
+
+  it.each(['succeeded', 'failed'] as const)(
+    '显式放弃保留原有 %s 汇报，重复清理不改写历史',
+    async (outcome) => {
+      const first = await dispatch();
+      await worker(first.dispatch.id).reportDone(outcome, 'Original report.', ['a.txt']);
+      const attempt = store.dispatches.get(first.dispatch.id);
+      expect(
+        await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+      ).toMatchObject({ ok: true });
+      expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+        ok: true,
+      });
+      expect(store.dispatches.get(first.dispatch.id)).toEqual(attempt);
+      expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+    }
+  );
+
+  it('旧 dispatch 不得取消重试或验收新汇报；最新尝试可以验收清理', async () => {
+    const first = await reported();
+    await host.rejectWork({ dispatchId: first.dispatch.id, feedback: 'Fix it.' });
+    const current = store.activeDispatch(first.task.id);
+    if (current === undefined) throw new Error('missing retry');
+    const start = fake.calls.length;
+    for (const abandon of [false, true]) {
+      expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(current.id),
+      });
+    }
+    expect(store.activeDispatch(first.task.id)).toEqual(current);
+    expect(store.tasks.get(first.task.id)?.status).toBe('in-progress');
+    await worker(current.id).reportDone('succeeded', 'Fixed.');
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: false,
+    });
+    expect(
+      await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+    ).toMatchObject({ ok: false });
+    expect(store.tasks.get(first.task.id)?.status).toBe('in-review');
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+    expect(commandsSince(start)).toEqual([]);
+    expect(await host.mergeWorktree({ dispatchId: current.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    expect(await host.cleanupWorktree({ dispatchId: current.id })).toMatchObject({ ok: true });
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
+  });
+
+  it('显式取消最新重试只结算当前尝试，保留之前的成功汇报', async () => {
+    const first = await reported();
+    const original = store.dispatches.get(first.dispatch.id);
+    await host.rejectWork({ dispatchId: first.dispatch.id, feedback: 'Fix it.' });
+    const current = store.activeDispatch(first.task.id);
+    if (current === undefined) throw new Error('missing retry');
+    expect(await host.cleanupWorktree({ dispatchId: current.id, abandon: true })).toMatchObject({
+      ok: true,
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
+    expect(store.dispatches.get(current.id)).toMatchObject({ outcome: 'failed', settledAt: 1000 });
+    expect(store.dispatches.get(first.dispatch.id)).toEqual(original);
+  });
+
+  it('拒绝非布尔 abandon，不把字符串 false 当作取消授权', async () => {
+    const first = await reported();
+    expect(
+      await host.cleanupWorktree({
+        dispatchId: first.dispatch.id,
+        abandon: 'false' as unknown as boolean,
+      })
+    ).toEqual({
+      ok: false,
+      error: 'abandon must be a boolean',
+    });
+    expect(store.tasks.get(first.task.id)?.status).toBe('in-review');
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
   });
 });
 
@@ -1068,13 +1265,19 @@ describe('普通目录（vcs: none）：原地编排，不调用 git', () => {
     expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual(cleaned);
     expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1');
     expect(store.tasks.get(first.task.id)?.status).toBe('completed');
-    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual(cleaned);
+    launcher.disposeSession.mockRejectedValueOnce(new Error('session gone'));
+    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })).toEqual(
+      cleaned
+    );
+    expect(store.tasks.get(first.task.id)?.status).toBe('completed');
     expectNoGit();
   });
 
-  it('cleanup 未完成的任务：放弃（进行中的尝试结算为 failed），改动留在目录里', async () => {
+  it('显式放弃未完成的任务：进行中的尝试结算为 failed，改动留在目录里', async () => {
     const first = await dispatch();
-    expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+    expect(
+      await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })
+    ).toMatchObject({
       ok: true,
       mode: 'in-place',
     });
