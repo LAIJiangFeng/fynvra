@@ -435,6 +435,8 @@ export const zhCN = {
     loadingDiff: '正在读取改动…',
     diffFailed: '读取改动失败',
     reloadDiff: '重新读取改动',
+    closeDiff: '关闭 {name} 的更改',
+    diffFileGone: '此文件已不在这组更改中，可能已提交或还原',
     base: '相对',
     staleDiff: 'worktree 已清理，这是清理前的改动',
     noCommits: '还没有提交的改动',

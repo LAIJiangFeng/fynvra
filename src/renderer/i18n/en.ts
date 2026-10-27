@@ -446,6 +446,8 @@ export const en: MessagesShape<typeof zhCN> = {
     loadingDiff: 'Loading changes…',
     diffFailed: 'Failed to load changes',
     reloadDiff: 'Reload changes',
+    closeDiff: 'Close changes for {name}',
+    diffFileGone: 'This file is no longer in these changes; it may have been committed or reverted',
     base: 'Base',
     staleDiff: 'Worktree cleaned up; these are the changes from before',
     noCommits: 'No committed changes yet',
