@@ -144,6 +144,34 @@ describe('createOrchestrationRegistry', () => {
     expect(registry.coordinatorOf('ws_2', 'run_missing')).toBeUndefined();
   });
 
+  it('coordinatorWork aggregates workspaces and restores acknowledged reviews without replaying message events', async () => {
+    const first = make({ launcher: createFakeLauncher() });
+    for (const workspaceId of ['ws_1', 'ws_2']) {
+      const dispatched = await first.hostFor('session_coord', workspaceId)?.dispatchTask(TASK);
+      if (!dispatched?.ok || !dispatched.dispatch) throw new Error('dispatch failed');
+      await first
+        .workerHostFor(dispatched.dispatch.workerSessionId)
+        ?.reportDone('succeeded', 'Done.');
+    }
+    const pending = first.coordinatorWork('session_coord');
+    expect(pending.messages).toHaveLength(2);
+    expect(pending.reviews).toHaveLength(2);
+    first.ackMessages(pending.messages.map(({ id }) => id));
+    await first.flushAll();
+
+    const restored = make();
+    const onMessage = vi.fn();
+    restored.onMessage(onMessage);
+    expect(restored.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
+    await restored.openAll();
+    expect(restored.coordinatorWork('session_coord')).toEqual({
+      messages: [],
+      reviews: pending.reviews,
+    });
+    expect(restored.coordinatorWork('unrelated')).toEqual({ messages: [], reviews: [] });
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
   it('openAll 之后 workerHostFor 能找到磁盘快照里的 worker 会话', async () => {
     const first = make({ launcher: createFakeLauncher() });
     await first.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);

@@ -15,7 +15,11 @@ import type { CheckCommandPolicy } from './checkCommand';
 import type { RunChecksFn } from './host';
 import type { WorkerSessionLauncher } from './launcher';
 import { nodeExec } from './nodeExec';
-import { createOrchestrationService, type OrchestrationService } from './service';
+import {
+  type CoordinatorWork,
+  createOrchestrationService,
+  type OrchestrationService,
+} from './service';
 import { createShellRunner } from './shellRunner';
 import { createWorktreesRootResolver, fallbackWorktreesRoot } from './worktreesRoot';
 
@@ -60,6 +64,8 @@ export interface OrchestrationRegistry {
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
   /** 收件箱里发给该会话、未确认的消息（跨工作区查找，不消费）。协调者唤醒器用。 */
   pendingMessagesTo(sessionId: string): Message[];
+  /** Read current actionable messages and unresolved successful attempts, without consuming either. */
+  coordinatorWork(sessionId: string): CoordinatorWork;
   /** 确认已投递的消息（各服务尽力而为）。 */
   ackMessages(ids: readonly string[]): void;
   flushAll(): Promise<void>;
@@ -193,6 +199,13 @@ export function createOrchestrationRegistry(
         if (pending.length > 0) return pending;
       }
       return [];
+    },
+    coordinatorWork(sessionId) {
+      const work = [...services.values()].map((service) => service.coordinatorWork(sessionId));
+      return {
+        messages: work.flatMap((entry) => entry.messages),
+        reviews: work.flatMap((entry) => entry.reviews),
+      };
     },
     ackMessages(ids: readonly string[]): void {
       for (const service of services.values()) service.ackMessages(ids);

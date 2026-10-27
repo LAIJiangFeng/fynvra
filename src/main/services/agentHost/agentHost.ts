@@ -120,6 +120,8 @@ export interface RespondApprovalInput {
 export interface SessionObserver {
   event?(envelope: SessionEventEnvelope): void;
   approval?(request: ApprovalRequest): void;
+  /** Main-only scheduling signals; automatic prompts do not emit `prompt`. */
+  activity?(sessionId: string, action: 'prompt' | 'abort' | 'idle'): void;
 }
 
 /** AgentHost（§9.5）加上 sessions IPC 用到的会话操作 */
@@ -140,6 +142,8 @@ export interface AgentHostService extends AgentHost {
    * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
    */
   prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
+  /** Automatic continuation: never queues behind a user turn or revives an archived session. */
+  promptWhenIdle(sessionId: string, text: string): Promise<IpcResult<{ delivered: boolean }>>;
   /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
   steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
@@ -182,6 +186,8 @@ interface LiveSession {
   running: boolean;
   /** 还在途的 prompt（spawn / 发出之前）：这期间不能换模型，否则 spawn 用的还是旧模型 */
   prompting: number;
+  /** Invalidates an automatic prompt when a user prompt/abort arrives during spawn. */
+  activity: number;
   transcript: Transcript | null;
   /** 进行中的 host 调用：`<generation>:<callId>` → 中止器 */
   calls: Map<string, AbortController>;
@@ -258,6 +264,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         sessionSeq: 0,
         running: false,
         prompting: 0,
+        activity: 0,
         transcript: null,
         calls: new Map(),
       };
@@ -329,6 +336,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!stored || stored.status === status) return;
     deps.store.update(sessionId, { status, updatedAt: now() });
     changed(stored.workspaceId);
+    if (status === 'idle') tellObservers((observer) => observer.activity?.(sessionId, 'idle'));
   }
 
   /** 推一条事件给 Renderer（同时进 transcript），seq 改写为会话级 */
@@ -723,6 +731,43 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return deliverMessage('steer', sessionId, text, images);
   }
 
+  async function promptWhenIdle(
+    sessionId: string,
+    text: string
+  ): Promise<Result<{ delivered: boolean }>> {
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail(translate('common.sessionNotFound'));
+    if (stored.status !== 'idle' || stored.archivedAt !== undefined || isBusy(stored)) {
+      return { ok: true, delivered: false };
+    }
+    const state = liveOf(sessionId);
+    const activity = state.activity;
+    state.prompting += 1;
+    try {
+      const spawned = await ensureSpawned(stored);
+      if (!spawned.ok) return spawned;
+      const current = deps.store.get(sessionId);
+      // Spawn can await model/resources/history. Recheck after all awaits so a user turn wins.
+      if (
+        current?.status !== 'idle' ||
+        current.archivedAt !== undefined ||
+        state.activity !== activity ||
+        state.running ||
+        state.prompting > 1
+      ) {
+        return { ok: true, delivered: false };
+      }
+      if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
+        return fail(translate('agent.workerUnavailable'));
+      }
+      state.running = true;
+      setStatus(sessionId, 'running');
+      return { ok: true, delivered: true };
+    } finally {
+      state.prompting -= 1;
+    }
+  }
+
   async function deliverMessage(
     type: 'prompt' | 'steer',
     sessionId: string,
@@ -732,6 +777,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
+    pending.activity += 1;
+    tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
     pending.prompting += 1;
     try {
       const spawned = await ensureSpawned(stored);
@@ -856,6 +903,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   function disposeLive(sessionId: string): void {
     const state = live.get(sessionId);
+    if (state) state.activity += 1;
+    tellObservers((observer) => observer.activity?.(sessionId, 'abort'));
     if (!state?.spawned) return;
     send({ type: 'dispose-session', identity: identityOf(sessionId, state) });
     const wasRunning = state.running;
@@ -968,6 +1017,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       client.start();
     },
     async shutdown(timeoutMs) {
+      for (const stored of deps.store.all()) {
+        const state = live.get(stored.id);
+        if (state) state.activity += 1;
+        tellObservers((observer) => observer.activity?.(stored.id, 'abort'));
+      }
       deps.store.flush();
       await client.shutdown(timeoutMs);
       failDescribes(translate('agent.workerUnavailable'));
@@ -1016,11 +1070,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     remove,
     prompt,
+    promptWhenIdle,
     steer,
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
-      const state = live.get(sessionId);
-      if (!state?.spawned) return { ok: true };
+      const state = liveOf(sessionId);
+      state.activity += 1;
+      tellObservers((observer) => observer.activity?.(sessionId, 'abort'));
+      if (!state.spawned) return { ok: true };
       return send({ type: 'abort', identity: identityOf(sessionId, state) })
         ? { ok: true }
         : fail(translate('agent.workerUnavailable'));
