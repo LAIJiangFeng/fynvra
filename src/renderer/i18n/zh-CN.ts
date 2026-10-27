@@ -387,6 +387,8 @@ export const zhCN = {
     untitledRun: '（未命名的编排）',
     progress: '任务完成进度',
     completedOf: '已完成 {completed} / {total}',
+    abandonedCount: '已放弃 {count}',
+    showAbandoned: '查看已放弃的任务',
     switchRun: '切换编排',
     attemptNth: '第 {count} 次尝试',
     dependsOn: '依赖：',

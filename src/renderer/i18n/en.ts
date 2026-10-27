@@ -398,6 +398,8 @@ export const en: MessagesShape<typeof zhCN> = {
     untitledRun: '(untitled run)',
     progress: 'Task progress',
     completedOf: '{completed} / {total} done',
+    abandonedCount: 'Abandoned {count}',
+    showAbandoned: 'Show abandoned tasks',
     switchRun: 'Switch run',
     attemptNth: 'Attempt {count}',
     dependsOn: 'Depends on: ',

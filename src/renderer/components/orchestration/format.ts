@@ -1,4 +1,4 @@
-import type { Dispatch, Message, MessageType, TaskStatus } from '@fynvra/core';
+import type { Dispatch, Message, MessageType, Task, TaskStatus } from '@fynvra/core';
 import type { T } from '../../i18n';
 
 // 编排面板的配色与格式化（文案在字典 orchestration.* / time.*）。纯函数，不碰 DOM，可在 node 下测试。
@@ -12,6 +12,18 @@ export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
   'failed',
   'abandoned',
 ];
+
+/** 完成进度不计已放弃任务，单独返回其数量供入口展示。 */
+export function progressCounts(groups: Record<TaskStatus, readonly Task[]>) {
+  return {
+    completed: groups.completed.length,
+    total: TASK_STATUS_ORDER.reduce(
+      (sum, status) => sum + (status === 'abandoned' ? 0 : groups[status].length),
+      0
+    ),
+    abandoned: groups.abandoned.length,
+  };
+}
 
 /** 状态色：圆点 / 卡片左边框 / 徽标。 */
 export const TASK_STATUS_TONE: Record<TaskStatus, { dot: string; border: string; badge: string }> =
