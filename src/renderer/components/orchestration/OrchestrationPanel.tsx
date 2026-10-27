@@ -21,8 +21,11 @@ import {
   usingOrchestrationMock,
 } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
+import { type DiffSource, diffSourceKey } from '@/stores/diffTabs';
 import { filesStoreFor, ROOT_DIRECTORY_ID } from '@/stores/files';
-import { reviewCandidatesOf, runsOf, useOrchestrationStore } from '@/stores/orchestration';
+import { runsOf, useOrchestrationStore } from '@/stores/orchestration';
+import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
+import { useSessionsStore } from '@/stores/sessions';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { ChangesView } from './ChangesView';
 import { PanelMessage } from './common';
@@ -86,13 +89,37 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const [tab, setTab] = useState<PanelTab>('files');
   const [runId, setRunId] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [review, setReview] = useState<{ dispatchId: string; sessionKey: string } | null>(null);
+  const activeSessionId = useSessionsStore((state) =>
+    state.workspaceId === workspaceId ? state.activeSessionId : null
+  );
+  const currentSource = useMemo<DiffSource>(
+    () => ({
+      kind: 'session',
+      workspaceId,
+      ...(activeSessionId ? { sessionId: activeSessionId } : {}),
+    }),
+    [workspaceId, activeSessionId]
+  );
+  const currentKey = diffSourceKey(currentSource);
+  useEffect(() => {
+    setReview((current) => (current?.sessionKey === currentKey ? current : null));
+  }, [currentKey]);
+  const source = useMemo<DiffSource>(
+    () =>
+      review?.sessionKey === currentKey
+        ? { kind: 'dispatch', workspaceId, dispatchId: review.dispatchId }
+        : currentSource,
+    [review, currentKey, currentSource, workspaceId]
+  );
+  const changes = useSourceDiff(source);
+  const changesLoading =
+    changes?.status === 'loading' || (changes?.status === 'ready' && changes.refreshing);
   const returnFocus = useRef<HTMLElement | null>(null);
   const t = useT();
 
   const runs = useMemo(() => runsOf(view), [view]);
   const run = runs.find((candidate) => candidate.id === runId) ?? runs[0];
-  const candidates = reviewCandidatesOf(view, run?.id ?? null);
   const openTask = openTaskId ? view?.tasks.find((task) => task.id === openTaskId) : undefined;
   const taskCount = run && view ? view.tasks.filter((task) => task.runId === run.id).length : 0;
 
@@ -102,7 +129,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
     requestAnimationFrame(() => target?.focus());
   };
 
-  // 两个 tab 共用：还没读到快照（加载中 / 失败）或工作区里还没有编排
+  // 任务页的快照加载 / 空状态；改动页独立按当前会话读取。
   let notice: ReactNode = null;
   if (!view) {
     notice = error ? (
@@ -143,7 +170,6 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             <TabsTrigger value="changes" className="px-2 text-xs">
               <GitCompareArrows />
               {t('orchestration.tabs.changes')}
-              {!plain && candidates.length > 0 && <Count value={candidates.length} />}
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-0.5">
@@ -163,11 +189,21 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
                   />
                 }
                 onClick={() =>
-                  void (tab === 'files' ? useFilesStore.getState().refresh() : refresh(workspaceId))
+                  void (tab === 'files'
+                    ? useFilesStore.getState().refresh()
+                    : tab === 'changes'
+                      ? loadSourceDiff(source, true)
+                      : refresh(workspaceId))
                 }
               >
                 <RefreshCw
-                  className={cn((tab === 'files' ? filesLoading : loading) && 'animate-spin')}
+                  className={cn(
+                    (tab === 'files'
+                      ? filesLoading
+                      : tab === 'changes'
+                        ? changesLoading
+                        : loading) && 'animate-spin'
+                  )}
                 />
               </TooltipTrigger>
               <TooltipContent side="bottom">
@@ -176,7 +212,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             </Tooltip>
           </div>
         </PanelHeaderBar>
-        {tab !== 'files' && view && error && (
+        {tab === 'tasks' && view && error && (
           <p
             role="alert"
             className="shrink-0 border-b bg-destructive/10 px-3 py-1 text-destructive text-xs"
@@ -204,19 +240,19 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
             ))}
         </TabsContent>
         <TabsContent value="changes" className="flex min-h-0 flex-col overflow-y-auto">
+          {source.kind === 'dispatch' && (
+            <div className="border-b p-3 text-xs">
+              <p>{t('orchestration.historicalReview')}</p>
+              <Button size="sm" variant="ghost" onClick={() => setReview(null)}>
+                {t('orchestration.currentChanges')}
+              </Button>
+            </div>
+          )}
           {plain ? (
             <PanelMessage icon={GitCompareArrows} title={t('common.noGit')} />
-          ) : (
-            (notice ??
-            (view && (
-              <ChangesView
-                view={view}
-                candidates={candidates}
-                selectedId={reviewId}
-                onSelect={setReviewId}
-              />
-            )))
-          )}
+          ) : tab === 'changes' ? (
+            <ChangesView key={diffSourceKey(source)} source={source} />
+          ) : null}
         </TabsContent>
       </Tabs>
 
@@ -228,7 +264,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
           onClose={closeDrawer}
           onOpenTask={setOpenTaskId}
           onReview={(dispatchId) => {
-            setReviewId(dispatchId);
+            setReview({ dispatchId, sessionKey: currentKey });
             setTab('changes');
             setOpenTaskId(null);
           }}

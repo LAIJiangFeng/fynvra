@@ -178,7 +178,11 @@ export interface Message {
 `completed` 在任何清理路径上都不变；清理前检查干净且无新增未合并提交，以非强制删除目录和分支保护验收后的改动。
 只有放弃的任务才强制丢弃 worktree / 分支；清理不自动验收或合并。无 worktree 记录的重复清理不按旧分支名删资源。
 
-**改动的生命周期**：`review_diff` 与面板共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
+**当前对话的改动**：`orchestration:changes` 只接受 `{ workspaceId, sessionId? }`，拒绝其它键和路径；无会话时读工作区主目录，主 / 调度会话也读登记主目录，worker 仅读与 session / dispatch / worktree 登记一致的目录。Main 验证真实 Git root、common-dir 与 worktree 登记归属，读取实际 branch / HEAD，绝不启动 agent、切分支、写 index 或创建 worktree；目录已清理时只报告该来源不可用，不回退到主目录或其它任务。
+未提交包含 staged / unstaged / untracked（内容读取有界且拒绝越界链接）；无 HEAD、detached HEAD 可读。worker 仍在登记分支时以登记 baseCommit 为基准；其它情况优先与默认分支 origin ref、其次本地 ref 的 merge-base 比较，没有不同基准时显示 HEAD 的最近一次提交（根提交比较空树），无 HEAD 则为空。返回实际比较范围及范围内至多 500 条提交，读取错误不能伪装成空结果。
+右栏改动跟随当前工作区 / 会话，不依赖 run 或任务数；进入、会话切换和手动刷新重新读取。中央 diff 的来源区分当前目录与历史 dispatch，已打开标签始终绑定原来源；请求按来源去重，刷新使旧响应失效。任务抽屉可明确进入历史审查，切换对话后恢复当前来源。文件浏览和任务执行语义不变。
+
+**改动的生命周期**：历史任务 `review_diff` 与明确的任务审查入口共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
 合并时将创建基准和 worker 提交 SHA 写入 Task 的可选 `mergedDiff`，随编排快照保存；正常清理、归档清理、重启后仍读这对提交，
 不拿主仓库当前 HEAD 代替 worker 提交。旧快照没有此字段时，沿用尚存的 worktree 基准与 worker 分支；两者已清理且无历史范围时明确报不可用。
 此修复必改 core 的 `types.ts`、`orchestration/store.ts`、`git/GitWorktreeManager.ts`，Main 的 `orchestration/{host,queries,service}.ts`，
@@ -386,10 +390,11 @@ export interface OrchestrationApi {
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: { dispatchId: string; cursor: number }): Promise<IpcResult<{ text: string; total: number; done: boolean }>>;
   reviewDiff(dispatchId: string): Promise<IpcResult<{ branch: string; baseCommit: string; files: string[]; stat: string; diff: string }>>;
+  changes(input: { workspaceId: string; sessionId?: string }): Promise<IpcResult<SessionChanges>>;
   onChanged(cb: (workspaceId: string) => void): Unsubscribe;
 }
 ```
-通道：`orchestration:snapshot|read-worker-output|review-diff`，推送 `orchestration:changed`。
+通道：`orchestration:snapshot|read-worker-output|review-diff|changes`，推送 `orchestration:changed`。
 
 ### 9.5 Main 内部接口（agent-host ⇄ orchestration-host，最终在 `src/main/index.ts` 接线）
 ```ts
