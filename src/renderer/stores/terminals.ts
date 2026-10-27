@@ -2,8 +2,8 @@ import { errorMessage } from '@shared/guards';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { create } from 'zustand';
-import { attachTerminalClipboard } from '@/components/terminal/terminalClipboard';
-import { translate } from '@/i18n';
+import { attachTerminalClipboard } from '../components/terminal/terminalClipboard';
+import { translate } from '../i18n';
 
 interface TerminalTab {
   id: string;
