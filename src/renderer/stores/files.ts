@@ -7,6 +7,7 @@ import type {
   WorkspaceFileEntry,
 } from '@shared/types/files';
 import { create } from 'zustand';
+import { createMarkdownReferences, type MarkdownReferences } from '@/lib/markdownPreview';
 import type { FilesApi } from '../../preload/domains/files';
 import { diffTabsStoreFor } from './diffTabs';
 
@@ -50,6 +51,8 @@ export interface FilesState {
   loadDirectory(directoryId?: string, force?: boolean): Promise<void>;
   toggleDirectory(directoryId: string): Promise<void>;
   openFile(entry: WorkspaceFileEntry): Promise<void>;
+  /** 只读引用解析器；缓存限定到调用方的 Markdown 预览生命周期。 */
+  markdownReferences(fileId: string): MarkdownReferences;
   closeFile(fileId: string, discard?: boolean): boolean;
   showChat(): void;
   editFile(fileId: string, text: string): void;
@@ -187,6 +190,11 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
         set({ selectedId: entry.id });
         const preview = get().previews[entry.id];
         if (!preview || (preview.error && !isFileDirty(preview))) await read(entry.id);
+      },
+
+      markdownReferences(fileId) {
+        const source = get().opened.find((file) => file.id === fileId);
+        return createMarkdownReferences(api, workspaceId, source?.relativePath ?? '');
       },
 
       closeFile(fileId, discard = false) {
