@@ -1,6 +1,8 @@
 import { useSettingsViewStore } from '../../components/settings/settingsViewStore';
 import { getSessionsApi } from '../../lib/api/sessions';
+import { diffTabsStoreFor } from '../diffTabs';
 import { filesStoreFor } from '../files';
+import { useTerminalsStore } from '../terminals';
 import { useWorkspacesStore } from '../workspaces';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
@@ -15,6 +17,7 @@ const api = getSessionsApi({ mock: import.meta.env.RENDERER_VITE_SESSIONS_MOCK =
 export const useSessionsStore = createSessionsStore(api, {
   onSelectSession(workspaceId) {
     useWorkspacesStore.getState().select(workspaceId);
+    useTerminalsStore.getState().select(workspaceId, null);
     filesStoreFor(workspaceId, window.fynvra.files).getState().showChat();
   },
 });
@@ -38,23 +41,41 @@ window.fynvra.notifications.onFocusSession(({ workspaceId, sessionId }) => {
   void useSessionsStore.getState().selectSession(sessionId, workspaceId);
 });
 
-// 屏幕上正看着的会话报给 Main（设置视图盖住时为 null）：窗口聚焦时不弹它的通知。
+// 屏幕上正看着的聊天报给 Main；设置、文件、差异或终端盖住时为 null。
 // 启动时先报一次：页面重新加载后，Main 记着的还是加载前看的那个会话
 let viewing: string | null | undefined;
 let watchedWorkspace: string | null | undefined;
-let unwatchFiles: (() => void) | undefined;
+let unwatchViews: (() => void) | undefined;
 function reportViewing(): void {
   const workspaceId = useWorkspacesStore.getState().selectedId;
   const files = workspaceId ? filesStoreFor(workspaceId, window.fynvra.files) : undefined;
+  const diffs = workspaceId ? diffTabsStoreFor(workspaceId) : undefined;
   if (watchedWorkspace !== workspaceId) {
-    unwatchFiles?.();
-    unwatchFiles = files?.subscribe(reportViewing);
+    unwatchViews?.();
     watchedWorkspace = workspaceId;
+    const unsubscribes = workspaceId
+      ? [
+          files?.subscribe(reportViewing),
+          diffs?.subscribe(reportViewing),
+          useTerminalsStore.subscribe((state, previous) => {
+            if (state.selected[workspaceId] !== previous.selected[workspaceId]) reportViewing();
+          }),
+        ]
+      : [];
+    unwatchViews = () => {
+      for (const unsubscribe of unsubscribes) unsubscribe?.();
+    };
   }
+  const sessions = useSessionsStore.getState();
   const next =
-    useSettingsViewStore.getState().open || files?.getState().selectedId
+    !workspaceId ||
+    sessions.workspaceId !== workspaceId ||
+    useSettingsViewStore.getState().open ||
+    files?.getState().selectedId ||
+    diffs?.getState().selectedId ||
+    useTerminalsStore.getState().selected[workspaceId]
       ? null
-      : useSessionsStore.getState().activeSessionId;
+      : sessions.activeSessionId;
   if (next === viewing) return;
   viewing = next;
   void window.fynvra.notifications.setViewing(next);

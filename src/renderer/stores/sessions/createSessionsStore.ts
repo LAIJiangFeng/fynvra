@@ -69,6 +69,8 @@ export interface SessionsState extends ChatProjection {
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
   listErrors: Record<string, string>;
+  /** 聊天审批条和全局处理窗口共用逐请求提交状态，失败保留请求供重试。 */
+  approvalSubmissions: Record<string, { pending: boolean; error?: string }>;
   /** 聊天区要提示的操作失败（读记录、停止、审批答复、换模型），用户关掉后清除 */
   notice: string | null;
   /** sessions:model-options 的服务与模型（每个模型带它可选的思考档位）；null 表示还没读到 */
@@ -432,6 +434,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       queuedBySession: {},
       loadingHistory: {},
       listErrors: {},
+      approvalSubmissions: {},
       notice: null,
       modelProviders: null,
       modelOptionsError: null,
@@ -679,21 +682,38 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       async respondApproval(requestId, decision) {
+        flushEvents();
         const request = findApproval(requestId);
-        if (!request) return;
+        if (
+          !request ||
+          (request.expiresAt > 0 && request.expiresAt <= now()) ||
+          get().approvalSubmissions[requestId]?.pending
+        )
+          return;
         const { sessionId } = request;
-        set((state) => dequeueApproval(state, sessionId, requestId));
+        // 保留请求直到送达，避免最后一项提交中关闭全局处理窗口，也避免失败后复活已取消的审批。
+        set((state) => ({
+          approvalSubmissions: { ...state.approvalSubmissions, [requestId]: { pending: true } },
+        }));
         const result = await safely(() => api.respondApproval({ sessionId, requestId, decision }));
-        if (result.ok) return;
-        set((state) =>
-          // 会话已经结束（审批随之作废）就不再放回队列
-          isBusy(statusOf(state, sessionId))
-            ? {
-                ...enqueueApproval(state, request),
-                notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }),
-              }
-            : { notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }) }
-        );
+        flushEvents();
+        set((state) => {
+          const submissions = omitKey(state.approvalSubmissions, requestId);
+          if (result.ok) {
+            return {
+              ...dequeueApproval(state, sessionId, requestId),
+              approvalSubmissions: submissions,
+            };
+          }
+          const current = findApproval(requestId);
+          if (!current || (current.expiresAt > 0 && current.expiresAt <= now()))
+            return { approvalSubmissions: submissions };
+          const error = translate('sessions.errors.approvalNotDelivered', { error: result.error });
+          return {
+            approvalSubmissions: { ...submissions, [requestId]: { pending: false, error } },
+            notice: error,
+          };
+        });
       },
 
       setDraft(sessionId, text) {
