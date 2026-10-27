@@ -3,6 +3,7 @@ import type { OpenWithApp } from '@shared/types/settings';
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import {
   AppWindow,
+  ChevronRight,
   Code,
   Copy,
   Ellipsis,
@@ -35,11 +36,11 @@ import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { CustomAppDialog } from './CustomAppDialog';
 
-/** 左栏：工作区列表；选中的工作区下面列出它的会话，再点一次选中的工作区折叠 / 展开会话列表。 */
+/** 左栏：工作区独立展开会话列表；选中工作区仍只有一个。 */
 export function Sidebar() {
   const workspaces = useWorkspacesStore((state) => state.workspaces);
   const selectedId = useWorkspacesStore((state) => state.selectedId);
-  const sessionsCollapsed = useWorkspacesStore((state) => state.sessionsCollapsed);
+  const expandedWorkspaces = useWorkspacesStore((state) => state.expandedWorkspaces);
   const adding = useWorkspacesStore((state) => state.adding);
   const add = useWorkspacesStore((state) => state.add);
   const select = useWorkspacesStore((state) => state.select);
@@ -82,15 +83,19 @@ export function Sidebar() {
           <ul className="flex flex-col gap-0.5 px-2 pb-2">
             {workspaces.map((workspace) => {
               const selected = workspace.id === selectedId;
-              const expanded = selected && !sessionsCollapsed;
+              const expanded = expandedWorkspaces[workspace.id] === true;
               return (
                 <Fragment key={workspace.id}>
                   <WorkspaceItem
                     workspace={workspace}
                     selected={selected}
                     expanded={expanded}
-                    // 点选中的工作区折叠 / 展开它的会话列表；点别的工作区选中它并展开
-                    onSelect={() => (selected ? toggleSessions() : select(workspace.id))}
+                    onSelect={() => {
+                      // 再次点击当前工作区仅切换会话列表的展开状态。
+                      if (selected) toggleSessions(workspace.id);
+                      else select(workspace.id);
+                    }}
+                    onToggle={() => toggleSessions(workspace.id)}
                     onRemove={() => void remove(workspace.id)}
                   />
                   {expanded && <SessionList workspaceId={workspace.id} />}
@@ -109,13 +114,14 @@ function WorkspaceItem({
   selected,
   expanded,
   onSelect,
+  onToggle,
   onRemove,
 }: {
   workspace: WorkspaceSummary;
   selected: boolean;
-  /** 选中且会话列表展开着 */
   expanded: boolean;
   onSelect: () => void;
+  onToggle: () => void;
   onRemove: () => void;
 }) {
   const t = useT();
@@ -149,8 +155,21 @@ function WorkspaceItem({
     <li className="group relative">
       <button
         type="button"
+        aria-label={t(expanded ? 'workspaces.collapseSessions' : 'workspaces.expandSessions', {
+          name: workspace.name,
+        })}
+        aria-expanded={expanded}
+        onClick={onToggle}
+        className="absolute top-1.5 left-0 z-10 flex size-6 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        <ChevronRight
+          aria-hidden
+          className={cn('size-3.5 transition-transform', expanded && 'rotate-90')}
+        />
+      </button>
+      <button
+        type="button"
         aria-current={selected ? 'true' : undefined}
-        // 选中的工作区控制它下面的会话列表
         aria-expanded={selected ? expanded : undefined}
         onClick={onSelect}
         onContextMenu={(event) => {
@@ -158,7 +177,7 @@ function WorkspaceItem({
           changeMenuOpen(true);
         }}
         className={cn(
-          'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
+          'flex w-full items-start gap-2 rounded-md py-1.5 pr-2 pl-6 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
           selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
         )}
       >

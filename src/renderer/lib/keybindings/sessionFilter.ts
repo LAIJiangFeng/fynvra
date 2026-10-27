@@ -25,24 +25,46 @@ export function cycleSessionId(
   return ids[(index + direction + ids.length) % ids.length] ?? null;
 }
 
-interface SessionSearchState {
-  /** 侧栏里显示着搜索框 */
+interface WorkspaceSearch {
   open: boolean;
   query: string;
   /** 每次「搜索会话」加一：搜索框据此重新聚焦并全选 */
   focusRequest: number;
-  show(): void;
-  setQuery(query: string): void;
-  /** 收起并清空 */
-  close(): void;
 }
 
-/** 侧栏的会话搜索（按标题过滤）：纯界面状态，不持久化 */
-export const useSessionSearchStore = create<SessionSearchState>()((set) => ({
-  open: false,
-  query: '',
-  focusRequest: 0,
-  show: () => set((state) => ({ open: true, focusRequest: state.focusRequest + 1 })),
-  setQuery: (query) => set({ query }),
-  close: () => set({ open: false, query: '' }),
-}));
+const EMPTY_SEARCH: WorkspaceSearch = { open: false, query: '', focusRequest: 0 };
+
+interface SessionSearchState {
+  byWorkspace: Record<string, WorkspaceSearch>;
+  show(workspaceId: string): void;
+  setQuery(workspaceId: string, query: string): void;
+  /** 收起并清空该工作区的搜索 */
+  close(workspaceId: string): void;
+}
+
+export const searchOf = (state: SessionSearchState, workspaceId: string): WorkspaceSearch =>
+  state.byWorkspace[workspaceId] ?? EMPTY_SEARCH;
+
+/** 每个工作区独立的会话搜索：纯界面状态，不持久化 */
+export const useSessionSearchStore = create<SessionSearchState>()((set) => {
+  const update = (
+    workspaceId: string,
+    change: (search: WorkspaceSearch) => Partial<WorkspaceSearch>
+  ) =>
+    set((state) => ({
+      byWorkspace: {
+        ...state.byWorkspace,
+        [workspaceId]: { ...searchOf(state, workspaceId), ...change(searchOf(state, workspaceId)) },
+      },
+    }));
+  return {
+    byWorkspace: {},
+    show: (workspaceId) =>
+      update(workspaceId, (search) => ({
+        open: true,
+        focusRequest: search.focusRequest + 1,
+      })),
+    setQuery: (workspaceId, query) => update(workspaceId, () => ({ query })),
+    close: (workspaceId) => update(workspaceId, () => ({ open: false, query: '' })),
+  };
+});

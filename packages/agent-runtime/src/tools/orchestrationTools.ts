@@ -9,6 +9,7 @@ import {
   THINKING_LEVELS,
 } from '@fynvra/core';
 import type {
+  CleanupWorktreeInput,
   CleanupWorktreeOutput,
   DispatchRef,
   DispatchTaskInput,
@@ -280,7 +281,8 @@ export function createOrchestrationTools(
       description:
         "Merge a worker's branch into your current branch with --no-ff. Use it only after review_diff and run_checks pass. " +
         'On conflicts the merge is aborted, the target branch stays unchanged and the conflicting files are listed. ' +
-        'Without git there is nothing to merge: it accepts the work in place and completes the task.',
+        'Accepts reviewed clean no-change or read-only tasks too. Without git there is nothing to merge: ' +
+        'it accepts the work in place and completes the task.',
       promptSnippet: "Merge an accepted worker's branch (--no-ff)",
       promptGuidelines: [
         'Merge only after you reviewed the diff and the checks passed in this conversation.',
@@ -339,14 +341,29 @@ export function createOrchestrationTools(
       name: 'cleanup_worktree',
       label: 'Clean up worktree',
       description:
-        "Remove a worker's worktree and its branch. Call it after merge_worktree, or to abandon a task. " +
-        'Without git it only stops the worker; its changes stay in the workspace directory.',
-      promptSnippet: "Remove a finished or abandoned worker's worktree",
-      parameters: dispatchRefSchema(),
+        'Stop the worker and remove its worktree and branch after merge_worktree accepts the task. ' +
+        'By default only completed or already abandoned tasks can be cleaned up; success reports still need acceptance. ' +
+        'Use abandon: true to explicitly cancel unfinished work and discard its commits and uncommitted changes. ' +
+        'Completed tasks stay completed, and cleanup refuses their dirty worktrees or unmerged commits. ' +
+        'Use the current dispatch_id from list_workers. Without git it only stops the worker; changes stay in place.',
+      promptSnippet: 'Clean up accepted work, or explicitly abandon unfinished work',
+      parameters: Type.Object(
+        {
+          dispatch_id: dispatchIdParam(),
+          abandon: Type.Optional(
+            Type.Boolean({
+              description:
+                'Explicitly cancel an unfinished task and discard its worktree, including uncommitted work. Default false; never relabels completed tasks.',
+              default: false,
+            })
+          ),
+        },
+        { additionalProperties: false }
+      ),
       executionMode: 'sequential',
-      normalize: normalizeRefArgs,
+      normalize: normalizeCleanupArgs,
       run: async (params, signal) => {
-        const input = parseRefArgs(params);
+        const input = parseCleanupArgs(params);
         if (!input.ok) return errorResult('cleanup_worktree', input.error);
         const result = await host.cleanupWorktree(input.value, signal);
         if (!result.ok) return errorResult('cleanup_worktree', result.error);
@@ -589,6 +606,26 @@ function parseRefArgs(params: unknown): Parsed<DispatchRef> {
   return id.ok ? { ok: true, value: { dispatchId: id.value } } : id;
 }
 
+function normalizeCleanupArgs(raw: unknown): ArgRecord {
+  const { abandon } = asRecord(raw);
+  return compact({
+    ...normalizeRefArgs(raw),
+    // pi 的 schema 校验会强转 "true" / 1 等标量；取消意图只接受真正的 boolean。
+    abandon:
+      abandon === undefined || typeof abandon === 'boolean' ? abandon : { invalidBoolean: abandon },
+  });
+}
+
+function parseCleanupArgs(params: unknown): Parsed<CleanupWorktreeInput> {
+  const ref = parseRefArgs(params);
+  if (!ref.ok) return ref;
+  const { abandon } = normalizeCleanupArgs(params);
+  if (abandon !== undefined && typeof abandon !== 'boolean') {
+    return { ok: false, error: 'abandon must be a boolean' };
+  }
+  return { ok: true, value: { ...ref.value, ...(abandon === undefined ? {} : { abandon }) } };
+}
+
 function normalizeReadArgs(raw: unknown): ArgRecord {
   const cursor = integerish(pick(asRecord(raw), 'cursor'));
   return compact({
@@ -750,7 +787,7 @@ function nextStep(message: Message): string {
     case 'question':
       return `answer with send_to_worker (${target}); the worker is blocked until you reply.`;
     case 'escalation':
-      return `decide how to proceed (ask the user when the decision is theirs), then send_to_worker, reject_work or cleanup_worktree (${target}).`;
+      return `decide how to proceed (ask the user when the decision is theirs), then send_to_worker, reject_work or explicitly cancel with cleanup_worktree and abandon: true (${target}).`;
     case 'worker_done':
       return `review_diff and run_checks (${target}), then merge_worktree if it passes or reject_work with concrete feedback.`;
     default:
@@ -797,7 +834,7 @@ function formatInPlaceReview(dispatchId: string, files: readonly string[]): stri
       : `- files reported by the worker (${files.length}): ${listFiles(files)}`,
     '',
     files.length === 0
-      ? 'The worker listed no modified files in report_done. Check read_worker_output, or reject_work asking it to list every file it changed.'
+      ? 'The worker listed no modified files in report_done. Check read_worker_output: accept intended read-only or no-change work with merge_worktree after review, or reject_work asking it to finish and list every file it changed.'
       : 'Read those files with read and grep to review the work, then verify it with run_checks.',
   ].join('\n');
 }
@@ -812,7 +849,7 @@ function formatDiff(dispatchId: string, result: ReviewDiffOutput): string {
     return [
       ...header,
       '',
-      `No changes on ${code(result.branch)} relative to its base. The worker may not have committed its work: check read_worker_output, or reject_work asking it to commit.`,
+      `No changes on ${code(result.branch)} relative to its base. Check read_worker_output: if this is an intended read-only or no-change result, review it and accept with merge_worktree before cleanup. If changes were expected, reject_work asking the worker to finish and commit them.`,
     ].join('\n');
   }
   const diff = truncateHeadChars(result.diff, DIFF_MAX_CHARS);

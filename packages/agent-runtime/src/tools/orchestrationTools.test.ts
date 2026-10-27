@@ -418,7 +418,7 @@ describe('review, checks, merge and follow-up tools', () => {
     expect(run.text).toContain('git_readonly');
   });
 
-  it('flags an empty diff as possibly uncommitted work', async () => {
+  it('guides empty diffs through review and acceptance or a retry for missing commits', async () => {
     const host = createHost();
     host.reviewDiff.mockResolvedValueOnce({
       ok: true,
@@ -433,6 +433,8 @@ describe('review, checks, merge and follow-up tools', () => {
     });
     expect(run.text).toContain('No changes');
     expect(run.text).toContain('commit');
+    expect(run.text).toContain('read-only');
+    expect(run.text).toContain('merge_worktree before cleanup');
   });
 
   it('reports failing checks with the tail of the output', async () => {
@@ -501,6 +503,57 @@ describe('review, checks, merge and follow-up tools', () => {
     host.listWorkers.mockResolvedValueOnce({ ok: true, workers: [] });
     const run = await runTool(toolByName(createOrchestrationTools(host), 'list_workers'), {});
     expect(run.text).toContain('## Workers (0)');
+  });
+});
+
+describe('cleanup_worktree intent', () => {
+  it.each([undefined, false, true])(
+    'forwards abandon %s without inferring intent',
+    async (abandon) => {
+      const host = createHost();
+      const tool = toolByName(createOrchestrationTools(host), 'cleanup_worktree');
+      const run = await runTool(tool, {
+        dispatchId: ' d1 ',
+        ...(abandon === undefined ? {} : { abandon }),
+      });
+      expect(run.isError).toBe(false);
+      expect(host.cleanupWorktree.mock.calls[0]?.[0]).toEqual({
+        dispatchId: 'd1',
+        ...(abandon === undefined ? {} : { abandon }),
+      });
+    }
+  );
+
+  it.each(['true', 'false', 1, null, {}])('refuses non-boolean abandonment %j', async (abandon) => {
+    const host = createHost();
+    const tool = toolByName(createOrchestrationTools(host), 'cleanup_worktree');
+    expect((await runTool(tool, { dispatch_id: 'd1', abandon })).isError).toBe(true);
+    expect(host.cleanupWorktree).not.toHaveBeenCalled();
+    // execute 的校验同样覆盖绕过 pi schema 的调用。
+    const result = await tool.execute(
+      'direct',
+      { dispatch_id: 'd1', abandon },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(result.isError).toBe(true);
+    expect(host.cleanupWorktree).not.toHaveBeenCalled();
+  });
+
+  it('returns the host refusal as an error and documents explicit cancellation', async () => {
+    const host = createHost();
+    const tool = toolByName(createOrchestrationTools(host), 'cleanup_worktree');
+    host.cleanupWorktree.mockResolvedValueOnce({
+      ok: false,
+      error: 'in-review; call merge_worktree or abandon: true',
+    });
+    const result = await runTool(tool, { dispatch_id: 'd1' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('merge_worktree');
+    expect(tool.description).toContain('abandon: true');
+    expect(tool.description).toContain('current dispatch_id');
+    expect(tool.description).toContain('uncommitted');
   });
 });
 

@@ -4,7 +4,12 @@ import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { selectSelectedWorkspace, useWorkspacesStore } from '@/stores/workspaces';
 import { useActionHandler } from './handlers';
-import { cycleSessionId, filterSessionsByTitle, useSessionSearchStore } from './sessionFilter';
+import {
+  cycleSessionId,
+  filterSessionsByTitle,
+  searchOf,
+  useSessionSearchStore,
+} from './sessionFilter';
 import {
   revealSessionListThen,
   type SessionListRevealer,
@@ -19,7 +24,7 @@ function cycleSession(direction: 1 | -1): void {
   if (!workspaceId) return;
   const shown = filterSessionsByTitle(
     sessionsByWorkspace[workspaceId] ?? [],
-    useSessionSearchStore.getState().query
+    searchOf(useSessionSearchStore.getState(), workspaceId).query
   );
   const next = cycleSessionId(
     shown.map((session) => session.id),
@@ -41,7 +46,9 @@ const revealer: SessionListRevealer = {
  */
 function useSessionListFallback(): void {
   const sidebarOpen = useSettingsStore(sidebarOpenOf);
-  const sessionsCollapsed = useWorkspacesStore((state) => state.sessionsCollapsed);
+  const sessionsCollapsed = useWorkspacesStore(
+    (state) => !state.selectedId || !state.expandedWorkspaces[state.selectedId]
+  );
   const workspaceSelected = useWorkspacesStore(
     (state) => selectSelectedWorkspace(state) !== undefined
   );

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { cycleSessionId, filterSessionsByTitle } from './sessionFilter';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  cycleSessionId,
+  filterSessionsByTitle,
+  searchOf,
+  useSessionSearchStore,
+} from './sessionFilter';
 
 const sessions = [
   { id: 's1', title: '重构 Composer' },
@@ -18,6 +23,38 @@ describe('filterSessionsByTitle', () => {
   it('空查询返回原数组（同一引用，不触发重渲染）', () => {
     expect(filterSessionsByTitle(sessions, '')).toBe(sessions);
     expect(filterSessionsByTitle(sessions, '   ')).toBe(sessions);
+  });
+});
+
+describe('各工作区独立搜索', () => {
+  beforeEach(() => useSessionSearchStore.setState({ byWorkspace: {} }));
+
+  it('搜索、清空和聚焦请求都只作用于指定工作区', () => {
+    const state = useSessionSearchStore.getState;
+    state().show('a');
+    state().setQuery('a', 'composer');
+    const a = searchOf(state(), 'a');
+    state().show('b');
+    state().setQuery('b', 'settings');
+    state().show('b');
+
+    expect(searchOf(state(), 'a')).toBe(a);
+    expect(searchOf(state(), 'b').focusRequest).toBe(2);
+    expect(filterSessionsByTitle(sessions, a.query).map((item) => item.id)).toEqual(['s1', 's3']);
+    expect(
+      filterSessionsByTitle(sessions, searchOf(state(), 'b').query).map((item) => item.id)
+    ).toEqual(['s2']);
+    expect(filterSessionsByTitle(sessions, searchOf(state(), 'c').query)).toBe(sessions);
+
+    state().close('b');
+    expect(searchOf(state(), 'b')).toMatchObject({ open: false, query: '' });
+    expect(searchOf(state(), 'a')).toBe(a);
+    state().show('a');
+    expect(searchOf(state(), 'a')).toMatchObject({
+      open: true,
+      query: 'composer',
+      focusRequest: 2,
+    });
   });
 });
 

@@ -1,149 +1,116 @@
-# Fynvra
+<h1 align="center">
+  <img src="resources/icon.png" alt="Fynvra" width="64" /><br />
+  Fynvra
+</h1>
 
-简体中文 | **[English](README.md)**
+<p align="center"><a href="README.md">English</a> · 简体中文</p>
 
-Fynvra 是一个开源的本地桌面 AI 编程工作台，基于 Electron、React、TypeScript 和 [pi](https://github.com/earendil-works/pi) SDK 构建。
+<p align="center">
+  <strong>本地桌面 AI 编程工作台。</strong><br />
+  协调 Agent，在独立 Git worktree 中并行执行任务，在同一工作区审查并合并改动。
+</p>
 
-在同一个工作区中完成 AI 对话、文件编辑、Markdown 预览和多 Agent 协作。角色、提示词、模型服务、Skills 与 MCP 都可以按项目需要配置，而不是固定在代码里。
+<p align="center">
+  <a href="https://github.com/LAIJiangFeng/fynvra/releases"><strong>下载 Fynvra</strong></a> ·
+  <a href="#快速上手">快速上手</a> ·
+  <a href="#文档">文档</a>
+</p>
 
-## 功能
+Fynvra 将 AI 对话、代码编辑、终端和多 Agent 协作整合到桌面中。向主 Agent 描述目标，跟进 Worker 的实现过程，再通过审查与合并把改动带回项目。
 
-- **多 Agent 协作**：主 Agent 拆分任务，将工作派发到独立 Git worktree，集中查看任务状态、消息、输出和改动，再执行验收与合并。
-- **可编辑角色**：支持自定义角色；内置主 Agent、Worker 也只是默认模板，可以修改提示词、模型、工具策略、审批档位、Skills 和 MCP，并恢复默认配置。
-- **模型服务**：支持 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions 和 Google Generative AI 协议，可配置兼容服务地址、模型与思考档位。
-- **本机配置导入**：从 Claude Code、Codex、CC Switch 导入模型服务；MCP 支持更多本机工具配置来源，导入前可预览并去重。
-- **文件浏览与编辑**：右侧目录树打开文件，中央以独立标签与对话并列展示。支持多文件编辑、Markdown 编辑 / 预览 / 双栏、常见图片预览，以及未保存内容和外部修改冲突保护。
-- **工作区与会话**：管理 Git 仓库或普通文件夹，保留会话历史，查看工具调用与审批请求。
-- **桌面体验**：中文 / 英文界面、主题、快捷键、系统通知和通用设置。
-- **应用更新**：正式版自动检查和下载稳定新版本，下载完成后提醒；确认安装且完成未保存文件确认、Agent 收尾后才重启，不强行中断当前任务。
+## 核心能力
 
-默认主 Agent 负责协调，Worker 负责执行；实际工具权限由角色策略和运行时共同约束，不会仅凭修改提示词绕过权限限制。
+### 多个 Agent，独立 worktree
 
-## 平台与安装
+主 Agent 将目标拆成任务，派发 Worker 到各自的 Git 分支和 worktree。集中查看任务状态、消息和实时输出，同时继续与主 Agent 对话。
 
-安装包发布后可从 [GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases) 下载。如果暂时没有 Release，请按下方步骤从源码启动。
+### 从审查到合并
 
-| 平台 | 安装包 | 状态 |
+在工作区查看 Worker 的代码差异。主 Agent 可以审查改动、运行检查、发回修改意见，并将验收通过的工作合入自己所在的分支。清理 worktree 后，仍可查看已完成任务的差异。
+
+### 按任务配置角色
+
+修改内置的 Orchestrator（主 Agent）和 Worker 角色，或创建自己的角色。配置提示词、模型、思考档位、工具策略和审批档位，再按任务搭配 Skills、MCP 服务与指令文件。默认由主 Agent 协调，Worker 执行。
+
+### 接入你的模型服务
+
+支持兼容 Anthropic Messages、OpenAI Responses、OpenAI Chat Completions 和 Google Generative AI 协议的服务，可配置服务地址与模型。从本机 Claude Code、Codex、CC Switch 配置导入模型服务，也可从支持的本机工具导入 MCP 服务，导入前预览并去重。
+
+### 与 Agent 在同一工作区工作
+
+对话、可编辑文件和内嵌终端以独立标签并列展示。浏览项目文件、预览 Markdown 与图片，编辑时保留未保存内容并检测外部修改冲突。通过会话历史和本机 Token、费用统计，持续了解工作进展与用量。
+
+桌面界面支持中文和英文、主题、快捷键与系统通知。
+
+## 下载与安装
+
+前往 **[GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases)** 的 **Assets** 下载已发布的安装包。如果暂时没有安装包，可[从源码启动](#开发)。
+
+| 平台 | 安装包 | 更新支持 |
 | --- | --- | --- |
-| Windows x64 | NSIS `.exe` | 已接入打包和自动更新，本地打包及隔离更新联调已验证 |
-| macOS Intel / Apple Silicon | 分架构 `.dmg` 与 `.zip` | 无 Apple 凭证也能打包和手动安装；正式签名、公证版可启用自动更新 |
-| Linux | 现有 AppImage 构建配置 | 尚未纳入自动发布与更新支持 |
+| Windows x64 | NSIS `.exe` 安装包 | 自动检查并下载更新 |
+| macOS Intel / Apple Silicon | 分架构 `.dmg` 与 `.zip` | Developer ID 签名并公证的版本支持自动更新；ad-hoc 签名版需手动更新 |
+| Linux | 仅有 AppImage 构建配置 | 尚未纳入自动发布与更新支持 |
 
-Windows 手动运行新版 `.exe` 安装包时，会显示安装向导，可在「选择安装位置」页面浏览或输入目标目录。通过「浏览」选择父目录后，路径框会自动补上 `Fynvra`，例如选择 `D:\Software` 后显示 `D:\Software\Fynvra`；选择已有的 `Fynvra` 目录不会重复追加。自动更新仍沿用已有安装目录；选择的目录只存放程序文件，不改变设置、会话等用户数据的位置。旧版安装包不会自动获得新的向导行为，需要重新下载包含此改动的新版安装包。
+Windows 安装向导支持选择程序安装目录。macOS 首次启动前，请将 Fynvra 从 DMG 拖入「应用程序」。ad-hoc 签名的 Mac 版可能需要在「系统设置 → 隐私与安全性」中针对该应用确认「仍要打开」；详见[安装与发布说明](docs/RELEASE.md)。
 
-Mac 首次安装应将应用从 DMG 拖入「应用程序」后运行。无 Apple 凭证的包使用 ad-hoc 签名，macOS 可能提示无法验证开发者或拦截启动；确认来源可信后，可按系统提示在「系统设置 → 隐私与安全性」中针对该应用选择「仍要打开」。具体行为取决于 macOS 版本与管理策略，不需要全局关闭系统安全检查。这类包只能手动下载新版并覆盖安装。详见 [发布文档](docs/RELEASE.md)。
+支持自动更新的版本会在后台下载稳定新版。安装须经你确认，并经过未保存文件确认和 Agent 退出收尾流程；后台下载不会重启应用。
 
-## 从源码启动
+## 快速上手
 
-### 环境要求
+模型服务由你提供：需要配置兼容服务、API Key 和可用额度。请求会发送到所配置的服务；本地运行 Fynvra 不意味着模型调用离线执行。
 
-- Node.js **22.19.0 或更高版本**，推荐 Node.js 22；仓库提供 `.nvmrc`。
-- pnpm **10.26.2**，与 `package.json` 的 `packageManager` 保持一致。
-- Git；多 Agent worktree 流程需要已有提交的 Git 仓库，并配置 Git 用户名与邮箱。
-- Windows 建议安装包含 Git Bash 的 Git for Windows；如无法自动找到 Bash，可在通用设置中指定路径。
+1. **连接模型。** 打开「设置 → 模型服务」，添加服务地址、API Key 与模型，或导入本机已有配置。
+2. **配置角色。** 从内置角色开始，在设置中按需配置模型、Skills、MCP 服务或指令文件。
+3. **打开项目。** 添加 Git 仓库，创建会话并选择 **Orchestrator（主 Agent）** 角色与模型。描述目标和约束，由主 Agent 派发工作。
+4. **跟进与审查。** 在任务和改动面板查看 Worker 输出与差异。主 Agent 审查、要求修改和合并已完成任务时，你可以继续向它补充需求。
 
-尚未安装 pnpm 时：
+Git worktree 流程需要安装 Git、仓库中至少有一次提交，并配置 Git 用户名与邮箱。普通文件夹也支持会话和 Worker 派发，但所有 Worker 共用同一目录，没有 worktree 隔离或 Git 合并；这种情况下建议一次只派发一个 Worker。
+
+模型和 MCP 凭证通过设置界面管理，运行应用无需在仓库内填写 `.env` 文件。
+
+## 开发
+
+基于 Electron、React、TypeScript 和 [pi SDK](https://github.com/earendil-works/pi) 构建。
+
+需要 **Node.js 22.19.0+**（推荐 Node.js 22）、**pnpm 10.26.2** 和 **Git**。Windows 建议安装包含 Git Bash 的 Git for Windows；可在通用设置中选择 Agent 和终端使用的 Shell。
 
 ```bash
 npm install --global pnpm@10.26.2
-```
-
-启动开发版：
-
-```bash
 git clone https://github.com/LAIJiangFeng/fynvra.git
 cd fynvra
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-首次运行需要网络下载依赖和 Electron。模型调用所需的服务账号、API Key 和额度由使用者提供；本地桌面应用不意味着模型请求离线执行。
-
-### 首次使用
-
-1. 打开「设置 → 模型服务」，添加服务地址、API Key 与模型，或从本机已有配置导入。
-2. 在「角色」「Skills」「MCP」中配置需要的能力；不需要的外部服务可以保持关闭。
-3. 添加一个仓库或文件夹，创建会话并选择角色、模型。多 Agent 任务派发需要 Git 工作区。
-4. 在右侧查看文件目录、任务和改动。点击文件后，在中央文件标签中编辑或预览，对话仍保留在独立标签中。
-
-运行应用不要求在仓库内填写 `.env`。请通过设置界面管理模型和 MCP 凭证。
-
-## 开发与验证
+如果已有对应版本的 pnpm，可跳过全局安装。首次启动需要网络下载依赖和 Electron。
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm dev` | 启动 Electron 开发环境 |
-| `pnpm typecheck` | 检查 Main、preload、Renderer 与工作区包的类型 |
+| `pnpm typecheck` | 检查应用与工作区包的类型 |
 | `pnpm lint` | 执行 Biome 检查 |
-| `pnpm test` | 运行 Vitest 全量测试 |
-| `pnpm test:watch` | 监听模式运行测试 |
+| `pnpm test` | 运行 Vitest 测试 |
 | `pnpm build` | 构建应用到 `out/`，不生成安装包 |
-| `pnpm preview` | 预览已有构建 |
-| `pnpm test:updates` | 在 Windows / Mac 上运行隔离更新联调，须先构建 |
-| `pnpm package:win` | 构建 Windows x64 安装包到 `dist/`，不上传 |
-| `pnpm package:mac` | 在 macOS 上构建无需 Apple 凭证的双架构手动安装包，不上传 |
-| `pnpm package:mac:signed` | 在 macOS 上构建 Developer ID 签名、公证包，需提供凭证，不上传 |
 
-提交前执行：
+打包、签名、更新验证与自动发布流程见[发布指南](docs/RELEASE.md)。贡献代码前请阅读[开发约定](AGENTS.md)。
 
-```bash
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
-```
+## 本地数据与权限
 
-更新联调使用临时用户数据、临时缓存和本机 HTTP 服务，并拦截最终安装，不会执行测试安装文件。它不能代替正式签名包的真机升级验收。
+设置、角色、模型服务与 MCP 配置、会话历史保存在本机应用数据目录中。**凭据目前以明文保存在本地配置文件中，不是加密凭证库。** 已保存的 API Key、MCP 环境变量和请求头由 Main 进程管理，不会向界面回传明文。请勿将应用数据、含凭据的导出文件或日志提交到 Git 或公开上传。
 
-## 自动发布
+Agent 与 MCP 工具可以执行命令和访问外部服务。请按项目需要配置工具策略与审批档位；运行时会独立于角色提示词执行这些权限约束。
 
-[Release 工作流](.github/workflows/release.yml) 在每次推送到 `main` 后检查代码、计算递增版本、构建 Windows 和 Mac 包，并在全部产物校验通过后公开同一个 GitHub Release。PR 合并同样会触发。
+## 文档
 
-- 普通直接 push 和 PR 合并都会打包发布；也可以在 Actions 中手动运行 Release 工作流。下载入口是 Releases 页的 Assets，不是仅上传源码。
-- 版本写入构建产物与标签，不让发布机器人回写版本提交。
-- 没有 Apple 凭证时，Mac 仍会生成并上传手动安装包，不阻止 Windows 自动更新；凭证齐全时自动切换为签名、公证模式。部分凭证缺失会明确报错，任何构建或校验失败都不会公开不完整 Release。
-- 客户端只使用正式 Release，开发模式不联网更新；首次使用需要手动安装一个包含更新功能的版本。
+以下指南目前以中文编写：
 
-签名 Secrets、打包命令、产物校验和首次发布步骤见 [docs/RELEASE.md](docs/RELEASE.md)。
+- [产品定义](docs/PRODUCT.md) — 工作流程、角色与产品范围。
+- [架构](docs/ARCHITECTURE.md) — 进程边界、持久化与跨层契约。
+- [安装、更新与发布](docs/RELEASE.md) — 平台限制与打包细节。
+- [开发约定](AGENTS.md) — 贡献范围与提交格式。
 
-## 项目结构
+包文档：[核心领域](packages/core/README.md) · [Agent 运行时](packages/agent-runtime/README.md)。
 
-```text
-src/
-  main/                  Electron 主进程、IPC、文件与更新服务
-  preload/               类型化的 Renderer 调用桥接
-  renderer/              React 界面、状态与国际化
-  shared/                跨进程类型与纯函数
-  agent/                 独立 Agent worker 入口与进程通信
-packages/
-  core/                  角色、任务、消息收件箱和 Git worktree 领域逻辑
-  agent-runtime/         pi SDK 接入、工具、审批和会话生命周期
-resources/               打包资源与 macOS 权限配置
-scripts/                 版本规划、发布校验和更新联调
-test/                    测试替身
-docs/                    产品、架构和发布说明
-.github/workflows/       GitHub Actions 发布流程
-```
+## 许可证
 
-## 数据与安全边界
-
-应用设置、角色、模型服务、MCP 配置和会话数据保存在本机应用数据目录中，不应提交到 Git。开发版默认使用系统应用数据目录下的 `fynvra-dev`，与正式版分开；`FYNVRA_USER_DATA_DIR` 仅在开发模式覆盖该目录，测试时应指向独立位置。
-
-API Key、MCP 环境变量和请求头的明文不会通过 IPC 回传给界面，但当前会保存在 Main 管理的本地配置文件中，**不是加密凭证库**。不要上传用户数据目录、配置导出或包含凭证的日志；分享角色配置前也应检查提示词及引用内容。
-
-`.gitignore` 排除依赖、构建产物、安装包、缓存、环境配置、签名私钥、本地用户数据及 `.workflow/` 内部开发记录；示例环境文件可以提交，但只能包含占位值。依赖锁文件、源码、测试、图标和 GitHub Actions 工作流配置保留在版本控制中。
-
-文件读写限定于登记的工作区，IPC 参数由 Main 校验；Renderer 不直接访问 Node.js 或 Electron。Agent 和 MCP 可执行命令或访问外部服务，请按项目需要配置工具白名单与审批策略。
-
-## 文档与贡献
-
-- [产品定义](docs/PRODUCT.md)
-- [架构与跨层契约](docs/ARCHITECTURE.md)
-- [自动更新与发布](docs/RELEASE.md)
-- [开发约定](AGENTS.md)
-- [核心领域包](packages/core/README.md)
-- [Agent 运行时包](packages/agent-runtime/README.md)
-
-提交改动前请阅读开发约定、补充相应测试，并使用 `<type>(<scope>): <summary>` 格式的提交信息。涉及 IPC 的修改需同步通道、Main handler 与 preload 类型出口。
-
-Fynvra 使用 [Apache-2.0](LICENSE) 许可证。第三方依赖遵循各自的许可证。
+Fynvra 基于 [Apache-2.0](LICENSE) 开源。第三方依赖遵循各自的许可证。

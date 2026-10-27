@@ -69,6 +69,8 @@ export interface SessionsState extends ChatProjection {
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
   listErrors: Record<string, string>;
+  /** 聊天审批条和全局处理窗口共用逐请求提交状态，失败保留请求供重试。 */
+  approvalSubmissions: Record<string, { pending: boolean; error?: string }>;
   /** 聊天区要提示的操作失败（读记录、停止、审批答复、换模型），用户关掉后清除 */
   notice: string | null;
   /** sessions:model-options 的服务与模型（每个模型带它可选的思考档位）；null 表示还没读到 */
@@ -83,13 +85,14 @@ export interface SessionsState extends ChatProjection {
   /** 切换工作区：拉它的会话列表；选中的会话不属于它时取消选中 */
   setWorkspace(workspaceId: string | null): void;
   loadSessions(workspaceId: string): Promise<void>;
-  /** 在当前工作区用指定角色（和选的模型）新建会话并选中它 */
+  /** 在指定工作区（缺省当前工作区）新建；等待期间发生导航则不抢回选中 */
   createSession(
     roleId: string,
-    model?: SessionModelRef
+    model?: SessionModelRef,
+    workspaceId?: string
   ): Promise<IpcResult<{ session: SessionSummary }>>;
-  /** 选中会话并拉 history（权威投影）替换本地正文 */
-  selectSession(sessionId: string | null): Promise<void>;
+  /** 同步选中会话及所属工作区，再拉 history；未缓存的会话可显式指定工作区 */
+  selectSession(sessionId: string | null, workspaceId?: string): Promise<void>;
   /**
    * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片、会话运行中或上一条还在途时返回 false
    */
@@ -154,6 +157,8 @@ export interface SessionsStoreOptions {
   /** 事件归并的调度：默认攒 16ms 一批；测试可注入同步调度 */
   schedule?: (flush: () => void) => void;
   now?: () => number;
+  /** 同步侧栏选中与文件视图；在选中会话时调用，不在后台加载列表时调用 */
+  onSelectSession?: (workspaceId: string) => void;
 }
 
 const EVENT_BATCH_MS = 16;
@@ -272,6 +277,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   /** 在途的换审批档位：同上 */
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
   let modelOptionsRequest = 0;
+  const modelOptionsByWorkspace = new Map<string | null, number>();
+  // 任何后续导航 / 创建都使旧创建的自动选中失效，即使用户又切回了同一工作区
+  let selectionVersion = 0;
   let requestSeq = 0;
   /** Sessions whose queue is paused: the user stopped the turn (or a queued send failed) */
   const heldQueues = new Set<string>();
@@ -426,6 +434,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       queuedBySession: {},
       loadingHistory: {},
       listErrors: {},
+      approvalSubmissions: {},
       notice: null,
       modelProviders: null,
       modelOptionsError: null,
@@ -435,6 +444,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       setWorkspace(workspaceId) {
         const state = get();
         if (state.workspaceId === workspaceId) return;
+        selectionVersion++;
         const active = state.activeSessionId;
         const keep =
           active !== null &&
@@ -481,9 +491,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         });
       },
 
-      async createSession(roleId, model) {
-        const workspaceId = get().workspaceId;
+      async createSession(roleId, model, workspaceId = get().workspaceId ?? undefined) {
         if (!workspaceId) return { ok: false, error: translate('sessions.errors.noWorkspace') };
+        const selection = ++selectionVersion;
         const result = await safely(() =>
           api.create({ workspaceId, roleId, ...(model ? { model } : {}) })
         );
@@ -509,14 +519,26 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         });
         // 比创建更早发出的列表请求可能还没回包：再拉一次，旧回包会被丢弃
         void get().loadSessions(session.workspaceId);
-        void get().selectSession(session.id);
+        if (selection === selectionVersion) {
+          void get().selectSession(session.id, session.workspaceId);
+        }
         return result;
       },
 
-      async selectSession(sessionId) {
+      async selectSession(sessionId, workspaceId) {
         if (sessionId && removedSessions.has(sessionId)) return;
-        set({ activeSessionId: sessionId });
+        const state = get();
+        const target = sessionId
+          ? (findSession(state, sessionId)?.workspaceId ?? workspaceId ?? state.workspaceId)
+          : state.workspaceId;
+        selectionVersion++;
+        // 一次更新会话 store 的两个选中字段，外部同步再读时不会清掉刚选的会话
+        set({ workspaceId: target, activeSessionId: sessionId });
         if (!sessionId) return;
+        if (target) {
+          options.onSelectSession?.(target);
+          if (target !== state.workspaceId) void get().loadSessions(target);
+        }
         const request = ++requestSeq;
         historyRequests.set(sessionId, request);
         set((state) => ({ loadingHistory: { ...state.loadingHistory, [sessionId]: true } }));
@@ -529,7 +551,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           if (!result.ok) {
             return {
               loadingHistory,
-              notice: translate('sessions.errors.historyFailed', { error: result.error }),
+              ...(state.activeSessionId === sessionId
+                ? { notice: translate('sessions.errors.historyFailed', { error: result.error }) }
+                : {}),
             };
           }
           return { ...applyHistory(state, sessionId, result.messages), loadingHistory };
@@ -658,21 +682,38 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       async respondApproval(requestId, decision) {
+        flushEvents();
         const request = findApproval(requestId);
-        if (!request) return;
+        if (
+          !request ||
+          (request.expiresAt > 0 && request.expiresAt <= now()) ||
+          get().approvalSubmissions[requestId]?.pending
+        )
+          return;
         const { sessionId } = request;
-        set((state) => dequeueApproval(state, sessionId, requestId));
+        // 保留请求直到送达，避免最后一项提交中关闭全局处理窗口，也避免失败后复活已取消的审批。
+        set((state) => ({
+          approvalSubmissions: { ...state.approvalSubmissions, [requestId]: { pending: true } },
+        }));
         const result = await safely(() => api.respondApproval({ sessionId, requestId, decision }));
-        if (result.ok) return;
-        set((state) =>
-          // 会话已经结束（审批随之作废）就不再放回队列
-          isBusy(statusOf(state, sessionId))
-            ? {
-                ...enqueueApproval(state, request),
-                notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }),
-              }
-            : { notice: translate('sessions.errors.approvalNotDelivered', { error: result.error }) }
-        );
+        flushEvents();
+        set((state) => {
+          const submissions = omitKey(state.approvalSubmissions, requestId);
+          if (result.ok) {
+            return {
+              ...dequeueApproval(state, sessionId, requestId),
+              approvalSubmissions: submissions,
+            };
+          }
+          const current = findApproval(requestId);
+          if (!current || (current.expiresAt > 0 && current.expiresAt <= now()))
+            return { approvalSubmissions: submissions };
+          const error = translate('sessions.errors.approvalNotDelivered', { error: result.error });
+          return {
+            approvalSubmissions: { ...submissions, [requestId]: { pending: false, error } },
+            notice: error,
+          };
+        });
       },
 
       setDraft(sessionId, text) {
@@ -736,10 +777,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async loadModelOptions(workspaceId = get().workspaceId) {
         const request = ++modelOptionsRequest;
+        modelOptionsByWorkspace.set(workspaceId, request);
         const result = await safely(() => api.modelOptions(workspaceId ? { workspaceId } : {}));
-        if (modelOptionsRequest !== request) return;
+        if (modelOptionsByWorkspace.get(workspaceId) !== request) return;
         if (!result.ok) {
-          set({ modelOptionsError: result.error });
+          if (modelOptionsRequest === request) set({ modelOptionsError: result.error });
           return;
         }
         set((state) => {
@@ -750,8 +792,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               : omitKey(lastModelByWorkspace, workspaceId);
           }
           return {
-            modelProviders: result.providers,
-            modelOptionsError: null,
+            ...(modelOptionsRequest === request
+              ? { modelProviders: result.providers, modelOptionsError: null }
+              : {}),
             lastModelByWorkspace,
           };
         });

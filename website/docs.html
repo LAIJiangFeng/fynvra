@@ -1,0 +1,670 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-locale="zh"
+  data-theme="light"
+  data-title-zh="使用文档 — Fynvra"
+  data-title-en="User guide — Fynvra"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>使用文档 — Fynvra</title>
+    <meta
+      name="description"
+      content="Fynvra 使用文档：安装、配置模型、开会话，以及主 Agent 如何派发、审查和合并。User guide for installing Fynvra, connecting a model, and running multi-agent tasks."
+    />
+    <meta name="theme-color" content="#f3f1ec" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script src="assets/site.js"></script>
+    <link rel="stylesheet" href="assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main"><span data-l="zh">跳到正文</span><span data-l="en">Skip to content</span></a>
+
+    <header class="site-header">
+      <div class="nav container">
+        <a class="brand" href="index.html">
+          <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+            <rect width="512" height="512" rx="112" />
+            <path d="M167 120h192v60H228v48h92v59h-92v104h-61z" />
+          </svg>
+          <span>Fynvra</span>
+        </a>
+        <nav class="nav-links" id="site-menu">
+          <a href="index.html#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a>
+          <a href="index.html#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a>
+          <a href="index.html#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
+          <a href="index.html#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
+          <a href="docs.html" aria-current="page"><span data-l="zh">使用文档</span><span data-l="en">Docs</span></a>
+        </nav>
+        <div class="nav-actions">
+          <a class="icon-btn" href="https://github.com/LAIJiangFeng/fynvra" aria-label="GitHub" title="GitHub">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+          </a>
+          <button class="icon-btn lang-btn" type="button" data-action="toggle-locale">
+            <span data-l="zh" lang="en">EN</span><span data-l="en" lang="zh-CN">中文</span>
+          </button>
+          <button class="icon-btn" type="button" data-action="toggle-theme">
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+            </svg>
+          </button>
+          <a class="btn btn-primary btn-sm nav-download" href="https://github.com/LAIJiangFeng/fynvra/releases"
+            ><span data-l="zh">下载</span><span data-l="en">Download</span></a
+          >
+          <button class="icon-btn menu-btn" type="button" data-action="toggle-menu" aria-controls="site-menu" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="docs-hero">
+        <div class="container">
+          <p class="eyebrow"><b>Docs</b><span data-l="zh">使用文档</span><span data-l="en">User guide</span></p>
+          <h1><span data-l="zh">从安装到第一次派发。</span><span data-l="en">From install to the first dispatch.</span></h1>
+          <p class="section-lead" data-l="zh">
+            Fynvra 在本机运行。你只和主 Agent 对话，它把需求拆成任务，交给各自独立的 Worker，再审查并合并。
+          </p>
+          <p class="section-lead" data-l="en">
+            Fynvra runs on your machine. You talk to one orchestrator; it splits the work, hands each piece to its own
+            worker, then reviews and merges.
+          </p>
+          <p class="docs-meta">
+            <span>Windows x64 · macOS</span>
+            <span data-l="zh">本地优先 · 无中转服务器</span>
+            <span data-l="en">Local-first · no relay server</span>
+          </p>
+          <div class="docs-jump">
+            <a class="btn btn-ghost btn-sm" href="#quickstart"><span data-l="zh">快速开始</span><span data-l="en">Quick start</span></a>
+            <a class="btn btn-ghost btn-sm" href="#orchestration"><span data-l="zh">编排</span><span data-l="en">Orchestration</span></a>
+            <a class="btn btn-ghost btn-sm" href="#shortcuts"><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></a>
+          </div>
+        </div>
+      </section>
+
+      <div class="container docs-layout">
+        <nav class="toc" aria-label="目录">
+          <p class="toc-title"><span data-l="zh">本页</span><span data-l="en">On this page</span></p>
+          <ol>
+            <li>
+              <a href="#overview"><span class="toc-num">01</span><span data-l="zh">概览</span><span data-l="en">Overview</span></a>
+            </li>
+            <li>
+              <a href="#install"><span class="toc-num">02</span><span data-l="zh">安装</span><span data-l="en">Install</span></a>
+            </li>
+            <li>
+              <a href="#quickstart"><span class="toc-num">03</span><span data-l="zh">快速开始</span><span data-l="en">Quick start</span></a>
+            </li>
+            <li>
+              <a href="#providers"><span class="toc-num">04</span><span data-l="zh">模型服务</span><span data-l="en">Providers</span></a>
+            </li>
+            <li>
+              <a href="#thinking"><span class="toc-num">05</span><span data-l="zh">思考档位</span><span data-l="en">Thinking</span></a>
+            </li>
+            <li>
+              <a href="#roles"><span class="toc-num">06</span><span data-l="zh">角色</span><span data-l="en">Roles</span></a>
+            </li>
+            <li>
+              <a href="#orchestration"><span class="toc-num">07</span><span data-l="zh">编排</span><span data-l="en">Orchestration</span></a>
+            </li>
+            <li>
+              <a href="#approval"><span class="toc-num">08</span><span data-l="zh">审批</span><span data-l="en">Approvals</span></a>
+            </li>
+            <li>
+              <a href="#shortcuts"><span class="toc-num">09</span><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></a>
+            </li>
+            <li>
+              <a href="#data"><span class="toc-num">10</span><span data-l="zh">数据与更新</span><span data-l="en">Data &amp; updates</span></a>
+            </li>
+          </ol>
+        </nav>
+
+        <div class="docs-main prose">
+          <section class="doc-section" id="overview">
+            <h2><span data-l="zh">概览</span><span data-l="en">Overview</span></h2>
+            <p data-l="zh">
+              窗口分成三块：左侧是工作区和会话，中间是对话、文件和终端，右侧是编排面板，里面有任务和改动。
+            </p>
+            <p data-l="en">
+              The window has three areas: workspaces and sessions on the left, chat, files, and the terminal in the
+              center, and the orchestration panel on the right with tasks and changes.
+            </p>
+            <dl class="defs">
+              <dt><span data-l="zh">工作区</span><span data-l="en">Workspace</span></dt>
+              <dd>
+                <span data-l="zh">挂进来的一个目录。有 git 时按仓库编排；没有 git 时按原地模式工作。</span>
+                <span data-l="en">A folder you attach. Git repos use the orchestration flow; folders without git run in place.</span>
+              </dd>
+              <dt><span data-l="zh">会话</span><span data-l="en">Session</span></dt>
+              <dd>
+                <span data-l="zh">一次和某个角色的对话。状态有空闲、运行中、等待审批、出错。</span>
+                <span data-l="en">A conversation with one role. Status is idle, running, waiting for approval, or error.</span>
+              </dd>
+              <dt>Orchestrator</dt>
+              <dd>
+                <span data-l="zh">主 Agent。拆任务、派活、审查、合并。默认自己不改代码。</span>
+                <span data-l="en">The main agent. It plans, dispatches, reviews, and merges. By default it does not edit code.</span>
+              </dd>
+              <dt>Worker</dt>
+              <dd>
+                <span data-l="zh">接到一个任务的 Agent。在自己的 git worktree 里改代码，做完向主 Agent 汇报。</span>
+                <span data-l="en">An agent given one task. It edits inside its own git worktree and reports back.</span>
+              </dd>
+              <dt><span data-l="zh">收件箱</span><span data-l="en">Inbox</span></dt>
+              <dd>
+                <span data-l="zh">Worker 和主 Agent 之间的消息：提问、答复、指示、完成汇报。主 Agent 空闲时会被唤醒。</span>
+                <span data-l="en">Messages between a worker and the orchestrator: questions, replies, instructions, and done reports. An idle orchestrator is woken up.</span>
+              </dd>
+            </dl>
+          </section>
+
+          <section class="doc-section" id="install">
+            <h2><span data-l="zh">安装</span><span data-l="en">Install</span></h2>
+            <p data-l="zh">
+              安装包发布后从
+              <a href="https://github.com/LAIJiangFeng/fynvra/releases">GitHub Releases</a>
+              下载。还没有 Release 时，按下面的步骤从源码运行。
+            </p>
+            <p data-l="en">
+              When installers are published, download them from
+              <a href="https://github.com/LAIJiangFeng/fynvra/releases">GitHub Releases</a>. If none is available yet, run
+              from source.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">平台</span><span data-l="en">Platform</span></th>
+                    <th><span data-l="zh">安装包</span><span data-l="en">Installer</span></th>
+                    <th><span data-l="zh">更新</span><span data-l="en">Updates</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>Windows x64</th>
+                    <td>NSIS <code>.exe</code></td>
+                    <td><span data-l="zh">已接入自动更新</span><span data-l="en">Auto-update wired up</span></td>
+                  </tr>
+                  <tr>
+                    <th>macOS Intel / Apple Silicon</th>
+                    <td><code>.dmg</code> / <code>.zip</code></td>
+                    <td>
+                      <span data-l="zh">签名公证后可自动更新；未签名包需手动覆盖安装</span>
+                      <span data-l="en">Auto-update after signing and notarization; unsigned builds are manual</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Linux</th>
+                    <td>AppImage</td>
+                    <td><span data-l="zh">有构建配置，尚未纳入自动发布与更新</span><span data-l="en">Build config exists; not in automated releases yet</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <aside class="callout">
+              <span class="callout-title"><span data-l="zh">macOS</span><span data-l="en">macOS</span></span>
+              <p data-l="zh">
+                第一次安装先把应用从 DMG 拖进「应用程序」再打开。没有 Apple 凭证的包是临时签名，系统可能提示无法验证开发者。确认来源可信后，到「系统设置 → 隐私与安全性」里对本应用选择「仍要打开」。不需要关闭系统安全检查。
+              </p>
+              <p data-l="en">
+                On first install, drag the app from the DMG into Applications before launching. Builds without Apple
+                credentials are ad-hoc signed, so macOS may say the developer cannot be verified. After you trust the
+                source, choose Open Anyway for this app under System Settings → Privacy &amp; Security. You do not need
+                to turn system security checks off.
+              </p>
+            </aside>
+            <h3><span data-l="zh">从源码运行</span><span data-l="en">Run from source</span></h3>
+            <p data-l="zh">需要 Node.js 22.19.0 或更高（推荐 22）、pnpm 10.26.2，以及 Git。</p>
+            <p data-l="en">You need Node.js 22.19.0 or later (22 recommended), pnpm 10.26.2, and Git.</p>
+            <div class="codeblock">
+              <div class="codeblock-bar"><i></i><i></i><i></i>bash</div>
+              <pre><code>npm install --global pnpm@10.26.2
+git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev</code></pre>
+            </div>
+            <p data-l="zh">
+              第一次运行要联网下载依赖和 Electron。开发版的数据目录是系统应用数据目录下的 <code>fynvra-dev</code>，和正式版分开。仓库里不需要 <code>.env</code>，模型密钥在设置界面里填写。
+            </p>
+            <p data-l="en">
+              The first run needs network access to download dependencies and Electron. Dev builds store data in
+              <code>fynvra-dev</code> under the system app-data directory, separate from release builds. The repo does
+              not need a <code>.env</code>; add model keys in Settings.
+            </p>
+          </section>
+
+          <section class="doc-section" id="quickstart">
+            <h2><span data-l="zh">快速开始</span><span data-l="en">Quick start</span></h2>
+            <ol class="steps-list">
+              <li>
+                <h3><span data-l="zh">添加模型服务</span><span data-l="en">Add a model provider</span></h3>
+                <p data-l="zh">按 <kbd>Ctrl</kbd>+<kbd>,</kbd>（macOS 为 <kbd>⌘</kbd>+<kbd>,</kbd>）打开设置，进入「模型服务」。添加一个服务，或从本机已有配置导入。</p>
+                <p data-l="en">Press <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>⌘</kbd>+<kbd>,</kbd> on macOS) and open Model providers. Add one, or import from configs already on this computer.</p>
+              </li>
+              <li>
+                <h3><span data-l="zh">挂入目录</span><span data-l="en">Attach a folder</span></h3>
+                <p data-l="zh">在左侧「工作区」点「挂入目录」，选一个仓库或普通文件夹。</p>
+                <p data-l="en">Under Workspaces in the sidebar, choose Attach folder and pick a repo or a plain folder.</p>
+              </li>
+              <li>
+                <h3><span data-l="zh">新建会话</span><span data-l="en">Start a session</span></h3>
+                <p data-l="zh">点「新建会话」。多 Agent 协作选内置的 Orchestrator，选好模型和思考档位后创建。</p>
+                <p data-l="en">Choose New session. For multi-agent work, pick the built-in Orchestrator, then a model and thinking level.</p>
+              </li>
+              <li>
+                <h3><span data-l="zh">说清楚要做什么</span><span data-l="en">Describe the goal</span></h3>
+                <p data-l="zh">用你平时的语言写需求。主 Agent 会拆任务并派发。进度、提问和改动出现在右侧「编排」里。</p>
+                <p data-l="en">Write the request in your own language. The orchestrator splits it and dispatches. Progress, questions, and diffs show up under Orchestration on the right.</p>
+              </li>
+            </ol>
+            <aside class="callout callout-warn">
+              <span class="callout-title"><span data-l="zh">派发条件</span><span data-l="en">Dispatch needs git</span></span>
+              <p data-l="zh">
+                多 Agent 派发需要一个已有提交的 Git 仓库，并且本机配置了 Git 用户名和邮箱。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。
+              </p>
+              <p data-l="en">
+                Dispatch needs a Git repository that already has commits, plus a Git user name and email. On Windows, Git
+                for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.
+              </p>
+            </aside>
+          </section>
+
+          <section class="doc-section" id="providers">
+            <h2><span data-l="zh">模型服务</span><span data-l="en">Providers</span></h2>
+            <p data-l="zh">
+              在「设置 → 模型服务」里添加。可以选择预设，也可以用自定义 OpenAI 兼容地址。填写名称、API 协议、Base URL、API Key 和模型 id。官方地址可以留空。
+            </p>
+            <p data-l="en">
+              Add them under Settings → Model providers. Pick a preset or a custom OpenAI-compatible endpoint. Fill in
+              the name, API protocol, base URL, API key, and model id. The official base URL can be left blank.
+            </p>
+            <ul>
+              <li>
+                <span data-l="zh"><strong>测试连接</strong>会显示耗时，以及服务端返回了多少个模型。</span>
+                <span data-l="en"><strong>Test connection</strong> reports latency and how many models the server returned.</span>
+              </li>
+              <li>
+                <span data-l="zh"><strong>拉取模型列表</strong>把远端模型加进来；也可以手动输入模型 id。</span>
+                <span data-l="en"><strong>Fetch models</strong> adds remote models; you can also type a model id yourself.</span>
+              </li>
+              <li>
+                <span data-l="zh"><strong>推理</strong>打开后，会话里才能选思考档位。</span>
+                <span data-l="en">Turn <strong>Reasoning</strong> on to choose a thinking level in chat.</span>
+              </li>
+              <li>
+                <span data-l="zh"><strong>从本机导入</strong>会读取 Claude Code、Codex、CC Switch 里已有的服务。没有 API Key 或自定义地址的配置不会出现。</span>
+                <span data-l="en"><strong>Import from this computer</strong> reads providers from Claude Code, Codex, and CC Switch. Configs without an API key or custom URL are skipped.</span>
+              </li>
+            </ul>
+            <aside class="callout">
+              <span class="callout-title"><span data-l="zh">密钥</span><span data-l="en">Keys</span></span>
+              <p data-l="zh">
+                API Key 的明文只在主进程使用，界面上回显成掩码。它保存在本机配置文件里，不是加密凭证库。不要把应用数据目录、配置导出或带密钥的日志发给别人。删除一个服务后，引用它的角色需要重新选择模型。
+              </p>
+              <p data-l="en">
+                Plaintext API keys stay in the main process; the UI shows a mask. They are stored in local config files,
+                not an encrypted vault. Don't share the app data folder, config exports, or logs that contain keys.
+                After you delete a provider, roles that used it need a new model.
+              </p>
+            </aside>
+          </section>
+
+          <section class="doc-section" id="thinking">
+            <h2><span data-l="zh">思考档位</span><span data-l="en">Thinking</span></h2>
+            <p data-l="zh">
+              思考档位决定模型在回答前想多深。在模型选择器、新建会话和角色编辑里切换。模型服务上的「推理」没打开时，这个选项不会出现。
+            </p>
+            <p data-l="en">
+              The thinking level is how deeply the model reasons before it answers. Change it in the model picker, the
+              new-session dialog, or the role editor. It only appears when Reasoning is on for that model.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">档位</span><span data-l="en">Level</span></th>
+                    <th><span data-l="zh">含义</span><span data-l="en">Meaning</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>off</th>
+                    <td><span data-l="zh">关闭思考</span><span data-l="en">No thinking</span></td>
+                  </tr>
+                  <tr>
+                    <th>minimal</th>
+                    <td><span data-l="zh">极少思考</span><span data-l="en">Barely any</span></td>
+                  </tr>
+                  <tr>
+                    <th>low</th>
+                    <td><span data-l="zh">少量思考</span><span data-l="en">Light</span></td>
+                  </tr>
+                  <tr>
+                    <th>medium</th>
+                    <td><span data-l="zh">适中，日常改代码用这个就够</span><span data-l="en">Balanced; enough for everyday edits</span></td>
+                  </tr>
+                  <tr>
+                    <th>high</th>
+                    <td><span data-l="zh">深入思考</span><span data-l="en">Deep</span></td>
+                  </tr>
+                  <tr>
+                    <th>xhigh</th>
+                    <td><span data-l="zh">更深入思考</span><span data-l="en">Deeper</span></td>
+                  </tr>
+                  <tr>
+                    <th>max</th>
+                    <td><span data-l="zh">最大思考。更慢，也更耗额度</span><span data-l="en">Maximum. Slower, and uses more of your quota</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">某个模型在目录里没有档位信息时，界面会标明这是按协议兜底，或暂时读不到档位。</p>
+            <p data-l="en">If a model has no level catalog, the UI marks the choice as a protocol fallback, or says the levels could not be read.</p>
+          </section>
+
+          <section class="doc-section" id="roles">
+            <h2><span data-l="zh">角色</span><span data-l="en">Roles</span></h2>
+            <p data-l="zh">
+              角色是一套可复用的配置：提示词、模型、思考档位、工具策略、审批档位、技能、MCP 和指令文件。在「设置 → 角色」里新建、复制、导入或导出 JSON。内置角色可以改，也可以恢复默认。改动对之后新建的会话生效。
+            </p>
+            <p data-l="en">
+              A role is a reusable bundle: prompt, model, thinking level, tool policy, approval mode, skills, MCP, and
+              instruction files. Create, duplicate, import, or export JSON under Settings → Roles. Built-in roles can be
+              edited and restored. Changes apply to sessions you create afterwards.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">内置角色</span><span data-l="en">Built-in</span></th>
+                    <th><span data-l="zh">工具策略</span><span data-l="en">Tool policy</span></th>
+                    <th><span data-l="zh">默认审批</span><span data-l="en">Default approval</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>Orchestrator</th>
+                    <td><span data-l="zh">编排</span><span data-l="en">Orchestration</span></td>
+                    <td><span data-l="zh">完全放行</span><span data-l="en">Full</span></td>
+                  </tr>
+                  <tr>
+                    <th>Worker</th>
+                    <td><span data-l="zh">全部工具</span><span data-l="en">All tools</span></td>
+                    <td><span data-l="zh">自动接受编辑</span><span data-l="en">Auto-accept edits</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">工具策略有三档：</p>
+            <p data-l="en">There are three tool policies:</p>
+            <ul>
+              <li>
+                <span data-l="zh"><strong>全部工具</strong>：可以读、写、执行命令。Worker 默认用这个。</span>
+                <span data-l="en"><strong>All tools</strong>: read, write, and run commands. This is the Worker default.</span>
+              </li>
+              <li>
+                <span data-l="zh"><strong>只读</strong>：不能改文件，也不能执行任意命令。</span>
+                <span data-l="en"><strong>Read-only</strong>: no file edits and no arbitrary commands.</span>
+              </li>
+              <li>
+                <span data-l="zh"><strong>编排</strong>：读文件、只读 git，以及派发、审查、合并等编排工具。不能写文件或执行任意命令。Orchestrator 默认用这个，所以即使审批是「完全放行」，它自己也不会改代码。</span>
+                <span data-l="en"><strong>Orchestration</strong>: read files, read-only git, and the dispatch, review, and merge tools. No writes and no arbitrary commands. This is why the Orchestrator still doesn't edit code when its approval mode is Full.</span>
+              </li>
+            </ul>
+            <p data-l="zh">角色 ID 只能是小写字母、数字和连字符，保存后不能改。派发时如果没有指定角色，用默认的 Worker。</p>
+            <p data-l="en">A role id is lowercase letters, digits, and hyphens, and it cannot be changed after save. Dispatch uses the Worker role when none is named.</p>
+          </section>
+
+          <section class="doc-section" id="orchestration">
+            <h2><span data-l="zh">编排</span><span data-l="en">Orchestration</span></h2>
+            <p data-l="zh">主 Agent 的一轮工作通常是这样：</p>
+            <p data-l="en">A typical orchestrator loop looks like this:</p>
+            <ol class="steps-list">
+              <li>
+                <h3><span data-l="zh">拆任务</span><span data-l="en">Split the work</span></h3>
+                <p data-l="zh">读够用的代码，把需求分成边界清楚、尽量能并行的任务，并写一份 Worker 能独立执行的任务说明。</p>
+                <p data-l="en">Read just enough code to split the request into tasks with clear ownership, then write a brief each worker can follow on its own.</p>
+              </li>
+              <li>
+                <h3><span data-l="zh">派发</span><span data-l="en">Dispatch</span></h3>
+                <p data-l="zh">每个任务一个 Worker，单独的 git worktree，分支名是 <code>fynvra/&lt;slug&gt;</code>。默认放在仓库同级的 <code>&lt;仓库目录名&gt;-worktrees</code>，可在「设置 → 通用」里改位置。</p>
+                <p data-l="en">Each task gets its own worker and git worktree on <code>fynvra/&lt;slug&gt;</code>. By default that folder sits beside the repo as <code>&lt;repo&gt;-worktrees</code>. Change the location under Settings → General.</p>
+              </li>
+              <li>
+                <h3><span data-l="zh">验收</span><span data-l="en">Review</span></h3>
+                <p data-l="zh">Worker 汇报后，主 Agent 看 diff、跑检查。通过就合并（<code>merge --no-ff</code>）并清理 worktree；不行就打回，Worker 再改。</p>
+                <p data-l="en">When a worker reports done, the orchestrator reads the diff and runs checks. A pass is merged with <code>merge --no-ff</code> and the worktree is cleaned up; otherwise the work is sent back.</p>
+              </li>
+            </ol>
+            <p data-l="zh">任务状态：</p>
+            <p data-l="en">Task status:</p>
+            <p class="status-flow">
+              <span data-l="zh">待开始</span><span data-l="en">Not started</span>
+              <span aria-hidden="true">→</span>
+              <span data-l="zh">进行中</span><span data-l="en">In progress</span>
+              <span aria-hidden="true">→</span>
+              <span data-l="zh">待验收</span><span data-l="en">In review</span>
+              <span aria-hidden="true">→</span>
+              <span data-l="zh">已完成</span><span data-l="en">Completed</span>
+            </p>
+            <p data-l="zh">走不下去时会标成失败或已放弃。右侧「改动」页列出尚未合并的文件。</p>
+            <p data-l="en">Work that cannot continue is marked failed or abandoned. The Changes tab lists files that are not merged yet.</p>
+            <aside class="callout">
+              <span class="callout-title"><span data-l="zh">没有 git</span><span data-l="en">No git</span></span>
+              <p data-l="zh">普通文件夹走原地模式：不建 worktree，Worker 直接改这个目录，审查时列出它汇报的文件。并行的 Worker 会共用同一份文件，一次只派一个任务。</p>
+              <p data-l="en">A folder without git runs in place: no worktree, workers edit that folder, and review lists the files they reported. Parallel workers would share those files, so dispatch one task at a time.</p>
+            </aside>
+          </section>
+
+          <section class="doc-section" id="approval">
+            <h2><span data-l="zh">审批</span><span data-l="en">Approvals</span></h2>
+            <p data-l="zh">
+              输入框里可以切换审批档位，快捷键是 <kbd>Shift</kbd>+<kbd>Tab</kbd>。角色设置里也有一份默认值，新建会话时带上。
+            </p>
+            <p data-l="en">
+              Cycle the approval mode from the composer with <kbd>Shift</kbd>+<kbd>Tab</kbd>. Roles store a default that
+              new sessions start with.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">档位</span><span data-l="en">Mode</span></th>
+                    <th><span data-l="zh">行为</span><span data-l="en">Behavior</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th><span data-l="zh">全程审批</span><span data-l="en">Supervised</span></th>
+                    <td><span data-l="zh">执行命令、编辑文件、写入文件、调用 MCP 都要你点允许。</span><span data-l="en">Commands, edits, writes, and MCP calls wait for Allow.</span></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">自动接受编辑</span><span data-l="en">Auto-accept edits</span></th>
+                    <td><span data-l="zh">文件编辑和写入自动通过，命令和 MCP 仍要审批。Worker 默认是这个。</span><span data-l="en">File edits and writes pass automatically; commands and MCP still ask. This is the Worker default.</span></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">完全放行</span><span data-l="en">Full</span></th>
+                    <td><span data-l="zh">常规工具自动通过。Orchestrator 默认是这个，但它的工具策略仍然不能改代码。</span><span data-l="en">Ordinary tools pass automatically. This is the Orchestrator default, and its tool policy still cannot edit code.</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <aside class="callout callout-warn">
+              <span class="callout-title"><span data-l="zh">保护底线</span><span data-l="en">Hard floor</span></span>
+              <p data-l="zh">
+                <code>git push</code>、<code>git reset --hard</code>、<code>rm -rf</code> 这类保护操作，在任何审批档位下都要你确认。「本会话都允许」也不会豁免。
+              </p>
+              <p data-l="en">
+                Protected operations such as <code>git push</code>, <code>git reset --hard</code>, and <code>rm -rf</code>
+                need your confirmation in every approval mode. Allow for session does not exempt them.
+              </p>
+            </aside>
+          </section>
+
+          <section class="doc-section" id="shortcuts">
+            <h2><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></h2>
+            <p data-l="zh">下面是默认按键。macOS 上把 Ctrl 换成 ⌘。可在「设置 → 快捷键」里查看。</p>
+            <p data-l="en">These are the defaults. On macOS, Ctrl is ⌘. See them under Settings → Shortcuts.</p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">操作</span><span data-l="en">Action</span></th>
+                    <th><span data-l="zh">按键</span><span data-l="en">Shortcut</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th><span data-l="zh">新建会话</span><span data-l="en">New session</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>N</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">打开设置</span><span data-l="en">Open settings</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>,</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">显示或隐藏右侧面板</span><span data-l="en">Toggle the right panel</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>B</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">显示或隐藏左侧栏</span><span data-l="en">Toggle the sidebar</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">聚焦输入框</span><span data-l="en">Focus the composer</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>L</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">搜索会话</span><span data-l="en">Search sessions</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>K</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">上一个 / 下一个会话</span><span data-l="en">Previous / next session</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">选择模型</span><span data-l="en">Pick a model</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>M</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">发送</span><span data-l="en">Send</span></th>
+                    <td><kbd>Enter</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">换行</span><span data-l="en">New line</span></th>
+                    <td><kbd>Shift</kbd>+<kbd>Enter</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">切换审批档位</span><span data-l="en">Cycle approval mode</span></th>
+                    <td><kbd>Shift</kbd>+<kbd>Tab</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">停止当前回合</span><span data-l="en">Stop the turn</span></th>
+                    <td><kbd>Esc</kbd></td>
+                  </tr>
+                  <tr>
+                    <th><span data-l="zh">立即发送排队消息</span><span data-l="en">Send a queued message now</span></th>
+                    <td><kbd>Ctrl</kbd>+<kbd>S</kbd></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="doc-section" id="data">
+            <h2><span data-l="zh">数据与更新</span><span data-l="en">Data and updates</span></h2>
+            <p data-l="zh">
+              设置、角色、模型服务、MCP 和会话都在本机应用数据目录里，不要提交到 Git，也不要打包发给别人。开发版默认用 <code>fynvra-dev</code>，和安装版分开。只有开发模式才认环境变量 <code>FYNVRA_USER_DATA_DIR</code>。
+            </p>
+            <p data-l="en">
+              Settings, roles, providers, MCP, and sessions live in the local app data directory. Don't commit that
+              folder or send it to anyone. Dev builds use <code>fynvra-dev</code>, separate from an installed release.
+              <code>FYNVRA_USER_DATA_DIR</code> is honored only in dev mode.
+            </p>
+            <p data-l="zh">
+              文件读写限制在已挂入的工作区。渲染进程不能直接使用 Node.js 或 Electron。Agent 和 MCP 仍然可以执行命令或访问外部服务，所以工具策略和审批档位要按项目来设。
+            </p>
+            <p data-l="en">
+              File access is limited to attached workspaces. The renderer cannot use Node.js or Electron directly.
+              Agents and MCP can still run commands or reach external services, so set the tool policy and approval mode
+              for the project.
+            </p>
+            <p data-l="zh">
+              已安装的 Windows 版，以及带 Developer ID 签名的 macOS 版，会在启动时和之后每 4 小时检查更新，下载完成后等你确认再重启安装。未签名的 Mac 包请从 Releases 手动下载覆盖。开发模式（<code>pnpm dev</code>）不检查更新。Linux 目前没有自动更新。
+            </p>
+            <p data-l="en">
+              Installed Windows builds, and macOS builds signed with a Developer ID, check at startup and every 4 hours.
+              The download installs after you confirm a restart. Unsigned Mac builds are replaced by hand from Releases.
+              Dev mode (<code>pnpm dev</code>) does not check for updates. Linux has no auto-update yet.
+            </p>
+            <p>
+              <a class="back-top" href="#main"><span data-l="zh">回到顶部</span><span data-l="en">Back to top</span></a>
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+              <rect width="512" height="512" rx="112" />
+              <path d="M167 120h192v60H228v48h92v59h-92v104h-61z" />
+            </svg>
+            <span>Fynvra</span>
+          </a>
+          <p data-l="zh">开源的本地多 Agent AI 编程工作台。基于 Electron 与 pi SDK 构建。</p>
+          <p data-l="en">The open-source, local multi-agent AI coding workbench. Built on Electron and the pi SDK.</p>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">产品</span><span data-l="en">Product</span></p>
+          <ul class="footer-links">
+            <li><a href="index.html#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a></li>
+            <li><a href="index.html#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a></li>
+            <li><a href="index.html#safety"><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l="zh">下载</span><span data-l="en">Download</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">文档</span><span data-l="en">Docs</span></p>
+          <ul class="footer-links">
+            <li><a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">User guide</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/PRODUCT.md"><span data-l="zh">产品定义</span><span data-l="en">Product definition</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/ARCHITECTURE.md"><span data-l="zh">架构契约</span><span data-l="en">Architecture</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/RELEASE.md"><span data-l="zh">发布说明</span><span data-l="en">Releases &amp; updates</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">社区</span><span data-l="en">Community</span></p>
+          <ul class="footer-links">
+            <li><a href="https://github.com/LAIJiangFeng/fynvra">GitHub</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/issues">Issues</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases">Releases</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="container footer-bottom">
+        <span>© 2026 Fynvra · Apache-2.0</span>
+        <span>Electron · React · pi SDK</span>
+      </div>
+    </footer>
+  </body>
+</html>

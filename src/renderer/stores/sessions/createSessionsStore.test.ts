@@ -297,6 +297,105 @@ describe('createSessionsStore · 列表与选择', () => {
     expect(selectMessagesOf('s1')(store.getState()).map((item) => item.text)).toEqual(['新']);
   });
 
+  it('后台加载其他展开分组及其推送不改变当前工作区或会话', async () => {
+    const { store, emitChanged } = await setup([
+      summary('s1'),
+      summary('other', { workspaceId: 'ws-2' }),
+    ]);
+    await store.getState().selectSession('s1');
+    await store.getState().loadSessions('ws-2');
+    emitChanged('ws-2');
+    await settle();
+
+    expect(store.getState().sessionsByWorkspace['ws-2']?.[0]?.id).toBe('other');
+    expect(store.getState()).toMatchObject({ workspaceId: WS, activeSessionId: 's1' });
+  });
+
+  it('跨项目选择同步更新两个选中字段，迟到的列表与 history 不抢回选择', async () => {
+    const fake = fakeApi([summary('s1'), summary('other', { workspaceId: 'ws-2' })]);
+    const onSelectSession = vi.fn((workspaceId: string) => {
+      // 侧栏同步回同一个工作区时，不能清掉刚选的会话
+      store.getState().setWorkspace(workspaceId);
+    });
+    const store = createSessionsStore(fake.api, { onSelectSession });
+    store.getState().setWorkspace(WS);
+    await store.getState().loadSessions('ws-2');
+    await settle();
+    const slowList = deferred<Awaited<ReturnType<typeof fake.api.list>>>();
+    const slowHistory = deferred<IpcResult<{ messages: ChatMessage[] }>>();
+    fake.api.list.mockReturnValueOnce(slowList.promise);
+    fake.api.history.mockReturnValueOnce(slowHistory.promise);
+
+    const selectingOther = store.getState().selectSession('other');
+    expect(store.getState()).toMatchObject({ workspaceId: 'ws-2', activeSessionId: 'other' });
+    expect(onSelectSession).toHaveBeenLastCalledWith('ws-2');
+    await store.getState().selectSession('s1');
+    slowList.resolve({ ok: true, sessions: [summary('other', { workspaceId: 'ws-2' })] });
+    slowHistory.resolve({ ok: false, error: '旧项目读取失败' });
+    await selectingOther;
+    await settle();
+
+    expect(store.getState()).toMatchObject({
+      workspaceId: WS,
+      activeSessionId: 's1',
+      notice: null,
+    });
+    expect(onSelectSession.mock.calls).toEqual([['ws-2'], [WS]]);
+  });
+
+  it('非当前分组新建使用该项目及其模型，并同步选中新会话所在项目', async () => {
+    const fake = fakeApi([summary('s1')]);
+    const onSelectSession = vi.fn();
+    const store = createSessionsStore(fake.api, { onSelectSession });
+    store.getState().setWorkspace(WS);
+    const result = await store.getState().createSession('worker', GPT, 'ws-2');
+    await settle();
+
+    expect(result.ok).toBe(true);
+    expect(fake.api.create).toHaveBeenCalledWith({
+      workspaceId: 'ws-2',
+      roleId: 'worker',
+      model: GPT,
+    });
+    expect(store.getState()).toMatchObject({ workspaceId: 'ws-2', activeSessionId: 's2' });
+    expect(store.getState().lastModelByWorkspace).toEqual({ 'ws-2': GPT });
+    expect(onSelectSession).toHaveBeenLastCalledWith('ws-2');
+  });
+
+  it('创建在途时用户切走又切回，晚到的新会话保留在目标列表但不抢回选中', async () => {
+    const { store, api, setSessions } = await setup([summary('s1')]);
+    await store.getState().selectSession('s1');
+    const answer = deferred<Awaited<ReturnType<typeof api.create>>>();
+    api.create.mockReturnValueOnce(answer.promise);
+    const creating = store.getState().createSession('worker', GPT, 'ws-2');
+    store.getState().setWorkspace('ws-3');
+    await store.getState().selectSession('s1');
+    const created = summary('new', { workspaceId: 'ws-2', model: GPT });
+    setSessions([summary('s1'), created]);
+    answer.resolve({ ok: true, session: created });
+    await creating;
+    await settle();
+
+    expect(store.getState()).toMatchObject({ workspaceId: WS, activeSessionId: 's1' });
+    expect(store.getState().sessionsByWorkspace['ws-2']).toEqual([created]);
+    expect(api.history).not.toHaveBeenCalledWith('new');
+  });
+
+  it('非当前分组归档、恢复与删除只修改该项目的列表', async () => {
+    const { store } = await setup([summary('s1'), summary('other', { workspaceId: 'ws-2' })]);
+    await store.getState().selectSession('s1');
+    await store.getState().loadSessions('ws-2');
+    await store.getState().archiveSession('other');
+    expect(selectArchivedSessionsOf('ws-2')(store.getState()).map((item) => item.id)).toEqual([
+      'other',
+    ]);
+    await store.getState().unarchiveSession('other');
+    expect(selectSessionsOf('ws-2')(store.getState()).map((item) => item.id)).toEqual(['other']);
+    await store.getState().removeSession('other');
+    expect(selectSessionsOf('ws-2')(store.getState())).toEqual([]);
+    expect(store.getState()).toMatchObject({ workspaceId: WS, activeSessionId: 's1' });
+  });
+
   it('切换工作区时，不属于它的选中会话被清空', async () => {
     const { store } = await setup();
     await store.getState().selectSession('s1');
@@ -1120,6 +1219,21 @@ describe('createSessionsStore · 模型选择', () => {
     slow.resolve({ ok: true, providers: PROVIDERS });
     await first;
     expect(store.getState().modelProviders).toEqual([]);
+  });
+
+  it('不同项目的模型选项并发加载，各自保留记忆模型且不切换工作区', async () => {
+    const { store, api } = await setup();
+    const first = deferred<IpcResult<ModelOptions>>();
+    api.modelOptions.mockReturnValueOnce(first.promise);
+    const loading = store.getState().loadModelOptions(WS);
+    api.modelOptions.mockResolvedValueOnce({ ok: true, providers: [], lastUsed: GPT });
+    await store.getState().loadModelOptions('ws-2');
+    first.resolve({ ok: true, providers: PROVIDERS, lastUsed: OPUS });
+    await loading;
+
+    expect(store.getState().lastModelByWorkspace).toEqual({ [WS]: OPUS, 'ws-2': GPT });
+    expect(store.getState().modelProviders).toEqual([]);
+    expect(store.getState().workspaceId).toBe(WS);
   });
 
   it('createSession 带上选的模型，并记作该工作区上次用过的模型', async () => {

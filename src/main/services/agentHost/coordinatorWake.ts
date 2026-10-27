@@ -1,127 +1,218 @@
 import type { Message } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
-import type { SessionEventEnvelope } from '@shared/types/chat';
 import type { OrchestrationRegistry } from '../orchestration/registry';
+import type { PendingCoordinatorReview } from '../orchestration/service';
 import type { AgentHostService } from './agentHost';
 
-/** 会唤醒主 agent 的消息类型：worker 的汇报与提问、编排自身的升级。 */
 const WAKE_TYPES: ReadonlySet<string> = new Set(['worker_done', 'question', 'escalation']);
-
-/** 消息正文的截断长度（与 wait_for_workers 的单条上限一致）。 */
 const BODY_MAX_CHARS = 6_000;
+/** Initial delivery plus one continuation per attempt; a new user turn can explicitly resume. */
+const MAX_REVIEW_PROMPTS = 2;
+const MAX_DELIVERY_ATTEMPTS = 3;
 
-/** 逐条消息的「下一步」指引（对应工具说明里各类型的处理方式）。 */
+function clipped(body: string): string {
+  return body.length > BODY_MAX_CHARS
+    ? `${body.slice(0, BODY_MAX_CHARS)}\n…(${body.length - BODY_MAX_CHARS} more characters)`
+    : body;
+}
+
 function nextStep(message: Message): string {
   const target = message.dispatchId ? `dispatch_id \`${message.dispatchId}\`` : 'its dispatch_id';
   switch (message.type) {
     case 'question':
       return `answer with send_to_worker (${target}); the worker is blocked until you reply.`;
     case 'escalation':
-      return `decide how to proceed (ask the user when the decision is theirs), then send_to_worker, reject_work or cleanup_worktree (${target}).`;
+      return `decide how to proceed (ask the user when the decision is theirs), then use the appropriate orchestration tool (${target}). To explicitly abandon a dispatched task, call cleanup_worktree with abandon: true; ordinary cleanup does not cancel or accept pending work.`;
     default:
-      return `review_diff and run_checks (${target}), then merge_worktree if it passes or reject_work with concrete feedback.`;
+      return `check list_workers for the current task and attempt (${target}). A failed report needs diagnosis and a retry decision, not acceptance; a successful report needs review before acceptance.`;
   }
 }
 
 function entry(message: Message, index: number): string {
   const ref = message.dispatchId ? ` · dispatch \`${message.dispatchId}\`` : '';
   const subject = message.subject ? ` — ${message.subject}` : '';
-  const body =
-    message.body.length > BODY_MAX_CHARS
-      ? `${message.body.slice(0, BODY_MAX_CHARS)}\n…(${message.body.length - BODY_MAX_CHARS} more characters)`
-      : message.body;
   return [
     `### ${index + 1}. ${message.type}${ref}${subject}`,
     `- from: ${message.from} · message_id: \`${message.id}\``,
     '',
-    body,
+    clipped(message.body),
     '',
     `Next: ${nextStep(message)}`,
   ].join('\n');
 }
 
-/**
- * 注入给空闲主 agent 的唤醒 prompt：把收件箱里未投递的消息连同下一步指引一起交给它。
- * 明确标注是 Fynvra 的自动通知，不是用户发言。
- */
-export function wakePrompt(messages: readonly Message[]): string {
+export function wakePrompt(
+  messages: readonly Message[],
+  reviews: readonly PendingCoordinatorReview[] = []
+): string {
   return [
     '[Fynvra orchestration] Automated notification — not a message from the user.',
     '',
-    `New worker message${messages.length === 1 ? '' : 's'} arrived (${messages.length}):`,
+    ...(messages.length
+      ? [`New worker messages (${messages.length}):`, messages.map(entry).join('\n\n')]
+      : []),
+    ...(reviews.length
+      ? [
+          'Successful attempts still awaiting review (in-review; message delivery is not acceptance):',
+          ...reviews.map(
+            ({ taskId, title, dispatch }) =>
+              `- ${title} · task \`${taskId}\` · current dispatch_id \`${dispatch.id}\`\n${clipped(dispatch.summary ?? '')}`
+          ),
+        ]
+      : []),
     '',
-    messages.map(entry).join('\n\n'),
-    '',
-    'Handle these now: answer questions, review reported work, merge or send it back, then report a short status to the user. Workers still running keep going; you do not need to call wait_for_workers.',
+    'Handle these now. Check list_workers for current status and dispatch IDs before acting; read_worker_output for the latest report and follow-ups. Answer questions with send_to_worker. For successful work, review_diff and run_checks as appropriate to the task and the user’s instructions, then explicitly accept with merge_worktree or reject_work with concrete feedback. Read-only audits may have no code changes: review their findings and evidence; do not invent a commit or checks. A successful read-only or empty-diff task still needs merge_worktree acceptance. Only after acceptance, use cleanup_worktree for cleanup. Do not merge solely because report_done says succeeded, and do not use cleanup_worktree as acceptance. To explicitly cancel pending work, use cleanup_worktree with abandon: true; this abandons the task rather than completing it.',
+    'Respect the user’s latest instructions, stop requests and required approvals. If a decision or approval is needed, explain the specific blocker to the user and stop. Otherwise resolve the pending reviews before your final response. Automatic continuation is bounded; do not loop on a blocked check. Workers still running keep going; you do not need to call wait_for_workers.',
   ].join('\n');
 }
 
 export interface CoordinatorWakeHosts {
-  /** 主 agent 会话的查询、注入 prompt 与事件订阅。 */
-  agentHost: Pick<AgentHostService, 'get' | 'prompt' | 'observe'>;
-  /** 编排收件箱：新消息通知、未确认消息的读取与确认。 */
-  registry: Pick<OrchestrationRegistry, 'onMessage' | 'pendingMessagesTo' | 'ackMessages'>;
+  agentHost: Pick<AgentHostService, 'get' | 'promptWhenIdle' | 'observe'>;
+  registry: Pick<OrchestrationRegistry, 'onMessage' | 'coordinatorWork' | 'ackMessages'>;
   log?(message: string): void;
 }
 
 export interface CoordinatorWakeOptions {
-  /** 防抖与回合结束后的缓冲毫秒数，默认 400。 */
+  /** Debounce and settling buffer, default 400ms. */
   delayMs?: number;
 }
 
+interface WakeState {
+  timer?: ReturnType<typeof setTimeout>;
+  inFlight: boolean;
+  again: boolean;
+  paused: boolean;
+  failures: number;
+  reviews: Map<string, number>;
+  warned: Set<string>;
+}
+
 /**
- * 协调者唤醒器（Orca 式监控）：主 agent 派发完任务即可结束回合继续对话，
- * 不再用 wait_for_workers 阻塞等待。收件箱出现 worker_done / question / escalation 时：
- * - 会话空闲：把未确认消息合成一条注入 prompt 唤醒主 agent，发送成功后确认（与 wait 的交付一致）；
- * - 会话忙碌：不投递也不确认，回合结束（agent_settled）后的下一拍再试；
- * - 会话不存在或已出错：放弃本轮，消息留在收件箱，下一次事件再触发。
+ * Inbox ack means delivered, not reviewed. Reconcile current in-review attempts on every idle/settled
+ * event, including after wait_for_workers consumed the report. Busy sessions wait for events, never
+ * poll. Stop/abort suspends automation until an explicit prompt; failures and unresolved reviews have
+ * bounded retries. Restored state is reconciled when the coordinator resumes: launching the app alone
+ * must not revive a previously stopped conversation (the stop intent is not persisted in task state).
  */
 export function installCoordinatorWake(
   hosts: CoordinatorWakeHosts,
   options: CoordinatorWakeOptions = {}
 ): void {
   const delayMs = options.delayMs ?? 400;
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  const schedule = (sessionId: string): void => {
-    if (timers.has(sessionId)) return;
-    timers.set(
-      sessionId,
-      setTimeout(() => {
-        timers.delete(sessionId);
-        void flush(sessionId);
-      }, delayMs)
-    );
+  const states = new Map<string, WakeState>();
+  const log = hosts.log ?? ((message: string) => console.warn(`[coordinator-wake] ${message}`));
+  const stateOf = (sessionId: string): WakeState => {
+    let state = states.get(sessionId);
+    if (!state) {
+      state = {
+        inFlight: false,
+        again: false,
+        paused: false,
+        failures: 0,
+        reviews: new Map(),
+        warned: new Set(),
+      };
+      states.set(sessionId, state);
+    }
+    return state;
   };
 
-  const flush = async (sessionId: string): Promise<void> => {
+  const schedule = (sessionId: string, delay = delayMs): void => {
+    const state = stateOf(sessionId);
+    if (state.paused) return;
+    if (state.inFlight) {
+      state.again = true;
+      return;
+    }
+    if (state.timer) return;
+    state.timer = setTimeout(() => {
+      state.timer = undefined;
+      void flush(sessionId, state);
+    }, delay);
+  };
+
+  const pause = (sessionId: string): void => {
+    const state = stateOf(sessionId);
+    state.paused = true;
+    state.again = false;
+    clearTimeout(state.timer);
+    state.timer = undefined;
+  };
+
+  const flush = async (sessionId: string, state: WakeState): Promise<void> => {
+    if (state.paused || state.inFlight || state.failures >= MAX_DELIVERY_ATTEMPTS) return;
+    const session = hosts.agentHost.get(sessionId);
+    if (session?.status !== 'idle' || session.archivedAt !== undefined) return;
+    state.inFlight = true;
+    let retry = false;
     try {
-      const messages = hosts.registry.pendingMessagesTo(sessionId);
-      if (messages.length === 0) return;
-      const session = hosts.agentHost.get(sessionId);
-      if (session === undefined) return;
-      if (session.status !== 'idle') {
-        // 忙碌是暂态：回合结束事件会再触发；error / 其他状态不再轮询
-        if (session.status === 'running' || session.status === 'waiting-approval') {
-          schedule(sessionId);
+      const work = hosts.registry.coordinatorWork(sessionId);
+      const currentIds = new Set(work.reviews.map(({ dispatch }) => dispatch.id));
+      for (const id of state.reviews.keys()) {
+        if (!currentIds.has(id)) {
+          state.reviews.delete(id);
+          state.warned.delete(id);
         }
-        return;
       }
-      const sent = await hosts.agentHost.prompt(sessionId, wakePrompt(messages));
-      if (sent.ok) hosts.registry.ackMessages(messages.map((message) => message.id));
-      else schedule(sessionId);
+      const reviews = work.reviews.filter(({ dispatch }) => {
+        if ((state.reviews.get(dispatch.id) ?? 0) < MAX_REVIEW_PROMPTS) return true;
+        if (!state.warned.has(dispatch.id)) {
+          state.warned.add(dispatch.id);
+          log(
+            `session ${sessionId}: review ${dispatch.id} is still unresolved after ${MAX_REVIEW_PROMPTS} automatic prompts; waiting for a user continuation or a new worker message`
+          );
+        }
+        return false;
+      });
+      if (!work.messages.length && !reviews.length) return;
+      const sent = await hosts.agentHost.promptWhenIdle(
+        sessionId,
+        wakePrompt(work.messages, reviews)
+      );
+      if (!sent.ok) throw new Error(sent.error);
+      if (!sent.delivered) return; // A user turn/abort won the race during spawn; wait for its lifecycle.
+      state.failures = 0;
+      for (const { dispatch } of reviews) {
+        state.reviews.set(dispatch.id, (state.reviews.get(dispatch.id) ?? 0) + 1);
+      }
+      hosts.registry.ackMessages(work.messages.map((message) => message.id));
     } catch (error) {
-      hosts.log?.(`coordinator wake failed: ${errorMessage(error)}`);
+      state.failures += 1;
+      retry = state.failures < MAX_DELIVERY_ATTEMPTS;
+      log(
+        `session ${sessionId}: coordinator wake failed (${state.failures}/${MAX_DELIVERY_ATTEMPTS}): ${errorMessage(error)}${retry ? '; retrying' : '; waiting for a user continuation or a new worker message'}`
+      );
+    } finally {
+      state.inFlight = false;
+      const again = state.again;
+      state.again = false;
+      if (retry || again)
+        schedule(sessionId, retry ? delayMs * 2 ** (state.failures - 1) : delayMs);
     }
   };
 
   hosts.registry.onMessage((_workspaceId, message) => {
-    if (WAKE_TYPES.has(message.type)) schedule(message.to);
+    if (!WAKE_TYPES.has(message.type)) return;
+    stateOf(message.to).failures = 0;
+    schedule(message.to);
   });
 
   hosts.agentHost.observe({
-    event: (envelope: SessionEventEnvelope) => {
-      if (envelope.event.type === 'agent_settled') schedule(envelope.sessionId);
+    activity: (sessionId, action) => {
+      if (action === 'abort') return pause(sessionId);
+      if (action === 'prompt') {
+        const state = stateOf(sessionId);
+        state.paused = false;
+        state.failures = 0;
+        state.reviews.clear();
+        state.warned.clear();
+      }
+      schedule(sessionId);
+    },
+    event: ({ sessionId, event }) => {
+      if (event.type !== 'agent_settled') return;
+      if (event.aborted) pause(sessionId);
+      else schedule(sessionId);
     },
   });
 }
