@@ -707,6 +707,48 @@ describe('createSessionsStore · send', () => {
   });
 });
 
+describe('createSessionsStore · setDraftImages', () => {
+  const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
+  const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
+
+  it('replaces images exactly for one session, preserving other drafts', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const { setDraft, setDraftImages } = store.getState();
+    setDraft('s1', 'unfinished');
+    setDraftImages('s1', [SHOT]);
+    setDraftImages('s2', [PHOTO]);
+    const before = store.getState();
+
+    setDraftImages('s1', [PHOTO, SHOT]);
+
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual([PHOTO, SHOT]);
+    expect(store.getState().draftImages.s2).toBe(before.draftImages.s2);
+    expect(store.getState().drafts).toBe(before.drafts);
+    expect(before.draftImages.s1).toEqual([SHOT]);
+  });
+
+  it('clears the session key for an empty array, including an already empty draft', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const { setDraftImages } = store.getState();
+    setDraftImages('s1', [SHOT]);
+    setDraftImages('s2', [PHOTO]);
+
+    setDraftImages('s1', []);
+    setDraftImages('missing', []);
+
+    expect(store.getState().draftImages).toEqual({ s2: [PHOTO] });
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual([]);
+  });
+
+  it('restores all images without applying attachment limits', () => {
+    const store = createSessionsStore(fakeApi().api);
+    const images = Array.from({ length: 12 }, () => SHOT);
+    store.getState().setDraftImages('s1', images);
+
+    expect(selectDraftImagesOf('s1')(store.getState())).toEqual(images);
+  });
+});
+
 describe('createSessionsStore · 粘贴的图片', () => {
   const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
   const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
