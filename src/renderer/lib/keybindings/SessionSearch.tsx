@@ -4,30 +4,35 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { useSessionsStore } from '@/stores/sessions';
+import { useWorkspacesStore } from '@/stores/workspaces';
 import { runAction, useActionHandler } from './handlers';
-import { filterSessionsByTitle, useSessionSearchStore } from './sessionFilter';
+import { filterSessionsByTitle, searchOf, useSessionSearchStore } from './sessionFilter';
 import { useChordLabel } from './useKeybindings';
 
 /** 侧栏的会话列表按搜索框过滤；搜索框空着时原样返回 */
-export function useFilteredSessions(sessions: SessionSummary[]): SessionSummary[] {
-  const query = useSessionSearchStore((state) => state.query);
+export function useFilteredSessions(
+  workspaceId: string,
+  sessions: SessionSummary[]
+): SessionSummary[] {
+  const query = useSessionSearchStore((state) => searchOf(state, workspaceId).query);
   return useMemo(() => filterSessionsByTitle(sessions, query), [sessions, query]);
 }
 
-/** 侧栏「会话」标题行上的搜索按钮。「搜索会话」快捷键也由它处理：侧栏没有会话分组时不拦截 */
-export function SessionSearchButton() {
+/** 每组的搜索按钮；只有当前工作区处理全局搜索快捷键 */
+export function SessionSearchButton({ workspaceId }: { workspaceId: string }) {
   const show = useSessionSearchStore((state) => state.show);
+  const current = useWorkspacesStore((state) => state.selectedId === workspaceId);
   const chord = useChordLabel('search-sessions');
   const t = useT();
-  useActionHandler('search-sessions', show);
+  useActionHandler('search-sessions', () => show(workspaceId), current);
 
   return (
     <Button
       variant="ghost"
       size="icon-xs"
       aria-label={t('sessions.search')}
-      title={t('sessions.searchHint', { chord })}
-      onClick={show}
+      title={current ? t('sessions.searchHint', { chord }) : t('sessions.search')}
+      onClick={() => show(workspaceId)}
     >
       <Search />
     </Button>
@@ -36,17 +41,19 @@ export function SessionSearchButton() {
 
 /** 会话列表上方的搜索框：按标题过滤。Enter 打开第一个结果，Esc 清空收起；空着失焦时也收起 */
 export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
-  const open = useSessionSearchStore((state) => state.open);
-  const query = useSessionSearchStore((state) => state.query);
-  const focusRequest = useSessionSearchStore((state) => state.focusRequest);
-  const setQuery = useSessionSearchStore((state) => state.setQuery);
-  const close = useSessionSearchStore((state) => state.close);
+  const { open, query, focusRequest } = useSessionSearchStore((state) =>
+    searchOf(state, workspaceId)
+  );
+  const setQuery = (query: string) => useSessionSearchStore.getState().setQuery(workspaceId, query);
+  const close = () => useSessionSearchStore.getState().close(workspaceId);
   const input = useRef<HTMLInputElement>(null);
+  const focusedRequest = useRef(focusRequest);
   const t = useT();
 
-  // 每次「搜索会话」都聚焦并全选，已经开着时也是
+  // 只响应新的搜索请求，重新展开列表不抢输入焦点
   useEffect(() => {
-    if (focusRequest === 0) return;
+    if (focusRequest === focusedRequest.current) return;
+    focusedRequest.current = focusRequest;
     input.current?.focus();
     input.current?.select();
   }, [focusRequest]);
@@ -63,7 +70,7 @@ export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
     const first = filterSessionsByTitle(sessions, query)[0];
     if (!first) return;
     close();
-    void useSessionsStore.getState().selectSession(first.id);
+    void useSessionsStore.getState().selectSession(first.id, workspaceId);
     runAction('focus-composer');
   };
 
@@ -87,7 +94,7 @@ export function SessionSearchInput({ workspaceId }: { workspaceId: string }) {
           }
         }}
         onBlur={() => {
-          if (!useSessionSearchStore.getState().query.trim()) close();
+          if (!searchOf(useSessionSearchStore.getState(), workspaceId).query.trim()) close();
         }}
       />
       {query && (

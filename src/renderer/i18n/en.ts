@@ -115,6 +115,8 @@ export const en: MessagesShape<typeof zhCN> = {
     empty: 'No workspaces',
     pickToStart: 'Select a workspace to start',
     moreActions: 'More actions for {name}',
+    expandSessions: 'Expand sessions for {name}',
+    collapseSessions: 'Collapse sessions for {name}',
     removeFromList: 'Remove from list',
     loadFailed: 'Failed to load workspaces',
     addFailed: "Couldn't add folder",

@@ -1,6 +1,6 @@
 import type { SessionSummary } from '@shared/types/chat';
 import { Archive, ArchiveRestore, ChevronRight, Trash2 } from 'lucide-react';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,6 @@ import { useNow } from '@/hooks/useNow';
 import { useT } from '@/i18n/I18nProvider';
 import { SessionSearchButton, SessionSearchInput, useFilteredSessions } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
-import { filesStoreFor } from '@/stores/files';
 import {
   isBusy,
   selectArchivedSessionsOf,
@@ -39,7 +38,12 @@ type Row = { kind: 'session'; session: SessionSummary } | { kind: 'archived'; co
  */
 export function SessionList({ workspaceId }: { workspaceId: string }) {
   const all = useSessionsStore(selectSessionsOf(workspaceId));
-  const sessions = useFilteredSessions(all);
+  const sessions = useFilteredSessions(workspaceId, all);
+  const loadSessions = useSessionsStore((state) => state.loadSessions);
+  // 展开其他工作区只加载列表，不切换正在查看的会话
+  useEffect(() => {
+    void loadSessions(workspaceId);
+  }, [workspaceId, loadSessions]);
   const error = useSessionsStore(selectListErrorOf(workspaceId));
   const archived = useSessionsStore(selectArchivedSessionsOf(workspaceId));
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -63,8 +67,8 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
       <div className="flex h-7 items-center justify-between pr-1 pl-2">
         <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
         <span className="flex items-center">
-          <SessionSearchButton />
-          <NewSessionButton compact />
+          <SessionSearchButton workspaceId={workspaceId} />
+          <NewSessionButton workspaceId={workspaceId} compact />
         </span>
       </div>
       <SessionSearchInput workspaceId={workspaceId} />
@@ -123,7 +127,9 @@ function ArchivedToggle({
 }
 
 const SessionRow = memo(function SessionRow({ session }: { session: SessionSummary }) {
-  const active = useSessionsStore((state) => state.activeSessionId === session.id);
+  const active = useSessionsStore(
+    (state) => state.workspaceId === session.workspaceId && state.activeSessionId === session.id
+  );
   const status = useSessionsStore(selectStatusOf(session.id));
   const select = useSessionsStore((state) => state.selectSession);
   const archive = useSessionsStore((state) => state.archiveSession);
@@ -143,10 +149,7 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
         <button
           type="button"
           aria-current={active ? 'true' : undefined}
-          onClick={() => {
-            filesStoreFor(session.workspaceId, window.fynvra.files).getState().showChat();
-            void select(session.id);
-          }}
+          onClick={() => void select(session.id, session.workspaceId)}
           className={cn(
             'flex w-full items-center gap-2 rounded-md py-1.5 pr-16 pl-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
             active && 'bg-sidebar-accent text-sidebar-accent-foreground'

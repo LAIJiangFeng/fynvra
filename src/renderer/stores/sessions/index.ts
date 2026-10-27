@@ -1,5 +1,5 @@
-import { useSettingsViewStore } from '@/components/settings/settingsViewStore';
-import { getSessionsApi } from '@/lib/api/sessions';
+import { useSettingsViewStore } from '../../components/settings/settingsViewStore';
+import { getSessionsApi } from '../../lib/api/sessions';
 import { filesStoreFor } from '../files';
 import { useWorkspacesStore } from '../workspaces';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
@@ -12,18 +12,30 @@ export * from './selectors';
 const api = getSessionsApi({ mock: import.meta.env.RENDERER_VITE_SESSIONS_MOCK === '1' });
 
 /** 会话列表、选中、草稿与正文投影；Main 的推送经 reducer 归并。按字段订阅。 */
-export const useSessionsStore = createSessionsStore(api);
+export const useSessionsStore = createSessionsStore(api, {
+  onSelectSession(workspaceId) {
+    useWorkspacesStore.getState().select(workspaceId);
+    filesStoreFor(workspaceId, window.fynvra.files).getState().showChat();
+  },
+});
 
 connectSessionsStore(useSessionsStore, api);
 
+/** 同步读取最新选择，不让延后的 React effect 用旧工作区覆盖刚点的会话。 */
+export function connectSessionsWorkspace(): () => void {
+  const sync = () => {
+    useSessionsStore.getState().setWorkspace(useWorkspacesStore.getState().selectedId);
+  };
+  const unsubscribe = useWorkspacesStore.subscribe(sync);
+  sync();
+  return unsubscribe;
+}
+
 // --- notifications ---
-// 点了桌面通知：切到会话所在的工作区再选中它（先切会话 store：侧栏随后同步到同一个工作区，不会清掉选中）
+// 点了桌面通知：通过与侧栏相同的选择入口同步会话、工作区及文件视图
 window.fynvra.notifications.onFocusSession(({ workspaceId, sessionId }) => {
-  useSessionsStore.getState().setWorkspace(workspaceId);
-  useWorkspacesStore.getState().select(workspaceId);
   useSettingsViewStore.getState().close();
-  filesStoreFor(workspaceId, window.fynvra.files).getState().showChat();
-  void useSessionsStore.getState().selectSession(sessionId);
+  void useSessionsStore.getState().selectSession(sessionId, workspaceId);
 });
 
 // 屏幕上正看着的会话报给 Main（设置视图盖住时为 null）：窗口聚焦时不弹它的通知。

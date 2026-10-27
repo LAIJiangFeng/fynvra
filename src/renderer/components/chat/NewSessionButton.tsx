@@ -20,6 +20,7 @@ import { useActionHandler } from '@/lib/keybindings';
 import { useRolesStore } from '@/stores/roles';
 import { selectModelProviders, useSessionsStore } from '@/stores/sessions';
 import { chooseModel, defaultModelChoice, findModel } from '@/stores/sessions/modelChoice';
+import { useWorkspacesStore } from '@/stores/workspaces';
 import { ModelSelect, ThinkingLevelPicker, ThinkingSourceBadge } from './ModelPicker';
 import { pickRole } from './roleChoices';
 import { isOrchestratorRole, roleDescription, useRoles } from './roles';
@@ -31,9 +32,11 @@ import { isOrchestratorRole, roleDescription, useRoles } from './roles';
  */
 export function NewSessionButton({
   compact = false,
+  workspaceId: groupWorkspaceId,
   children,
 }: {
   compact?: boolean;
+  workspaceId?: string;
   children?: (open: () => void) => ReactNode;
 }) {
   const id = useId();
@@ -46,8 +49,10 @@ export function NewSessionButton({
   const providers = useSessionsStore(selectModelProviders);
   const optionsLoaded = useSessionsStore((state) => state.modelProviders !== null);
   const optionsError = useSessionsStore((state) => state.modelOptionsError);
+  const selectedWorkspaceId = useWorkspacesStore((state) => state.selectedId);
+  const workspaceId = groupWorkspaceId ?? selectedWorkspaceId;
   const lastUsed = useSessionsStore((state) =>
-    state.workspaceId ? state.lastModelByWorkspace[state.workspaceId] : undefined
+    workspaceId ? state.lastModelByWorkspace[workspaceId] : undefined
   );
   const [open, setOpen] = useState(false);
   const [roleId, setRoleId] = useState<string>(ORCHESTRATOR_ROLE_ID);
@@ -57,18 +62,22 @@ export function NewSessionButton({
   const [error, setError] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const t = useT();
-  // 「新建会话」快捷键：侧栏的小按钮负责（会话区的大按钮可能同时在），走与点击相同的打开流程
-  useActionHandler('new-session', () => trigger.current?.click(), compact);
+  // 只有当前工作区的小按钮登记全局快捷键，其他展开的分组只响应点击
+  useActionHandler(
+    'new-session',
+    () => trigger.current?.click(),
+    compact && workspaceId !== null && workspaceId === selectedWorkspaceId
+  );
 
   const selected = pickRole(roles, roleId);
   const model = picked ?? defaultModelChoice({ providers, roleModel: selected?.model, lastUsed });
   const found = findModel(providers, model);
 
   const submit = async () => {
-    if (!selected) return;
+    if (!selected || !workspaceId) return;
     setCreating(true);
     setError(null);
-    const result = await createSession(selected.id, model);
+    const result = await createSession(selected.id, model, workspaceId);
     setCreating(false);
     if (result.ok) setOpen(false);
     else setError(result.error);
@@ -81,7 +90,7 @@ export function NewSessionButton({
     setRoleId(ORCHESTRATOR_ROLE_ID);
     setPicked(null);
     void refreshRoles();
-    void loadModelOptions();
+    void loadModelOptions(workspaceId);
   };
 
   return (
