@@ -1,7 +1,9 @@
 import type { WorkspaceFileEntry } from '@shared/types/files';
-import { FileCode2, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { FileCode2, GitCompareArrows, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
+import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react';
 import { NewSessionButton } from '@/components/chat/NewSessionButton';
+import { DiffTabPane } from '@/components/orchestration/DiffTabPane';
+import { STATUS_MARK } from '@/components/orchestration/diffView';
 import { TerminalPane } from '@/components/terminal/TerminalPane';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,7 +22,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
+import { bindDiffTabSelection, type DiffTab, diffTabsStoreFor } from '@/stores/diffTabs';
 import { filesStoreFor, isFileDirty } from '@/stores/files';
+import { useOrchestrationStore } from '@/stores/orchestration';
 import { useSessionsStore } from '@/stores/sessions';
 import { useTerminalsStore } from '@/stores/terminals';
 import { FilePane } from './FilePane';
@@ -37,6 +41,9 @@ export function FileWorkspace({
   const opened = store((state) => state.opened);
   const selectedId = store((state) => state.selectedId);
   const previews = store((state) => state.previews);
+  const diffStore = diffTabsStoreFor(workspaceId);
+  const diffTabs = diffStore((state) => state.opened);
+  const diffId = diffStore((state) => state.selectedId);
   const allTerminals = useTerminalsStore((state) => state.tabs);
   const terminals = allTerminals.filter((tab) => tab.workspaceId === workspaceId);
   const terminalId = useTerminalsStore((state) => state.selected[workspaceId] ?? null);
@@ -55,14 +62,12 @@ export function FileWorkspace({
   const t = useT();
 
   useEffect(() => {
-    if (selectedId) selectedTab.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [selectedId]);
+    if (selectedId || diffId || terminalId)
+      selectedTab.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selectedId, diffId, terminalId]);
 
   useEffect(
-    () =>
-      store.subscribe((state) => {
-        if (state.selectedId) useTerminalsStore.getState().select(workspaceId, null);
-      }),
+    () => bindDiffTabSelection(workspaceId, store, useTerminalsStore),
     [store, workspaceId]
   );
 
@@ -100,11 +105,14 @@ export function FileWorkspace({
       <nav aria-label={t('files.opened')} className="flex h-10 shrink-0 border-b bg-sidebar/60">
         <button
           type="button"
-          aria-pressed={selectedId === null && !terminalId}
+          aria-pressed={selectedId === null && !terminalId && !diffId}
           onClick={showChat}
           className={cn(
             'flex shrink-0 items-center gap-2 border-r border-t-2 border-t-transparent px-4 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-            selectedId === null && !terminalId && 'border-t-primary bg-background font-medium'
+            selectedId === null &&
+              !terminalId &&
+              !diffId &&
+              'border-t-primary bg-background font-medium'
           )}
         >
           <MessageSquare className="size-3.5" />
@@ -147,9 +155,20 @@ export function FileWorkspace({
               </Button>
             </div>
           ))}
+          {diffTabs.map((tab) => (
+            <DiffWorkspaceTab
+              key={tab.id}
+              tab={tab}
+              active={tab.id === diffId}
+              tabRef={tab.id === diffId ? selectedTab : undefined}
+              onSelect={() => diffStore.getState().select(tab.id)}
+              onClose={() => diffStore.getState().close(tab.id)}
+            />
+          ))}
           {terminals.map((tab) => (
             <div
               key={tab.id}
+              ref={tab.id === terminalId ? selectedTab : undefined}
               className={cn(
                 'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
                 tab.id === terminalId && 'border-t-primary bg-background text-foreground'
@@ -223,7 +242,7 @@ export function FileWorkspace({
       <div
         className={cn(
           'min-h-0 flex-1 flex-col',
-          selectedId === null && !terminalId ? 'flex' : 'hidden'
+          selectedId === null && !terminalId && !diffId ? 'flex' : 'hidden'
         )}
       >
         {children}
@@ -242,6 +261,14 @@ export function FileWorkspace({
             active={selectedId === file.id}
             onReload={() => requestReload(file)}
           />
+        </div>
+      ))}
+      {diffTabs.map((tab) => (
+        <div
+          key={tab.id}
+          className={cn('min-h-0 min-w-0 flex-1 flex-col', diffId === tab.id ? 'flex' : 'hidden')}
+        >
+          <DiffTabPane tab={tab} />
         </div>
       ))}
       {terminals.map((tab) => (
@@ -334,5 +361,71 @@ export function FileWorkspace({
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+function DiffWorkspaceTab({
+  tab,
+  active,
+  tabRef,
+  onSelect,
+  onClose,
+}: {
+  tab: DiffTab;
+  active: boolean;
+  tabRef?: Ref<HTMLDivElement>;
+  onSelect: () => void;
+  onClose: () => void;
+}) {
+  const entry = useOrchestrationStore((state) => state.diffs[tab.dispatchId]);
+  const dispatchBranch = useOrchestrationStore(
+    (state) =>
+      state.snapshots[tab.workspaceId]?.view?.dispatches.find(
+        (dispatch) => dispatch.id === tab.dispatchId
+      )?.branch
+  );
+  const branch = entry?.status === 'ready' ? entry.data.branch : dispatchBranch;
+  const name = tab.path.slice(tab.path.lastIndexOf('/') + 1);
+  const path = tab.oldPath ? `${tab.oldPath} → ${tab.path}` : tab.path;
+  const mark = STATUS_MARK[tab.status];
+  const t = useT();
+  const section = t(
+    tab.section === 'committed'
+      ? 'orchestration.committedChanges'
+      : 'orchestration.uncommittedChanges'
+  );
+
+  return (
+    <div
+      ref={tabRef}
+      className={cn(
+        'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
+        active && 'border-t-primary bg-background text-foreground'
+      )}
+    >
+      <button
+        type="button"
+        title={[path, branch, section].filter(Boolean).join('\n')}
+        aria-pressed={active}
+        className="flex h-full max-w-52 items-center gap-2 pr-1 pl-3 text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={onSelect}
+      >
+        <GitCompareArrows className="size-3.5 shrink-0" />
+        <span className="truncate">{name}</span>
+        <span className={cn('shrink-0 font-mono font-semibold', mark.className)}>
+          <span aria-hidden>{mark.letter}</span>
+          <span className="sr-only">{t(`orchestration.fileStatus.${tab.status}`)}</span>
+        </span>
+      </button>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="mx-1 size-6"
+        aria-label={t('orchestration.closeDiff', { name })}
+        onClick={onClose}
+      >
+        <X className="size-3" />
+      </Button>
+    </div>
   );
 }
