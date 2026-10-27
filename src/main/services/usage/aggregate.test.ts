@@ -11,19 +11,21 @@ function line(
     cacheWrite: 5,
     totalTokens: 999,
     cost: { total: 0.025 },
-  }
+  },
+  model = { provider: 'provider-a', model: 'model-a' }
 ) {
   return JSON.stringify({
     type: 'message',
     timestamp: new Date(timestamp).toISOString(),
-    message: { role, timestamp, usage },
+    message: { role, timestamp, usage, ...model },
   });
 }
 
+let nextSession = 0;
 function file(...lines: string[]) {
   const accumulator = createFileAccumulator();
   for (const value of lines) accumulator.add(value);
-  return accumulator.finish();
+  return { ...accumulator.finish(), sessionId: `session-${nextSession++}` };
 }
 
 const at = (day: number, hour = 12, minute = 0) => new Date(2026, 3, day, hour, minute).getTime();
@@ -51,9 +53,6 @@ describe('usage aggregation', () => {
     const summary = aggregateUsage([first, second], 'today', at(3, 18));
     expect(summary.current.totals).toEqual({
       cost: 0.07500000000000001,
-      inputTokens: 300,
-      outputTokens: 60,
-      cacheTokens: 105,
       totalTokens: 465,
       activeMs: 10 * 60_000,
       sessions: 2,
@@ -65,9 +64,9 @@ describe('usage aggregation', () => {
       totalTokens: 465,
       sessions: 2,
     });
-    expect(summary.current.heatmap[5][9]).toBe(5);
-    expect(summary.current.heatmap[5][14]).toBe(1);
-    expect(summary.current.heatmap.flat().reduce((a, b) => a + b, 0)).toBe(6);
+    expect(summary.hourly[9]).toBe(5);
+    expect(summary.hourly[14]).toBe(1);
+    expect(summary.hourly.reduce((a, b) => a + b, 0)).toBe(6);
   });
 
   it('uses local dates and entry timestamp fallback; validates numeric usage independently', () => {
@@ -82,8 +81,8 @@ describe('usage aggregation', () => {
     });
     expect(parseUsageLine(raw)).toMatchObject({
       inputTokens: 0,
-      outputTokens: 0,
-      cacheTokens: 4,
+      cacheRead: 4,
+      totalTokens: 4,
       cost: 0,
     });
     expect(
@@ -94,7 +93,7 @@ describe('usage aggregation', () => {
       messages: 1,
       totalTokens: 4,
     });
-    expect(summary.current.heatmap[3][0]).toBe(1);
+    expect(summary.hourly[0]).toBe(1);
   });
 
   it('compares contiguous equal calendar periods, counts each session once and fills empty days', () => {
@@ -143,12 +142,109 @@ describe('usage aggregation', () => {
         range === 'today' ? 1 : Number.parseInt(range, 10)
       );
       expect(Object.values(summary.current.totals).every((value) => value === 0)).toBe(true);
-      expect(summary.current.heatmap).toHaveLength(7);
-      expect(
-        summary.current.heatmap.every((row) => row.length === 24 && row.every((cell) => cell === 0))
-      ).toBe(true);
+      expect(summary.hourly).toEqual(Array(24).fill(0));
+      expect(summary.cacheHitRate).toBeNull();
+      expect(summary.byRole).toEqual([]);
+      expect(summary.byModel).toEqual([]);
+      expect(summary.byWorkspace).toEqual([]);
     }
   );
+
+  it('joins current registry roles and workspace names, including custom and deleted sessions', () => {
+    const files = [
+      { ...file(line(at(2)), line(at(3))), sessionId: 'coord' },
+      { ...file(line(at(3))), sessionId: 'worker' },
+      { ...file(line(at(3))), sessionId: 'custom' },
+      { ...file(line(at(3))), sessionId: 'deleted' },
+      { ...file(line(at(-30))), sessionId: 'outside' },
+    ];
+    const context = {
+      sessions: [
+        { id: 'coord', roleId: 'orchestrator', workspaceId: 'app' },
+        { id: 'worker', roleId: 'worker', workspaceId: 'app' },
+        { id: 'custom', roleId: 'reviewer', workspaceId: 'docs' },
+      ],
+      workspaces: [
+        { id: 'app', name: 'App' },
+        { id: 'docs', name: 'Docs' },
+      ],
+      snapshots: [],
+    };
+    const summary = aggregateUsage(files, '7d', at(3), context);
+    expect(summary.byRole).toEqual([
+      { roleId: 'orchestrator', sessions: 1, totalTokens: 310, cost: 0.05 },
+      { roleId: 'worker', sessions: 1, totalTokens: 155, cost: 0.025 },
+      { roleId: 'reviewer', sessions: 1, totalTokens: 155, cost: 0.025 },
+      { roleId: null, sessions: 1, totalTokens: 155, cost: 0.025 },
+    ]);
+    expect(summary.byWorkspace).toEqual([
+      { workspaceId: 'app', name: 'App', totalTokens: 465, cost: 0.07500000000000001 },
+      { workspaceId: 'docs', name: 'Docs', totalTokens: 155, cost: 0.025 },
+      { workspaceId: null, name: null, totalTokens: 155, cost: 0.025 },
+    ]);
+    context.sessions[0].roleId = 'reviewer';
+    context.workspaces[0].name = 'Renamed';
+    const updated = aggregateUsage(files, '7d', at(3), context);
+    expect(updated.byRole[0]).toMatchObject({ roleId: 'reviewer', sessions: 2, totalTokens: 465 });
+    expect(updated.byWorkspace[0].name).toBe('Renamed');
+  });
+
+  it('ranks actual assistant models by tokens then cost, separates providers and filters dates', () => {
+    const usage = (input: number, cost: number) => ({ input, cost: { total: cost } });
+    const summary = aggregateUsage(
+      [
+        file(
+          line(at(3), 'assistant', usage(100, 1)),
+          line(at(3), 'assistant', usage(100, 1)),
+          line(at(3), 'assistant', usage(300, 2), { provider: 'provider-a', model: 'model-b' }),
+          line(at(3), 'assistant', usage(300, 3), { provider: 'provider-b', model: 'model-b' }),
+          line(at(2), 'assistant', usage(9000, 9)),
+          line(at(3), 'user', usage(9000, 9)),
+          line(at(3), 'assistant', usage(200, 0), { provider: '', model: '' })
+        ),
+      ],
+      'today',
+      at(3)
+    );
+    expect(summary.byModel).toEqual([
+      { provider: 'provider-b', model: 'model-b', totalTokens: 300, cost: 3, share: 0.3 },
+      { provider: 'provider-a', model: 'model-b', totalTokens: 300, cost: 2, share: 0.3 },
+      { provider: 'provider-a', model: 'model-a', totalTokens: 200, cost: 2, share: 0.2 },
+      { provider: null, model: null, totalTokens: 200, cost: 0, share: 0.2 },
+    ]);
+  });
+
+  it('weights cache reads across files and excludes writes/output, prior dates and tool messages', () => {
+    const summary = aggregateUsage(
+      [
+        file(
+          line(at(3), 'assistant', { input: 100, cacheRead: 300, cacheWrite: 900, output: 500 })
+        ),
+        file(line(at(3), 'assistant', { input: 100, cacheRead: 100 }), line(at(2))),
+      ],
+      'today',
+      at(3)
+    );
+    expect(summary.cacheHitRate).toBeCloseTo(400 / 600);
+    expect(aggregateUsage([file(line(at(3), 'user'))], 'today', at(3)).cacheHitRate).toBeNull();
+    expect(
+      aggregateUsage([file(line(at(3), 'assistant', { input: 100 }))], 'today', at(3)).cacheHitRate
+    ).toBe(0);
+  });
+
+  it('combines local hours across days and files without including earlier periods', () => {
+    const summary = aggregateUsage(
+      [
+        file(line(at(3, 9)), line(at(2, 9)), line(at(3, 23), 'user'), line(at(-10, 9))),
+        file(line(at(1, 9)), line(at(3, 9), 'toolResult')),
+      ],
+      '7d',
+      at(3)
+    );
+    expect(summary.hourly[9]).toBe(3);
+    expect(summary.hourly[23]).toBe(1);
+    expect(summary.hourly.reduce((a, b) => a + b, 0)).toBe(4);
+  });
 
   it('keeps local calendar boundaries over daylight saving transitions', () => {
     vi.stubEnv('TZ', 'America/New_York');

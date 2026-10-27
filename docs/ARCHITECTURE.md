@@ -253,10 +253,12 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.6 本机用量统计
 
-- `usage:summary` 只接收 `{ range: 'today' | '7d' | '30d' | '90d' }`，返回当前及前一等长日历周期的总计、每日序列和周日到周六 × 24 小时消息热力图；范围含今天，日界线按本地时间计算。
-- Main 的 `services/usage` 只读流式扫描 `userData/agent/sessions/*.jsonl`（含归档及已从列表删除的会话），跳过坏行和不可读文件，以路径、mtime、size 缓存每文件聚合；不读取正文到 Renderer，不写回 transcript。
-- Token 总量为 input + output + cacheRead + cacheWrite，费用累计 pi 记录的 cost.total；消息仅计 user / assistant。活跃时长累加同一周期内每会话相邻消息不超过 5 分钟的间隔。
-- 改动层限于 shared 用量类型/通道、Main 服务/handler、preload typed 出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
+- `usage:summary` 只接收 `{ range: 'today' | '7d' | '30d' | '90d' }`，返回当前及前一等长日历周期的总计、每日序列，以及当前周期的角色 / 模型 / 工作区分组、缓存命中率、24 小时消息分布和编排统计；范围含今天，日界线按本地时间计算。
+- Main 的 `services/usage` 只读流式扫描 `userData/agent/sessions/*.jsonl`（含归档及已从列表删除的会话），跳过坏行和不可读文件，以路径、mtime、size 缓存每文件每日 / 模型 / 小时聚合；按文件名的 sessionId 在汇总时关联实时 session registry，未知 / 已删除会话保留在独立分组，工作区只返回名称。模型取 assistant 消息上的 provider/model，按 Token 再按费用排名；不向 Renderer 返回路径、正文或密钥，不写回 transcript。
+- Token 总量为 input + output + cacheRead + cacheWrite，费用累计 pi 记录的 cost.total；缓存命中率为 cacheRead / (input + cacheRead)，无输入时为空。消息仅计 user / assistant；活跃时长累加同一周期内每会话相邻消息不超过 5 分钟的间隔。
+- 编排展示「本期派发任务的当前结果」：按首次 dispatch.startedAt 归组，统计当前 completed / abandoned / failed 状态；快照无合并 / 放弃时间，不将 settledAt 伪装成合并时间。一次验收通过率和平均尝试数只计该组已合并任务；打回次数为本期开始的非首次 dispatch（含旧任务）。每个合并任务的 Worker 费用取该组已合并任务经 dispatchId 关联的会话全量费用（含跨期和重试，同一会话只计一次），关联或 transcript 缺失则省略，无已合并任务时省略比率。
+- 用量 IPC 注入 session / workspace / orchestration getters；编排 registry 的 readSnapshot 读取已打开服务的当前快照，或只读解析持久化 JSON，绝不因用量查询打开服务、修复或重命名文件。页面为响应式双栏总览、SVG 趋势、角色 / 缓存卡片和排名，活动仅为紧凑小时条。
+- 改动层限于 shared 用量类型、Main 服务 / handler 与两个只读访问出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
 
 ## 8. 分阶段
 

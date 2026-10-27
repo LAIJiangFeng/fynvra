@@ -67,7 +67,7 @@ export function getAgentHost(): AgentHostService {
 }
 
 /** 会话注册表 sessions.json：agent host 与归档共用同一份 */
-function getSessionStore(): SessionStore {
+export function getSessionStore(): SessionStore {
   sessionStore ??= createSessionStore({
     filePath: join(app.getPath('userData'), 'sessions.json'),
   });

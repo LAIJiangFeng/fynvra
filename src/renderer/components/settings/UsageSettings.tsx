@@ -1,9 +1,4 @@
-import {
-  USAGE_RANGES,
-  type UsageRange,
-  type UsageSummary,
-  type UsageTotals,
-} from '@shared/types/usage';
+import { USAGE_RANGES, type UsageRange, type UsageSummary } from '@shared/types/usage';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,20 +6,69 @@ import { useT } from '@/i18n/I18nProvider';
 import { getUsageApi } from '@/lib/api/usage';
 import { cn } from '@/lib/utils';
 import { InlineMessage } from './common';
+import { UsageActivityStrip } from './UsageActivityStrip';
+import {
+  UsageCache,
+  UsageModels,
+  UsageOrchestrationCard,
+  UsageRoles,
+  UsageWorkspaces,
+} from './UsageBreakdowns';
 import { UsageDailyChart } from './UsageDailyChart';
-import { UsageHeatmap } from './UsageHeatmap';
 import { formatChange, formatCompact, formatCost, formatDuration } from './usageFormat';
 
-const METRICS: { key: keyof UsageTotals; format: (value: number) => string }[] = [
-  { key: 'cost', format: formatCost },
-  { key: 'totalTokens', format: formatCompact },
-  { key: 'inputTokens', format: formatCompact },
-  { key: 'outputTokens', format: formatCompact },
-  { key: 'cacheTokens', format: formatCompact },
-  { key: 'activeMs', format: formatDuration },
-  { key: 'sessions', format: formatCompact },
-  { key: 'messages', format: formatCompact },
-];
+function UsageHero({ summary }: { summary: UsageSummary }) {
+  const t = useT();
+  const { current, previous } = summary;
+  return (
+    <section className="min-w-0 rounded-xl border bg-card p-5">
+      <p className="text-muted-foreground text-xs">{t('settings.usage.overview')}</p>
+      <div className="mt-4 flex flex-wrap gap-x-10 gap-y-5">
+        {(['cost', 'totalTokens'] as const).map((key) => {
+          const format = key === 'cost' ? formatCost : formatCompact;
+          return (
+            <div key={key}>
+              <p className="text-muted-foreground text-xs">{t(`settings.usage.${key}`)}</p>
+              <p
+                className={cn(
+                  'mt-1 font-semibold text-4xl tabular-nums tracking-tight',
+                  key === 'cost' && 'text-emerald-600 dark:text-emerald-400'
+                )}
+                title={String(current.totals[key])}
+              >
+                {format(current.totals[key])}
+              </p>
+              <p
+                className="mt-2 text-[11px] text-muted-foreground"
+                title={t('settings.usage.previousValue', { value: format(previous.totals[key]) })}
+              >
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatChange(current.totals[key], previous.totals[key])}
+                </span>{' '}
+                {t('settings.usage.vsPrevious')}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      <dl className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t pt-4 text-xs">
+        {(['activeMs', 'sessions', 'messages'] as const).map((key) => (
+          <div key={key} className="flex gap-2">
+            <dt className="text-muted-foreground">{t(`settings.usage.${key}`)}</dt>
+            <dd className="tabular-nums">
+              {key === 'activeMs'
+                ? formatDuration(current.totals[key])
+                : formatCompact(current.totals[key])}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {current.totals.messages === 0 && (
+        <p className="mt-3 text-muted-foreground text-xs">{t('settings.usage.empty')}</p>
+      )}
+    </section>
+  );
+}
 
 export function UsageSettings() {
   const t = useT();
@@ -58,7 +102,7 @@ export function UsageSettings() {
 
   const visible = summary?.range === range ? summary : null;
   return (
-    <div className="grid gap-5" aria-busy={loading}>
+    <div className="@container grid gap-5" aria-busy={loading}>
       <div className="flex items-start justify-between gap-4">
         <p className="max-w-xl text-muted-foreground text-sm leading-relaxed">
           {t('settings.usage.subtitle')}
@@ -99,40 +143,25 @@ export function UsageSettings() {
       )}
       {visible && (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {METRICS.map(({ key, format }) => {
-              const current = visible.current.totals[key];
-              const previous = visible.previous.totals[key];
-              return (
-                <div key={key} className="min-w-0 rounded-xl border bg-card p-4">
-                  <p className="text-muted-foreground text-xs">{t(`settings.usage.${key}`)}</p>
-                  <p
-                    className={cn(
-                      'mt-2 font-semibold text-2xl tabular-nums tracking-tight',
-                      key === 'cost' && 'text-emerald-600 dark:text-emerald-400'
-                    )}
-                    title={String(current)}
-                  >
-                    {format(current)}
-                  </p>
-                  <p
-                    className="mt-2 text-[11px] text-muted-foreground"
-                    title={t('settings.usage.previousValue', { value: format(previous) })}
-                  >
-                    <span className="font-medium text-foreground tabular-nums">
-                      {formatChange(current, previous)}
-                    </span>{' '}
-                    {t('settings.usage.vsPrevious')}
-                  </p>
-                </div>
-              );
-            })}
+          <div className="grid items-start gap-4 @min-[48rem]:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+            <div className="grid min-w-0 gap-4">
+              <UsageHero summary={visible} />
+              <UsageDailyChart
+                days={visible.current.daily}
+                today={visible.current.daily.at(-1)?.date ?? ''}
+              />
+            </div>
+            <div className="grid min-w-0 gap-4">
+              <UsageRoles roles={visible.byRole} />
+              <UsageCache rate={visible.cacheHitRate} />
+            </div>
           </div>
-          {visible.current.totals.messages === 0 && (
-            <p className="text-muted-foreground text-sm">{t('settings.usage.empty')}</p>
-          )}
-          <UsageDailyChart days={visible.current.daily} />
-          <UsageHeatmap cells={visible.current.heatmap} />
+          <UsageActivityStrip hourly={visible.hourly} />
+          <div className="grid items-start gap-4 @min-[48rem]:grid-cols-2">
+            <UsageModels models={visible.byModel} />
+            <UsageOrchestrationCard stats={visible.orchestration} />
+            <UsageWorkspaces workspaces={visible.byWorkspace} />
+          </div>
         </>
       )}
     </div>
