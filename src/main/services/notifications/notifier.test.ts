@@ -71,7 +71,7 @@ function setup(prefs: Partial<NotificationPreferences> = {}) {
       kind: 'command',
       title: 'bash',
       detail,
-      expiresAt: 0,
+      expiresAt: Date.now() + 60_000,
     } satisfies ApprovalRequest);
   const message = (patch: Partial<Message>) =>
     notifier.message({
@@ -121,30 +121,44 @@ describe('createNotifier', () => {
     ]);
   });
 
-  it('启动后 5 秒内的事件不弹（窗口过后也不补）', () => {
+  it('启动后 5 秒内普通事件不弹也不补；实时审批立即弹出', () => {
     const env = setup();
     env.turn(MAIN, '恢复时补发的');
     vi.advanceTimersByTime(STARTUP_QUIET_MS - 1);
     env.approval(MAIN, 'ls');
+    expect(env.shown.map((notification) => notification.body)).toEqual(['bash：ls']);
     vi.advanceTimersByTime(COALESCE_MS * 2);
-    expect(env.shown).toEqual([]);
+    expect(env.shown.map((notification) => notification.body)).toEqual(['bash：ls']);
     env.turn(MAIN, '启动之后的');
     env.flush();
-    expect(env.shown.map((notification) => notification.body)).toEqual(['启动之后的']);
+    expect(env.shown.map((notification) => notification.body)).toEqual(['bash：ls', '启动之后的']);
   });
 
-  it('同一会话 2 秒内多条合并为最后一条；不同会话各弹各的', () => {
+  it('审批逐条即时弹出；普通通知仍按会话合并为最后一条，不同会话各弹各的', () => {
     const env = setup();
     env.pastStartup();
     env.approval(MAIN, 'git status');
+    expect(env.shown.map((notification) => notification.body)).toEqual(['bash：git status']);
+    env.turn(MAIN, '先完成的');
     vi.advanceTimersByTime(1_000);
     env.approval(MAIN, 'git push');
+    expect(env.shown.map((notification) => notification.body)).toEqual([
+      'bash：git status',
+      'bash：git push',
+    ]);
+    env.turn(MAIN, '后完成的');
     env.turn(OTHER, '文档写好了');
     vi.advanceTimersByTime(1_000);
-    expect(env.shown.map((notification) => notification.body)).toEqual(['bash：git push']);
+    expect(env.shown.map((notification) => notification.body)).toEqual([
+      'bash：git status',
+      'bash：git push',
+      '后完成的',
+    ]);
     vi.advanceTimersByTime(1_000);
     expect(env.shown.map((notification) => notification.body)).toEqual([
+      'bash：git status',
       'bash：git push',
+      '后完成的',
       '文档写好了',
     ]);
   });
