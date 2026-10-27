@@ -5,7 +5,7 @@ import { translate } from '../../i18n';
 
 /**
  * 桌面通知的规则（纯函数，Task 24）：哪些事件弹、受哪个开关管、标题与正文怎么写、什么时候按聚焦抑制。
- * 弹不弹由 notifier 在合并窗口前后各查一次，这里不碰 Electron。
+ * 弹不弹由 notifier 按设置判断；普通通知在合并窗口前后各查一次，实时审批立即检查。这里不碰 Electron。
  */
 
 /** 正文取前多少字 */
@@ -32,7 +32,7 @@ export type NotifiedSession = Pick<SessionSummary, 'id' | 'workspaceId' | 'title
 
 export interface NotificationCandidate {
   kind: NotificationKind;
-  /** 点击后切到的会话；合并与聚焦抑制都按它 */
+  /** 点击后切到的会话；普通通知的合并与聚焦抑制也按它 */
   sessionId: string;
   workspaceId: string;
   title: string;
@@ -63,9 +63,11 @@ export function allowedBy(preferences: NotificationPreferences, kind: Notificati
   }
 }
 
-/** 窗口聚焦且正看着这条通知的会话：用户已经看到了，不弹 */
+/** 普通通知在聚焦当前会话时不弹；审批需要用户操作，即使正看着也提醒一次。 */
 export function hiddenByView(candidate: NotificationCandidate, view: ViewState): boolean {
-  return view.focused && view.viewingSessionId === candidate.sessionId;
+  return (
+    candidate.kind !== 'approval' && view.focused && view.viewingSessionId === candidate.sessionId
+  );
 }
 
 /** 压成一行的纯文字，去掉常见的 Markdown 标记；超长时截成 `max` 字（含省略号），按字符计 */

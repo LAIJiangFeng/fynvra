@@ -7,8 +7,8 @@ import type {
   WorkspaceFileEntry,
 } from '@shared/types/files';
 import { create } from 'zustand';
-import { createMarkdownReferences, type MarkdownReferences } from '@/lib/markdownPreview';
 import type { FilesApi } from '../../preload/domains/files';
+import { createMarkdownReferences, type MarkdownReferences } from '../lib/markdownPreview';
 import { diffTabsStoreFor } from './diffTabs';
 
 export const ROOT_DIRECTORY_ID = 'root';
