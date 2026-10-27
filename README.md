@@ -1,149 +1,116 @@
-# Fynvra
+<h1 align="center">
+  <img src="resources/icon.png" alt="Fynvra" width="64" /><br />
+  Fynvra
+</h1>
 
-**[简体中文](README.zh-CN.md)** | English
+<p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
-Fynvra is an open-source local desktop AI coding workbench built with Electron, React, TypeScript, and the [pi](https://github.com/earendil-works/pi) SDK.
+<p align="center">
+  <strong>A local desktop AI coding workbench.</strong><br />
+  Coordinate agents, run tasks in parallel Git worktrees, and review and merge their changes in one workspace.
+</p>
 
-Run AI conversations, file editing, Markdown preview, and multi-agent collaboration in a single workspace. Roles, prompts, model providers, Skills, and MCP are all configurable per project instead of being hardcoded.
+<p align="center">
+  <a href="https://github.com/LAIJiangFeng/fynvra/releases"><strong>Download Fynvra</strong></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#documentation">Documentation</a>
+</p>
 
-## Features
+Fynvra brings AI conversations, code editing, terminals, and multi-agent collaboration to your desktop. Give the main agent a goal, follow the workers as they implement it, and keep the resulting changes visible through review and merge.
 
-- **Multi-agent collaboration**: the main agent splits tasks and dispatches them to isolated Git worktrees; review task status, messages, output, and changes in one place, then accept and merge.
-- **Editable roles**: custom roles are supported; built-in main agent and worker roles are just default templates — edit their prompts, models, tool policies, approval levels, Skills, and MCP, and restore defaults at any time.
-- **Model providers**: supports Anthropic Messages, OpenAI Responses, OpenAI Chat Completions, and Google Generative AI protocols, with configurable base URLs, models, and reasoning levels for compatible services.
-- **Local config import**: import model providers from Claude Code, Codex, and CC Switch; MCP supports additional local tool config sources, with preview and deduplication before importing.
-- **File browsing and editing**: open files from the directory tree on the right and view them in center tabs alongside conversations. Supports multi-file editing, Markdown edit / preview / split view, common image previews, plus unsaved-content and external-modification conflict protection.
-- **Workspaces and sessions**: manage Git repos or plain folders, keep session history, and inspect tool calls and approval requests.
-- **Desktop experience**: Chinese / English UI, themes, keyboard shortcuts, system notifications, and general settings.
-- **App updates**: release builds automatically check for and download new stable versions and notify when ready; restart happens only after you confirm installation, unsaved files are confirmed, and agents finish their work — running tasks are never forcibly interrupted.
+## Core capabilities
 
-By default the main agent coordinates and workers execute; actual tool permissions are constrained by role policies and the runtime together, and cannot be bypassed merely by editing prompts.
+### Parallel agents, separate worktrees
 
-## Platforms and Installation
+The main agent breaks a goal into tasks and dispatches workers into their own Git branches and worktrees. Track task status, messages, and live output together while continuing the conversation with the main agent.
 
-Once installers are published, download them from [GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases). If no Release is available yet, follow the steps below to run from source.
+### From review to merge
 
-| Platform | Installer | Status |
+Inspect worker diffs in the workspace. The main agent can review changes, run checks, send feedback for another pass, and merge accepted work into its branch. Completed task diffs remain available after worktree cleanup.
+
+### Roles you can shape
+
+Customize the built-in Orchestrator and Worker roles or create your own. Set prompts, models, reasoning levels, tool policies, and approvals; attach Skills, MCP servers, and instruction files to fit the task. By default, the main agent coordinates and workers implement.
+
+### Connect your model services
+
+Use services compatible with Anthropic Messages, OpenAI Responses, OpenAI Chat Completions, or Google Generative AI, with configurable endpoints and models. Import provider settings from local Claude Code, Codex, and CC Switch configs, or import MCP servers from supported local tools, with preview and deduplication.
+
+### Work alongside your agents
+
+Keep conversations, editable files, and integrated terminals in adjacent tabs. Browse project files, preview Markdown and images, and edit with unsaved-change and external-modification protection. Session history and local token and cost summaries help you follow the work over time.
+
+The desktop UI supports English and Chinese, themes, keyboard shortcuts, and system notifications.
+
+## Download and install
+
+Get available installers from **[GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases)** → **Assets**. If no installer is published yet, [run from source](#development).
+
+| Platform | Package | Update support |
 | --- | --- | --- |
-| Windows x64 | NSIS `.exe` | Packaging and auto-update wired up; local packaging and isolated update tests verified |
-| macOS Intel / Apple Silicon | Per-arch `.dmg` and `.zip` | Builds and installs manually without Apple credentials; signed and notarized builds enable auto-update |
-| Linux | Existing AppImage build config | Not yet included in automated release and update support |
+| Windows x64 | NSIS `.exe` installer | Automatic update checks and downloads |
+| macOS Intel / Apple Silicon | Per-architecture `.dmg` and `.zip` | Developer ID signed and notarized builds support auto-update; ad-hoc builds require manual updates |
+| Linux | AppImage build configuration only | Not included in automated releases or update support |
 
-When manually running the new Windows `.exe` installer, a setup wizard appears and lets you browse or type a target directory on the "Choose Install Location" page. After browsing to a parent directory, `Fynvra` is appended to the path automatically — selecting `D:\Software` shows `D:\Software\Fynvra`; choosing an existing `Fynvra` directory does not append it again. Auto-updates keep using the existing install directory; the selected directory only holds program files and does not move settings, sessions, or other user data. Older installers do not gain the new wizard behavior — download a newer installer that includes this change.
+On Windows, the installer lets you choose the application directory. On macOS, move Fynvra from the DMG to Applications before launching. Ad-hoc Mac builds may require an app-specific “Open Anyway” confirmation in System Settings → Privacy & Security; see the [installation and release details](docs/RELEASE.md).
 
-On first install on Mac, drag the app from the DMG into Applications before running. Packages built without Apple credentials use ad-hoc signing; macOS may warn that the developer cannot be verified or block launch. After confirming the source is trusted, use "Open Anyway" for this app under System Settings → Privacy & Security. Exact behavior depends on the macOS version and management policies; globally disabling system security checks is not required. These packages only support manual download and overwrite installs. See the [release docs](docs/RELEASE.md).
+Where auto-update is supported, new stable versions download in the background. Installation requires your confirmation and follows the app's unsaved-file and agent shutdown flow; downloading an update does not restart the app.
 
-## Running from Source
+## Quick start
 
-### Prerequisites
+Model access is supplied by you: configure a compatible service, API key, and available quota. Requests go to that service; running Fynvra locally does not make model calls offline.
 
-- Node.js **22.19.0 or later**; Node.js 22 recommended. The repo ships an `.nvmrc`.
-- pnpm **10.26.2**, matching the `packageManager` field in `package.json`.
-- Git; the multi-agent worktree flow requires a Git repository with existing commits and a configured Git user name and email.
-- On Windows, Git for Windows with Git Bash is recommended; if Bash cannot be found automatically, set its path in general settings.
+1. **Connect a model.** Open **Settings → Model Providers**, add your endpoint, API key, and models, or import an existing local configuration.
+2. **Set up your roles.** Start with the built-in roles, then configure the models, Skills, MCP servers, or instruction files you need in Settings.
+3. **Open a project.** Add a Git repository, create a session, and select the **Orchestrator** role and a model. Describe your goal and any constraints so the main agent can dispatch the work.
+4. **Follow and review the work.** Use the task and changes panels to inspect worker output and diffs. Send follow-ups to the main agent as it reviews, requests revisions, and merges completed tasks.
 
-If pnpm is not installed yet:
+The Git worktree flow needs Git, a repository with at least one commit, and a configured Git user name and email. Ordinary folders also support sessions and worker dispatch, but workers share the same directory without worktree isolation or Git merging; dispatch one worker at a time there.
+
+Model and MCP credentials are managed in Settings. No repository `.env` file is required to run the app.
+
+## Development
+
+Built with Electron, React, TypeScript, and the [pi SDK](https://github.com/earendil-works/pi).
+
+Requires **Node.js 22.19.0+** (Node.js 22 recommended), **pnpm 10.26.2**, and **Git**. On Windows, Git for Windows with Git Bash is recommended; agent and terminal shells can be selected in General settings.
 
 ```bash
 npm install --global pnpm@10.26.2
-```
-
-Start the dev build:
-
-```bash
 git clone https://github.com/LAIJiangFeng/fynvra.git
 cd fynvra
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-The first run needs network access to download dependencies and Electron. Service accounts, API keys, and quotas for model calls are provided by the user; a local desktop app does not mean model requests run offline.
-
-### First Run
-
-1. Open "Settings → Model Providers", add a base URL, API key, and models — or import from existing local configs.
-2. Configure capabilities under "Roles", "Skills", and "MCP"; external services you don't need can stay off.
-3. Add a repository or folder, then create a session and pick a role and model. Multi-agent task dispatch requires a Git workspace.
-4. Browse files, tasks, and changes on the right. Click a file to edit or preview it in a center file tab; conversations stay in their own tabs.
-
-Running the app does not require a `.env` in the repo. Manage model and MCP credentials through the settings UI.
-
-## Development and Verification
+Skip the global install if the required pnpm version is already available. Initial setup needs network access to download dependencies and Electron.
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm dev` | Start the Electron dev environment |
-| `pnpm typecheck` | Type-check Main, preload, Renderer, and workspace packages |
+| `pnpm typecheck` | Check app and workspace package types |
 | `pnpm lint` | Run Biome checks |
-| `pnpm test` | Run the full Vitest suite |
-| `pnpm test:watch` | Run tests in watch mode |
-| `pnpm build` | Build the app into `out/` without installers |
-| `pnpm preview` | Preview an existing build |
-| `pnpm test:updates` | Run isolated update tests on Windows / Mac; requires a build first |
-| `pnpm package:win` | Build the Windows x64 installer into `dist/`, no upload |
-| `pnpm package:mac` | Build the dual-arch manual-install packages on macOS without Apple credentials, no upload |
-| `pnpm package:mac:signed` | Build Developer ID signed and notarized packages on macOS; requires credentials, no upload |
+| `pnpm test` | Run the Vitest suite |
+| `pnpm build` | Build the app into `out/`, without installers |
 
-Before committing, run:
+For packaging, signing, update verification, and automated publishing, see the [release guide](docs/RELEASE.md). Read the [development conventions](AGENTS.md) before contributing.
 
-```bash
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
-```
+## Local data and permissions
 
-Update tests use temporary user data, a temporary cache, and a local HTTP server, and intercept the final install — no test installer is ever executed. They do not replace real-device upgrade acceptance for officially signed packages.
+Settings, roles, provider and MCP configs, and session history are stored in the local app data directory. **Credentials are currently stored in plaintext local config files, not an encrypted vault.** Saved API keys, MCP environment variables, and request headers are managed by the Main process and are not returned to the UI in plaintext. Keep app data and credential-bearing exports or logs out of Git and public uploads.
 
-## Automated Releases
+Agents and MCP tools can execute commands and contact external services. Configure tool policies and approval levels for your project; the runtime enforces these policies independently of role prompts.
 
-The [Release workflow](.github/workflows/release.yml) runs checks after every push to `main`, computes an incremented version, builds Windows and Mac packages, and publishes a single GitHub Release once all artifacts pass verification. Merged PRs trigger it too.
+## Documentation
 
-- Both direct pushes and merged PRs build and publish; the Release workflow can also be run manually from Actions. Downloads live in the Release page's Assets — not just source uploads.
-- Versions are written into build artifacts and tags; the release bot never commits version bumps back to the repo.
-- Without Apple credentials, Mac still produces and uploads manual-install packages and Windows auto-updates stay unblocked; with full credentials the workflow switches to signed and notarized mode automatically. Missing some credentials fails explicitly, and any build or verification failure prevents publishing an incomplete Release.
-- The client only consumes official Releases; dev builds never check for updates online. The first install must come manually from a version that includes update support.
+These guides are currently in Chinese:
 
-Signing secrets, packaging commands, artifact verification, and first-release steps are documented in [docs/RELEASE.md](docs/RELEASE.md).
+- [Product definition](docs/PRODUCT.md) — workflow, roles, and product scope.
+- [Architecture](docs/ARCHITECTURE.md) — process boundaries, persistence, and cross-layer contracts.
+- [Installation, updates, and releases](docs/RELEASE.md) — platform caveats and packaging details.
+- [Development conventions](AGENTS.md) — contribution scope and commit format.
 
-## Project Structure
+Package guides: [Core domain](packages/core/README.md) · [Agent runtime](packages/agent-runtime/README.md).
 
-```text
-src/
-  main/                  Electron main process, IPC, file and update services
-  preload/               Typed bridge for Renderer calls
-  renderer/              React UI, state, and i18n
-  shared/                Cross-process types and pure functions
-  agent/                 Standalone agent worker entry and process communication
-packages/
-  core/                  Roles, tasks, message inbox, and Git worktree domain logic
-  agent-runtime/         pi SDK integration, tools, approvals, and session lifecycle
-resources/               Bundled resources and macOS entitlements
-scripts/                 Version planning, release verification, and update testing
-test/                    Test doubles
-docs/                    Product, architecture, and release docs
-.github/workflows/       GitHub Actions release pipeline
-```
+## License
 
-## Data and Security Boundaries
-
-App settings, roles, model providers, MCP configs, and session data are stored in the local app data directory and must not be committed to Git. Dev builds default to `fynvra-dev` under the system app data directory, separate from release builds; `FYNVRA_USER_DATA_DIR` overrides this directory in dev mode only and should point to an isolated location in tests.
-
-API keys, MCP environment variables, and request header values in plaintext are never sent back to the UI over IPC, but they are currently stored in local config files managed by the Main process — **this is not an encrypted credential vault**. Do not upload the user data directory, config exports, or logs containing credentials; check prompts and referenced content before sharing role configs.
-
-`.gitignore` excludes dependencies, build artifacts, installers, caches, environment configs, signing private keys, local user data, and `.workflow/` internal dev notes; example environment files may be committed with placeholder values only. Lockfiles, source, tests, icons, and GitHub Actions workflow configs stay under version control.
-
-File reads and writes are restricted to registered workspaces, IPC parameters are validated by the Main process, and the Renderer has no direct access to Node.js or Electron. Agents and MCP can execute commands or reach external services — configure tool allowlists and approval policies to match your project's needs.
-
-## Docs and Contributing
-
-- [Product definition](docs/PRODUCT.md) (Chinese)
-- [Architecture and cross-layer contracts](docs/ARCHITECTURE.md) (Chinese)
-- [Auto-update and releases](docs/RELEASE.md) (Chinese)
-- [Development conventions](AGENTS.md) (Chinese)
-- [Core domain package](packages/core/README.md)
-- [Agent runtime package](packages/agent-runtime/README.md)
-
-Read the development conventions before contributing, add tests for your changes, and use commit messages in the `<type>(<scope>): <summary>` format. Changes involving IPC must keep the channel constants, Main handlers, and preload typed exports in sync.
-
-Fynvra is licensed under [Apache-2.0](LICENSE). Third-party dependencies follow their respective licenses.
+Fynvra is open source under [Apache-2.0](LICENSE). Third-party dependencies follow their respective licenses.
