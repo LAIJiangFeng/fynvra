@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import { create } from 'zustand';
 import { translate } from '@/i18n';
+import type { OpenWithTarget, WorkspaceCopyKind } from '../../preload/domains/workspaces';
 
 /** 需要用户确认的提示（如挂入被拒绝的原因），由 NoticeDialog 展示。 */
 export interface Notice {
@@ -16,6 +17,10 @@ export interface WorkspacesState {
   sessionsCollapsed: boolean;
   adding: boolean;
   notice: Notice | null;
+  openWithTargets: OpenWithTarget[];
+  loadOpenWithApps(refresh?: boolean): Promise<void>;
+  openIn(workspaceId: string, appId: string): Promise<void>;
+  copy(workspaceId: string, what: WorkspaceCopyKind): Promise<void>;
   refresh(): Promise<void>;
   /** Main 弹出目录选择框；挂入成功后选中该工作区（展开它的会话列表） */
   add(): Promise<void>;
@@ -37,6 +42,49 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
   sessionsCollapsed: false,
   adding: false,
   notice: null,
+  openWithTargets: [],
+
+  async loadOpenWithApps(refresh = false) {
+    try {
+      const result = await api.openWithApps({ refresh });
+      if (result.ok) set({ openWithTargets: result.apps });
+      else set({ notice: { title: translate('workspaces.actionFailed'), message: result.error } });
+    } catch (error) {
+      set({
+        notice: { title: translate('workspaces.actionFailed'), message: errorMessage(error) },
+      });
+    }
+  },
+
+  async openIn(workspaceId, appId) {
+    try {
+      const result = await api.openIn({ workspaceId, appId });
+      if (!result.ok)
+        set({ notice: { title: translate('workspaces.actionFailed'), message: result.error } });
+    } catch (error) {
+      set({
+        notice: { title: translate('workspaces.actionFailed'), message: errorMessage(error) },
+      });
+    }
+  },
+
+  async copy(workspaceId, what) {
+    const title = translate(
+      what === 'path'
+        ? 'workspaces.copyPath'
+        : what === 'name'
+          ? 'workspaces.copyName'
+          : 'workspaces.copyBranch'
+    );
+    try {
+      const result = await api.copy({ workspaceId, what });
+      set({
+        notice: { title, message: result.ok ? translate('workspaces.copied') : result.error },
+      });
+    } catch (error) {
+      set({ notice: { title, message: errorMessage(error) } });
+    }
+  },
 
   async refresh() {
     try {

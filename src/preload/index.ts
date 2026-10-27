@@ -12,6 +12,7 @@ import { createSkillsApi } from './domains/skills';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
+import { createWorkspacesApi } from './domains/workspaces';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -40,12 +41,7 @@ const api: FynvraApi = {
         : ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WORKTREES_ROOT_INFO),
     onChanged: (callback) => subscribe(IPC_CHANNELS.SETTINGS_CHANGED, () => callback()),
   },
-  workspaces: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_LIST),
-    add: () => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_ADD),
-    remove: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACES_REMOVE, id),
-    onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, () => callback()),
-  },
+  workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),
   terminals: createTerminalsApi(ipcRenderer, subscribe),

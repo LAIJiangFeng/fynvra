@@ -24,6 +24,10 @@ export const IPC_CHANNELS = {
   /** Main 弹目录选择框并校验；Renderer 不传路径 */
   WORKSPACES_ADD: 'workspaces:add',
   WORKSPACES_REMOVE: 'workspaces:remove',
+  WORKSPACES_OPEN_WITH_APPS: 'workspaces:open-with-apps',
+  WORKSPACES_OPEN_IN: 'workspaces:open-in',
+  WORKSPACES_COPY: 'workspaces:copy',
+  WORKSPACES_PICK_APP: 'workspaces:pick-app',
   TERMINALS_CREATE: 'terminals:create',
   TERMINALS_WRITE: 'terminals:write',
   TERMINALS_RESIZE: 'terminals:resize',

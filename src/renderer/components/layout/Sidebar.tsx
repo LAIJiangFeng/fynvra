@@ -1,6 +1,20 @@
+import { errorMessage } from '@shared/guards';
+import type { OpenWithApp } from '@shared/types/settings';
 import type { WorkspaceSummary } from '@shared/types/workspace';
-import { Ellipsis, Folder, FolderGit2, FolderOpen, Plus, Trash2 } from 'lucide-react';
-import { Fragment } from 'react';
+import {
+  AppWindow,
+  Code,
+  Copy,
+  Ellipsis,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
+  Plus,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
+import { Fragment, useId, useState } from 'react';
 import { SessionList } from '@/components/chat/SessionList';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +22,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -15,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { CustomAppDialog } from './CustomAppDialog';
 
 /** 左栏：工作区列表；选中的工作区下面列出它的会话，再点一次选中的工作区折叠 / 展开会话列表。 */
 export function Sidebar() {
@@ -100,6 +119,31 @@ function WorkspaceItem({
   onRemove: () => void;
 }) {
   const t = useT();
+  const triggerId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [customDialog, setCustomDialog] = useState<{ app: OpenWithApp | null } | null>(null);
+  const targets = useWorkspacesStore((state) => state.openWithTargets);
+  const loadApps = useWorkspacesStore((state) => state.loadOpenWithApps);
+  const openIn = useWorkspacesStore((state) => state.openIn);
+  const copy = useWorkspacesStore((state) => state.copy);
+  const changeMenuOpen = (open: boolean) => {
+    setMenuOpen(open);
+    if (open) void loadApps();
+  };
+  const pickApp = async () => {
+    try {
+      const result = await window.fynvra.workspaces.pickApp();
+      if (result.ok) setCustomDialog({ app: result.app });
+      else if (result.code !== 'canceled')
+        useWorkspacesStore.setState({
+          notice: { title: t('workspaces.actionFailed'), message: result.error },
+        });
+    } catch (error) {
+      useWorkspacesStore.setState({
+        notice: { title: t('workspaces.actionFailed'), message: errorMessage(error) },
+      });
+    }
+  };
   const FolderIcon = expanded ? FolderOpen : workspace.vcs === 'none' ? Folder : FolderGit2;
   return (
     <li className="group relative">
@@ -109,6 +153,10 @@ function WorkspaceItem({
         // 选中的工作区控制它下面的会话列表
         aria-expanded={selected ? expanded : undefined}
         onClick={onSelect}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          changeMenuOpen(true);
+        }}
         className={cn(
           'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
           selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
@@ -137,8 +185,13 @@ function WorkspaceItem({
         </span>
       </button>
 
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={changeMenuOpen} triggerId={triggerId}>
         <DropdownMenuTrigger
+          id={triggerId}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            changeMenuOpen(true);
+          }}
           render={
             <Button
               variant="ghost"
@@ -151,12 +204,65 @@ function WorkspaceItem({
           <Ellipsis />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <AppWindow />
+              {t('workspaces.openIn')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-w-72">
+              {targets.length === 0 && (
+                <DropdownMenuItem disabled>{t('common.loading')}</DropdownMenuItem>
+              )}
+              {targets.map((target) => {
+                const Icon =
+                  target.kind === 'vscode' ? Code : target.kind === 'explorer' ? Folder : AppWindow;
+                return (
+                  <DropdownMenuItem
+                    key={target.id}
+                    onClick={() => void openIn(workspace.id, target.id)}
+                  >
+                    <Icon />
+                    <span className="truncate">{target.name}</span>
+                  </DropdownMenuItem>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void pickApp()}>
+                <Plus />
+                {t('workspaces.customApp')}
+              </DropdownMenuItem>
+              {targets.some((target) => target.kind === 'custom') && (
+                <DropdownMenuItem onClick={() => setCustomDialog({ app: null })}>
+                  <Settings2 />
+                  {t('workspaces.manageApps')}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuItem onClick={() => void copy(workspace.id, 'path')}>
+            <Copy />
+            {t('workspaces.copyPath')}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void copy(workspace.id, 'name')}>
+            <Copy />
+            {t('workspaces.copyName')}
+          </DropdownMenuItem>
+          {workspace.vcs === 'git' && (
+            <DropdownMenuItem onClick={() => void copy(workspace.id, 'branch')}>
+              <GitBranch />
+              {t('workspaces.copyBranch')}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onClick={onRemove}>
             <Trash2 />
             {t('workspaces.removeFromList')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {customDialog && (
+        <CustomAppDialog initialApp={customDialog.app} onClose={() => setCustomDialog(null)} />
+      )}
     </li>
   );
 }

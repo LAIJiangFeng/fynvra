@@ -195,6 +195,10 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.1 工作区文件浏览与编辑
 
+- 侧栏工作区菜单支持「打开于」及复制路径 / 文件夹名称 / 当前 git 分支（detached HEAD 为短 sha），右键与省略号共用菜单。`workspaces:open-with-apps` 列出目标（可传 `{ refresh: true }` 刷新 VS Code 探测缓存）；`workspaces:open-in` 只接收 `{ workspaceId, appId }`；`workspaces:copy` 只接收 `{ workspaceId, what }`，Main 从注册表解析路径并启动应用或写剪贴板。
+- `workspaces:pick-app` 由 Main 原生选择器签发自定义应用 id、路径与建议名称；`settings:update` 保存 / 移除 `preferences.openWithApps`（最多 20 项），新增或改路径须匹配本窗口已选择的应用，已存项可改名称。Renderer 通过重新选择修改路径，不传工作区路径或任意命令。Windows 仅接受自定义 `.exe`，VS Code 的 `code.cmd` 只用于定位真实 `Code.exe`；macOS `.app` 交给 `/usr/bin/open`；启动参数独立传递且禁用 shell。
+- 此功能仅改 workspace IPC / Main 应用探测启动 helper、typed preload、settings 校验、侧栏菜单 / 自定义应用对话框 / Base UI 子菜单封装、中英文字典及测试；不改会话、文件编辑或终端能力。
+
 - 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与固定的「对话」标签并列，支持多开、切换和关闭。
 - `files:list` 接收 `{ workspaceId, directoryId? }`，省略目录 id 时列出工作区根目录；`files:read` 接收 `{ workspaceId, fileId }`；`files:write` 接收 `{ workspaceId, fileId, version, text }`，版本是读取时的文件内容摘要。
 - Main 根据工作区记录定位根目录，为列出的条目签发不透明 id；Renderer 只能回传这些 id，展示用相对路径不能作为访问参数。

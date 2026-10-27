@@ -14,6 +14,7 @@ import {
 } from '@shared/types/settings';
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialogOptions } from 'electron';
 import { translate } from '../i18n';
+import { allowedOpenWithAppsUpdate } from '../services/openWith';
 import {
   collectWorktreesRootInfo,
   fallbackWorktreesRoot,
@@ -109,7 +110,7 @@ export function registerSettingsHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE, (_event, raw: unknown): PreferencesResult => {
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE, (event, raw: unknown): PreferencesResult => {
     const patch = parsePreferencesPatch(raw);
     const deps = shellDetectionDeps();
     if (
@@ -120,6 +121,15 @@ export function registerSettingsHandlers(): void {
       return { ok: false, error: translate('settings.invalidPatch') };
     }
     try {
+      if (
+        patch.openWithApps &&
+        !allowedOpenWithAppsUpdate(
+          patch.openWithApps,
+          getSettingsFile().read().preferences.openWithApps ?? [],
+          event.sender.id
+        )
+      )
+        return { ok: false, error: translate('settings.invalidPatch') };
       const { settings, changed } = getSettingsFile().update((current) => ({
         ...current,
         preferences: { ...current.preferences, ...patch },
