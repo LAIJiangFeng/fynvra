@@ -1,5 +1,6 @@
 import { MODEL_CATALOG } from '@shared/modelCatalog';
 import type { ProviderImportCandidate, ProviderImportSource } from '@shared/types/llm';
+import type { ProviderImportEntry } from '../../../preload/domains/providers';
 import { translate } from '../../i18n';
 
 // 「从本机导入」弹窗的纯逻辑：不碰 DOM 与 window.fynvra，在 node 下测试。
@@ -118,9 +119,17 @@ export function modelSummary(candidate: ProviderImportCandidate): string {
 }
 
 export function importSummary(result: {
-  imported: ReadonlyArray<{ name: string }>;
+  imported: ReadonlyArray<Pick<ProviderImportEntry, 'name' | 'models'>>;
   skipped: ReadonlyArray<{ name: string; reason: string }>;
 }): string {
   const done = translate('settings.providers.imported', { count: result.imported.length });
-  return skippedSummary(done, result.skipped);
+  const summaries = result.imported.map(({ name, models }) =>
+    'error' in models
+      ? translate('settings.providers.importModelsFailed', { name, error: models.error })
+      : translate('settings.providers.importedModels', { name, ...models })
+  );
+  return skippedSummary(
+    [done, ...summaries].join(translate('common.listSeparator')),
+    result.skipped
+  );
 }

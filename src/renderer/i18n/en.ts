@@ -763,6 +763,9 @@ export const en: MessagesShape<typeof zhCN> = {
       modelsMore: 'Models: {names}, … ({count})',
       modelsList: 'Models: {names}',
       imported: 'Imported {count} {count|provider|providers}',
+      importingModels: 'Importing and fetching models…',
+      importedModels: '{name}: added {added} {added|model|models} ({total} total)',
+      importModelsFailed: '{name}: failed to fetch models ({error})',
     },
     import: {
       fromLocal: 'Import from this computer…',

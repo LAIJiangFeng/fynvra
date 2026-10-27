@@ -745,6 +745,9 @@ export const zhCN = {
       modelsMore: '模型：{names} 等 {count} 个',
       modelsList: '模型：{names}',
       imported: '已导入 {count} 个模型服务',
+      importingModels: '正在导入并拉取模型…',
+      importedModels: '{name}：新增 {added} 个模型（共 {total} 个）',
+      importModelsFailed: '{name}：拉取模型失败（{error}）',
     },
     import: {
       fromLocal: '从本机导入…',

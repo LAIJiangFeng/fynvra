@@ -35,6 +35,8 @@ export interface ListRemoteModelsOptions {
   fetch: FetchLike;
   /** 每次请求的超时，默认 15 秒 */
   timeoutMs?: number;
+  /** 可选的整次操作中止信号，覆盖回退请求与响应体读取 */
+  signal?: AbortSignal;
 }
 
 type ListShape = 'anthropic' | 'openai' | 'google';
@@ -137,7 +139,7 @@ type Failure = Extract<Outcome, { kind: 'http' | 'not-list' }>;
  */
 export async function listRemoteModels(
   target: RemoteModelsTarget,
-  { fetch, timeoutMs = PROVIDER_TEST_TIMEOUT_MS }: ListRemoteModelsOptions
+  { fetch, timeoutMs = PROVIDER_TEST_TIMEOUT_MS, signal }: ListRemoteModelsOptions
 ): Promise<ListRemoteModelsResult> {
   const { apiKey } = target;
   if (!apiKey) return { ok: false, error: translate('remote.noApiKey') };
@@ -146,7 +148,7 @@ export async function listRemoteModels(
   const failures: Array<{ request: ModelsRequest; failure: Failure }> = [];
 
   for (const [index, request] of requests.entries()) {
-    const outcome = await send(request, fetch, timeoutMs);
+    const outcome = await send(request, fetch, timeoutMs, signal);
     if (outcome.kind === 'list') {
       const { models, notes } = toEntries(outcome.list, target);
       const fallbacks = failures.map((previous) =>
@@ -174,15 +176,22 @@ export async function listRemoteModels(
   return { ok: false, error: redact(mostTelling(failures.map((entry) => entry.failure))) };
 }
 
-async function send(request: ModelsRequest, fetch: FetchLike, timeoutMs: number): Promise<Outcome> {
+async function send(
+  request: ModelsRequest,
+  fetch: FetchLike,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<Outcome> {
   const endpoint = endpointOf(request.url);
   const controller = new AbortController();
+  const requestSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    requestSignal.throwIfAborted();
     const response = await fetch(request.url, {
       method: 'GET',
       headers: request.headers,
-      signal: controller.signal,
+      signal: requestSignal,
       redirect: 'error',
     });
     const body = await response.text();
@@ -200,7 +209,7 @@ async function send(request: ModelsRequest, fetch: FetchLike, timeoutMs: number)
         : translate('remote.notModelListAt', { endpoint }),
     };
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (requestSignal.aborted) {
       return {
         kind: 'fatal',
         error: translate('remote.timeout', {

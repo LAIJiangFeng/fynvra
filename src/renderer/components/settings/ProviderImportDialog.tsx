@@ -226,8 +226,9 @@ function ImportContent({ onImported }: { onImported: (status: ImportStatus) => v
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >
+          {importing && <Loader2 className="animate-spin" />}
           {importing
-            ? t('settings.import.importing')
+            ? t('settings.providers.importingModels')
             : t('settings.import.importPicked', { count: selected.length })}
         </Button>
       </DialogFooter>

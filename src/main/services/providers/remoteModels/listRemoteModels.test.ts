@@ -424,6 +424,27 @@ describe('listRemoteModels', () => {
     expect(errorOf(result)).toBe('请求超时（1 秒）：relay.example.com');
   });
 
+  it('可选的外部 signal 中止在途请求；已中止时不再发请求', async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn<FetchLike>(
+      (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        })
+    );
+    const pending = listRemoteModels(anthropic(), { fetch, signal: controller.signal });
+    controller.abort();
+    expect(errorOf(await pending)).toContain('请求超时');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[1].signal.aborted).toBe(true);
+    const alreadyAborted = await listRemoteModels(anthropic(), {
+      fetch,
+      signal: controller.signal,
+    });
+    expect(alreadyAborted.ok).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('返回值里没有 key：错误回显、连接错误、模型 id / 名称、地址里的 key 都被去掉', async () => {
     const echoed = await listRemoteModels(anthropic(), {
       fetch: fakeFetch(

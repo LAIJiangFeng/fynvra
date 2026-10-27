@@ -1,8 +1,8 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { MODEL_CATALOG } from '@shared/modelCatalog';
+import type { IpcResult } from '@shared/types/ipc';
 import type { ModelProviderView, ProviderImportSource } from '@shared/types/llm';
 import type {
-  ProviderImportResult,
   ProviderImportSkipped,
   ProviderScanImportsResult,
   ProviderUpsertInput,
@@ -23,12 +23,18 @@ export const IMPORT_CACHE_TTL_MS = 10 * 60_000;
 const MAX_CANDIDATE_IDS = 500;
 const CANDIDATE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** 先落盘的导入结果，仅供 Main 随后拉取模型；IPC 返回的是数量摘要。 */
+type StoredImportResult = IpcResult<{
+  imported: ModelProviderView[];
+  skipped: ProviderImportSkipped[];
+}>;
+
 /** `providers:scan-imports` 与 `providers:import` 的实现：入参 `unknown` 收窄，返回 `{ ok }`，不抛异常。 */
 export interface ProviderImporter {
   /** 扫描（只读）→ 缓存含 key 的结果 → 返回脱敏候选。 */
   scan(raw: unknown): Promise<ProviderScanImportsResult>;
   /** 按候选 id 从最近一次扫描的缓存取出 → 补默认模型 → 一次写进 providers.json。 */
-  import(raw: unknown): Promise<ProviderImportResult>;
+  import(raw: unknown): Promise<StoredImportResult>;
 }
 
 export function createProviderImporter(deps: {

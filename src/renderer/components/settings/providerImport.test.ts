@@ -84,16 +84,28 @@ describe('providerImport', () => {
     expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('未写模型');
   });
 
-  it('导入结果的提示：导入数量，以及跳过了哪些、为什么', () => {
-    expect(importSummary({ imported: [{ name: 'A' }, { name: 'B' }], skipped: [] })).toBe(
-      '已导入 2 个模型服务'
+  it('导入结果的提示：每个服务的新增 / 总数、失败原因，以及跳过的候选', () => {
+    expect(
+      importSummary({
+        imported: [
+          { name: 'cursor', models: { added: 42, total: 43 } },
+          { name: '君', models: { error: 'HTTP 401' } },
+          { name: 'A', models: { added: 0, total: 1 } },
+        ],
+        skipped: [],
+      })
+    ).toBe(
+      '已导入 3 个模型服务；cursor：新增 42 个模型（共 43 个）；君：拉取模型失败（HTTP 401）；A：新增 0 个模型（共 1 个）'
     );
     expect(
       importSummary({
-        imported: [{ name: 'A' }],
+        imported: [{ name: 'A', models: { added: 1, total: 2 } }],
         skipped: [{ name: 'C', reason: '与「A」的地址和 API Key 都相同' }],
       })
-    ).toBe('已导入 1 个模型服务；跳过 1 个：C（与「A」的地址和 API Key 都相同）');
+    ).toBe(
+      '已导入 1 个模型服务；A：新增 1 个模型（共 2 个）；跳过 1 个：C（与「A」的地址和 API Key 都相同）'
+    );
+    expect(importSummary({ imported: [], skipped: [] })).toBe('已导入 0 个模型服务');
   });
 });
 
@@ -107,7 +119,16 @@ describe('界面语言', () => {
     expect(duplicateReason(duplicate)).toBe('Same URL and API key as existing provider "Relay"');
     expect(modelSummary(candidate('x', { api: 'openai-completions' }))).toBe('No models listed');
     expect(
-      importSummary({ imported: [{ name: 'A' }], skipped: [{ name: 'C', reason: 'duplicate' }] })
-    ).toBe('Imported 1 provider; skipped 1: C (duplicate)');
+      importSummary({
+        imported: [
+          { name: 'A', models: { added: 1, total: 2 } },
+          { name: 'B', models: { added: 2, total: 3 } },
+          { name: 'C', models: { error: 'HTTP 401' } },
+        ],
+        skipped: [{ name: 'D', reason: 'duplicate' }],
+      })
+    ).toBe(
+      'Imported 3 providers; A: added 1 model (2 total); B: added 2 models (3 total); C: failed to fetch models (HTTP 401); skipped 1: D (duplicate)'
+    );
   });
 });
