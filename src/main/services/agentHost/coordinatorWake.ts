@@ -22,7 +22,7 @@ function nextStep(message: Message): string {
     case 'question':
       return `answer with send_to_worker (${target}); the worker is blocked until you reply.`;
     case 'escalation':
-      return `decide how to proceed (ask the user when the decision is theirs), then use the appropriate orchestration tool (${target}).`;
+      return `decide how to proceed (ask the user when the decision is theirs), then use the appropriate orchestration tool (${target}). To explicitly abandon a dispatched task, call cleanup_worktree with abandon: true; ordinary cleanup does not cancel or accept pending work.`;
     default:
       return `check list_workers for the current task and attempt (${target}). A failed report needs diagnosis and a retry decision, not acceptance; a successful report needs review before acceptance.`;
   }
@@ -61,7 +61,7 @@ export function wakePrompt(
         ]
       : []),
     '',
-    'Handle these now. Check list_workers for current status and dispatch IDs before acting; read_worker_output for the latest report and follow-ups. Answer questions with send_to_worker. For successful work, review_diff and run_checks as appropriate to the task and the user’s instructions, then explicitly accept with merge_worktree or reject_work with concrete feedback. Read-only audits may have no code changes: review their findings and evidence; do not invent a commit or checks. Do not merge solely because report_done says succeeded, and do not use cleanup_worktree as acceptance.',
+    'Handle these now. Check list_workers for current status and dispatch IDs before acting; read_worker_output for the latest report and follow-ups. Answer questions with send_to_worker. For successful work, review_diff and run_checks as appropriate to the task and the user’s instructions, then explicitly accept with merge_worktree or reject_work with concrete feedback. Read-only audits may have no code changes: review their findings and evidence; do not invent a commit or checks. A successful read-only or empty-diff task still needs merge_worktree acceptance. Only after acceptance, use cleanup_worktree for cleanup. Do not merge solely because report_done says succeeded, and do not use cleanup_worktree as acceptance. To explicitly cancel pending work, use cleanup_worktree with abandon: true; this abandons the task rather than completing it.',
     'Respect the user’s latest instructions, stop requests and required approvals. If a decision or approval is needed, explain the specific blocker to the user and stop. Otherwise resolve the pending reviews before your final response. Automatic continuation is bounded; do not loop on a blocked check. Workers still running keep going; you do not need to call wait_for_workers.',
   ].join('\n');
 }

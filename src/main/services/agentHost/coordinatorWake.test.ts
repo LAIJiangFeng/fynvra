@@ -128,6 +128,7 @@ describe('wakePrompt', () => {
       [
         message({ id: 'm1', dispatchId: 'd_failed', subject: 'failed' }),
         message({ id: 'm2', dispatchId: 'd_question', type: 'question', body: 'JSON or YAML?' }),
+        message({ id: 'm3', dispatchId: 'd_escalation', type: 'escalation' }),
       ],
       [review()]
     );
@@ -136,6 +137,12 @@ describe('wakePrompt', () => {
     expect(text).toContain('message delivery is not acceptance');
     expect(text).toContain('review_diff and run_checks as appropriate');
     expect(text).toContain('Read-only audits may have no code changes');
+    expect(text).toContain('empty-diff task still needs merge_worktree acceptance');
+    expect(text).toContain('Only after acceptance, use cleanup_worktree for cleanup');
+    expect(text).toContain(
+      'To explicitly abandon a dispatched task, call cleanup_worktree with abandon: true'
+    );
+    expect(text).toContain('ordinary cleanup does not cancel or accept pending work');
     expect(text).toContain('A failed report needs diagnosis');
     expect(text).toContain('send_to_worker');
     expect(text).toContain('Do not merge solely');
