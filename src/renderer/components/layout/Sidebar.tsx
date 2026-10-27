@@ -90,7 +90,11 @@ export function Sidebar() {
                     workspace={workspace}
                     selected={selected}
                     expanded={expanded}
-                    onSelect={() => select(workspace.id)}
+                    onSelect={() => {
+                      // 再次点击当前工作区仅切换会话列表的展开状态。
+                      if (selected) toggleSessions(workspace.id);
+                      else select(workspace.id);
+                    }}
                     onToggle={() => toggleSessions(workspace.id)}
                     onRemove={() => void remove(workspace.id)}
                   />
@@ -166,6 +170,7 @@ function WorkspaceItem({
       <button
         type="button"
         aria-current={selected ? 'true' : undefined}
+        aria-expanded={selected ? expanded : undefined}
         onClick={onSelect}
         onContextMenu={(event) => {
           event.preventDefault();
