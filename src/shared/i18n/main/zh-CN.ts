@@ -39,6 +39,13 @@ export const mainZhCN = {
     discard: '放弃修改并离开',
   },
   workspaces: {
+    explorer: '文件资源管理器',
+    finder: 'Finder',
+    fileManager: '文件管理器',
+    pickApp: '选择自定义应用程序',
+    appUnavailable: '应用程序不可用，请重新选择可执行文件',
+    branchUnavailable: '无法读取当前分支或提交',
+    actionFailed: '工作区操作失败：{error}',
     add: '挂入目录',
     addButton: '挂入',
     insideRepo: '所选目录位于 git 仓库内',

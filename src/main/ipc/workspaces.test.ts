@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { WorkspaceAddResult, WorkspaceListResult } from '@shared/types/workspace';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PickAppResult } from '../../preload/domains/workspaces';
 
 const mocks = vi.hoisted(() => ({
   userData: '',
@@ -12,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   showOpenDialog: vi.fn(),
   showMessageBox: vi.fn(),
   send: vi.fn(),
+  openPath: vi.fn(async () => ''),
+  writeText: vi.fn(),
+  detectVsCode: vi.fn<() => Promise<string | undefined>>(async () => undefined),
+  launchApplication: vi.fn(async () => {}),
 }));
 
 vi.mock('electron', () => ({
@@ -27,7 +32,15 @@ vi.mock('electron', () => ({
     ],
   },
   dialog: { showOpenDialog: mocks.showOpenDialog, showMessageBox: mocks.showMessageBox },
+  shell: { openPath: mocks.openPath },
+  clipboard: { writeText: mocks.writeText },
   nativeTheme: { themeSource: 'system', shouldUseDarkColors: false },
+}));
+
+vi.mock('../services/openWith', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  detectVsCode: mocks.detectVsCode,
+  launchApplication: mocks.launchApplication,
 }));
 
 const hasGit = (() => {
@@ -40,7 +53,7 @@ const hasGit = (() => {
 })();
 
 const invoke = (channel: string, ...args: unknown[]) =>
-  mocks.handlers.get(channel)?.({ sender: {} }, ...args);
+  mocks.handlers.get(channel)?.({ sender: { id: 1 } }, ...args);
 
 const pick = (dir: string | null) =>
   mocks.showOpenDialog.mockResolvedValueOnce(
@@ -59,6 +72,8 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
     mocks.userData = join(base, 'userData');
     previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
     process.env.GIT_CEILING_DIRECTORIES = base;
+    const { registerSettingsHandlers } = await import('./settings');
+    registerSettingsHandlers();
     const { registerWorkspaceHandlers } = await import('./workspaces');
     registerWorkspaceHandlers();
   });
@@ -80,8 +95,13 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
     for (const workspace of await listed()) {
       await invoke(IPC_CHANNELS.WORKSPACES_REMOVE, workspace.id);
     }
+    await invoke(IPC_CHANNELS.SETTINGS_UPDATE, { openWithApps: [] });
     mocks.send.mockClear();
     mocks.showMessageBox.mockReset();
+    mocks.writeText.mockClear();
+    mocks.openPath.mockReset().mockResolvedValue('');
+    mocks.detectVsCode.mockReset().mockResolvedValue(undefined);
+    mocks.launchApplication.mockReset().mockResolvedValue(undefined);
   });
 
   const directory = (name: string): string => {
@@ -211,6 +231,185 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
       expect(await listed()).toHaveLength(1);
     }
   );
+
+  describe('workspace menu actions', () => {
+    it.each([null, 42, {}, { workspaceId: '../bad' }, { workspaceId: '' }, { workspaceId: 1 }])(
+      'rejects invalid workspace input %j without side effects',
+      async (raw) => {
+        for (const channel of [IPC_CHANNELS.WORKSPACES_OPEN_IN, IPC_CHANNELS.WORKSPACES_COPY]) {
+          expect(await invoke(channel, raw)).toMatchObject({ ok: false });
+        }
+        expect(mocks.openPath).not.toHaveBeenCalled();
+        expect(mocks.launchApplication).not.toHaveBeenCalled();
+        expect(mocks.writeText).not.toHaveBeenCalled();
+      }
+    );
+
+    it('rejects missing workspaces, unknown app ids, copy kinds and renderer-supplied paths', async () => {
+      pick(directory('actions'));
+      await add();
+      const workspaceId = (await listed())[0]?.id;
+      for (const input of [
+        { workspaceId: 'missing', appId: 'explorer' },
+        { workspaceId, appId: 'unknown' },
+        { workspaceId, appId: '/bin/editor' },
+        { workspaceId, appId: 1 },
+        { workspaceId, appId: 'explorer', path: '/elsewhere' },
+      ])
+        expect(await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, input)).toMatchObject({ ok: false });
+      for (const input of [
+        { workspaceId: 'missing', what: 'path' },
+        { workspaceId, what: 'unknown' },
+        { workspaceId, what: 1 },
+        { workspaceId, what: 'path', path: '/elsewhere' },
+      ])
+        expect(await invoke(IPC_CHANNELS.WORKSPACES_COPY, input)).toMatchObject({ ok: false });
+      expect(mocks.openPath).not.toHaveBeenCalled();
+      expect(mocks.launchApplication).not.toHaveBeenCalled();
+      expect(mocks.writeText).not.toHaveBeenCalled();
+    });
+
+    it('resolves the real folder for Explorer and copies its absolute path and basename', async () => {
+      const dir = directory('space & percent%');
+      pick(dir);
+      await add();
+      const workspaceId = (await listed())[0]?.id;
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: 'explorer' })
+      ).toEqual({ ok: true });
+      expect(mocks.openPath).toHaveBeenLastCalledWith(dir);
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what: 'path' })).toEqual({
+        ok: true,
+      });
+      expect(mocks.writeText).toHaveBeenLastCalledWith(dir);
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what: 'name' })).toEqual({
+        ok: true,
+      });
+      expect(mocks.writeText).toHaveBeenLastCalledWith(basename(dir));
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what: 'branch' })
+      ).toMatchObject({ ok: false });
+      expect(mocks.writeText).toHaveBeenCalledTimes(2);
+      mocks.openPath.mockResolvedValueOnce('access denied');
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: 'explorer' })
+      ).toEqual({ ok: false, error: '工作区操作失败：access denied' });
+    });
+
+    it('reads the checked-out branch afresh and copies the short SHA for detached HEAD', async () => {
+      const repo = gitRepo('menu-branch');
+      pick(repo);
+      await add();
+      const workspaceId = (await listed())[0]?.id;
+      await invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what: 'branch' });
+      expect(mocks.writeText).toHaveBeenLastCalledWith('main');
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.test',
+          'commit',
+          '--allow-empty',
+          '-qm',
+          'initial',
+        ],
+        { cwd: repo }
+      );
+      execFileSync('git', ['checkout', '-q', '--detach'], { cwd: repo });
+      const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim();
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what: 'branch' })).toEqual({
+        ok: true,
+      });
+      expect(mocks.writeText).toHaveBeenLastCalledWith(sha);
+    });
+
+    it('lists only detected VS Code and saved custom targets without exposing executable paths', async () => {
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS)).toMatchObject({
+        ok: true,
+        apps: [{ id: 'explorer', kind: 'explorer' }],
+      });
+      mocks.detectVsCode.mockResolvedValue(process.execPath);
+      const result = await invoke(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS, { refresh: true });
+      expect(result).toMatchObject({
+        ok: true,
+        apps: [
+          { id: 'vscode', kind: 'vscode' },
+          { id: 'explorer', kind: 'explorer' },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain(process.execPath);
+      expect(mocks.detectVsCode).toHaveBeenLastCalledWith(true);
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS, { refresh: 'yes' })
+      ).toMatchObject({ ok: false });
+    });
+
+    it('only saves native-picked executables, permits rename/removal and validates ids on each launch', async () => {
+      const dir = directory('custom-target');
+      pick(dir);
+      await add();
+      const workspaceId = (await listed())[0]?.id;
+      const unpicked = { id: 'invented', name: 'Editor', path: process.execPath };
+      expect(
+        await invoke(IPC_CHANNELS.SETTINGS_UPDATE, { openWithApps: [unpicked] })
+      ).toMatchObject({ ok: false });
+      pick(process.execPath);
+      const result = (await invoke(IPC_CHANNELS.WORKSPACES_PICK_APP)) as PickAppResult;
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.error);
+      const app = { ...result.app, name: 'My editor' };
+      expect(
+        await invoke(IPC_CHANNELS.SETTINGS_UPDATE, { openWithApps: [{ ...app, path: '/changed' }] })
+      ).toMatchObject({ ok: false });
+      expect(await invoke(IPC_CHANNELS.SETTINGS_UPDATE, { openWithApps: [app] })).toMatchObject({
+        ok: true,
+      });
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS)).toMatchObject({
+        ok: true,
+        apps: [{ id: 'explorer' }, { id: app.id, name: 'My editor', kind: 'custom' }],
+      });
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: app.id })).toEqual(
+        { ok: true }
+      );
+      expect(mocks.launchApplication).toHaveBeenLastCalledWith(process.execPath, dir);
+      expect(await invoke(IPC_CHANNELS.SETTINGS_UPDATE, { openWithApps: [] })).toMatchObject({
+        ok: true,
+      });
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: app.id })
+      ).toMatchObject({ ok: false });
+      expect(mocks.launchApplication).toHaveBeenCalledOnce();
+    });
+
+    it('launches only detected VS Code and translates spawn errors', async () => {
+      pick(directory('code-target'));
+      await add();
+      const workspaceId = (await listed())[0]?.id;
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: 'vscode' })
+      ).toMatchObject({ ok: false });
+      mocks.detectVsCode.mockResolvedValue(process.execPath);
+      mocks.launchApplication.mockRejectedValueOnce(new Error('EACCES'));
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_OPEN_IN, { workspaceId, appId: 'vscode' })
+      ).toEqual({ ok: false, error: '工作区操作失败：EACCES' });
+    });
+
+    it('cancels native picking and refuses a non-executable selection', async () => {
+      pick(null);
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_PICK_APP)).toMatchObject({
+        ok: false,
+        code: 'canceled',
+      });
+      pick(directory('not-an-app'));
+      expect(await invoke(IPC_CHANNELS.WORKSPACES_PICK_APP)).toMatchObject({ ok: false });
+    });
+  });
 
   it('按 id 移除；未知 id 返回错误', async () => {
     pick(directory('removed'));

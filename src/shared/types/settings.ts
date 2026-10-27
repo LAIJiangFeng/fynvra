@@ -75,8 +75,50 @@ export function parseShellPreference(raw: unknown, agent = false): ShellPreferen
   return { kind: kind as ShellKind };
 }
 
+export interface OpenWithApp {
+  id: string;
+  name: string;
+  path: string;
+}
+
+export const MAX_OPEN_WITH_APPS = 20;
+
+/** Small portable metadata only; executable access and native-picker provenance are checked in Main. */
+export function parseOpenWithApps(raw: unknown): OpenWithApp[] {
+  if (!Array.isArray(raw)) return [];
+  const apps: OpenWithApp[] = [];
+  const seen = new Set<string>();
+  const shortText = (value: unknown, max: number): value is string =>
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= max &&
+    value === value.trim() &&
+    !Array.from(value).some((character) => character.charCodeAt(0) < 32);
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (
+      !entry ||
+      !shortText(entry.id, 100) ||
+      !/^[a-zA-Z0-9_-]+$/.test(entry.id) ||
+      entry.id === 'vscode' ||
+      entry.id === 'explorer' ||
+      seen.has(entry.id) ||
+      !shortText(entry.name, 100) ||
+      !shortText(entry.path, 4096) ||
+      !/^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/.test(entry.path)
+    )
+      continue;
+    apps.push({ id: entry.id, name: entry.name, path: entry.path });
+    seen.add(entry.id);
+    if (apps.length === MAX_OPEN_WITH_APPS) break;
+  }
+  return apps;
+}
+
 /** Renderer 可读写的界面偏好，经 `settings:update` 合并落盘。 */
 export interface Preferences {
+  /** User-picked applications for the workspace menu; Main verifies new executable paths. */
+  openWithApps?: OpenWithApp[];
   theme: ThemeMode;
   /** 右侧面板是否展开 */
   sidePanelOpen: boolean;
@@ -330,6 +372,9 @@ export function parsePreferences(raw: unknown): Preferences {
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
     ...(typeof sidebarOpen === 'boolean' ? { sidebarOpen } : {}),
+    ...(Array.isArray(record?.openWithApps)
+      ? { openWithApps: parseOpenWithApps(record.openWithApps) }
+      : {}),
     ...parseSessionPreferences(record),
     ...parseTimelinePreferences(record),
     ...(shellPath ? { shellPath } : {}),
@@ -377,6 +422,12 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
   for (const key of Object.keys(record)) {
     const value = record[key];
     switch (key) {
+      case 'openWithApps': {
+        const apps = parseOpenWithApps(value);
+        if (!Array.isArray(value) || apps.length !== value.length) return null;
+        patch.openWithApps = apps;
+        break;
+      }
       case 'agentShell':
       case 'terminalShell': {
         // An explicit undefined resets the preference; JSON persistence omits it.

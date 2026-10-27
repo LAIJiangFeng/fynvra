@@ -73,6 +73,28 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_REMOVE, 'ws-1');
   });
 
+  it('workspace actions expose only ids/values and a parameterless native app picker', async () => {
+    await api.workspaces.openWithApps();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS);
+    await api.workspaces.openWithApps({ refresh: true });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_OPEN_WITH_APPS, {
+      refresh: true,
+    });
+    const target = { workspaceId: 'ws-1', appId: 'explorer', path: '/ignored' };
+    await api.workspaces.openIn(target);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_OPEN_IN, {
+      workspaceId: 'ws-1',
+      appId: 'explorer',
+    });
+    await api.workspaces.copy({ workspaceId: 'ws-1', what: 'branch' });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_COPY, {
+      workspaceId: 'ws-1',
+      what: 'branch',
+    });
+    await api.workspaces.pickApp();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_PICK_APP);
+  });
+
   it('shell settings use a no-input list and target-only file picker', async () => {
     await api.settings.availableShells();
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS);

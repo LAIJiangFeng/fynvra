@@ -1,11 +1,33 @@
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
-import { CircleIcon } from 'lucide-react';
+import { ChevronRightIcon, CircleIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const ITEM_CLASS =
   "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 const DropdownMenu = MenuPrimitive.Root;
+const DropdownMenuSub = MenuPrimitive.SubmenuRoot;
+
+function DropdownMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: MenuPrimitive.SubmenuTrigger.Props) {
+  return (
+    <MenuPrimitive.SubmenuTrigger
+      data-slot="dropdown-menu-sub-trigger"
+      className={cn(ITEM_CLASS, 'data-[popup-open]:bg-accent', className)}
+      {...props}
+    >
+      {children}
+      <ChevronRightIcon className="ml-auto" />
+    </MenuPrimitive.SubmenuTrigger>
+  );
+}
+
+function DropdownMenuSubContent(props: Parameters<typeof DropdownMenuContent>[0]) {
+  return <DropdownMenuContent side="right" align="start" sideOffset={4} {...props} />;
+}
 
 function DropdownMenuTrigger(props: MenuPrimitive.Trigger.Props) {
   return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />;
@@ -115,5 +137,8 @@ export {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 };
