@@ -1,0 +1,731 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-locale="zh"
+  data-theme="dark"
+  data-title-zh="使用文档 — Fynvra"
+  data-title-en="User guide — Fynvra"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>使用文档 — Fynvra</title>
+    <meta
+      name="description"
+      content="Fynvra 使用文档：安装、接入模型、从本机导入配置、工作区与会话、角色 / 技能 / MCP、任务派发、审查合并与常见问题 / User guide for install, providers, workspaces, roles, tasks, and review."
+    />
+    <meta name="theme-color" content="#05080a" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <script src="assets/site.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Inter:wght@300..700&amp;family=Sora:wght@400..700&amp;display=swap"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main"><span data-l="zh">跳到正文</span><span data-l="en">Skip to content</span></a>
+
+    <header class="site-header">
+      <div class="nav shell">
+        <a class="brand" href="index.html" aria-label="Fynvra">
+          <img class="brand-mark" src="assets/favicon.svg" alt="" width="28" height="28" />
+          <span>Fynvra</span>
+        </a>
+        <nav class="nav-links" id="site-menu" aria-label="主导航 / Main navigation">
+          <a href="index.html#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a>
+          <a href="index.html#runtime"><span data-l="zh">能力</span><span data-l="en">Capabilities</span></a>
+          <a href="index.html#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
+          <a href="index.html#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
+          <a href="docs.html" aria-current="page"><span data-l="zh">使用文档</span><span data-l="en">User guide</span></a>
+        </nav>
+        <div class="nav-actions">
+          <a class="icon-btn nav-github" href="https://github.com/LAIJiangFeng/fynvra" aria-label="GitHub" title="GitHub">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+            <span class="sr-only">GitHub</span>
+          </a>
+          <button class="icon-btn lang-btn" type="button" data-action="toggle-locale">
+            <span data-l="zh" lang="en">EN</span><span data-l="en" lang="zh-CN">中文</span>
+          </button>
+          <button class="icon-btn theme-btn" type="button" data-action="toggle-theme" aria-label="切换主题 / Toggle theme" title="切换主题 / Toggle theme">
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z" />
+            </svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4" />
+            </svg>
+          </button>
+          <a class="btn btn-primary btn-sm nav-download" href="https://github.com/LAIJiangFeng/fynvra/releases">
+            <span data-l="zh">下载</span><span data-l="en">Download</span>
+          </a>
+          <button class="icon-btn menu-btn" type="button" data-action="toggle-menu" aria-controls="site-menu" aria-expanded="false">
+            <span class="menu-lines" aria-hidden="true"><i></i><i></i></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="reading-progress" aria-hidden="true"><span data-progress></span></div>
+
+      <section class="docs-hero">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="shell docs-hero-grid">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-num">Docs</span> User guide <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">使用文档</span></p>
+            <h1 class="docs-title">
+              <span data-l="zh">从安装，<br />到第一条派发</span>
+              <span data-l="en">From install,<br />to your first dispatch</span>
+            </h1>
+            <p class="docs-lead" data-l="zh">
+              按实际界面顺序整理：安装、模型、工作区、角色与资源、任务和更改，最后是常见问题；每一步都对应应用里的真实入口
+            </p>
+            <p class="docs-lead" data-l="en">
+              Ordered the way the app is used: install, models, workspaces, roles and resources, tasks and changes, then
+              FAQ. Every step maps to a real entry in the app.
+            </p>
+            <div class="docs-jump">
+              <a class="btn btn-primary btn-sm" href="#install"><span data-l="zh">开始安装</span><span data-l="en">Start with install</span></a>
+              <a class="btn btn-ghost btn-sm" href="#tasks"><span data-l="zh">派发与验收</span><span data-l="en">Dispatch and review</span></a>
+              <a class="btn btn-ghost btn-sm" href="#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
+            </div>
+          </div>
+          <aside class="docs-hero-card">
+            <p class="panel-label">READING PATH <span>06 CHAPTERS</span></p>
+            <ol class="hero-path">
+              <li><span>01</span><span data-l="zh">安装与平台</span><span data-l="en">Install and platforms</span></li>
+              <li><span>02</span><span data-l="zh">模型与本机导入</span><span data-l="en">Models and local import</span></li>
+              <li><span>03</span><span data-l="zh">工作区与会话</span><span data-l="en">Workspaces and sessions</span></li>
+              <li><span>04</span><span data-l="zh">角色、技能与 MCP</span><span data-l="en">Roles, skills, and MCP</span></li>
+              <li><span>05</span><span data-l="zh">任务与更改</span><span data-l="en">Tasks and changes</span></li>
+              <li><span>06</span><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></li>
+            </ol>
+            <p class="docs-hero-note"><span data-l="zh">界面支持简体中文与英文，右上角切换</span><span data-l="en">The app supports Chinese and English; switch in the top-right corner</span></p>
+          </aside>
+        </div>
+      </section>
+
+      <div class="shell docs-layout">
+        <aside class="toc-wrap">
+          <nav class="toc" aria-label="本页目录 / Page contents">
+            <p class="toc-title"><span data-l="zh">本页目录</span><span data-l="en">On this page</span><span>06</span></p>
+            <ol>
+              <li>
+                <a href="#install"><span class="toc-num">01</span><span><span data-l="zh">安装与平台</span><span data-l="en">Install and platforms</span></span></a>
+              </li>
+              <li>
+                <a href="#models"><span class="toc-num">02</span><span><span data-l="zh">模型与本机导入</span><span data-l="en">Models and import</span></span></a>
+              </li>
+              <li>
+                <a href="#workspace"><span class="toc-num">03</span><span><span data-l="zh">工作区与会话</span><span data-l="en">Workspaces and sessions</span></span></a>
+              </li>
+              <li>
+                <a href="#configuration"><span class="toc-num">04</span><span><span data-l="zh">角色、技能与 MCP</span><span data-l="en">Roles, skills, MCP</span></span></a>
+              </li>
+              <li>
+                <a href="#tasks"><span class="toc-num">05</span><span><span data-l="zh">任务与更改</span><span data-l="en">Tasks and changes</span></span></a>
+              </li>
+              <li>
+                <a href="#faq"><span class="toc-num">06</span><span><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></span></a>
+              </li>
+            </ol>
+            <a class="toc-top" href="#main"><span aria-hidden="true">↑</span><span data-l="zh">回到顶部</span><span data-l="en">Back to top</span></a>
+          </nav>
+          <a class="toc-download" href="https://github.com/LAIJiangFeng/fynvra/releases">
+            <span class="toc-download-k"><span data-l="zh">安装包</span><span data-l="en">Installer</span></span>
+            <span class="toc-download-v"><span data-l="zh">GitHub Releases</span><span data-l="en">GitHub Releases</span><span aria-hidden="true">↗</span></span>
+          </a>
+        </aside>
+
+        <div class="prose docs-main">
+          <section class="doc-section" id="install">
+            <header class="doc-heading">
+              <p class="doc-kicker">01 / INSTALL</p>
+              <h2><span data-l="zh">安装与平台</span><span data-l="en">Install and platforms</span></h2>
+              <p class="doc-lead" data-l="zh">先拿到安装包，或者从源码启动开发版；两条路径都通向同一个模型设置入口</p>
+              <p class="doc-lead" data-l="en">Start from an installer or run the dev build from source. Both paths lead to the same model setup.</p>
+            </header>
+
+            <h3 id="download"><span data-l="zh">下载安装包</span><span data-l="en">Download an installer</span></h3>
+            <p data-l="zh">
+              安装包发布在 <a href="https://github.com/LAIJiangFeng/fynvra/releases">GitHub Releases</a> 的 Assets 里；只有源码的
+              Source code 下载项不包含安装程序
+            </p>
+            <p data-l="en">
+              Installers are attached to <a href="https://github.com/LAIJiangFeng/fynvra/releases">GitHub Releases</a> under
+              Assets. The “Source code” downloads do not include an installer.
+            </p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">平台</span><span data-l="en">Platform</span></th>
+                    <th><span data-l="zh">安装包</span><span data-l="en">Installer</span></th>
+                    <th><span data-l="zh">更新方式</span><span data-l="en">Updates</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>Windows x64</th>
+                    <td>NSIS <code>.exe</code></td>
+                    <td><span data-l="zh">正式安装版支持应用内自动更新</span><span data-l="en">Installed builds support in-app auto-update</span></td>
+                  </tr>
+                  <tr>
+                    <th>macOS Intel / Apple Silicon</th>
+                    <td><code>.dmg</code> / <code>.zip</code></td>
+                    <td><span data-l="zh">Developer ID 签名、公证版可自动更新；手动包需覆盖安装</span><span data-l="en">Developer ID-signed and notarized builds auto-update; manual builds are replaced by hand</span></td>
+                  </tr>
+                  <tr>
+                    <th>Linux</th>
+                    <td><span data-l="zh">AppImage（仅构建配置）</span><span data-l="en">AppImage (build config only)</span></td>
+                    <td><span data-l="zh">有构建配置，尚未纳入自动发布与更新</span><span data-l="en">Build config exists; not in automated releases or updates yet</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <aside class="callout">
+              <p class="callout-title"><span data-l="zh">macOS 首次打开</span><span data-l="en">First launch on macOS</span></p>
+              <p data-l="zh">
+                把应用从 DMG 拖进「应用程序」后再启动；没有 Apple 凭证的包使用临时签名，系统可能提示无法验证开发者；确认来源可信后，到「系统设置 → 隐私与安全性」对本应用选择「仍要打开」，不需要关闭系统安全检查
+              </p>
+              <p data-l="en">
+                Drag the app from the DMG into Applications before launching. Builds without Apple credentials are ad-hoc
+                signed, so macOS may warn that the developer cannot be verified. After trusting the source, choose Open
+                Anyway for this app under System Settings → Privacy &amp; Security. You do not need to disable system
+                security checks.
+              </p>
+            </aside>
+
+            <h3 id="source"><span data-l="zh">从源码运行</span><span data-l="en">Run from source</span></h3>
+            <p data-l="zh">需要 Node.js 22.19.0 或更高（推荐 22）、pnpm 10.26.2，以及 Git</p>
+            <p data-l="en">You need Node.js 22.19.0 or later (22 recommended), pnpm 10.26.2, and Git.</p>
+            <div class="codeblock">
+              <div class="codeblock-bar"><span>bash</span><span>terminal</span></div>
+              <pre><code>npm install --global pnpm@10.26.2
+git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev</code></pre>
+            </div>
+            <p data-l="zh">
+              首次运行需要联网下载依赖与 Electron；开发版数据目录是系统应用数据目录下的 <code>fynvra-dev</code>，与安装版分开；仓库不需要 <code>.env</code>，模型密钥在设置界面填写
+            </p>
+            <p data-l="en">
+              The first run needs network access to download dependencies and Electron. Dev builds store data in
+              <code>fynvra-dev</code> under the system app-data directory, separate from installed builds. The repository
+              does not need a <code>.env</code>; model keys are entered in Settings.
+            </p>
+
+            <h3 id="first-run"><span data-l="zh">首次启动</span><span data-l="en">First launch</span></h3>
+            <ol class="step-list">
+              <li><span data-l="zh">打开「设置 → 模型服务」，添加服务或从本机导入</span><span data-l="en">Open Settings → Model providers, add a provider, or import one from this computer</span></li>
+              <li><span data-l="zh">挂入一个 git 仓库或普通文件夹</span><span data-l="en">Attach a git repository or a plain folder</span></li>
+              <li><span data-l="zh">新建会话，选择 Orchestrator、模型与思考档位</span><span data-l="en">Start a session and choose Orchestrator, a model, and a thinking level</span></li>
+              <li><span data-l="zh">直接描述需求，主 Agent 会决定拆不拆任务</span><span data-l="en">Describe the request; the orchestrator decides whether to split it</span></li>
+            </ol>
+            <p data-l="zh">模型服务是第一步的前提；没有可用的服务与 API Key，会话无法请求模型</p>
+            <p data-l="en">Provider setup comes first. A session cannot call a model without a usable provider and API key.</p>
+          </section>
+
+          <section class="doc-section" id="models">
+            <header class="doc-heading">
+              <p class="doc-kicker">02 / MODELS</p>
+              <h2><span data-l="zh">模型与本机导入</span><span data-l="en">Models and local import</span></h2>
+              <p class="doc-lead" data-l="zh">服务协议、API Key、模型列表与思考档位，都在「设置 → 模型服务」里管理</p>
+              <p class="doc-lead" data-l="en">Protocols, API keys, model lists, and thinking levels all live under Settings → Model providers.</p>
+            </header>
+
+            <h3 id="providers"><span data-l="zh">添加模型服务</span><span data-l="en">Add a provider</span></h3>
+            <p data-l="zh">选择预设或自定义 OpenAI 兼容服务，填写名称、协议、Base URL、API Key 与模型 id；使用官方地址时 Base URL 可以留空</p>
+            <p data-l="en">Pick a preset or a custom OpenAI-compatible endpoint, then fill in the name, protocol, base URL, API key, and model id. Leave the base URL blank to use the official endpoint.</p>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th><span data-l="zh">协议</span><span data-l="en">Protocol</span></th>
+                    <th><span data-l="zh">用途</span><span data-l="en">Use</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><th><code>anthropic-messages</code></th><td><span data-l="zh">Anthropic Messages</span><span data-l="en">Anthropic Messages</span></td></tr>
+                  <tr><th><code>openai-responses</code></th><td><span data-l="zh">OpenAI Responses</span><span data-l="en">OpenAI Responses</span></td></tr>
+                  <tr><th><code>openai-completions</code></th><td><span data-l="zh">OpenAI Chat Completions，以及兼容服务</span><span data-l="en">OpenAI Chat Completions and compatible endpoints</span></td></tr>
+                  <tr><th><code>google-generative-ai</code></th><td><span data-l="zh">Google Generative AI</span><span data-l="en">Google Generative AI</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <ul>
+              <li><span data-l="zh"><strong>测试连接</strong>：显示耗时，以及服务端返回了多少个模型</span><span data-l="en"><strong>Test connection</strong>: shows latency and how many models the server returned</span></li>
+              <li><span data-l="zh"><strong>拉取模型列表</strong>：把远端模型加入列表；也可以手动输入模型 id</span><span data-l="en"><strong>Fetch models</strong>: add remote models to the list, or type a model id manually</span></li>
+              <li><span data-l="zh"><strong>推理</strong>：打开后，会话与角色里才能选择思考档位</span><span data-l="en"><strong>Reasoning</strong>: enables thinking-level choices in sessions and roles</span></li>
+              <li><span data-l="zh">每个服务最多保存 500 个模型，超出的模型不会加入</span><span data-l="en">Each provider stores up to 500 models; extra models are not added</span></li>
+            </ul>
+
+            <h3 id="import"><span data-l="zh">从本机导入</span><span data-l="en">Import from this computer</span></h3>
+            <p data-l="zh">打开「从本机导入」，勾选来源后扫描；只读取带 API Key 或自定义地址的配置；导入前可以预览、去重，并为每个服务依次选择要加入的模型</p>
+            <p data-l="en">Choose Import from this computer, pick sources, and scan. Only configs with an API key or custom URL are read. Preview, deduplicate, and pick models for each provider before saving.</p>
+            <div class="source-list">
+              <div><span class="source-name">Claude Code</span><code>~/.claude/settings.json</code></div>
+              <div><span class="source-name">Codex</span><code>~/.codex/config.toml</code></div>
+              <div><span class="source-name">CC Switch</span><code>~/.cc-switch/cc-switch.db</code></div>
+            </div>
+            <p data-l="zh">已有地址与 API Key 都相同的服务会被标记为重复；导入后仍需保存，删除某个服务后，引用它的角色需要重新选择模型</p>
+            <p data-l="en">Providers with the same URL and API key are marked as duplicates. Imported entries still need saving, and roles that referenced a deleted provider must choose a new model.</p>
+
+            <h3 id="model-select"><span data-l="zh">选择模型</span><span data-l="en">Choose a model</span></h3>
+            <p data-l="zh">新建会话时选择模型与思考档位；会话内按 <kbd>Ctrl</kbd>+<kbd>M</kbd>（macOS 为 <kbd>⌘</kbd>+<kbd>M</kbd>）打开模型选择器；只列出已启用且填了 API Key 的服务</p>
+            <p data-l="en">Pick a model and thinking level when creating a session. Inside a session, <kbd>Ctrl</kbd>+<kbd>M</kbd> (<kbd>⌘</kbd>+<kbd>M</kbd> on macOS) opens the model picker. Only enabled providers with an API key are listed.</p>
+            <ul>
+              <li><span data-l="zh">角色可以选择「跟随会话模型」；Worker 角色没配模型时，继承主 Agent 当前模型与档位</span><span data-l="en">A role can follow the session model; a worker role without its own model inherits the orchestrator’s current model and level</span></li>
+              <li><span data-l="zh">会话运行中不能换模型；空闲时切换，下一次发送生效，已有对话历史保留</span><span data-l="en">A running session cannot switch models. Change it while idle; the next prompt uses the new model and history is preserved</span></li>
+              <li><span data-l="zh">可选档位由模型能力决定，pi 目录之外的模型按服务里的「推理」标记判断</span><span data-l="en">Available levels come from model capabilities; models outside the pi catalog use the provider’s Reasoning flag</span></li>
+            </ul>
+
+            <h3 id="thinking"><span data-l="zh">思考档位</span><span data-l="en">Thinking levels</span></h3>
+            <p data-l="zh">思考档位决定模型回答前投入多少推理；服务未标记推理，或读不到档位时，界面会给出说明或回落到模型默认档位</p>
+            <p data-l="en">The thinking level controls how much reasoning the model spends before answering. If reasoning is off or levels cannot be read, the UI explains why or falls back to the model default.</p>
+            <div class="table-scroll">
+              <table class="thinking-table">
+                <thead><tr><th><span data-l="zh">档位</span><span data-l="en">Level</span></th><th><span data-l="zh">含义</span><span data-l="en">Meaning</span></th></tr></thead>
+                <tbody>
+                  <tr><th><code>off</code></th><td><span data-l="zh">关闭思考</span><span data-l="en">No thinking</span></td></tr>
+                  <tr><th><code>minimal</code></th><td><span data-l="zh">极少思考</span><span data-l="en">Barely any</span></td></tr>
+                  <tr><th><code>low</code></th><td><span data-l="zh">少量思考</span><span data-l="en">Light</span></td></tr>
+                  <tr><th><code>medium</code></th><td><span data-l="zh">适中，日常改动通常够用</span><span data-l="en">Balanced; usually enough for everyday edits</span></td></tr>
+                  <tr><th><code>high</code></th><td><span data-l="zh">深入思考</span><span data-l="en">Deep</span></td></tr>
+                  <tr><th><code>xhigh</code></th><td><span data-l="zh">更深入的思考</span><span data-l="en">Deeper</span></td></tr>
+                  <tr><th><code>max</code></th><td><span data-l="zh">最大思考；更慢，也更耗额度</span><span data-l="en">Maximum; slower and uses more quota</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <aside class="callout callout-warn">
+              <p class="callout-title"><span data-l="zh">密钥边界</span><span data-l="en">Key boundary</span></p>
+              <p data-l="zh">
+                API Key 的明文只在主进程使用，界面回显为掩码；它保存在本机配置文件中，不是加密凭证库；不要分享应用数据目录、配置导出或包含密钥的日志
+              </p>
+              <p data-l="en">
+                Plaintext API keys stay in the main process and appear masked in the UI. They are stored in local config
+                files, not an encrypted vault. Do not share the app data directory, config exports, or logs containing keys.
+              </p>
+            </aside>
+          </section>
+
+          <section class="doc-section" id="workspace">
+            <header class="doc-heading">
+              <p class="doc-kicker">03 / WORKSPACE</p>
+              <h2><span data-l="zh">工作区与会话</span><span data-l="en">Workspaces and sessions</span></h2>
+              <p class="doc-lead" data-l="zh">工作区是一个目录，会话是一次与某个角色的对话；文件、终端和任务面板都围绕当前工作区展开</p>
+              <p class="doc-lead" data-l="en">A workspace is a folder; a session is a conversation with one role. Files, terminals, and the task panel all follow the current workspace.</p>
+            </header>
+
+            <h3 id="attach"><span data-l="zh">挂入目录</span><span data-l="en">Attach a folder</span></h3>
+            <p data-l="zh">在左侧「工作区」选择挂入目录，挑一个 git 仓库或普通文件夹；挂入 git 仓库的子目录时，会询问改挂仓库根目录、仍然按普通目录挂入该子目录，或取消</p>
+            <p data-l="en">Under Workspaces in the sidebar, choose Attach folder and pick a git repository or a plain folder. If you pick a subdirectory of a git repository, Fynvra asks whether to attach the repository root, attach the subdirectory as a plain folder, or cancel.</p>
+            <ul>
+              <li><span data-l="zh">git 仓库：每个任务创建独立 worktree，默认放在仓库同级的 <code>&lt;仓库目录名&gt;-worktrees</code>，可在「设置 → 通用」修改根目录</span><span data-l="en">Git repository: each task gets a worktree, by default beside the repo as <code>&lt;repo&gt;-worktrees</code>. Change the root under Settings → General</span></li>
+              <li><span data-l="zh">普通文件夹：原地模式，不创建 worktree；并行的 Worker 会共用目录</span><span data-l="en">Plain folder: in-place mode, no worktree; parallel workers would share the folder</span></li>
+              <li><span data-l="zh">仓库需要已有提交，并配置 git 用户名与邮箱，才能派发任务</span><span data-l="en">Dispatching needs an existing commit plus a configured git user name and email</span></li>
+            </ul>
+
+            <h3 id="sessions"><span data-l="zh">新建与管理会话</span><span data-l="en">Create and manage sessions</span></h3>
+            <p data-l="zh">点「新建会话」，选择角色（多 Agent 协作选内置 Orchestrator）、模型与思考档位；会话状态分为空闲、运行中、等待审批与出错</p>
+            <p data-l="en">Choose New session, then a role (use the built-in Orchestrator for multi-agent work), model, and thinking level. Session status is idle, running, waiting for approval, or error.</p>
+            <ul>
+              <li><span data-l="zh">左侧栏按工作区列出会话；可以搜索、切换、归档或删除</span><span data-l="en">The sidebar lists sessions per workspace; search, switch, archive, or remove them</span></li>
+              <li><span data-l="zh">归档只是把会话移出默认列表；归档闲置策略可在设置里调整，删除会话不删除本地 pi jsonl 记录</span><span data-l="en">Archiving hides a session from the default list; idle-archive rules are configurable, and removing a session keeps the local pi jsonl transcript</span></li>
+              <li><span data-l="zh">会话正文以本地 pi jsonl 为权威源，界面显示的是重建后的投影</span><span data-l="en">The local pi jsonl transcript is authoritative; the UI renders a rebuilt projection</span></li>
+            </ul>
+
+            <h4 id="interface"><span data-l="zh">界面分区</span><span data-l="en">Interface map</span></h4>
+            <div class="app-map" role="img" aria-label="Fynvra interface layout schematic">
+              <div class="app-map-side">
+                <span class="map-k"><span data-l="zh">左侧栏</span><span data-l="en">SIDEBAR</span></span>
+                <b><span data-l="zh">工作区 · 会话</span><span data-l="en">Workspaces · Sessions</span></b>
+                <span data-l="zh">切换目录、角色与运行状态</span><span data-l="en">Switch folders, roles, and run states</span>
+              </div>
+              <div class="app-map-main">
+                <span class="map-k"><span data-l="zh">中央</span><span data-l="en">CENTER</span></span>
+                <b><span data-l="zh">对话 · 文件 · 终端</span><span data-l="en">Chat · Files · Terminal</span></b>
+                <span data-l="zh">标签并列，编辑不离开上下文</span><span data-l="en">Tabs side by side, edits stay in context</span>
+              </div>
+              <div class="app-map-side">
+                <span class="map-k"><span data-l="zh">右侧栏</span><span data-l="en">RIGHT PANEL</span></span>
+                <b><span data-l="zh">文件 · 任务 · 改动</span><span data-l="en">Files · Tasks · Changes</span></b>
+                <span data-l="zh">任务状态、尝试与逐文件 diff</span><span data-l="en">Task states, attempts, and per-file diffs</span></div>
+            </div>
+            <p class="figure-note"><span data-l="zh">布局示意，非应用截图</span><span data-l="en">Layout schematic, not a screenshot</span></p>
+
+            <h3 id="files"><span data-l="zh">文件编辑与预览</span><span data-l="en">Files and previews</span></h3>
+            <p data-l="zh">右侧目录树打开文件，中央以独立标签与对话并列；支持多文件、Markdown 编辑 / 预览 / 双栏，以及常见图片预览</p>
+            <p data-l="en">Open files from the right-hand tree; each opens in a center tab beside the chat. Multiple files, Markdown edit / preview / split view, and common image previews are supported.</p>
+            <ul>
+              <li><span data-l="zh">UTF-8 文本编辑上限 256 KiB；HTML / SVG 只按源码显示，不执行</span><span data-l="en">UTF-8 text edits up to 256 KiB; HTML / SVG show source only and are never executed</span></li>
+              <li><span data-l="zh">保存前核对当前内容版本；外部修改冲突时保留磁盘内容与你的草稿</span><span data-l="en">Saves check the current content version; an external conflict keeps both the disk content and your draft</span></li>
+              <li><span data-l="zh">未保存草稿不会被目录刷新覆盖；关闭标签或退出窗口前会确认</span><span data-l="en">Drafts survive directory refreshes and are confirmed before closing a tab or the window</span></li>
+              <li><span data-l="zh">文件访问限定在当前工作区，符号链接只展示，不展开或预览</span><span data-l="en">Access is limited to the current workspace; symlinks are shown but not expanded or previewed</span></li>
+            </ul>
+
+            <h3 id="terminal"><span data-l="zh">内嵌终端</span><span data-l="en">Built-in terminal</span></h3>
+            <p data-l="zh">中央标签栏的「＋ → 终端」会创建真正的终端标签，PTY 由主进程托管；Windows 默认使用 PowerShell，其他平台启动登录 shell；可在「设置 → 通用」指定命令壳</p>
+            <p data-l="en">The center tab bar’s “+ → Terminal” creates a real terminal tab backed by a main-process PTY. Windows defaults to PowerShell; other platforms start a login shell. Choose the shell under Settings → General.</p>
+            <ul>
+              <li><span data-l="zh">切换对话、文件或工作区不会结束终端进程；关闭终端标签需要确认</span><span data-l="en">Switching chats, files, or workspaces keeps the PTY alive; closing a terminal tab asks for confirmation</span></li>
+              <li><span data-l="zh">支持 ANSI、历史滚动、Ctrl+C 与粘贴；输入直接发送给 PTY，不经过模型</span><span data-l="en">ANSI, scrollback, Ctrl+C, and paste are supported; input goes straight to the PTY, not through a model</span></li>
+              <li><span data-l="zh">终端与屏幕内容只驻留内存，不写进设置</span><span data-l="en">Terminal screens live in memory only and are not written to settings</span></li>
+            </ul>
+
+            <h3 id="shortcuts"><span data-l="zh">常用快捷键</span><span data-l="en">Common shortcuts</span></h3>
+            <p data-l="zh">下面是默认按键，可在「设置 → 快捷键」查看或修改；macOS 上把 Ctrl 换成 ⌘</p>
+            <p data-l="en">These are defaults. View or rebind them under Settings → Shortcuts; on macOS, use ⌘ instead of Ctrl.</p>
+            <div class="table-scroll">
+              <table class="shortcut-table">
+                <thead><tr><th><span data-l="zh">操作</span><span data-l="en">Action</span></th><th><span data-l="zh">按键</span><span data-l="en">Shortcut</span></th></tr></thead>
+                <tbody>
+                  <tr><th><span data-l="zh">新建会话</span><span data-l="en">New session</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>N</kbd></td></tr>
+                  <tr><th><span data-l="zh">打开设置</span><span data-l="en">Open settings</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>,</kbd></td></tr>
+                  <tr><th><span data-l="zh">切换右侧面板</span><span data-l="en">Toggle right panel</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>B</kbd></td></tr>
+                  <tr><th><span data-l="zh">切换左侧栏</span><span data-l="en">Toggle sidebar</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>Shift</kbd><span>+</span><kbd>B</kbd></td></tr>
+                  <tr><th><span data-l="zh">聚焦输入框</span><span data-l="en">Focus composer</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>L</kbd></td></tr>
+                  <tr><th><span data-l="zh">搜索会话</span><span data-l="en">Search sessions</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>K</kbd></td></tr>
+                  <tr><th><span data-l="zh">选择模型</span><span data-l="en">Pick a model</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>M</kbd></td></tr>
+                  <tr><th><span data-l="zh">切换审批档位</span><span data-l="en">Cycle approval mode</span></th><td><kbd>Shift</kbd><span>+</span><kbd>Tab</kbd></td></tr>
+                  <tr><th><span data-l="zh">发送 / 换行</span><span data-l="en">Send / new line</span></th><td><kbd>Enter</kbd><span>/</span><kbd>Shift</kbd><span>+</span><kbd>Enter</kbd></td></tr>
+                  <tr><th><span data-l="zh">停止当前回合</span><span data-l="en">Stop the turn</span></th><td><kbd>Esc</kbd></td></tr>
+                  <tr><th><span data-l="zh">立即发送排队消息</span><span data-l="en">Send queued message now</span></th><td><kbd>Ctrl</kbd><span>+</span><kbd>S</kbd></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="doc-section" id="configuration">
+            <header class="doc-heading">
+              <p class="doc-kicker">04 / CONFIGURATION</p>
+              <h2><span data-l="zh">角色、技能与 MCP</span><span data-l="en">Roles, skills, and MCP</span></h2>
+              <p class="doc-lead" data-l="zh">角色把提示词、模型、权限与资源打包成一份可复用配置；技能和 MCP 是可挂到角色上的能力</p>
+              <p class="doc-lead" data-l="en">A role packages a prompt, model, permissions, and resources into a reusable profile. Skills and MCP servers are capabilities you attach to it.</p>
+            </header>
+
+            <h3 id="roles"><span data-l="zh">角色组成</span><span data-l="en">Anatomy of a role</span></h3>
+            <p data-l="zh">在「设置 → 角色」新建、复制、导入或导出 JSON；一个角色包含以下字段</p>
+            <p data-l="en">Create, duplicate, import, or export JSON under Settings → Roles. A role contains:</p>
+            <ul class="field-list">
+              <li><b><span data-l="zh">名称与 id</span><span data-l="en">Name and id</span></b><span data-l="zh">id 只能是小写字母、数字和连字符，保存后不可修改</span><span data-l="en">The id allows lowercase letters, digits, and hyphens, and cannot change after saving</span></li>
+              <li><b><span data-l="zh">系统提示词</span><span data-l="en">System prompt</span></b><span data-l="zh">追加在基础提示词之后，可以自由修改或清空</span><span data-l="en">Appended after the base prompt; edit or clear it freely</span></li>
+              <li><b><span data-l="zh">模型与思考档位</span><span data-l="en">Model and thinking</span></b><span data-l="zh">可以指定，也可以跟随会话模型</span><span data-l="en">Set explicitly or follow the session model</span></li>
+              <li><b><span data-l="zh">工具策略与审批档位</span><span data-l="en">Tool policy and approval</span></b><span data-l="zh">决定能调用哪些工具，以及何时需要你确认</span><span data-l="en">Controls which tools are available and when you are asked</span></li>
+              <li><b><span data-l="zh">技能、MCP 与指令文件</span><span data-l="en">Skills, MCP, and instructions</span></b><span data-l="zh">选择要加载的资源；指令文件可以覆盖全局选择</span><span data-l="en">Pick resources to load; an instruction file can override the global choice</span></li>
+            </ul>
+            <p data-l="zh">内置 Orchestrator 与 Worker 是默认模板，可以修改并保存，也可以恢复默认；内置 id 固定、不可删除；角色改动对之后新建的会话生效，运行中的会话不会热替换</p>
+            <p data-l="en">The built-in Orchestrator and Worker are editable defaults that can be restored; their ids are fixed and cannot be deleted. Role changes apply to newly created sessions; running sessions are not hot-swapped.</p>
+
+            <h4 id="tool-policy"><span data-l="zh">工具策略</span><span data-l="en">Tool policy</span></h4>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th><span data-l="zh">策略</span><span data-l="en">Policy</span></th><th><span data-l="zh">可用工具</span><span data-l="en">Available tools</span></th></tr></thead>
+                <tbody>
+                  <tr><th><span data-l="zh">全部工具</span><span data-l="en">All tools</span></th><td><span data-l="zh">读取、写入、执行命令等 pi 默认编程工具</span><span data-l="en">Reading, writes, commands, and the rest of pi’s default coding tools</span></td></tr>
+                  <tr><th><span data-l="zh">只读</span><span data-l="en">Read-only</span></th><td><span data-l="zh">读文件、只读 git；不能改文件或执行任意命令</span><span data-l="en">Read files and read-only git; no writes or arbitrary commands</span></td></tr>
+                  <tr><th><span data-l="zh">编排</span><span data-l="en">Orchestration</span></th><td><span data-l="zh">只读工具加派发、审查、合并等编排工具；不能写文件或执行任意命令</span><span data-l="en">Read-only tools plus dispatch, review, and merge tools; no writes or arbitrary commands</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">Orchestrator 默认使用「编排」，Worker 默认使用「全部工具」；即使把 Orchestrator 的审批档位设为完全放行，它的工具策略仍然不允许改代码</p>
+            <p data-l="en">Orchestrator defaults to Orchestration; Worker defaults to All tools. Even with approval set to Full, the Orchestrator’s tool policy still cannot edit code.</p>
+
+            <h4 id="approval"><span data-l="zh">审批档位</span><span data-l="en">Approval modes</span></h4>
+            <p data-l="zh">输入框里可以切换当前会话的审批档位，快捷键是 <kbd>Shift</kbd>+<kbd>Tab</kbd>；角色里保存的是新建会话时的默认值</p>
+            <p data-l="en">Cycle the current session’s approval mode from the composer with <kbd>Shift</kbd>+<kbd>Tab</kbd>. A role stores the default used by new sessions.</p>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th><span data-l="zh">档位</span><span data-l="en">Mode</span></th><th><span data-l="zh">行为</span><span data-l="en">Behavior</span></th></tr></thead>
+                <tbody>
+                  <tr><th><span data-l="zh">全程审批</span><span data-l="en">Supervised</span></th><td><span data-l="zh">命令、文件写改与 MCP 调用都需要确认</span><span data-l="en">Commands, file writes and edits, and MCP calls all require confirmation</span></td></tr>
+                  <tr><th><span data-l="zh">自动接受编辑</span><span data-l="en">Auto-accept edits</span></th><td><span data-l="zh">文件写改自动通过，命令与 MCP 仍要确认</span><span data-l="en">File writes and edits pass automatically; commands and MCP still ask</span></td></tr>
+                  <tr><th><span data-l="zh">完全放行</span><span data-l="en">Full</span></th><td><span data-l="zh">常规工具自动通过，保护操作仍然拦截</span><span data-l="en">Ordinary tools pass automatically; protected operations are still intercepted</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">内置 Orchestrator 的默认审批是「完全放行」，Worker 是「自动接受编辑」；两者都可以在角色里修改</p>
+            <p data-l="en">The built-in Orchestrator defaults to Full and the Worker to Auto-accept edits; both are editable in the role.</p>
+            <aside class="callout callout-warn">
+              <p class="callout-title"><span data-l="zh">保护底线</span><span data-l="en">Hard floor</span></p>
+              <p data-l="zh">
+                <code>git push</code>、<code>git reset --hard</code>、<code>rm -rf</code>、<code>Remove-Item -Recurse</code>、<code>del /s</code> 与包管理器 <code>publish</code> 等保护操作，在任何审批档位下都要你确认；「本会话都允许」也不豁免；10 分钟未答复或回合中止，按拒绝处理
+              </p>
+              <p data-l="en">
+                Protected operations such as <code>git push</code>, <code>git reset --hard</code>, <code>rm -rf</code>,
+                <code>Remove-Item -Recurse</code>, <code>del /s</code>, and package-manager <code>publish</code> need
+                your confirmation in every mode. “Allow for session” does not exempt them. No answer within 10 minutes,
+                or an aborted turn, counts as a denial.
+              </p>
+            </aside>
+
+            <h3 id="skills"><span data-l="zh">技能</span><span data-l="en">Skills</span></h3>
+            <p data-l="zh">在「设置 → 技能」扫描本机，或添加一个包含 <code>SKILL.md</code> 的目录；登记后的技能可以在角色编辑里勾选</p>
+            <p data-l="en">Under Settings → Skills, scan this computer or add a folder containing <code>SKILL.md</code>. Registered skills can be selected in the role editor.</p>
+            <ul>
+              <li><span data-l="zh">扫描来源：Claude Code 的 <code>~/.claude/skills</code>、Codex 的 <code>~/.codex/skills</code>、pi 的 <code>~/.pi/agent/skills</code></span><span data-l="en">Scan sources: Claude Code’s <code>~/.claude/skills</code>, Codex’s <code>~/.codex/skills</code>, and pi’s <code>~/.pi/agent/skills</code></span></li>
+              <li><span data-l="zh">只登记带 <code>SKILL.md</code> 的目录；同名技能按来源顺序去重</span><span data-l="en">Only folders with <code>SKILL.md</code> are registered; duplicates are resolved by source order</span></li>
+              <li><span data-l="zh">移除只删除 Fynvra 里的登记，不删除磁盘上的技能目录</span><span data-l="en">Removing a skill only deletes Fynvra’s registry entry, not the folder on disk</span></li>
+              <li><span data-l="zh">技能是否加载由角色的勾选决定；改动在会话下次启动时生效</span><span data-l="en">The role decides which skills load; changes take effect the next time a session starts</span></li>
+            </ul>
+
+            <h3 id="mcp"><span data-l="zh">MCP 服务器</span><span data-l="en">MCP servers</span></h3>
+            <p data-l="zh">在「设置 → MCP」添加服务器，填写名称、传输方式与连接信息；启用后，再到角色里选择要加载的服务器</p>
+            <p data-l="en">Add servers under Settings → MCP with a name, transport, and connection details. Enable them, then select which ones a role loads.</p>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th><span data-l="zh">传输</span><span data-l="en">Transport</span></th><th><span data-l="zh">需要填写</span><span data-l="en">Required</span></th></tr></thead>
+                <tbody>
+                  <tr><th><span data-l="zh">本地进程（stdio）</span><span data-l="en">Local process (stdio)</span></th><td><span data-l="zh">命令与参数，可选环境变量</span><span data-l="en">Command and args, optional environment variables</span></td></tr>
+                  <tr><th><span data-l="zh">远程（Streamable HTTP）</span><span data-l="en">Remote (Streamable HTTP)</span></th><td><span data-l="zh">URL，可选 Header</span><span data-l="en">URL, optional headers</span></td></tr>
+                  <tr><th><span data-l="zh">远程（SSE）</span><span data-l="en">Remote (SSE)</span></th><td><span data-l="zh">URL，可选 Header</span><span data-l="en">URL, optional headers</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">「从本机导入」可以读取以下工具的已有配置；重复的服务器会按命令或 URL 标记</p>
+            <p data-l="en">Import from this computer reads existing configs from the tools below; duplicates are matched by command or URL.</p>
+            <div class="tag-cloud">
+              <span>Claude Code</span><span>Codex</span><span>Grok CLI</span><span>Gemini CLI</span><span>Cursor</span><span>VS Code</span><span>OpenCode</span><span>CC Switch</span>
+            </div>
+            <p data-l="zh">环境变量与 Header 的值只在主进程读取，保存后界面不再显示明文；删除一个服务器后，引用它的角色将不再加载它</p>
+            <p data-l="en">Environment-variable and header values are read only in the main process and are not shown again after saving. Deleting a server removes it from roles that referenced it.</p>
+
+            <h3 id="instructions"><span data-l="zh">指令文件</span><span data-l="en">Instruction files</span></h3>
+            <p data-l="zh">本机的 AGENTS.md / CLAUDE.md 类文件可以在「设置 → 指令文件」中导入，以链接或本地副本的形式保存；同一时间只有一份全局指令生效</p>
+            <p data-l="en">AGENTS.md / CLAUDE.md-style files can be imported under Settings → Instruction files as links or local copies. Only one global instruction file is active at a time.</p>
+            <ul>
+              <li><span data-l="zh">链接：每次启动会话时读取源文件；源文件缺失或不可读时显示警告且不注入</span><span data-l="en">Link: read at each session start; a missing or unreadable source shows a warning and is not injected</span></li>
+              <li><span data-l="zh">本地副本：保存到 Fynvra 的用户数据目录；编辑链接条目会转为本地副本，绝不改写源文件</span><span data-l="en">Local copy: stored in Fynvra’s user-data directory; editing a linked entry converts it to a local copy and never rewrites the source</span></li>
+              <li><span data-l="zh">角色可以跟随全局、不使用，或指定某个条目；指定条目不受全局开关影响</span><span data-l="en">A role can follow the global choice, use none, or name an entry; a named entry ignores the global toggle</span></li>
+              <li><span data-l="zh">删除只移除 Fynvra 条目，不会删除磁盘上的原始文件</span><span data-l="en">Deleting removes only the Fynvra entry, never the original file on disk</span></li>
+            </ul>
+          </section>
+
+          <section class="doc-section" id="tasks">
+            <header class="doc-heading">
+              <p class="doc-kicker">05 / TASKS</p>
+              <h2><span data-l="zh">任务与更改</span><span data-l="en">Tasks and changes</span></h2>
+              <p class="doc-lead" data-l="zh">主 Agent 把需求拆成任务，每个任务在独立 worktree 中执行，再经过审查与合并回到主分支</p>
+              <p class="doc-lead" data-l="en">The orchestrator splits a request into tasks, runs each in its own worktree, then brings passing work back through review and merge.</p>
+            </header>
+
+            <h3 id="dispatch"><span data-l="zh">派发条件</span><span data-l="en">Before dispatch</span></h3>
+            <aside class="callout">
+              <p class="callout-title"><span data-l="zh">git 工作区</span><span data-l="en">Git workspace</span></p>
+              <p data-l="zh">
+                多 Agent 派发需要已有提交的 git 仓库，并配置 git 用户名与邮箱；Windows 建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」指定本地命令壳；非 git 目录走原地模式，见下方说明
+              </p>
+              <p data-l="en">
+                Multi-agent dispatch needs a git repository with at least one commit and a configured git user name and
+                email. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local shell under
+                Settings → General. Non-git folders use in-place mode, described below.
+              </p>
+            </aside>
+
+            <h3 id="flow"><span data-l="zh">一轮完整流程</span><span data-l="en">A complete run</span></h3>
+            <ol class="step-list">
+              <li><span data-l="zh"><strong>描述需求</strong>：在 Orchestrator 会话里说清楚目标，需要时点名角色，例如「Y 交给测试工程师」</span><span data-l="en"><strong>Describe</strong>: state the goal in the Orchestrator session and name a role when needed, for example “give Y to the QA engineer”</span></li>
+              <li><span data-l="zh"><strong>拆解与派发</strong>：主 Agent 写任务书，调用 <code>dispatch_task</code>；Fynvra 创建 worktree、启动 Worker 并投递任务书</span><span data-l="en"><strong>Split and dispatch</strong>: the orchestrator writes a brief and calls <code>dispatch_task</code>; Fynvra creates the worktree, starts a worker, and delivers the brief</span></li>
+              <li><span data-l="zh"><strong>并行执行</strong>：Worker 在自己的分支里改代码并提交；卡住时用 <code>ask_coordinator</code> 提问，完成后用 <code>report_done</code> 汇报</span><span data-l="en"><strong>Build in parallel</strong>: workers edit and commit on their branches, use <code>ask_coordinator</code> when stuck, and <code>report_done</code> when finished</span></li>
+              <li><span data-l="zh"><strong>审查</strong>：主 Agent 用 <code>review_diff</code> 读改动、用 <code>run_checks</code> 跑检查；不达标时用 <code>reject_work</code> 把意见发回</span><span data-l="en"><strong>Review</strong>: the orchestrator reads the diff with <code>review_diff</code>, runs checks with <code>run_checks</code>, and sends work back with <code>reject_work</code> if it falls short</span></li>
+              <li><span data-l="zh"><strong>合并与收尾</strong>：通过后 <code>merge_worktree</code> 合入当前分支，<code>cleanup_worktree</code> 清理目录，最后向你汇报结果与证据</span><span data-l="en"><strong>Merge and wrap up</strong>: <code>merge_worktree</code> lands it on the current branch, <code>cleanup_worktree</code> tidies up, and you get a report with evidence</span></li>
+            </ol>
+            <p data-l="zh">派发后主 Agent 不会阻塞等待，你可以继续对话；收件箱出现完成、提问或上报消息且主 Agent 空闲时，Fynvra 会唤醒它</p>
+            <p data-l="en">The orchestrator does not block after dispatching, so you can keep talking to it. When a done, question, or escalation message arrives and the orchestrator is idle, Fynvra wakes it.</p>
+
+            <h3 id="status"><span data-l="zh">任务状态</span><span data-l="en">Task states</span></h3>
+            <div class="status-row">
+              <span class="status-chip"><i class="state-queued"></i><span data-l="zh">待开始</span><span data-l="en">Not started</span></span>
+              <span class="status-arrow" aria-hidden="true">→</span>
+              <span class="status-chip"><i class="state-running"></i><span data-l="zh">进行中</span><span data-l="en">In progress</span></span>
+              <span class="status-arrow" aria-hidden="true">→</span>
+              <span class="status-chip"><i class="state-review"></i><span data-l="zh">待验收</span><span data-l="en">In review</span></span>
+              <span class="status-arrow" aria-hidden="true">→</span>
+              <span class="status-chip"><i class="state-done"></i><span data-l="zh">已完成</span><span data-l="en">Completed</span></span>
+              <span class="status-arrow" aria-hidden="true">/</span>
+              <span class="status-chip"><i class="state-failed"></i><span data-l="zh">失败或已放弃</span><span data-l="en">Failed or abandoned</span></span>
+            </div>
+            <p data-l="zh">每个任务可以有多次尝试；右侧「任务」按状态分组，点开任务可以查看尝试、消息与结果；待验收的任务在「改动」里选择某次尝试查看 diff</p>
+            <p data-l="en">A task can have several attempts. Tasks groups them by state; open a task to see attempts, messages, and results. In Changes, pick an in-review task and attempt to inspect its diff.</p>
+
+            <h3 id="tools"><span data-l="zh">编排工具</span><span data-l="en">Orchestration tools</span></h3>
+            <p data-l="zh">这些工具只对使用「编排」策略的角色开放，实际执行由主进程的编排服务完成</p>
+            <p data-l="en">These tools are available only to roles using the Orchestration policy; the main-process orchestration service performs the actual work.</p>
+            <div class="table-scroll">
+              <table class="tool-table">
+                <thead><tr><th><span data-l="zh">工具</span><span data-l="en">Tool</span></th><th><span data-l="zh">作用</span><span data-l="en">Purpose</span></th></tr></thead>
+                <tbody>
+                  <tr><th><code>dispatch_task</code></th><td><span data-l="zh">创建任务、worktree 与 Worker，并投递任务书</span><span data-l="en">Create a task, worktree, and worker; deliver the brief</span></td></tr>
+                  <tr><th><code>list_workers</code></th><td><span data-l="zh">列出当前 Run 的 Worker 与状态</span><span data-l="en">List workers and states in the current run</span></td></tr>
+                  <tr><th><code>wait_for_workers</code></th><td><span data-l="zh">显式等待任意或全部 Worker 完成</span><span data-l="en">Explicitly wait for any or all workers</span></td></tr>
+                  <tr><th><code>read_worker_output</code></th><td><span data-l="zh">增量读取某个 Worker 的输出</span><span data-l="en">Incrementally read one worker’s output</span></td></tr>
+                  <tr><th><code>send_to_worker</code></th><td><span data-l="zh">回答提问或发送新的指示</span><span data-l="en">Answer a question or send new instructions</span></td></tr>
+                  <tr><th><code>review_diff</code></th><td><span data-l="zh">读取任务相对基准提交的改动</span><span data-l="en">Read a task’s changes against its base commit</span></td></tr>
+                  <tr><th><code>run_checks</code></th><td><span data-l="zh">在任务目录里执行白名单内的检查命令</span><span data-l="en">Run a whitelisted check command in the task directory</span></td></tr>
+                  <tr><th><code>merge_worktree</code></th><td><span data-l="zh">把 Worker 分支以 <code>--no-ff</code> 合入当前分支</span><span data-l="en">Merge the worker branch into the current branch with <code>--no-ff</code></span></td></tr>
+                  <tr><th><code>reject_work</code></th><td><span data-l="zh">把反馈作为新指令发回 Worker</span><span data-l="en">Send feedback back to the worker as a new prompt</span></td></tr>
+                  <tr><th><code>cleanup_worktree</code></th><td><span data-l="zh">清理任务目录与分支，或停止原地任务的 Worker</span><span data-l="en">Remove the worktree and branch, or stop an in-place worker</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p data-l="zh">Worker 侧还有两个协议工具：<code>ask_coordinator</code> 阻塞等待主 Agent 回答，<code>report_done</code> 在每一轮只允许成功汇报一次</p>
+            <p data-l="en">Workers also have two protocol tools: <code>ask_coordinator</code> blocks until the orchestrator answers, and <code>report_done</code> can succeed only once per run.</p>
+
+            <h3 id="review"><span data-l="zh">审查、打回与合并</span><span data-l="en">Review, reject, and merge</span></h3>
+            <ul>
+              <li><span data-l="zh">审查读取的是 Worker 的提交差异；即使 worktree 已清理，合并时记录的提交范围仍可在「改动」里回看</span><span data-l="en">Review reads the worker’s commit range; after cleanup, the commit range recorded at merge time is still viewable in Changes</span></li>
+              <li><span data-l="zh">合并使用 <code>--no-ff</code>；发生冲突时自动中止合并并报告冲突文件，不会留下半合并状态</span><span data-l="en">Merges use <code>--no-ff</code>; on conflict the merge is aborted automatically and conflicting files are reported</span></li>
+              <li><span data-l="zh">打回会把反馈作为新的提示词发回 Worker，Worker 可以再次修改并汇报</span><span data-l="en">Rejecting sends feedback as a new prompt; the worker can revise and report again</span></li>
+              <li><span data-l="zh">合并到主 Agent 当前检出的分支；合并前会确认仓库仍在该分支上</span><span data-l="en">Work merges into the branch the orchestrator has checked out; Fynvra verifies the repo is still on it first</span></li>
+              <li><span data-l="zh">派发时的审批档位跟随主 Agent 当时的档位；Worker 的保护操作仍走同一条底线</span><span data-l="en">A dispatched worker inherits the orchestrator’s approval mode at dispatch time; protected operations still hit the same hard floor</span></li>
+            </ul>
+
+            <h3 id="in-place"><span data-l="zh">没有 git 的工作区</span><span data-l="en">Workspaces without git</span></h3>
+            <p data-l="zh">普通文件夹按原地模式编排：不创建 worktree，Worker 的 cwd 就是工作区目录；<code>review_diff</code> 没有 diff，改为列出 Worker 在汇报里提交的改动文件；<code>merge_worktree</code> 直接把任务记为完成；<code>cleanup_worktree</code> 只停止 Worker，改动留在目录里</p>
+            <p data-l="en">Plain folders run in place: no worktree, and the worker’s cwd is the workspace folder. <code>review_diff</code> has no diff and lists the files reported by the worker instead; <code>merge_worktree</code> marks the task complete; <code>cleanup_worktree</code> only stops the worker and leaves changes in the folder.</p>
+            <p data-l="zh">并行 Worker 会共用同一个目录与文件，建议一次只派发一个任务；需要隔离时，把目录初始化为 git 仓库并至少提交一次</p>
+            <p data-l="en">Parallel workers share the same folder and files, so dispatch one task at a time. For isolation, initialize the folder as a git repository and make at least one commit.</p>
+
+            <h3 id="usage"><span data-l="zh">用量与通知</span><span data-l="en">Usage and notifications</span></h3>
+            <p data-l="zh">「设置 → 用量」从本机会话记录汇总 Token、费用、缓存命中率，以及本期任务的完成、放弃、失败状态、打回次数与一次验收通过率；未知或已删除的会话单独归组，不返回路径和正文</p>
+            <p data-l="en">Settings → Usage summarizes tokens, cost, cache hit rate, and this period’s completed, abandoned, and failed task states, rejections, and first-pass acceptance from local session records. Unknown or deleted sessions are grouped separately; paths and message content are not returned.</p>
+            <p data-l="zh">通知可以只针对主 Agent 完成、Worker 提问、上报与审批请求；桌面通知和声音在「设置 → 通知」里控制</p>
+            <p data-l="en">Notifications can be limited to orchestrator completion or extended to worker questions, escalations, and approval requests. Desktop notifications and sound are controlled under Settings → Notifications.</p>
+          </section>
+
+          <section class="doc-section" id="faq">
+            <header class="doc-heading">
+              <p class="doc-kicker">06 / FAQ</p>
+              <h2><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></h2>
+              <p class="doc-lead" data-l="zh">平台、数据、更新与迁移相关的短答案；具体操作回到前五章</p>
+              <p class="doc-lead" data-l="en">Short answers on platforms, data, updates, and migration. Detailed steps live in the first five chapters.</p>
+            </header>
+
+            <div class="faq-list docs-faq">
+              <details>
+                <summary><span data-l="zh">没有 Release 或安装包怎么办</span><span data-l="en">No release or installer yet?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">按「从源码运行」安装 Node.js 22.19+、pnpm 10.26.2 与 Git，执行 <code>pnpm install --frozen-lockfile</code> 后运行 <code>pnpm dev</code></p>
+                <p data-l="en">Follow “Run from source”: install Node.js 22.19+, pnpm 10.26.2, and Git, run <code>pnpm install --frozen-lockfile</code>, then <code>pnpm dev</code>.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">Windows SmartScreen 或 macOS Gatekeeper 拦截了安装包</span><span data-l="en">Windows SmartScreen or macOS Gatekeeper blocked the installer</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">没有签名证书的 Windows 包可能触发 SmartScreen；没有 Apple 凭证的 Mac 包是临时签名；确认下载来源可信后再按系统提示放行，不建议全局关闭安全检查</p>
+                <p data-l="en">Unsigned Windows builds may trigger SmartScreen; Mac builds without Apple credentials are ad-hoc signed. Verify where the download came from, then follow the system prompt for this app. Do not disable security checks globally.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">必须用 git 吗</span><span data-l="en">Is git required?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">不是，普通文件夹按原地模式工作，但不创建 worktree，并行 Worker 会共用目录；需要隔离与逐任务 diff 时使用 git 仓库</p>
+                <p data-l="en">No. Plain folders run in place, but without worktrees, so parallel workers share the folder. Use a git repository when you need isolation and per-task diffs.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">主 Agent 会自己改代码吗</span><span data-l="en">Does the orchestrator edit code itself?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">默认不会，它的工具策略只包含读文件、只读 git 和编排工具；你可以修改角色配置，但运行时仍会执行工具权限与审批底线</p>
+                <p data-l="en">Not by default. Its tool policy includes only file reads, read-only git, and orchestration tools. You can edit the role, but the runtime still enforces tool permissions and the approval floor.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">代码、会话和密钥会被上传吗</span><span data-l="en">Are code, sessions, and keys uploaded?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">Fynvra 没有中转服务器，模型请求只发往你配置的服务地址；设置、角色、会话与密钥保存在本机应用数据目录；密钥明文只在主进程使用，但本地配置不是加密凭证库，请不要分享用户数据目录；Agent 与 MCP 仍可能执行命令或访问外部服务，按项目需要设置工具策略与审批档位</p>
+                <p data-l="en">There is no relay server; model requests go only to the endpoints you configure. Settings, roles, sessions, and keys stay in the local app-data directory. Plaintext keys are used only in the main process, but local config is not an encrypted vault, so do not share the user-data folder. Agents and MCP servers can still run commands or reach external services, so set the tool policy and approval mode for the project.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">能连接本地模型吗</span><span data-l="en">Can I connect a local model?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">只要服务实现了受支持的四种协议之一，就可以填自定义 Base URL、API Key 与模型 id 接入；Fynvra 不内置模型运行时，也不代为安装推理服务</p>
+                <p data-l="en">If a server implements one of the four supported protocols, point a provider at its base URL with an API key and model id. Fynvra does not bundle a model runtime or install inference servers.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">Worker 会 push 或删库吗</span><span data-l="en">Can workers push or delete a repository?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">git push、git reset --hard、rm -rf 等保护操作在任何审批档位下都必须由你确认；没有回应按拒绝处理</p>
+                <p data-l="en">Protected operations such as git push, git reset --hard, and rm -rf always require your confirmation, regardless of approval mode. No response means denial.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">支持哪些平台，Linux 能用吗</span><span data-l="en">Which platforms are supported? What about Linux?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">正式提供 Windows x64 与 macOS Intel / Apple Silicon 安装包，Linux 有 AppImage 构建配置，但尚未纳入自动发布、安装包分发与更新</p>
+                <p data-l="en">Windows x64 and macOS Intel / Apple Silicon are the released platforms. Linux has an AppImage build config but is not part of automated releases, installer distribution, or updates.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">如何更新，开发模式会更新吗</span><span data-l="en">How do updates work? Does dev mode update?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">Windows 安装版与正式签名的 macOS 版启动后及每 4 小时检查一次稳定版，下载完成后等你确认安装；未签名 Mac 包从 Releases 手动覆盖，开发模式与未发布平台不联网更新</p>
+                <p data-l="en">Installed Windows and Developer ID-signed macOS builds check for stable updates at startup and every 4 hours, then wait for your confirmation. Unsigned Mac builds are replaced manually from Releases. Dev mode and unpublished platforms do not update online.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">数据存在哪里，开发版和正式版会混用吗</span><span data-l="en">Where is data stored? Do dev and release builds share it?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">设置、角色、模型服务、MCP 与会话都在本机应用数据目录；开发版使用 <code>fynvra-dev</code>，与安装版分开；只有开发模式认 <code>FYNVRA_USER_DATA_DIR</code>；删除会话不会删除 pi jsonl 正文记录</p>
+                <p data-l="en">Settings, roles, providers, MCP, and sessions live in the local app-data directory. Dev builds use <code>fynvra-dev</code>, separate from installed builds; <code>FYNVRA_USER_DATA_DIR</code> applies only in dev mode. Removing a session does not delete its pi jsonl transcript.</p>
+              </details>
+              <details>
+                <summary><span data-l="zh">可以从 Claude Code、Codex 迁移吗</span><span data-l="en">Can I migrate from Claude Code or Codex?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+                <p data-l="zh">模型服务可从 Claude Code、Codex、CC Switch 导入；MCP 额外支持 Grok CLI、Gemini CLI、Cursor、VS Code 与 OpenCode；技能会扫描 Claude Code、Codex 与 pi 的目录；导入前可预览并去重</p>
+                <p data-l="en">Providers can be imported from Claude Code, Codex, and CC Switch; MCP also supports Grok CLI, Gemini CLI, Cursor, VS Code, and OpenCode; skills are scanned from Claude Code, Codex, and pi. Preview and deduplicate before importing.</p>
+              </details>
+            </div>
+
+            <div class="doc-end">
+              <p data-l="zh">还需要更多上下文？仓库里有产品定义、架构契约与发布说明</p>
+              <p data-l="en">Need more context? The repository includes the product definition, architecture contract, and release guide.</p>
+              <div class="doc-end-links">
+                <a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/PRODUCT.md"><span data-l="zh">产品定义</span><span data-l="en">Product definition</span><span aria-hidden="true">↗</span></a>
+                <a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/ARCHITECTURE.md"><span data-l="zh">架构契约</span><span data-l="en">Architecture</span><span aria-hidden="true">↗</span></a>
+                <a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/RELEASE.md"><span data-l="zh">发布说明</span><span data-l="en">Release guide</span><span aria-hidden="true">↗</span></a>
+              </div>
+              <a class="back-top" href="#main"><span aria-hidden="true">↑</span><span data-l="zh">回到顶部</span><span data-l="en">Back to top</span></a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html" aria-label="Fynvra">
+            <img class="brand-mark" src="assets/favicon.svg" alt="" width="26" height="26" />
+            <span>Fynvra</span>
+          </a>
+          <p data-l="zh">开源的本地多 Agent AI 编程工作台，基于 Electron 与 pi SDK 构建</p>
+          <p data-l="en">The open-source, local multi-agent AI coding workbench. Built on Electron and the pi SDK.</p>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">产品</span><span data-l="en">Product</span></p>
+          <ul class="footer-links">
+            <li><a href="index.html#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a></li>
+            <li><a href="index.html#runtime"><span data-l="zh">能力</span><span data-l="en">Capabilities</span></a></li>
+            <li><a href="index.html#safety"><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l="zh">下载</span><span data-l="en">Download</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">文档</span><span data-l="en">Docs</span></p>
+          <ul class="footer-links">
+            <li><a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">User guide</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/PRODUCT.md"><span data-l="zh">产品定义</span><span data-l="en">Product definition</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/ARCHITECTURE.md"><span data-l="zh">架构契约</span><span data-l="en">Architecture</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/RELEASE.md"><span data-l="zh">发布说明</span><span data-l="en">Releases and updates</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">社区</span><span data-l="en">Community</span></p>
+          <ul class="footer-links">
+            <li><a href="https://github.com/LAIJiangFeng/fynvra">GitHub</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/issues">Issues</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases">Releases</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/LICENSE">Apache-2.0</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="shell footer-bottom">
+        <span>© 2026 Fynvra · Apache-2.0</span>
+        <span>Electron · React · pi SDK</span>
+      </div>
+    </footer>
+  </body>
+</html>

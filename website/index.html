@@ -1,0 +1,1086 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-locale="zh"
+  data-theme="dark"
+  data-title-zh="Fynvra — 本地多 Agent AI 编程工作台"
+  data-title-en="Fynvra — The local multi-agent AI coding workbench"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fynvra — 本地多 Agent AI 编程工作台</title>
+    <meta
+      name="description"
+      content="Fynvra 是开源的本地桌面 AI 编程工作台：主 Agent 拆分需求，每个任务在独立 git worktree 中由 Worker 执行，验收通过后再合并 / An open-source desktop AI coding workbench with worktree-isolated multi-agent orchestration."
+    />
+    <meta name="theme-color" content="#05080a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Fynvra" />
+    <meta
+      property="og:description"
+      content="说清需求，让本地 Agent 团队并行交付 / Describe the goal. Let a local team deliver in parallel."
+    />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <script src="assets/site.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Inter:wght@300..700&amp;family=Sora:wght@400..700&amp;display=swap"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main"><span data-l="zh">跳到正文</span><span data-l="en">Skip to content</span></a>
+
+    <header class="site-header">
+      <div class="nav shell">
+        <a class="brand" href="index.html" aria-label="Fynvra">
+          <img class="brand-mark" src="assets/favicon.svg" alt="" width="28" height="28" />
+          <span>Fynvra</span>
+        </a>
+        <nav class="nav-links" id="site-menu" aria-label="主导航 / Main navigation">
+          <a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a>
+          <a href="#runtime"><span data-l="zh">能力</span><span data-l="en">Capabilities</span></a>
+          <a href="#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
+          <a href="#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
+          <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">User guide</span></a>
+        </nav>
+        <div class="nav-actions">
+          <a
+            class="icon-btn nav-github"
+            href="https://github.com/LAIJiangFeng/fynvra"
+            aria-label="GitHub"
+            title="GitHub"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+            <span class="sr-only">GitHub</span>
+          </a>
+          <button class="icon-btn lang-btn" type="button" data-action="toggle-locale">
+            <span data-l="zh" lang="en">EN</span><span data-l="en" lang="zh-CN">中文</span>
+          </button>
+          <button class="icon-btn theme-btn" type="button" data-action="toggle-theme" aria-label="切换主题 / Toggle theme" title="切换主题 / Toggle theme">
+            <svg
+              class="icon-moon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z" />
+            </svg>
+            <svg
+              class="icon-sun"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4" />
+            </svg>
+          </button>
+          <a class="btn btn-primary btn-sm nav-download" href="https://github.com/LAIJiangFeng/fynvra/releases">
+            <span data-l="zh">下载</span><span data-l="en">Download</span>
+          </a>
+          <button
+            class="icon-btn menu-btn"
+            type="button"
+            data-action="toggle-menu"
+            aria-controls="site-menu"
+            aria-expanded="false"
+            aria-label="打开菜单 / Open menu"
+            title="打开菜单 / Open menu"
+          >
+            <span class="menu-lines" aria-hidden="true"><i></i><i></i></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="shell hero-grid">
+          <div class="hero-copy">
+            <p class="hero-badge rise" style="--i: 0">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span data-l="zh">开源 · 本地优先 · 多 Agent 编排</span>
+              <span data-l="en">Open source · Local-first · Multi-agent built in</span>
+            </p>
+            <h1 class="hero-title rise" style="--i: 1">
+              <span data-l="zh">说清需求<br />让本地 <em>Agent 团队</em><br />并行交付</span>
+              <span data-l="en">Describe the goal<br />Let a <em>local team</em><br />deliver in parallel</span>
+            </h1>
+            <p class="hero-lead rise" style="--i: 2" data-l="zh">
+              Fynvra 是本地桌面 AI 编程工作台：主 Agent 拆解需求，为每个任务开一个独立 git worktree，交给 Worker
+              并行执行；再由主 Agent 读改动、跑检查、验收合并
+            </p>
+            <p class="hero-lead rise" style="--i: 2" data-l="en">
+              Fynvra is a local desktop workbench for AI coding. The orchestrator splits your request and gives every
+              task its own git worktree and worker. When the work comes back, it reads the diff, runs the checks, and
+              merges what passes.
+            </p>
+            <div class="hero-actions rise" style="--i: 3">
+              <a class="btn btn-primary" href="https://github.com/LAIJiangFeng/fynvra/releases">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 15V3M7 10l5 5 5-5M5 21h14" />
+                </svg>
+                <span data-l="zh">下载 Fynvra</span><span data-l="en">Download Fynvra</span>
+              </a>
+              <a class="btn btn-ghost" href="docs.html#install">
+                <span data-l="zh">从安装开始</span><span data-l="en">Start with install</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </a>
+            </div>
+            <p class="hero-meta rise" style="--i: 4">
+              <span>Windows x64</span><span class="meta-sep">/</span>
+              <span>macOS Intel · Apple Silicon</span><span class="meta-sep">/</span>
+              <span>Apache-2.0</span>
+            </p>
+          </div>
+
+          <aside class="topology rise" style="--i: 2" aria-label="编排结构示意 / Orchestration schematic">
+            <div class="topo-head">
+              <span class="live-label"><i aria-hidden="true"></i>ORCHESTRATION / LOCAL</span>
+              <span class="topo-mode">RUN · REVIEW</span>
+            </div>
+            <div class="topo-orch">
+              <span class="orch-glyph" aria-hidden="true">F</span>
+              <div class="orch-id">
+                <b>Orchestrator</b>
+                <span data-l="zh">主 Agent</span><span data-l="en">Main agent</span>
+              </div>
+              <span class="tag tag-line"><span data-l="zh">只读 + 编排</span><span data-l="en">Read-only + orchestration</span></span>
+            </div>
+            <div class="topo-flow" aria-hidden="true"><span></span></div>
+            <ul class="topo-workers">
+              <li class="is-running">
+                <span class="worker-state" aria-hidden="true"></span>
+                <div class="worker-id">
+                  <code>fynvra/login-race</code>
+                  <b><span data-l="zh">修复登录竞态</span><span data-l="en">Fix login race</span></b>
+                </div>
+                <span class="tag tag-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span>
+              </li>
+              <li class="is-review">
+                <span class="worker-state" aria-hidden="true"></span>
+                <div class="worker-id">
+                  <code>fynvra/ci-cache</code>
+                  <b><span data-l="zh">CI 缓存提速</span><span data-l="en">Speed up CI cache</span></b>
+                </div>
+                <span class="tag tag-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span>
+              </li>
+              <li class="is-queued">
+                <span class="worker-state" aria-hidden="true"></span>
+                <div class="worker-id">
+                  <code>fynvra/e2e-tests</code>
+                  <b><span data-l="zh">补回归测试</span><span data-l="en">Regression tests</span></b>
+                </div>
+                <span class="tag tag-queued"><span data-l="zh">待开始</span><span data-l="en">Not started</span></span>
+              </li>
+            </ul>
+            <div class="topo-foot">
+              <span class="topo-merge">merge --no-ff</span>
+              <span class="topo-foot-text"><span data-l="zh">验收通过后进入主分支</span><span data-l="en">Lands on main after review</span></span>
+            </div>
+            <p class="schematic-note"><span data-l="zh">结构示意 · 非应用截图</span><span data-l="en">Schematic · not a screenshot</span></p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="spec-strip" aria-label="技术规格 / Technical spec">
+        <div class="shell spec-grid">
+          <div class="spec-item">
+            <span class="spec-k">RUNTIME</span>
+            <span class="spec-v">Electron · pi SDK</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-k">ISOLATION</span>
+            <span class="spec-v"><span data-l="zh">每个 git 任务一个 worktree</span><span data-l="en">One worktree per git task</span></span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-k">CONTROL</span>
+            <span class="spec-v"><span data-l="zh">三档审批 + 保护底线</span><span data-l="en">3 approval modes + hard floor</span></span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-k">PROTOCOLS</span>
+            <span class="spec-v">Anthropic · OpenAI · Google</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section quickstart" id="quickstart">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">01</span> Quickstart <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">快速开始</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">三步，跑起第一条并行任务</span>
+              <span data-l="en">Three steps to your first parallel run</span>
+            </h2>
+            <p class="section-lead" data-l="zh">
+              安装包由 GitHub Releases 分发；源码运行需要 Node.js 22.19+、pnpm 10.26.2 与 Git
+            </p>
+            <p class="section-lead" data-l="en">
+              Installers ship through GitHub Releases. Running from source needs Node.js 22.19+, pnpm 10.26.2, and Git.
+            </p>
+          </header>
+
+          <div class="quick-grid">
+            <ol class="quick-steps reveal">
+              <li>
+                <span class="quick-num">01</span>
+                <div>
+                  <h3><span data-l="zh">下载并安装</span><span data-l="en">Download and install</span></h3>
+                  <p data-l="zh">Windows x64 使用 NSIS 安装包；macOS 按 Intel 或 Apple Silicon 选择对应架构的 DMG 或 ZIP</p>
+                  <p data-l="en">Use the NSIS installer on Windows x64, or pick the Intel or Apple Silicon DMG / ZIP on macOS.</p>
+                  <a class="text-link" href="https://github.com/LAIJiangFeng/fynvra/releases">
+                    <span data-l="zh">打开 Releases</span><span data-l="en">Open Releases</span>
+                    <span aria-hidden="true">↗</span>
+                  </a>
+                </div>
+              </li>
+              <li>
+                <span class="quick-num">02</span>
+                <div>
+                  <h3><span data-l="zh">接入模型服务</span><span data-l="en">Connect a model provider</span></h3>
+                  <p data-l="zh">在「设置 → 模型服务」添加协议、地址与 API Key，或从本机的 Claude Code、Codex、CC Switch 配置导入</p>
+                  <p data-l="en">Under Settings → Model providers, add a protocol, base URL, and API key — or import from Claude Code, Codex, or CC Switch.</p>
+                  <a class="text-link" href="docs.html#models">
+                    <span data-l="zh">配置模型</span><span data-l="en">Configure models</span>
+                    <span aria-hidden="true">→</span>
+                  </a>
+                </div>
+              </li>
+              <li>
+                <span class="quick-num">03</span>
+                <div>
+                  <h3><span data-l="zh">挂入仓库并派发</span><span data-l="en">Attach a repo and dispatch</span></h3>
+                  <p data-l="zh">添加一个已有提交的 git 仓库，新建 Orchestrator 会话，直接描述任务；Worker 会在独立 worktree 中执行</p>
+                  <p data-l="en">Attach a git repo that already has commits, start an Orchestrator session, and describe the task. Workers run in isolated worktrees.</p>
+                  <a class="text-link" href="docs.html#tasks">
+                    <span data-l="zh">看派发流程</span><span data-l="en">See the dispatch flow</span>
+                    <span aria-hidden="true">→</span>
+                  </a>
+                </div>
+              </li>
+            </ol>
+
+            <aside class="source-panel reveal">
+              <p class="panel-label"><span data-l="zh">从源码运行</span><span data-l="en">Run from source</span><span class="panel-label-en">BASH</span></p>
+              <div class="codeblock">
+                <div class="codeblock-bar"><span>terminal</span><span>bash</span></div>
+                <pre><code>git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev</code></pre>
+              </div>
+              <p class="source-note">
+                <span data-l="zh">首次运行需要联网下载依赖与 Electron</span>
+                <span data-l="en">The first run downloads dependencies and Electron.</span>
+              </p>
+              <a class="text-link" href="docs.html#install">
+                <span data-l="zh">完整安装说明</span><span data-l="en">Full install guide</span>
+                <span aria-hidden="true">→</span>
+              </a>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="section workflow" id="workflow">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">02</span> Workflow <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">工作流</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">从一句需求，到一次干净的合并</span>
+              <span data-l="en">From one request to a clean merge</span>
+            </h2>
+            <p class="section-lead" data-l="zh">
+              派发、执行、审查、合并都在同一个窗口里完成；每一步都是可追踪的工具调用，下方窗口与数据为结构示意
+            </p>
+            <p class="section-lead" data-l="en">
+              Dispatch, execution, review, and merge happen in one window — every step is a traceable tool call. Screens and values below are illustrative.
+            </p>
+          </header>
+
+          <figure class="lane-map reveal">
+            <div class="lane-map-head">
+              <span>BRANCH GRAPH / RUN 001</span>
+              <span>SCHEMATIC · NOT A SCREENSHOT</span>
+            </div>
+            <svg viewBox="0 0 1200 258" role="img" aria-labelledby="lane-title lane-desc">
+              <title id="lane-title">Parallel worktree branches merging into main</title>
+              <desc id="lane-desc">An orchestrator dispatches three tasks onto separate fynvra branches, reviews them, and merges passing work into main with a no-fast-forward merge.</desc>
+              <defs>
+                <linearGradient id="laneTeal" x1="0" x2="1">
+                  <stop offset="0" stop-color="#5eead4" stop-opacity=".25" />
+                  <stop offset=".5" stop-color="#5eead4" />
+                  <stop offset="1" stop-color="#7dd3fc" stop-opacity=".55" />
+                </linearGradient>
+                <linearGradient id="laneBlue" x1="0" x2="1">
+                  <stop offset="0" stop-color="#7dd3fc" stop-opacity=".2" />
+                  <stop offset="1" stop-color="#7dd3fc" stop-opacity=".7" />
+                </linearGradient>
+              </defs>
+              <path class="lane-line lane-line-main" pathLength="1" d="M40 212H1160" />
+              <path class="lane-line lane-line-a" pathLength="1" d="M150 212C184 212 184 92 230 92H570C616 92 616 212 660 212" />
+              <path class="lane-line lane-line-b" pathLength="1" d="M210 212C238 212 238 142 280 142H762C802 142 802 212 842 212" />
+              <circle class="lane-node lane-node-main" cx="150" cy="212" r="4" />
+              <circle class="lane-node lane-node-main" cx="660" cy="212" r="5" />
+              <circle class="lane-node lane-node-main" cx="842" cy="212" r="5" />
+              <circle class="lane-node lane-node-main" cx="1160" cy="212" r="4" />
+              <circle class="lane-node lane-node-a" cx="330" cy="92" r="4" />
+              <circle class="lane-node lane-node-a" cx="470" cy="92" r="4" />
+              <circle class="lane-node lane-node-b" cx="390" cy="142" r="4" />
+              <circle class="lane-node lane-node-b" cx="560" cy="142" r="4" />
+              <g class="lane-check" transform="translate(560 92)">
+                <circle r="9" />
+                <path d="M-3.6 .4l2.4 2.4 5-5.2" />
+              </g>
+              <g class="lane-check" transform="translate(742 142)">
+                <circle r="9" />
+                <path d="M-3.6 .4l2.4 2.4 5-5.2" />
+              </g>
+              <g class="lane-merge" transform="translate(660 212)">
+                <circle r="7" />
+                <circle r="2.5" />
+              </g>
+              <g class="lane-merge" transform="translate(842 212)">
+                <circle r="7" />
+                <circle r="2.5" />
+              </g>
+              <text class="lane-label lane-label-main" x="40" y="242">main</text>
+              <text class="lane-label lane-label-a" x="236" y="78">fynvra/login-race</text>
+              <text class="lane-label lane-label-b" x="286" y="128">fynvra/ci-cache</text>
+              <text class="lane-label lane-label-tool" x="150" y="196">dispatch</text>
+              <text class="lane-label lane-label-tool" x="560" y="70" text-anchor="middle">review_diff · run_checks</text>
+              <text class="lane-label lane-label-tool" x="660" y="242" text-anchor="middle">merge --no-ff</text>
+              <text class="lane-label lane-label-tool" x="842" y="242" text-anchor="middle">merge --no-ff</text>
+              <text class="lane-label lane-label-tool" x="1160" y="242" text-anchor="end">cleanup</text>
+            </svg>
+            <figcaption class="lane-legend">
+              <span><i class="legend-dot legend-dot-main"></i><span data-l="zh">主分支</span><span data-l="en">Main branch</span></span>
+              <span><i class="legend-dot legend-dot-task"></i><span data-l="zh">Worker 分支</span><span data-l="en">Worker branch</span></span>
+              <span><i class="legend-dot legend-dot-check"></i><span data-l="zh">审查与检查</span><span data-l="en">Review and checks</span></span>
+              <span class="lane-legend-note"><span data-l="zh">分支名与节点为结构示意</span><span data-l="en">Branch names and nodes are illustrative</span></span>
+            </figcaption>
+          </figure>
+
+          <div class="feature-list">
+            <article class="feature-row reveal">
+              <span class="feature-index">01</span>
+              <div class="feature-copy">
+                <p class="feature-kicker">Orchestrator</p>
+                <h3><span data-l="zh">只派活，不动手</span><span data-l="en">It delegates, it doesn’t edit</span></h3>
+                <p data-l="zh">
+                  默认主 Agent 使用编排工具策略：可以读文件、执行只读 git、派发与验收，但不能写文件或执行任意命令；派发后它不会阻塞等待，收件箱有消息时再由 Fynvra 唤醒
+                </p>
+                <p data-l="en">
+                  The default orchestrator gets read-only and orchestration tools: read files, read-only git, dispatch,
+                  review, merge. No file writes, no arbitrary commands. It never blocks after a dispatch — Fynvra wakes
+                  it when the inbox has news.
+                </p>
+              </div>
+              <div class="feature-visual">
+                <div class="mini-panel">
+                  <div class="mini-head"><span>INBOX · 收件箱</span><span class="mini-live"><i></i>LIVE</span></div>
+                  <div class="inbox-item">
+                    <span class="tag tag-run">worker_done</span>
+                    <div><b><span data-l="zh">修复登录竞态</span><span data-l="en">Login race</span></b><p><span data-l="zh">已提交，等待验收</span><span data-l="en">Committed, ready for review</span></p></div>
+                  </div>
+                  <div class="inbox-item">
+                    <span class="tag tag-warn">question</span>
+                    <div><b><span data-l="zh">CI 缓存提速</span><span data-l="en">CI cache</span></b><p><span data-l="zh">缓存 key 要包含 lockfile 吗</span><span data-l="en">Should the cache key include the lockfile?</span></p></div>
+                  </div>
+                  <div class="inbox-reply"><span class="reply-arrow" aria-hidden="true">↳</span><span data-l="zh">主 Agent 回复：要，用 lockfile 哈希</span><span data-l="en">Orchestrator: yes — hash the lockfile</span></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="feature-row reveal">
+              <span class="feature-index">02</span>
+              <div class="feature-copy">
+                <p class="feature-kicker">Worktrees</p>
+                <h3><span data-l="zh">每个任务，自己的目录与分支</span><span data-l="en">A directory and branch per task</span></h3>
+                <p data-l="zh">
+                  每个 Worker 绑定一条 <code>fynvra/&lt;slug&gt;</code> 分支和独立 worktree；并行的 Agent 不会互相踩踏，主仓库在验收前保持原样；worktree 根目录可以配置
+                </p>
+                <p data-l="en">
+                  Every worker gets a <code>fynvra/&lt;slug&gt;</code> branch and its own worktree. Parallel agents never
+                  collide, and your main checkout stays untouched until review. The worktree root is configurable.
+                </p>
+              </div>
+              <div class="feature-visual">
+                <div class="mini-panel">
+                  <div class="mini-head"><span>WORKTREES</span><span>git</span></div>
+                  <div class="tree-row"><span class="tree-guide">├─</span><b>repo/</b><code>main</code></div>
+                  <div class="tree-row"><span class="tree-guide">├─</span><span>login-race/</span><code class="branch-a">fynvra/login-race</code></div>
+                  <div class="tree-row"><span class="tree-guide">├─</span><span>ci-cache/</span><code class="branch-b">fynvra/ci-cache</code></div>
+                  <div class="tree-row"><span class="tree-guide">└─</span><span>e2e-tests/</span><code class="branch-c">fynvra/e2e-tests</code></div>
+                  <div class="tree-foot"><span data-l="zh">默认位置</span><span data-l="en">Default root</span><code>&lt;repo&gt;-worktrees</code></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="feature-row reveal">
+              <span class="feature-index">03</span>
+              <div class="feature-copy">
+                <p class="feature-kicker">Review &amp; merge</p>
+                <h3><span data-l="zh">检查通过，才进入主分支</span><span data-l="en">Merged only after it passes</span></h3>
+                <p data-l="zh">
+                  Worker 汇报后，主 Agent 读 diff、跑检查命令，再决定合并或打回；合并统一使用 <code>--no-ff</code>，随后清理 worktree；已合并的改动仍可回看
+                </p>
+                <p data-l="en">
+                  When a worker reports back, the orchestrator reads the diff, runs checks, then merges or sends the work
+                  back. Merges use <code>--no-ff</code> and clean up the worktree; merged diffs remain viewable.
+                </p>
+              </div>
+              <div class="feature-visual">
+                <div class="mini-panel">
+                  <div class="mini-head"><span>CHANGES · ATTEMPT 02</span><span class="mini-badge"><span data-l="zh">待验收</span><span data-l="en">In review</span></span></div>
+                  <div class="diff-head"><code>src/session.ts</code><span>+12 −3</span></div>
+                  <pre class="mini-diff"><code><span class="d-del">- if (!token) return next()</span>
+<span class="d-add">+ if (!token) return redirectToLogin()</span>
+<span class="d-add">+ await refreshLock.acquire(userId)</span></code></pre>
+                  <div class="check-row"><span class="check-mark">✓</span><code>pnpm typecheck &amp;&amp; pnpm test</code><span data-l="zh">通过</span><span data-l="en">passed</span></div>
+                  <div class="check-row"><span class="check-mark">✓</span><span><span data-l="zh">审查通过</span><span data-l="en">Reviewed</span></span><code>merge --no-ff</code></div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <aside class="inline-note reveal">
+            <span class="inline-note-label"><span data-l="zh">没有 git</span><span data-l="en">No git</span></span>
+            <p data-l="zh">
+              普通文件夹按原地模式工作：不创建 worktree，Worker 直接修改该目录，审查时列出它汇报的改动文件；并行 Worker 会共用目录，建议一次派发一个任务
+            </p>
+            <p data-l="en">
+              Plain folders run in place: no worktree, workers edit the folder directly, and review lists the files they
+              reported. Parallel workers share the directory, so dispatch one task at a time.
+            </p>
+            <a class="text-link" href="docs.html#in-place"><span data-l="zh">了解原地模式</span><span data-l="en">Read about in-place mode</span><span aria-hidden="true">→</span></a>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section demo-section" id="demo">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">03</span> Runbook <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">流程示意</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">窗口里的一轮协作</span>
+              <span data-l="en">One run, inside the window</span>
+            </h2>
+            <p class="section-lead" data-l="zh">从派发到合并的四个切面；点击标题切换，内容均为结构示意</p>
+            <p class="section-lead" data-l="en">Four slices from dispatch to merge. Switch tabs to explore; every panel is a schematic.</p>
+          </header>
+
+          <div class="console reveal" data-demo>
+            <div class="console-bar">
+              <div class="console-brand">
+                <img src="assets/favicon.svg" alt="" width="20" height="20" />
+                <span>Fynvra</span>
+                <span class="console-workspace">acme-web · main</span>
+              </div>
+              <div class="console-tabs" role="tablist" aria-label="流程示意 / Runbook">
+                <button type="button" role="tab" id="demo-tab-0" aria-controls="demo-panel-0" aria-selected="true">
+                  <span>01</span><span data-l="zh">派发</span><span data-l="en">Dispatch</span>
+                </button>
+                <button type="button" role="tab" id="demo-tab-1" aria-controls="demo-panel-1" aria-selected="false" tabindex="-1">
+                  <span>02</span><span data-l="zh">提问</span><span data-l="en">Question</span>
+                </button>
+                <button type="button" role="tab" id="demo-tab-2" aria-controls="demo-panel-2" aria-selected="false" tabindex="-1">
+                  <span>03</span><span data-l="zh">验收</span><span data-l="en">Review</span>
+                </button>
+                <button type="button" role="tab" id="demo-tab-3" aria-controls="demo-panel-3" aria-selected="false" tabindex="-1">
+                  <span>04</span><span data-l="zh">合并</span><span data-l="en">Merge</span>
+                </button>
+              </div>
+              <span class="console-flag">SCHEMATIC</span>
+            </div>
+
+            <div class="console-body">
+              <section class="demo-panel is-active" id="demo-panel-0" role="tabpanel" aria-labelledby="demo-tab-0" data-demo-panel>
+                <div class="demo-chat">
+                  <div class="chat-turn user">
+                    <span class="turn-label">YOU</span>
+                    <p data-l="zh">修复登录页的竞态，给 CI 缓存提速，再补一条回归测试</p>
+                    <p data-l="en">Fix the login race, speed up CI caching, and add a regression test.</p>
+                  </div>
+                  <div class="chat-turn agent">
+                    <span class="turn-label">ORCHESTRATOR</span>
+                    <p data-l="zh">拆成 3 个任务，各开一个 worktree；回归测试依赖登录修复，等合并后再派</p>
+                    <p data-l="en">Three tasks, each in its own worktree. The test waits for the login fix to merge.</p>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">dispatch_task</span>
+                    <span data-l="zh">修复登录竞态</span><span data-l="en">Fix login race</span>
+                    <code>fynvra/login-race</code>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">dispatch_task</span>
+                    <span data-l="zh">CI 缓存提速</span><span data-l="en">Speed up CI cache</span>
+                    <code>fynvra/ci-cache</code>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">dispatch_task</span>
+                    <span data-l="zh">补回归测试</span><span data-l="en">Regression tests</span>
+                    <code>fynvra/e2e-tests</code>
+                    <span class="tool-role">QA</span>
+                  </div>
+                </div>
+                <aside class="demo-side">
+                  <p class="side-title"><span data-l="zh">任务</span><span data-l="en">Tasks</span><span>1 / 3</span></p>
+                  <div class="side-task"><span class="task-state running"></span><div><b><span data-l="zh">修复登录竞态</span><span data-l="en">Login race</span></b><code>fynvra/login-race</code></div><span class="tag tag-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span></div>
+                  <div class="side-task"><span class="task-state review"></span><div><b><span data-l="zh">CI 缓存提速</span><span data-l="en">CI cache</span></b><code>fynvra/ci-cache</code></div><span class="tag tag-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span></div>
+                  <div class="side-task"><span class="task-state queued"></span><div><b><span data-l="zh">补回归测试</span><span data-l="en">Regression tests</span></b><code>fynvra/e2e-tests</code></div><span class="tag tag-queued"><span data-l="zh">待开始</span><span data-l="en">Not started</span></span></div>
+                  <p class="side-caption"><span data-l="zh">每个任务独立分支与 worktree</span><span data-l="en">A branch and worktree per task</span></p>
+                </aside>
+              </section>
+
+              <section class="demo-panel" id="demo-panel-1" role="tabpanel" aria-labelledby="demo-tab-1" data-demo-panel hidden>
+                <div class="demo-chat">
+                  <div class="chat-turn agent">
+                    <span class="turn-label">WORKER · CI-CACHE</span>
+                    <p data-l="zh">缓存 key 要包含 pnpm-lock.yaml 吗</p>
+                    <p data-l="en">Should the cache key include pnpm-lock.yaml?</p>
+                  </div>
+                  <div class="msg-meta"><span class="tag tag-warn">question</span><span data-l="zh">已送达主 Agent 收件箱</span><span data-l="en">Delivered to the orchestrator inbox</span></div>
+                  <div class="chat-turn user reply-turn">
+                    <span class="turn-label">ORCHESTRATOR → WORKER</span>
+                    <p data-l="zh">要，用 lockfile 的哈希；其余部分按现有 workflow 结构</p>
+                    <p data-l="en">Yes — hash the lockfile. Keep the rest of the workflow structure as is.</p>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">send_to_worker</span>
+                    <span data-l="zh">答复已投递，Worker 继续执行</span><span data-l="en">Reply delivered; worker continues</span>
+                  </div>
+                </div>
+                <aside class="demo-side">
+                  <p class="side-title"><span data-l="zh">收件箱</span><span data-l="en">Inbox</span><span>3</span></p>
+                  <div class="inbox-line"><span class="tag tag-run">worker_done</span><span data-l="zh">登录竞态已提交</span><span data-l="en">Login race committed</span></div>
+                  <div class="inbox-line"><span class="tag tag-warn">question</span><span data-l="zh">CI 缓存 key</span><span data-l="en">CI cache key</span></div>
+                  <div class="inbox-line"><span class="tag">reply</span><span data-l="zh">主 Agent 已答复</span><span data-l="en">Orchestrator replied</span></div>
+                  <p class="side-caption"><span data-l="zh">主 Agent 空闲时自动唤醒</span><span data-l="en">An idle orchestrator is woken automatically</span></p>
+                </aside>
+              </section>
+
+              <section class="demo-panel" id="demo-panel-2" role="tabpanel" aria-labelledby="demo-tab-2" data-demo-panel hidden>
+                <div class="demo-chat">
+                  <div class="chat-turn agent">
+                    <span class="turn-label">ORCHESTRATOR</span>
+                    <p data-l="zh">CI 缓存的改动看完了，现在跑检查</p>
+                    <p data-l="en">The CI cache diff looks right. Running the checks now.</p>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">review_diff</span>
+                    <span data-l="zh">读取 worktree 相对基准提交的改动</span><span data-l="en">Read the diff against the base commit</span>
+                    <code>3 files</code>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">run_checks</span>
+                    <code>pnpm typecheck &amp;&amp; pnpm test</code>
+                  </div>
+                  <div class="check-result"><span class="check-mark">✓</span><span data-l="zh">检查通过，可以合并</span><span data-l="en">Checks passed, ready to merge</span></div>
+                </div>
+                <aside class="demo-side">
+                  <p class="side-title"><span data-l="zh">改动</span><span data-l="en">Changes</span><span>1 / 2</span></p>
+                  <div class="side-diff"><div class="diff-head"><code>ci.yml</code><span>+8 −2</span></div><pre class="mini-diff"><code><span class="d-add">+ key: ${{ hashFiles('pnpm-lock.yaml') }}</span>
+<span class="d-del">- key: cache-v1</span></code></pre></div>
+                  <p class="side-caption"><span data-l="zh">按文件查看每次尝试的改动</span><span data-l="en">Review each attempt, file by file</span></p>
+                </aside>
+              </section>
+
+              <section class="demo-panel" id="demo-panel-3" role="tabpanel" aria-labelledby="demo-tab-3" data-demo-panel hidden>
+                <div class="demo-chat">
+                  <div class="chat-turn agent">
+                    <span class="turn-label">ORCHESTRATOR</span>
+                    <p data-l="zh">检查通过，合并到当前分支并清理 worktree</p>
+                    <p data-l="en">Checks passed. Merging into the current branch and cleaning up the worktree.</p>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">merge_worktree</span>
+                    <code>fynvra/ci-cache → main</code>
+                    <span class="tool-ok"><span data-l="zh">已合并</span><span data-l="en">Merged</span></span>
+                  </div>
+                  <div class="tool-call">
+                    <span class="tool-name">cleanup_worktree</span>
+                    <span data-l="zh">worktree 与分支已清理</span><span data-l="en">Worktree and branch cleaned up</span>
+                  </div>
+                  <div class="chat-turn user reply-turn">
+                    <span class="turn-label">REPORT</span>
+                    <p data-l="zh">CI 缓存任务完成；登录竞态仍在审查，回归测试等待依赖合并</p>
+                    <p data-l="en">CI cache is complete. Login race is still in review; the regression test is waiting on it.</p>
+                  </div>
+                </div>
+                <aside class="demo-side">
+                  <p class="side-title"><span data-l="zh">任务</span><span data-l="en">Tasks</span><span>1 / 3</span></p>
+                  <div class="side-task"><span class="task-state done"></span><div><b><span data-l="zh">CI 缓存提速</span><span data-l="en">CI cache</span></b><code>merged</code></div><span class="tag tag-done"><span data-l="zh">已完成</span><span data-l="en">Done</span></span></div>
+                  <div class="side-task"><span class="task-state review"></span><div><b><span data-l="zh">修复登录竞态</span><span data-l="en">Login race</span></b><code>in review</code></div><span class="tag tag-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span></div>
+                  <div class="side-task"><span class="task-state queued"></span><div><b><span data-l="zh">补回归测试</span><span data-l="en">Regression tests</span></b><code>todo</code></div><span class="tag tag-queued"><span data-l="zh">待开始</span><span data-l="en">Not started</span></span></div>
+                  <p class="side-caption"><span data-l="zh">合并后的差异仍可回看</span><span data-l="en">Merged diffs stay reviewable</span></p>
+                </aside>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="runtime">
+        <div class="shell">
+          <div class="split-head reveal">
+            <div>
+              <p class="eyebrow"><span class="eyebrow-num">04</span> Runtime <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">可组合运行时</span></p>
+              <h2 class="section-title">
+                <span data-l="zh">角色不是提示词，<br />而是一份完整的工作契约</span>
+                <span data-l="en">A role is more than a prompt.<br />It’s a complete work contract.</span>
+              </h2>
+            </div>
+            <div class="split-lead">
+              <p data-l="zh">
+                提示词、模型与思考档位、工具策略、审批档位、技能、MCP 和指令文件共同组成一个角色；内置的 Orchestrator 与 Worker 也只是可修改的模板
+              </p>
+              <p data-l="en">
+                A prompt, model and thinking level, tool policy, approval mode, skills, MCP servers, and instruction
+                files form one role. Even the built-in Orchestrator and Worker are editable templates.
+              </p>
+              <a class="text-link" href="docs.html#configuration"><span data-l="zh">角色与资源配置</span><span data-l="en">Configure roles and resources</span><span aria-hidden="true">→</span></a>
+            </div>
+          </div>
+
+          <div class="runtime-grid">
+            <figure class="manifest reveal" aria-label="角色配置示意 / Role manifest schematic">
+              <div class="manifest-bar"><span>roles/qa-engineer.json</span><span class="mini-live"><i></i>SCHEMATIC</span></div>
+              <pre><code><span class="y-key">role</span>: <span class="y-str">qa-engineer</span>
+<span class="y-key">model</span>: <span class="y-str">&lt;provider&gt;/&lt;model&gt;</span>
+<span class="y-key">thinking</span>: <span class="y-str">high</span>
+<span class="y-key">tools</span>: <span class="y-str">all</span>
+<span class="y-key">approval</span>: <span class="y-str">auto-edits</span>
+<span class="y-key">skills</span>: [<span class="y-str">playwright</span>, <span class="y-str">api-testing</span>]
+<span class="y-key">mcp</span>: [<span class="y-str">github</span>, <span class="y-str">postgres</span>]
+<span class="y-key">instructions</span>: <span class="y-str">follow-global</span></code></pre>
+              <p class="manifest-note"><span data-l="zh">字段为配置结构示意，值不是内置数据</span><span data-l="en">Field structure is illustrative; values are not built-in data</span></p>
+            </figure>
+
+            <div class="capability-list reveal">
+              <a class="capability-row" href="docs.html#models">
+                <span class="capability-k">MODELS</span>
+                <div>
+                  <h3><span data-l="zh">四种协议，配置可导入</span><span data-l="en">Four protocols, importable setup</span></h3>
+                  <p data-l="zh">Anthropic Messages、OpenAI Responses、OpenAI Chat Completions、Google Generative AI；从 Claude Code、Codex、CC Switch 读取已有服务</p>
+                  <p data-l="en">Anthropic Messages, OpenAI Responses, OpenAI Chat Completions, and Google Generative AI — with imports from Claude Code, Codex, and CC Switch.</p>
+                </div>
+                <span class="capability-arrow" aria-hidden="true">↗</span>
+              </a>
+              <a class="capability-row" href="docs.html#skills">
+                <span class="capability-k">SKILLS</span>
+                <div>
+                  <h3><span data-l="zh">扫描本机技能，按角色启用</span><span data-l="en">Scan local skills, enable by role</span></h3>
+                  <p data-l="zh">从 Claude Code、Codex 与 pi 目录中发现含 <code>SKILL.md</code> 的技能，登记后挂到角色上</p>
+                  <p data-l="en">Discover folders with <code>SKILL.md</code> under Claude Code, Codex, and pi, then attach them to roles.</p>
+                </div>
+                <span class="capability-arrow" aria-hidden="true">↗</span>
+              </a>
+              <a class="capability-row" href="docs.html#mcp">
+                <span class="capability-k">MCP</span>
+                <div>
+                  <h3><span data-l="zh">接上本机已有工具</span><span data-l="en">Bring your existing tools</span></h3>
+                  <p data-l="zh">支持 stdio、Streamable HTTP 与 SSE；可从 Claude Code、Codex、Grok CLI、Gemini CLI、Cursor、VS Code、OpenCode、CC Switch 导入</p>
+                  <p data-l="en">stdio, Streamable HTTP, and SSE, with imports from Claude Code, Codex, Grok CLI, Gemini CLI, Cursor, VS Code, OpenCode, and CC Switch.</p>
+                </div>
+                <span class="capability-arrow" aria-hidden="true">↗</span>
+              </a>
+              <a class="capability-row" href="docs.html#instructions">
+                <span class="capability-k">CONTEXT</span>
+                <div>
+                  <h3><span data-l="zh">全局或角色级指令文件</span><span data-l="en">Global or per-role instructions</span></h3>
+                  <p data-l="zh">链接本机 AGENTS.md / CLAUDE.md 类文件，或保存为 Fynvra 本地副本；角色可以覆盖全局选择</p>
+                  <p data-l="en">Link AGENTS.md / CLAUDE.md-style files or keep a local copy; a role can override the global choice.</p>
+                </div>
+                <span class="capability-arrow" aria-hidden="true">↗</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section desktop" id="desktop">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">05</span> Workspace <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">桌面工作区</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">对话旁边，就是文件、终端和改动</span>
+              <span data-l="en">Chat, files, terminals, and diffs — side by side</span>
+            </h2>
+            <p class="section-lead" data-l="zh">
+              文件在中央标签中与对话并列打开；终端真正跑在工作区里；每个任务的改动按尝试保留
+            </p>
+            <p class="section-lead" data-l="en">
+              Files open in center tabs beside the chat, a real terminal runs in the workspace, and every task’s changes
+              are kept per attempt.
+            </p>
+          </header>
+
+          <figure class="bench reveal">
+            <div class="bench-bar">
+              <span class="bench-brand"><img src="assets/favicon.svg" alt="" width="18" height="18" />Fynvra</span>
+              <span class="bench-title">acme-web · session / orchestrator</span>
+              <span class="bench-controls" aria-hidden="true"><i></i><i></i><i></i></span>
+            </div>
+            <div class="bench-body">
+              <aside class="bench-tree" aria-hidden="true">
+                <p class="bench-label"><span data-l="zh">文件</span><span data-l="en">FILES</span></p>
+                <div class="file-row is-folder"><span>▾</span>src</div>
+                <div class="file-row"><span class="file-indent">├</span>auth</div>
+                <div class="file-row is-open"><span class="file-indent">│</span>session.ts</div>
+                <div class="file-row"><span class="file-indent">└</span>checkout.ts</div>
+                <div class="file-row"><span>▸</span>tests</div>
+                <div class="file-row"><span>·</span>README.md</div>
+              </aside>
+              <div class="bench-main" aria-hidden="true">
+                <div class="bench-tabs">
+                  <span><span data-l="zh">对话</span><span data-l="en">Chat</span></span>
+                  <span class="is-active">session.ts</span>
+                  <span>README.md</span>
+                  <span class="bench-tab-plus">+</span>
+                </div>
+                <div class="bench-editor">
+                  <div class="editor-line"><span class="ln">14</span><span><span class="s-key">export async function</span> <span class="s-fn">refresh</span>(req) {</span></div>
+                  <div class="editor-line"><span class="ln">15</span><span>  <span class="s-key">if</span> (!req.token) <span class="s-key">return</span> <span class="s-fn">next</span>()</span></div>
+                  <div class="editor-line is-add"><span class="ln">16</span><span>+ <span class="s-key">if</span> (!req.token) <span class="s-key">return</span> <span class="s-fn">redirectToLogin</span>(req)</span></div>
+                  <div class="editor-line is-add"><span class="ln">17</span><span>+ <span class="s-key">await</span> refreshLock.<span class="s-fn">acquire</span>(req.userId)</span></div>
+                  <div class="editor-line"><span class="ln">18</span><span>  <span class="s-key">const</span> session = <span class="s-key">await</span> store.<span class="s-fn">get</span>(req.token)</span></div>
+                  <div class="editor-line"><span class="ln">19</span><span>  <span class="s-key">return</span> session</span></div>
+                  <div class="editor-line"><span class="ln">20</span><span>}</span></div>
+                </div>
+                <div class="bench-status"><span>TypeScript</span><span>UTF-8</span><span>Ln 18, Col 42</span></div>
+              </div>
+              <aside class="bench-side" aria-hidden="true">
+                <div class="bench-side-tabs">
+                  <span><span data-l="zh">任务</span><span data-l="en">Tasks</span></span>
+                  <span class="is-active"><span data-l="zh">改动</span><span data-l="en">Changes</span></span>
+                </div>
+                <div class="side-task"><span class="task-state done"></span><div><b><span data-l="zh">CI 缓存</span><span data-l="en">CI cache</span></b><code>merged</code></div></div>
+                <div class="side-task"><span class="task-state review"></span><div><b><span data-l="zh">登录竞态</span><span data-l="en">Login race</span></b><code>in review</code></div></div>
+                <div class="bench-diff">
+                  <div class="diff-head"><code>session.ts</code><span>+2 −0</span></div>
+                  <div class="bench-diff-lines"><span class="d-add">+ redirectToLogin(req)</span><span class="d-add">+ refreshLock.acquire()</span></div>
+                </div>
+                <div class="bench-terminal">
+                  <p class="terminal-title">TERMINAL <span>PS</span></p>
+                  <p><span class="term-prompt">›</span> pnpm test auth</p>
+                  <p class="term-ok">✓ <span data-l="zh">测试通过</span><span data-l="en">tests passed</span></p>
+                </div>
+              </aside>
+            </div>
+            <figcaption class="bench-caption">
+              <span class="schematic-note"><span data-l="zh">界面结构示意 · 非应用截图</span><span data-l="en">Schematic interface · not a screenshot</span></span>
+            </figcaption>
+          </figure>
+
+          <div class="workspace-points reveal">
+            <div>
+              <span class="point-k">FILES</span>
+              <h3><span data-l="zh">编辑、预览、冲突保护</span><span data-l="en">Edit, preview, protect</span></h3>
+              <p data-l="zh">文本编辑上限 256 KiB，Markdown 支持编辑、预览与双栏；保存前核对版本，冲突时保留磁盘内容与草稿</p>
+              <p data-l="en">Text editing up to 256 KiB, Markdown edit / preview / split views, and version checks on save so conflicts keep both disk content and your draft.</p>
+            </div>
+            <div>
+              <span class="point-k">TERMINAL</span>
+              <h3><span data-l="zh">工作区里的真终端</span><span data-l="en">A real terminal in the workspace</span></h3>
+              <p data-l="zh">PTY 由主进程托管，切换标签或工作区不会结束进程；关闭终端标签前会确认</p>
+              <p data-l="en">A main-process PTY keeps running when you switch tabs or workspaces, and closing a terminal tab asks first.</p>
+            </div>
+            <div>
+              <span class="point-k">INSIGHT</span>
+              <h3><span data-l="zh">用量留在本机</span><span data-l="en">Usage stays local</span></h3>
+              <p data-l="zh">Token、费用、缓存命中率与一次验收通过率，只从本机会话记录汇总，不上传</p>
+              <p data-l="en">Tokens, cost, cache hit rate, and first-pass acceptance are summarized from local session records only.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="safety">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">06</span> Guardrails <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">安全边界</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">放手让它跑，底线不让步</span>
+              <span data-l="en">Let it run. Keep the floor.</span>
+            </h2>
+            <p class="section-lead" data-l="zh">
+              权限由角色策略和运行时共同执行；修改提示词不能绕过工具与审批
+            </p>
+            <p class="section-lead" data-l="en">
+              Role policy and the runtime enforce access together. Editing a prompt cannot talk its way around them.
+            </p>
+          </header>
+
+          <div class="safety-grid">
+            <div class="matrix-wrap reveal">
+              <table class="matrix">
+                <caption class="sr-only">Approval behavior by mode</caption>
+                <thead>
+                  <tr>
+                    <th scope="col"><span data-l="zh">操作</span><span data-l="en">Action</span></th>
+                    <th scope="col"><span data-l="zh">全程审批</span><span data-l="en">Supervised</span></th>
+                    <th scope="col"><span data-l="zh">自动接受编辑</span><span data-l="en">Auto edits</span></th>
+                    <th scope="col"><span data-l="zh">完全放行</span><span data-l="en">Full</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row"><span data-l="zh">执行命令</span><span data-l="en">Commands</span><small>bash · powershell · run_checks</small></th>
+                    <td><span class="mark mark-ask"><i></i><span data-l="zh">确认</span><span data-l="en">Ask</span></span></td>
+                    <td><span class="mark mark-ask"><i></i><span data-l="zh">确认</span><span data-l="en">Ask</span></span></td>
+                    <td><span class="mark mark-auto"><i></i><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row"><span data-l="zh">写改文件</span><span data-l="en">File writes</span><small>write · edit · apply_patch</small></th>
+                    <td><span class="mark mark-ask"><i></i><span data-l="zh">确认</span><span data-l="en">Ask</span></span></td>
+                    <td><span class="mark mark-auto"><i></i><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
+                    <td><span class="mark mark-auto"><i></i><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row"><span data-l="zh">MCP 工具</span><span data-l="en">MCP tools</span><small>mcp</small></th>
+                    <td><span class="mark mark-ask"><i></i><span data-l="zh">确认</span><span data-l="en">Ask</span></span></td>
+                    <td><span class="mark mark-ask"><i></i><span data-l="zh">确认</span><span data-l="en">Ask</span></span></td>
+                    <td><span class="mark mark-auto"><i></i><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
+                  </tr>
+                  <tr class="floor-row">
+                    <th scope="row"><span data-l="zh">保护操作</span><span data-l="en">Protected</span><small>git push · reset --hard · rm -rf · publish</small></th>
+                    <td><span class="mark mark-always"><i></i><span data-l="zh">始终确认</span><span data-l="en">Always ask</span></span></td>
+                    <td><span class="mark mark-always"><i></i><span data-l="zh">始终确认</span><span data-l="en">Always ask</span></span></td>
+                    <td><span class="mark mark-always"><i></i><span data-l="zh">始终确认</span><span data-l="en">Always ask</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="guard-list reveal">
+              <div class="guard-row">
+                <span class="guard-k">KEY</span>
+                <div>
+                  <h3><span data-l="zh">密钥只在主进程</span><span data-l="en">Keys stay in the main process</span></h3>
+                  <p data-l="zh">API Key、MCP 环境变量与 Header 的明文不通过 IPC 回到界面；本地配置不是加密凭证库</p>
+                  <p data-l="en">Plaintext API keys, MCP env vars, and headers do not cross IPC to the UI; local config is not an encrypted vault.</p>
+                </div>
+              </div>
+              <div class="guard-row">
+                <span class="guard-k">DENY</span>
+                <div>
+                  <h3><span data-l="zh">没人回应，就是拒绝</span><span data-l="en">Silence means no</span></h3>
+                  <p data-l="zh">审批请求 10 分钟无答复，或回合被中止，一律按拒绝处理</p>
+                  <p data-l="en">No answer within 10 minutes, or an aborted turn, is treated as a denial.</p>
+                </div>
+              </div>
+              <div class="guard-row">
+                <span class="guard-k">FILE</span>
+                <div>
+                  <h3><span data-l="zh">文件访问有围栏</span><span data-l="en">Fenced file access</span></h3>
+                  <p data-l="zh">读写限定在登记的工作区内，界面只传不透明 id，越界链接与跨工作区 id 一律拒绝</p>
+                  <p data-l="en">Reads and writes stay inside registered workspaces. The UI passes opaque ids only; out-of-bounds links and cross-workspace ids are refused.</p>
+                </div>
+              </div>
+              <div class="guard-row">
+                <span class="guard-k">NET</span>
+                <div>
+                  <h3><span data-l="zh">本地运行，直连服务</span><span data-l="en">Local, direct connections</span></h3>
+                  <p data-l="zh">没有中转服务器；模型请求直接发往你配置的服务地址</p>
+                  <p data-l="en">No relay server. Model requests go straight to the endpoints you configure.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section docs-map-section" id="docs">
+        <div class="shell">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">07</span> User guide <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">使用文档</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">需要细节时，按路径读</span>
+              <span data-l="en">Read the path you need</span>
+            </h2>
+            <p class="section-lead" data-l="zh">从安装到任务验收的完整说明，按实际界面顺序整理</p>
+            <p class="section-lead" data-l="en">The complete path from install to task acceptance, ordered the way the app is used.</p>
+          </header>
+
+          <nav class="doc-index reveal" aria-label="文档目录 / Documentation index">
+            <a href="docs.html#install">
+              <span class="doc-index-num">01</span>
+              <div><h3><span data-l="zh">安装与平台</span><span data-l="en">Install and platforms</span></h3><p><span data-l="zh">下载、macOS 提示、源码运行</span><span data-l="en">Downloads, macOS notes, running from source</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a href="docs.html#models">
+              <span class="doc-index-num">02</span>
+              <div><h3><span data-l="zh">模型与本机导入</span><span data-l="en">Models and local import</span></h3><p><span data-l="zh">协议、服务配置、本机导入、思考档位</span><span data-l="en">Protocols, providers, imports, thinking levels</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a href="docs.html#workspace">
+              <span class="doc-index-num">03</span>
+              <div><h3><span data-l="zh">工作区与会话</span><span data-l="en">Workspaces and sessions</span></h3><p><span data-l="zh">挂入目录、会话、文件、终端、快捷键</span><span data-l="en">Attach, sessions, files, terminal, shortcuts</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a href="docs.html#configuration">
+              <span class="doc-index-num">04</span>
+              <div><h3><span data-l="zh">角色、技能与 MCP</span><span data-l="en">Roles, skills, and MCP</span></h3><p><span data-l="zh">工具策略、审批、技能、MCP、指令文件</span><span data-l="en">Tool policy, approvals, skills, MCP, instructions</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a href="docs.html#tasks">
+              <span class="doc-index-num">05</span>
+              <div><h3><span data-l="zh">任务与更改</span><span data-l="en">Tasks and changes</span></h3><p><span data-l="zh">派发、状态、工具、审查、合并、用量</span><span data-l="en">Dispatch, status, tools, review, merge, usage</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+            <a href="docs.html#faq">
+              <span class="doc-index-num">06</span>
+              <div><h3><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></h3><p><span data-l="zh">平台、数据、更新与安全边界</span><span data-l="en">Platforms, data, updates, and guardrails</span></p></div>
+              <span class="doc-index-arrow" aria-hidden="true">↗</span>
+            </a>
+          </nav>
+        </div>
+      </section>
+
+      <section class="section" id="faq">
+        <div class="shell faq-layout">
+          <header class="section-head reveal">
+            <p class="eyebrow"><span class="eyebrow-num">08</span> FAQ <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">常见问题</span></p>
+            <h2 class="section-title">
+              <span data-l="zh">装之前，先看这些</span>
+              <span data-l="en">Before you install</span>
+            </h2>
+            <p class="section-lead" data-l="zh">更完整的步骤与边界说明在<a href="docs.html">使用文档</a></p>
+            <p class="section-lead" data-l="en">The full steps and boundaries live in the <a href="docs.html">user guide</a>.</p>
+          </header>
+
+          <div class="faq-list reveal">
+            <details>
+              <summary><span data-l="zh">Fynvra 和 Claude Code、Codex 这类 CLI 有什么不同</span><span data-l="en">How is Fynvra different from CLIs like Claude Code or Codex?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">它们通常是单个 Agent 的命令行工具；Fynvra 是桌面工作台，内置基于 pi SDK 的运行时，把主 Agent 编排、worktree 隔离、消息收件箱、审查与合并做成完整流程；已有的模型服务和 MCP 配置可以导入</p>
+              <p data-l="en">They are usually single-agent CLIs. Fynvra is a desktop workbench with a pi SDK-based runtime that ties orchestration, worktree isolation, an inbox, review, and merge into one flow. Existing provider and MCP configs can be imported.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">收费吗，模型费用怎么算</span><span data-l="en">Is it free? How is model usage billed?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">Fynvra 本身免费开源，使用 Apache-2.0 许可证；模型调用费用与额度来自你连接的服务商账号</p>
+              <p data-l="en">Fynvra is free and open source under Apache-2.0. Model usage is billed by whichever provider account you connect.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">我的代码和 API Key 会被上传吗</span><span data-l="en">Do my code and API keys leave my machine?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">Fynvra 没有中转服务器，对话请求只发往你配置的模型服务地址；密钥明文只在主进程使用，但保存在本地配置文件中，不是加密凭证库，请不要分享应用数据目录</p>
+              <p data-l="en">There is no relay server; prompts go only to the provider endpoints you configure. Plaintext keys are used only in the main process but stored in local config files — not an encrypted vault — so do not share the app data folder.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">主 Agent 会自己改代码吗</span><span data-l="en">Will the orchestrator edit code itself?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">默认不会，内置 Orchestrator 使用编排工具策略，只能读文件、执行只读 git 和调用编排工具，不能写文件或执行任意命令；你可以在角色设置里调整</p>
+              <p data-l="en">Not by default. The built-in Orchestrator uses the orchestration tool policy: read files, read-only git, and orchestration tools — no writes or arbitrary commands. You can change it in role settings.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">没有 git 的项目能用吗</span><span data-l="en">Can I use it without git?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">能，普通文件夹按原地模式工作：不建 worktree，Worker 直接在目录里修改，审查时列出它汇报的改动文件；并行 Worker 会共用目录，建议一次只派一个任务</p>
+              <p data-l="en">Yes. Plain folders run in place: no worktree, workers edit the folder directly, and review lists the files they reported. Parallel workers share the directory, so dispatch one task at a time.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">支持哪些平台</span><span data-l="en">Which platforms are supported?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">Windows x64 和 macOS（Intel / Apple Silicon），Linux 有 AppImage 构建配置，但尚未纳入自动发布与更新</p>
+              <p data-l="en">Windows x64 and macOS (Intel and Apple Silicon). Linux has an AppImage build config but is not part of automated releases or updates yet.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">Worker 会不会 push 代码或删库</span><span data-l="en">Can a worker push code or wipe my repo?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">git push、git reset --hard、rm -rf 等保护操作在任何审批档位下都需要你确认，「本会话都允许」也不会豁免</p>
+              <p data-l="en">Protected operations such as git push, git reset --hard, and rm -rf need your confirmation in every approval mode. “Allow for session” does not exempt them.</p>
+            </details>
+            <details>
+              <summary><span data-l="zh">怎么更新 Fynvra</span><span data-l="en">How do updates work?</span><span class="faq-plus" aria-hidden="true"></span></summary>
+              <p data-l="zh">Windows 安装版与正式签名的 macOS 版会检查并后台下载稳定新版本，下载完成后由你确认安装；未签名的 Mac 包需要从 Releases 手动覆盖，开发模式不联网更新</p>
+              <p data-l="en">Installed Windows builds and Developer ID-signed macOS builds check for and download stable updates, then wait for you to confirm the install. Unsigned Mac builds are replaced manually from Releases. Dev mode does not update online.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta" id="download">
+        <div class="shell cta-inner">
+          <p class="eyebrow"><span class="eyebrow-num">09</span> Get started <span class="eyebrow-divider" data-l="zh">/</span> <span data-l="zh">开始使用</span></p>
+          <h2 class="cta-title">
+            <span data-l="zh">把下一个需求，<br />交给主 Agent</span>
+            <span data-l="en">Hand the next request<br />to the orchestrator</span>
+          </h2>
+          <div class="cta-actions">
+            <a class="btn btn-primary btn-lg" href="https://github.com/LAIJiangFeng/fynvra/releases">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 15V3M7 10l5 5 5-5M5 21h14" />
+              </svg>
+              <span data-l="zh">前往 Releases 下载</span><span data-l="en">Download from Releases</span>
+            </a>
+            <a class="btn btn-ghost btn-lg" href="docs.html#install"><span data-l="zh">打开使用文档</span><span data-l="en">Open the user guide</span></a>
+          </div>
+          <p class="cta-meta">
+            <span data-l="zh">Windows x64 · macOS Intel / Apple Silicon · 需要自备模型服务</span>
+            <span data-l="en">Windows x64 · macOS Intel / Apple Silicon · Bring your own model provider</span>
+          </p>
+          <div class="cta-grid" aria-hidden="true"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html" aria-label="Fynvra">
+            <img class="brand-mark" src="assets/favicon.svg" alt="" width="26" height="26" />
+            <span>Fynvra</span>
+          </a>
+          <p data-l="zh">开源的本地多 Agent AI 编程工作台，基于 Electron 与 pi SDK 构建</p>
+          <p data-l="en">The open-source, local multi-agent AI coding workbench. Built on Electron and the pi SDK.</p>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">产品</span><span data-l="en">Product</span></p>
+          <ul class="footer-links">
+            <li><a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a></li>
+            <li><a href="#runtime"><span data-l="zh">能力</span><span data-l="en">Capabilities</span></a></li>
+            <li><a href="#safety"><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l="zh">下载</span><span data-l="en">Download</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">文档</span><span data-l="en">Docs</span></p>
+          <ul class="footer-links">
+            <li><a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">User guide</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/PRODUCT.md"><span data-l="zh">产品定义</span><span data-l="en">Product definition</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/ARCHITECTURE.md"><span data-l="zh">架构契约</span><span data-l="en">Architecture</span></a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/RELEASE.md"><span data-l="zh">发布说明</span><span data-l="en">Releases and updates</span></a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="footer-title"><span data-l="zh">社区</span><span data-l="en">Community</span></p>
+          <ul class="footer-links">
+            <li><a href="https://github.com/LAIJiangFeng/fynvra">GitHub</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/issues">Issues</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/releases">Releases</a></li>
+            <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/LICENSE">Apache-2.0</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="shell footer-bottom">
+        <span>© 2026 Fynvra · Apache-2.0</span>
+        <span>Electron · React · pi SDK</span>
+      </div>
+    </footer>
+  </body>
+</html>
