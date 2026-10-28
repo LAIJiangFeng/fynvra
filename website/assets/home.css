@@ -91,6 +91,14 @@
 }
 
 /* 场景切换只在增强后出现；无 JS 时保留默认可读的协作流程。 */
+/* 外层占满演示窗口宽度，用居中布局把整组标签相对窗口水平居中。 */
+.fd-scene-switch-row {
+  display: none;
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
 .fd-scene-switch {
   display: none;
   --fd-scene-pill-bg: var(--surface);
@@ -101,7 +109,7 @@
   max-width: 100%;
   align-items: center;
   gap: 2px;
-  margin: 0 auto 10px;
+  margin: 0;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -112,6 +120,10 @@
 :root[data-theme="dark"] .fd-scene-switch {
   --fd-scene-pill-bg: rgb(255 255 255 / 8%);
   --fd-scene-pill-ring: rgb(255 255 255 / 12%);
+}
+
+.fd-showcase[data-enhanced="true"] .fd-scene-switch-row {
+  display: flex;
 }
 
 .fd-showcase[data-enhanced="true"] .fd-scene-switch {
