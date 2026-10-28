@@ -3,6 +3,8 @@
 
 /* 标题略收一号，正文用实际容器宽度自然换行 */
 .hero-title {
+  /* 上方 badge 已删除，去掉原先为它预留的 30px */
+  margin-top: 0;
   font-size: clamp(1.95rem, 4.9vw, 4.45rem);
   line-height: 1.02;
 }
@@ -42,6 +44,21 @@
   max-width: 48em;
 }
 
+/* 删掉重复模块后收紧纵向留白。
+   .faq .section-head 与 .cta .section-head 的 margin-bottom:0 优先级更高，仍按原样生效。 */
+.hero {
+  padding-top: clamp(32px, 4vw, 56px);
+  padding-bottom: clamp(32px, 3.6vw, 48px);
+}
+
+.section {
+  padding-block: clamp(36px, 4vw, 64px);
+}
+
+.section-head {
+  margin-bottom: clamp(24px, 3vw, 36px);
+}
+
 .faq-list details p {
   max-width: none;
 }
@@ -65,7 +82,7 @@
 /* ── 顶部连续操作演示 ───────────────────────────────────────── */
 
 .fd-showcase {
-  margin-top: clamp(40px, 5.5vw, 66px);
+  margin-top: clamp(26px, 3vw, 40px);
 }
 
 /* 场景切换只在增强后出现；无 JS 时保留默认可读的协作流程。 */
@@ -1588,12 +1605,13 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin-top: 18px;
+  /* 原先是给 .flow-spotlight 拉开的距离，模块删掉后不再需要 */
+  margin-top: 0;
 }
 
 .cap-card {
   display: flex;
-  min-height: 214px;
+  min-height: 188px;
   flex-direction: column;
   gap: 11px;
   padding: 23px;
