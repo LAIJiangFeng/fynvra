@@ -43,6 +43,8 @@ export interface SessionRuntime {
   model?: string;
   /** 本轮的错误，新一轮开始时清除；settled 时据此决定 idle 还是 error。 */
   error?: string;
+  /** 最近一次正常结束（非 aborted）的 settled 事件的会话级 seq：回复建议只对这一轮有效 */
+  settledSeq?: number;
   /** 运行中工具的本地开始时间（toolCallId → epoch ms），tool_end 缺 durationMs 时据此推算。 */
   toolStartedAt: Record<string, number>;
 }
@@ -216,6 +218,7 @@ function applyEvent(
           ...slice.runtime,
           status: slice.runtime.error === undefined ? 'idle' : 'error',
           toolStartedAt: {},
+          ...(event.aborted ? {} : { settledSeq: event.seq }),
         },
         approvals: EMPTY_APPROVALS,
       };

@@ -1,6 +1,7 @@
 import type {
   ChatImage,
   ModelProviderOption,
+  ReplySuggestion,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
@@ -93,6 +94,23 @@ export const selectDraftImagesOf =
   (sessionId: string) =>
   (state: SessionsState): ChatImage[] =>
     state.draftImages[sessionId] ?? EMPTY_IMAGES;
+
+/**
+ * 当前会话的灰字回复建议。除了要有值，还必须仍属于最后的 settled 轮次：
+ * 新一轮的事件 / settled 之后旧 roundId 对不上，绝不把上一轮的灰字重新显示出来。
+ */
+export const selectReplySuggestionOf =
+  (sessionId: string) =>
+  (state: SessionsState): ReplySuggestion | undefined => {
+    const suggestion = state.replySuggestions[sessionId];
+    if (!suggestion) return undefined;
+    const runtime = state.runtimeBySession[sessionId];
+    if (runtime?.status !== 'idle') return undefined;
+    if (runtime.settledSeq !== suggestion.roundId || runtime.lastSeq !== suggestion.roundId) {
+      return undefined;
+    }
+    return suggestion;
+  };
 
 /** Messages queued while the session runs, oldest first */
 export const selectQueueOf =

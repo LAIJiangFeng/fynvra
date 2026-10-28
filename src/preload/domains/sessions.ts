@@ -5,6 +5,7 @@ import type {
   ChatImage,
   ChatMessage,
   ModelOptions,
+  ReplySuggestion,
   SessionEventEnvelope,
   SessionModelRef,
   SessionSummary,
@@ -52,6 +53,15 @@ export interface SessionsApi {
     sessionId: string;
     mode: ApprovalMode;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
+   * 为刚结束的一轮（`roundId` = settled 事件的会话级 seq）生成一条输入框灰字建议。
+   * Renderer 只传会话 id 与轮次 id；Main / worker 再核对空闲状态与轮次，空建议表示没有可展示的建议。
+   * 不写入对话历史，不自动发送，失败静默
+   */
+  suggestReply(input: {
+    sessionId: string;
+    roundId: number;
+  }): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>>;
   /** 归档：运行中返回错误；按设置清理它绑定的、已合并且干净的 worktree */
   archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 恢复归档的会话，闲置计时从现在重新开始 */
@@ -91,6 +101,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     setModel: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, input),
     modelOptions: (input = {}) => ipc.invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, input),
     setApprovalMode: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, input),
+    suggestReply: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SUGGEST_REPLY, input),
     archive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ARCHIVE, sessionId),
     unarchive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_UNARCHIVE, sessionId),
     sweep: () => ipc.invoke(IPC_CHANNELS.SESSIONS_SWEEP),

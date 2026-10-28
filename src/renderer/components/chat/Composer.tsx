@@ -35,10 +35,12 @@ import {
   type ImageRejection,
   isBusy,
   type QueuedMessage,
+  selectApprovalsOf,
   selectDraftImagesOf,
   selectDraftOf,
   selectMessagesOf,
   selectQueueOf,
+  selectReplySuggestionOf,
   selectSessionOf,
   selectStatusOf,
   useSessionsStore,
@@ -56,6 +58,7 @@ import {
   up,
 } from './inputHistory';
 import { ModelPicker } from './ModelPicker';
+import { ReplySuggestionGhost } from './ReplySuggestionGhost';
 
 type Caret = 'start' | 'end';
 
@@ -173,11 +176,15 @@ function imageProblem(problem: ImageRejection | 'unsupported', t: T): string {
  * 这些都是默认键：按键经动作表（设置 → 快捷键）判断，另有运行中 Esc 停止、Ctrl+M（macOS ⌘M）打开模型选择器。
  * Ctrl/⌘+V 粘贴图片：剪贴板里有 PNG / JPEG / GIF / WebP 文件时以图片为准，缩略图挂在输入框顶部
  * （草稿，按会话存在 store），只有图片也能发；没有图片文件时照常粘贴文字。
+ * 一轮正常结束后 store 可能带一条灰字建议：它不进入草稿、不占发送按钮；光标在末尾且没有修饰键时按 → 采纳为草稿，
+ * Esc 忽略本轮。普通输入不匹配建议时立即隐藏；运行中、有队列 / 审批 / 图片 / 历史浏览时不显示。
  */
 export function Composer({ sessionId }: { sessionId: string }) {
   const draft = useSessionsStore(selectDraftOf(sessionId));
   const images = useSessionsStore(selectDraftImagesOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
+  const suggestion = useSessionsStore(selectReplySuggestionOf(sessionId));
+  const approvals = useSessionsStore(selectApprovalsOf(sessionId));
   const approvalMode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
@@ -191,12 +198,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   const attachImages = useSessionsStore((state) => state.attachImages);
   const removeDraftImage = useSessionsStore((state) => state.removeDraftImage);
+  const ignoreSuggestion = useSessionsStore((state) => state.ignoreSuggestion);
   const hints = useComposerHints();
   const sendLabel = useChordLabel('send');
   const steerLabel = useChordLabel('steer-now');
   const t = useT();
   const input = useRef<HTMLTextAreaElement>(null);
   const imagePicker = useRef<HTMLInputElement>(null);
+  /** 输入法组字中：keydown 的 isComposing / keyCode 229 之外再兜一层 composition 状态 */
+  const composing = useRef(false);
+  /** 正在翻历史：与 history ref 同步，供灰字显隐/光标逻辑读 */
+  const [browsing, setBrowsing] = useState(false);
   useActionHandler('focus-composer', () => input.current?.focus());
   /** 正在翻的历史；null 表示没在浏览（输入框里是草稿） */
   const history = useRef<InputHistory | null>(null);
@@ -215,11 +227,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
   );
 
   const busy = isBusy(status);
+  // 灰字只在空闲、没队列 / 审批 / 图片、没翻历史且草稿恰好是建议前缀时显示；它不进 draft，也不影响 canSend
+  const ghostVisible =
+    suggestion !== undefined &&
+    !busy &&
+    status === 'idle' &&
+    approvals.length === 0 &&
+    queue.length === 0 &&
+    images.length === 0 &&
+    !browsing &&
+    draft.length < suggestion.text.length &&
+    suggestion.text.startsWith(draft);
+  const ghostSuffix = ghostVisible && suggestion ? suggestion.text.slice(draft.length) : '';
   // While running the message is queued (sent when the turn settles) instead of being refused
   const canSend = draft.trim().length > 0 || images.length > 0;
   const submit = () => {
     if (!canSend) return;
     history.current = null;
+    setBrowsing(false);
     void send(draft);
   };
   /** Idle: same as send. Running: steer the latest queued message, or the draft when none is queued */
@@ -228,7 +253,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
       submit();
       return;
     }
-    if (queue.length === 0) history.current = null;
+    if (queue.length === 0) {
+      history.current = null;
+      setBrowsing(false);
+    }
     void steer(sessionId);
   };
 
@@ -242,6 +270,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   /** 换成历史里的另一条（或回到草稿） */
   const browse = (next: InputHistory, caret: Caret) => {
     history.current = isBrowsing(next) ? next : null;
+    setBrowsing(history.current !== null);
     const entry = currentEntry(next);
     setDraftImages(sessionId, entry.images);
     if (entry.text === draft) {
@@ -277,6 +306,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     // 只在确实加了图片时结束浏览；读文件期间可能已经切到别的会话。
     if (state.activeSessionId === sessionId && state.draftImages[sessionId] !== previousImages) {
       history.current = null;
+      setBrowsing(false);
     }
     setImageHint(problem ? { text: imageProblem(problem, t) } : null);
   };
@@ -285,6 +315,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const removeImage = useCallback(
     (index: number) => {
       history.current = null;
+      setBrowsing(false);
       removeDraftImage(sessionId, index);
       input.current?.focus();
     },
@@ -323,9 +354,33 @@ export function Composer({ sessionId }: { sessionId: string }) {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // 输入法组字时的按键（Enter 确认候选词、方向键选词）都交给输入法
-    if (event.nativeEvent.isComposing) return;
+    // 输入法组字时的按键（Enter 确认候选词、方向键选词）都交给输入法；
+    // 有的浏览器在 compositionend 后仍报 keyCode 229，这里一并挡住
+    if (event.nativeEvent.isComposing || composing.current || event.nativeEvent.keyCode === 229) {
+      return;
+    }
     const textarea = event.currentTarget;
+    // → 只在灰字可见、无修饰键、无选区且光标在末尾时采纳为草稿；不发送、不写历史
+    if (
+      ghostVisible &&
+      suggestion &&
+      event.key === 'ArrowRight' &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      textarea.selectionStart === textarea.selectionEnd &&
+      textarea.selectionStart === textarea.value.length
+    ) {
+      event.preventDefault();
+      history.current = null;
+      setBrowsing(false);
+      pendingCaret.current = 'end';
+      // 采纳后与 Esc 一样结束本轮建议：之后删空草稿也不会再冒出来
+      ignoreSuggestion(sessionId);
+      setDraft(sessionId, suggestion.text);
+      return;
+    }
     if (matchAction(event, 'cycle-approval')) {
       event.preventDefault();
       if (approvalMode) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
@@ -348,6 +403,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
     if (event.key === 'Escape' && history.current) {
       event.preventDefault();
       browse(toDraft(history.current), 'end');
+      return;
+    }
+    // 灰字建议：Esc 忽略本轮，不重新出现；没有灰字时 Esc 保持原行为
+    if (event.key === 'Escape' && ghostVisible) {
+      event.preventDefault();
+      ignoreSuggestion(sessionId);
       return;
     }
     if (busy && matchAction(event, 'stop-turn')) {
@@ -400,6 +461,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     () => () => {
       const browsing = history.current;
       history.current = null;
+      setBrowsing(false);
       if (browsing) {
         setDraft(sessionId, browsing.draft.text);
         setDraftImages(sessionId, browsing.draft.images);
@@ -423,23 +485,43 @@ export function Composer({ sessionId }: { sessionId: string }) {
             {imageHint.text}
           </p>
         )}
-        <Textarea
-          ref={input}
-          value={draft}
-          rows={1}
-          aria-label={t('chat.message')}
-          aria-keyshortcuts={hints.ariaKeyShortcuts}
-          title={hints.title}
-          placeholder={t('chat.placeholder')}
-          className="field-sizing-content max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
-          onChange={(event) => {
-            // 翻到的内容一经编辑就成为新的草稿，不再处于浏览状态
-            history.current = null;
-            setDraft(sessionId, event.target.value);
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-        />
+        <div className="relative">
+          <ReplySuggestionGhost
+            textarea={input}
+            draft={draft}
+            suffix={ghostSuffix}
+            visible={ghostVisible}
+          />
+          <Textarea
+            ref={input}
+            value={draft}
+            rows={1}
+            aria-label={t('chat.message')}
+            aria-keyshortcuts={hints.ariaKeyShortcuts}
+            title={hints.title}
+            placeholder={ghostVisible ? '' : t('chat.placeholder')}
+            className="field-sizing-content relative z-10 max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
+            onChange={(event) => {
+              // 翻到的内容一经编辑就成为新的草稿，不再处于浏览状态
+              history.current = null;
+              setBrowsing(false);
+              setDraft(sessionId, event.target.value);
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+          />
+        </div>
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {ghostVisible && suggestion
+            ? t('chat.replySuggestionHint', { suggestion: suggestion.text })
+            : ''}
+        </p>
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <div className="flex min-w-0 items-center gap-2">
             <input

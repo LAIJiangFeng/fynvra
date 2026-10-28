@@ -549,6 +549,11 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true, session: session.summary };
     },
 
+    // mock 没有真实模型，不编造建议；返回空建议保持与 Main 相同的接口与静默失败行为
+    async suggestReply() {
+      return { ok: true, suggestion: null };
+    },
+
     async modelOptions(input = {}) {
       const lastUsed = input.workspaceId ? lastModels.get(input.workspaceId) : undefined;
       return {

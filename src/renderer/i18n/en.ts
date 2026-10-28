@@ -284,6 +284,7 @@ export const en: MessagesShape<typeof zhCN> = {
     queuedImageOnly: '(images only)',
     sendNow: 'Send now ({chord})',
     removeQueued: 'Remove from queue',
+    replySuggestionHint: 'Reply suggestion: {suggestion}. Press Right Arrow to fill it in',
   },
   model: {
     pick: 'Select model',

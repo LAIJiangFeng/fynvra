@@ -15,6 +15,7 @@ import {
   type ApprovalKind,
   type ChatImage,
   isThinkingSource,
+  MAX_REPLY_SUGGESTION_CHARS,
   type ModelThinkingCapability,
   parseChatImages,
   type SessionStatus,
@@ -187,6 +188,20 @@ export type AgentCommand =
    * allowSession 的记忆保留，从 full 切回更严的档位时清空
    */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  /**
+   * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
+   * worker 只在会话当前空闲且 generation 未变时生成；结果必须回同一 requestId 与 roundId
+   */
+  | {
+      type: 'suggest-reply';
+      identity: SessionIdentity;
+      requestId: string;
+      roundId: number;
+      /** worker 侧的轮次计数（每正常 settle 一次 +1）：生成前后都要与发送时一致 */
+      round: number;
+    }
+  /** 用户已开始新一轮 / 换模型 / 切会话了：中止仍在途的建议请求 */
+  | { type: 'cancel-suggestion'; identity: SessionIdentity; requestId: string }
   /** 查模型的思考档位（进程级，不带 identity）；worker 回同一 requestId 的 models-described */
   | { type: 'describe-models'; requestId: string; models: ModelQuery[] }
   /** 关闭全部会话后退出进程（进程级，不带 identity） */
@@ -216,6 +231,15 @@ export type AgentWorkerEvent =
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
+  /** 建议请求的结果：text 为空表示没有明确建议或生成失败；Main 只认仍挂在表里的 requestId */
+  | {
+      type: 'suggestion-result';
+      identity: SessionIdentity;
+      requestId: string;
+      roundId: number;
+      round: number;
+      text: string;
+    }
   /** describe-models 的回答（进程级） */
   | { type: 'models-described'; requestId: string; result: ModelsDescribedResult }
   /** 诊断日志（进程级） */
@@ -279,6 +303,16 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
     case 'set-approval-mode':
       return isApprovalMode(record.mode)
         ? { type: 'set-approval-mode', identity, mode: record.mode }
+        : null;
+    case 'suggest-reply': {
+      const { requestId, roundId, round } = record;
+      return isNonEmptyString(requestId) && isPositiveInteger(roundId) && isPositiveInteger(round)
+        ? { type: 'suggest-reply', identity, requestId, roundId, round }
+        : null;
+    }
+    case 'cancel-suggestion':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'cancel-suggestion', identity, requestId: record.requestId }
         : null;
     case 'prompt': {
       const { text } = record;
@@ -357,6 +391,16 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       const { error, fatal } = record;
       return typeof error === 'string' && typeof fatal === 'boolean'
         ? { type: 'session-error', identity, error, fatal }
+        : null;
+    }
+    case 'suggestion-result': {
+      const { requestId, roundId, round, text } = record;
+      return isNonEmptyString(requestId) &&
+        isPositiveInteger(roundId) &&
+        isPositiveInteger(round) &&
+        typeof text === 'string' &&
+        text.length <= MAX_REPLY_SUGGESTION_CHARS
+        ? { type: 'suggestion-result', identity, requestId, roundId, round, text }
         : null;
     }
     case 'approval-request': {

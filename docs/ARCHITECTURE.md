@@ -291,6 +291,15 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态。
 - 已有会话不打断、不重建、不热切换策略，worker 崩溃重启也沿用该会话打开时的缓存 spec；更改在新会话或重启应用后生效，不新增热更新通道。关闭只停用自动压缩，不改变模型的上下文上限，也没有手动压缩入口；不读取本机 pi / 扩展配置，不接入第三方 compaction 扩展。
 
+### 7.9 输入框回复建议
+
+- 一轮真实 AI 回复正常 `agent_settled`（未中止、未出错）后，Renderer 仅在当前选中会话、输入框空闲、没有队列 / 待审批 / 图片 / 未发送草稿时，调用 `sessions:suggest-reply`，只传 `{ sessionId, roundId }`（roundId 是该轮 settled 事件的会话级 seq）。切换历史会话、重渲染、流式 token、普通打字都不触发新请求；同一轮（含空结果 / 失败）只请求一次。
+- Main 核对记录状态、未归档、没有待审批、`live` 仍空闲且 `lastSettledSeq === roundId`，再经既有 AgentCommand 通道让 worker 生成；Main 只保留最近轮次标记与有界的在途表（同时最多 2 条），不缓存对话正文，不把 key / 端点返回 Renderer。
+- worker 用该会话当前的 `ResolvedModel`（含换模型后的模型）在 live `AgentSession` 上另发一次独立、无工具、`maxRetries: 0`、约 8 秒超时、输出上限 256 token 的 `completeSimple` 请求；不传 `reasoning`，Anthropic 等支持的服务走非思考分支、不会再追加 2048 思考预算（该上限是输出预算，请求本身仍按正常 token 计费）。不调用 `session.prompt`，不写 pi jsonl / 消息历史，不派 worker、不执行工具。上下文只取最近 8 条 user / assistant 纯文本（总计约 8k 字符，单条约 2k；最新优先，assistant 保留尾部），要求预测用户的下一句话、跟随最近用户语言、空建议表示不展示，并禁止 markdown、多候选以及替用户同意删除 / 发布 / 付款 / 权限变更等破坏性确认。
+- 建议结果带 `requestId`、generation、sessionId、roundId 回 Main；Main 再核对轮次 / 状态并清洗成一行至多 200 字符。`prompt` / `steer` / `setModel` / `abort` / 删除 / 归档 / worker 崩溃都会取消在途请求或丢弃迟到回包；worker 生成前后都核对 generation、回合计数与空闲状态。失败、超时、取消一律静默返回空建议，不影响主聊天状态。
+- Renderer 的灰字建议与 draft 分离：不进入草稿、不使发送按钮可用、不被 Enter 发送；只有建议可见、无修饰键、未组字（`isComposing` / composition / keyCode 229）、无选区且光标在末尾时，右箭头才把建议写入本会话 draft 并把光标放到末尾，不自动发送。Esc 忽略本轮且不重新出现；草稿是建议前缀时只显示剩余灰字，不匹配的普通输入立即隐藏；运行中、错误、队列、审批、图片、历史浏览时不显示。
+- 灰字层复用输入框排版与明暗主题，`pointer-events-none`、`aria-hidden`，另用简短 live region 提示右箭头采纳；长建议截断并随输入框滚动。不改正常对话 prompt / 工具 / thinking / Fast，不新增通用设置开关。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
