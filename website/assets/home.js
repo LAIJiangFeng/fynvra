@@ -210,7 +210,10 @@
             : config.durations[state.phase];
       state.autoTimer = window.setTimeout(() => {
         state.autoTimer = 0;
-        applyPhase(state.phase === LAST ? 0 : state.phase + 1);
+        if (!shouldRun()) return;
+        // 最后一个阶段的结果停留结束后让位给另一个场景，两个场景按顺序无限交替。
+        if (state.phase === LAST) selectScene(config.next);
+        else applyPhase(state.phase + 1);
       }, delay);
     }
 
@@ -294,6 +297,7 @@
     emptyUntil: 2,
     hotPhases: [1],
     text: (lang) => collabText[lang],
+    next: 'model',
     render: renderCollabScene,
   });
 
@@ -304,11 +308,27 @@
     emptyUntil: 2,
     hotPhases: [1],
     text: (lang) => modelText[lang],
+    next: 'collab',
     render: renderModelScene,
   });
 
   const scenes = { collab, model };
   const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
+  const sceneSwitch = root.querySelector('.fd-scene-switch');
+
+  // 滑块按当前按钮的实测位置对齐，换语言、字体或窗口宽度变化后重新测量。
+  function moveScenePill() {
+    if (!sceneSwitch) return;
+    const pressed = sceneSwitch.querySelector('.fd-scene-btn[aria-pressed="true"]');
+    if (!pressed) return;
+    const track = sceneSwitch.getBoundingClientRect();
+    const pill = pressed.getBoundingClientRect();
+    const style = sceneSwitch.style;
+    style.setProperty('--fd-scene-pill-x', `${pill.left - track.left - sceneSwitch.clientLeft}px`);
+    style.setProperty('--fd-scene-pill-y', `${pill.top - track.top - sceneSwitch.clientTop}px`);
+    style.setProperty('--fd-scene-pill-w', `${pill.width}px`);
+    style.setProperty('--fd-scene-pill-h', `${pill.height}px`);
+  }
 
   function selectScene(name) {
     const next = scenes[name];
@@ -318,11 +338,16 @@
     for (const button of sceneButtons) {
       button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === name));
     }
+    moveScenePill();
     next.activate();
   }
 
   for (const button of sceneButtons) {
     button.addEventListener('click', () => selectScene(button.dataset.sceneBtn));
+  }
+
+  if (sceneSwitch && 'ResizeObserver' in window) {
+    new ResizeObserver(moveScenePill).observe(sceneSwitch);
   }
 
   if ('IntersectionObserver' in window) {
@@ -359,7 +384,10 @@
   else motion.addListener(handleMotionChange);
 
   // 语言切换不重启动画：输入阶段重打当前语言，其余阶段沿用已显示的流程状态。
-  new MutationObserver(() => activeScene?.localeChanged()).observe(document.documentElement, {
+  new MutationObserver(() => {
+    moveScenePill();
+    activeScene?.localeChanged();
+  }).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-locale'],
   });
@@ -369,5 +397,9 @@
   for (const button of sceneButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === 'collab'));
   }
+  moveScenePill();
+  window.requestAnimationFrame(() => {
+    if (sceneSwitch) sceneSwitch.dataset.ready = 'true';
+  });
   activeScene.activate();
 })();
