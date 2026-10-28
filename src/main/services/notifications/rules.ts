@@ -1,11 +1,11 @@
-import type { FynvraSessionEventBody, Message } from '@fynvra/core';
+import type { FynvraSessionEventBody, Message, ToolOperationNotice } from '@fynvra/core';
 import type { ApprovalRequest, SessionSummary } from '@shared/types/chat';
 import type { NotificationPreferences } from '@shared/types/settings';
 import { translate } from '../../i18n';
 
 /**
  * 桌面通知的规则（纯函数，Task 24）：哪些事件弹、受哪个开关管、标题与正文怎么写、什么时候按聚焦抑制。
- * 弹不弹由 notifier 按设置判断；普通通知在合并窗口前后各查一次，实时审批立即检查。这里不碰 Electron。
+ * 弹不弹由 notifier 按设置判断；操作通知与普通通知均按会话节流。这里不碰 Electron。
  */
 
 /** 正文取前多少字 */
@@ -24,7 +24,9 @@ export type NotificationKind =
   | 'question'
   /** 上报给主 agent（worker 或 Fynvra 自己） */
   | 'escalation'
-  /** 任何会话的审批请求 */
+  /** 单向工具操作通知，不等待确认 */
+  | 'tool-notice'
+  /** @deprecated 旧审批事件不再通知 */
   | 'approval';
 
 /** 通知用到的会话字段；有 dispatchId 的是编排派出的 worker 会话 */
@@ -58,15 +60,17 @@ export function allowedBy(preferences: NotificationPreferences, kind: Notificati
       return !preferences.mainAgentOnly;
     case 'question':
     case 'escalation':
-    case 'approval':
+    case 'tool-notice':
       return preferences.askAndApproval;
+    case 'approval':
+      return false;
   }
 }
 
-/** 普通通知在聚焦当前会话时不弹；审批需要用户操作，即使正看着也提醒一次。 */
+/** 普通通知在聚焦当前会话时不弹；操作通知可提醒，但不会抢焦点。 */
 export function hiddenByView(candidate: NotificationCandidate, view: ViewState): boolean {
   return (
-    candidate.kind !== 'approval' && view.focused && view.viewingSessionId === candidate.sessionId
+    candidate.kind !== 'tool-notice' && view.focused && view.viewingSessionId === candidate.sessionId
   );
 }
 
@@ -150,19 +154,28 @@ export function createTurnTracker(): TurnTracker {
   };
 }
 
-/** 审批请求：任何会话都弹（受「提问与审批」开关管） */
-export function approvalCandidate(
+/** 操作通知仅含会话、固定工具标签与安全动作类别，不含参数或执行结果。 */
+export function toolNoticeCandidate(
   session: NotifiedSession,
-  request: ApprovalRequest
+  notice: ToolOperationNotice
 ): NotificationCandidate {
   return candidate(
-    'approval',
+    'tool-notice',
     session,
-    translate('notifications.approvalTitle', { title: session.title }),
-    excerpt(
-      translate('notifications.approvalBody', { title: request.title, detail: request.detail })
-    )
+    translate('notifications.operationTitle', { title: excerpt(session.title) }),
+    translate('notifications.operationBody', {
+      tool: notice.toolName,
+      action: translate(`notifications.actions.${notice.kind}`),
+    })
   );
+}
+
+/** @deprecated 仅保留旧调用方类型兼容，不由 notifier 发布。 */
+export function approvalCandidate(
+  session: NotifiedSession,
+  _request: ApprovalRequest
+): NotificationCandidate {
+  return candidate('approval', session, session.title, '');
 }
 
 /**

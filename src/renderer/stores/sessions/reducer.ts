@@ -1,7 +1,5 @@
 import type { FynvraSessionEvent } from '@fynvra/core';
-import { asRecord } from '@shared/guards';
 import {
-  type ApprovalKind,
   type ApprovalRequest,
   type ChatImage,
   type ChatMessage,
@@ -21,7 +19,7 @@ export interface TimelineMessage extends ChatMessage {
   failed?: true;
 }
 
-/** 待审批请求；`toolCallId` 来自 approval_request 事件，工具开始或结束时据此出队。 */
+/** 兼容旧 store 类型；新版不会生成可操作审批。 */
 export interface PendingApproval extends ApprovalRequest {
   toolCallId?: string;
 }
@@ -53,15 +51,13 @@ export interface SessionRuntime {
 export interface ChatProjection {
   messagesBySession: Record<string, TimelineMessage[]>;
   runtimeBySession: Record<string, SessionRuntime>;
-  /** 按会话的待审批队列，先到先审。 */
+  /** 兼容旧投影形状，始终为空；旧审批事件不能重新入队。 */
   pendingApprovals: Record<string, PendingApproval[]>;
 }
 
 const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const NO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-/** approval_request 事件不带审批详情的长度上限；Main 的推送到达后以 Main 的字段为准。 */
-const APPROVAL_DETAIL_MAX_CHARS = 500;
 
 export function emptyProjection(): ChatProjection {
   return { messagesBySession: {}, runtimeBySession: {}, pendingApprovals: {} };
@@ -200,17 +196,11 @@ function applyEvent(
         },
       };
     }
-    case 'approval_request': {
-      const existing = slice.approvals.findIndex((request) => request.id === event.requestId);
-      const approvals =
-        existing < 0
-          ? [...slice.approvals, approvalFromEvent(sessionId, event)]
-          : replaceAt(slice.approvals, existing, {
-              ...slice.approvals[existing],
-              toolCallId: event.toolCallId,
-            });
-      return active({ ...slice, approvals });
-    }
+    case 'approval_request':
+      return retireApprovals(slice);
+    case 'tool_notice':
+      // 只用于旁路通知；不能据此把工具标为开始或成功。
+      return slice;
     case 'agent_settled':
       return {
         messages: settleMessages(slice.messages),
@@ -236,12 +226,29 @@ function applyEvent(
   }
 }
 
-/** 运行中的会话：有待审批就是 waiting-approval，否则 running。 */
+/** 真实流式 / 工具事件表明正在运行，不再由审批队列推导等待态。 */
 function active(slice: Slice): Slice {
-  const status: SessionStatus = slice.approvals.length > 0 ? 'waiting-approval' : 'running';
-  return slice.runtime.status === status
-    ? slice
-    : { ...slice, runtime: { ...slice.runtime, status } };
+  return {
+    ...slice,
+    approvals: EMPTY_APPROVALS,
+    runtime:
+      slice.runtime.status === 'running' ? slice.runtime : { ...slice.runtime, status: 'running' },
+  };
+}
+
+/** 忽略旧审批：仅按已有实时投影恢复状态，不重放动作或伪造完成。 */
+function retireApprovals(slice: Slice): Slice {
+  const running =
+    Object.keys(slice.runtime.toolStartedAt).length > 0 ||
+    slice.messages.some((message) => message.streaming || message.optimistic);
+  return {
+    ...slice,
+    approvals: EMPTY_APPROVALS,
+    runtime:
+      slice.runtime.status === 'waiting-approval'
+        ? { ...slice.runtime, status: slice.runtime.error ? 'error' : running ? 'running' : 'idle' }
+        : slice.runtime,
+  };
 }
 
 /** 新一轮开始：清掉上一轮的错误。 */
@@ -421,45 +428,6 @@ function addUsage(total: UsageTotals, usage: ChatMessage['usage']): UsageTotals 
   };
 }
 
-function approvalKindOf(toolName: string): ApprovalKind {
-  if (toolName === 'edit') return 'file-edit';
-  if (toolName === 'write') return 'file-write';
-  if (toolName.startsWith('mcp__')) return 'mcp';
-  return 'command';
-}
-
-function describeArgs(args: unknown): string {
-  const record = asRecord(args);
-  if (typeof record?.command === 'string') return record.command;
-  if (typeof record?.path === 'string') return record.path;
-  let text: string;
-  try {
-    text = JSON.stringify(args) ?? '';
-  } catch {
-    text = '';
-  }
-  return text.length > APPROVAL_DETAIL_MAX_CHARS
-    ? `${text.slice(0, APPROVAL_DETAIL_MAX_CHARS - 1)}…`
-    : text;
-}
-
-function approvalFromEvent(
-  sessionId: string,
-  event: Extract<FynvraSessionEvent, { type: 'approval_request' }>
-): PendingApproval {
-  const detail = describeArgs(event.args);
-  return {
-    id: event.requestId,
-    sessionId,
-    kind: approvalKindOf(event.toolName),
-    title: event.toolName,
-    detail: event.reason ? [detail, event.reason].filter(Boolean).join('\n') : detail,
-    // 事件不带过期时间；0 表示未知，Main 的推送到达后补上
-    expiresAt: 0,
-    toolCallId: event.toolCallId,
-  };
-}
-
 /**
  * 发送时的乐观回显（带着粘贴的图片）：追加在末尾，会话置 running 并清掉上一轮的错误和未送达的回显。
  */
@@ -530,18 +498,13 @@ export function applyHistory<S extends ChatProjection>(
   });
 }
 
-/** Main 推送的审批请求：以 Main 的字段为准，保留事件带来的 toolCallId；会话置 waiting-approval。 */
+/** @deprecated 旧 IPC 只清理旧投影，不创建人工等待。 */
 export function enqueueApproval<S extends ChatProjection>(state: S, request: ApprovalRequest): S {
   const before = sliceOf(state, request.sessionId);
-  const index = before.approvals.findIndex((pending) => pending.id === request.id);
-  const toolCallId = before.approvals[index]?.toolCallId;
-  const merged: PendingApproval = toolCallId === undefined ? request : { ...request, toolCallId };
-  const approvals =
-    index < 0 ? [...before.approvals, merged] : replaceAt(before.approvals, index, merged);
-  return commit(state, request.sessionId, before, active({ ...before, approvals }));
+  return commit(state, request.sessionId, before, retireApprovals(before));
 }
 
-/** 审批已答复：出队；队列空了回到 running。 */
+/** @deprecated 清理旧审批投影；答复不能使工具进入运行态。 */
 export function dequeueApproval<S extends ChatProjection>(
   state: S,
   sessionId: string,
@@ -550,7 +513,7 @@ export function dequeueApproval<S extends ChatProjection>(
   const before = sliceOf(state, sessionId);
   const approvals = before.approvals.filter((request) => request.id !== requestId);
   if (approvals.length === before.approvals.length) return state;
-  return commit(state, sessionId, before, active({ ...before, approvals }));
+  return commit(state, sessionId, before, retireApprovals({ ...before, approvals }));
 }
 
 /**
@@ -565,9 +528,14 @@ export function syncSessionStatuses<S extends ChatProjection>(
   let runtimeBySession: Record<string, SessionRuntime> | undefined;
   for (const session of sessions) {
     const runtime = state.runtimeBySession[session.id];
-    if (!runtime || runtime.status === session.status || skip.has(session.id)) continue;
+    if (!runtime || skip.has(session.id)) continue;
+    const status =
+      session.status === 'waiting-approval'
+        ? retireApprovals(sliceOf(state, session.id)).runtime.status
+        : session.status;
+    if (runtime.status === status) continue;
     runtimeBySession ??= { ...state.runtimeBySession };
-    runtimeBySession[session.id] = { ...runtime, status: session.status };
+    runtimeBySession[session.id] = { ...runtime, status };
   }
   return runtimeBySession ? { ...state, runtimeBySession } : state;
 }

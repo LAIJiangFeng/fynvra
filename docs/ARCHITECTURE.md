@@ -45,6 +45,8 @@ Renderer(React) ⇄ preload(typed API) ⇄ Main(ipc/*, services/*) ⇄ Agent Wor
                                                                      └─ pi AgentSession × N（每个会话一个）
 ```
 
+- 工具执行与通知（本次行为变更）：运行时的人工审批改为单向通知后立即继续；Main 与 Worker 一致，任何旧 `approvalMode` 都不创建人工等待。参数校验、角色工具白名单、路径边界、编排权限、Stop / abort 与真正的 `ask_coordinator` 提问保持独立执行。
+- 必改层：agent-runtime 的工具通知钩子与会话接线；core / shared 的 `tool_notice` 事件及 unknown parser；supervisor 与 Main agentHost 的旧审批兼容；Main notifications 与双语文案；Renderer 审批入口 / 旧事件投影 / 通知范围标签及 mock。不改 Magic Context、模型配置、任务审查合并或灰字建议算法。
 - Main 是权威：settings、roles、workspaces、orchestration 状态、worktree 注册表都在 Main 持久化。
 - 一个 Agent Worker 进程托管多个 pi 会话。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
 - Renderer 只持有投影；pi jsonl 是会话正文权威源。
@@ -105,7 +107,7 @@ export interface Message {
 
 `packages/core` 提供：
 - `roles/`：内置角色定义（`orchestrator`、`worker`）、`parseRole(unknown)` 校验收窄、`RoleStore` 接口 + 基于注入 fs 的 JSON 文件实现。
-  - 内置角色是默认模板，不是只读配置。名称、描述、提示词、模型、工具策略、审批档位、Skills 和 MCP 均可通过现有 `roles:save` 保存到 `userData/roles/<id>.json`，提示词不进 `settings.json`。
+  - 内置角色是默认模板，不是只读配置。名称、描述、提示词、模型、工具策略、通知范围（兼容字段 approvalMode）、Skills 和 MCP 均可通过现有 `roles:save` 保存到 `userData/roles/<id>.json`，提示词不进 `settings.json`。
   - 内置 id 固定、不可删除；`builtin` 身份按 id 判定，不信任文件或 IPC 的标记。`list/get` 优先读取完整覆盖配置，缺失或无效时使用默认模板并报告无效文件；内置角色始终排在前面且不重复。
   - 覆盖是完整角色快照，不把缺省字段重新与模板合并：用户可以清空参考提示词、技能、MCP 和模型。界面的「恢复默认」只还原草稿，保存后生效。
   - 新启动的会话读取保存后的角色；已经启动的会话不热替换资源、不强制重启。工具权限和编排/worker 协议仍由运行时执行，不因修改参考提示词而移除。
@@ -133,7 +135,7 @@ export interface Message {
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
-    approval?: ApprovalPolicyHooks;     // 审批门（按 role.approvalMode 拦截 tool_call）的人工审批通道；不提供时需审批的调用一律拒绝
+    approval?: ApprovalPolicyHooks;     // 兼容字段名：工具操作的单向通知钩子，缺省或发送失败均不等待人工
   }
   interface RoleSession {
     session: AgentSession;
@@ -151,7 +153,9 @@ export interface Message {
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
-  - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止按 deny，拒绝以可读文本作为工具结果返回模型。worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main，再发 `approval_request` 会话事件。
+  - 工具通知钩子（兼容名 `createApprovalGate`）：所有档位均直接继续执行，不调用旧 `request`，不创建待审批 Promise / 超时或 `waiting-approval`。`approvalMode` 保留存储 / IPC / 继承格式，只选择通知范围：`supervised` 通知命令、文件写改、MCP；`auto-edits` 通知命令与 MCP；`full` 只通知重点命令。`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish` 属于所有范围均通知的重点动作，不再人工确认。角色工具白名单、参数 / 路径校验、编排权限与 abort 仍可拒绝工具。
+  - supervisor 经现有 `session-event` 发出 `tool_notice { toolCallId, toolName, kind }`（只允许固定工具标签，MCP 统一为 `mcp`；不含原始 args、命令、路径、key 或 env），共用 seq / generation 校验。通知发送与展示失败不影响工具，不依赖窗口或点击。Main 复用通知设置（旧 `askAndApproval` 字段）、去重与节流；操作通知无需等待启动静默期，聚焦当前会话也可提醒，通知自身不抢焦点，点击仅定位信息。
+  - 旧 `approval-request` / `approval_request` 忽略，不转发为可操作请求、不自动答复、不重放旧工具。旧响应 IPC 保留但返回请求不存在。Renderer 移除全局确认条 / 模态入口与聊天审批卡；三档标签明确为通知范围。持久化 `waiting-approval` 沿用重启后归 idle 的恢复规则（原 worker 已不存在），实时旧等待状态按当前 live 运行态恢复，不把未执行动作标为完成。源码需构建并重启使用新版本才生效，不热更新已安装应用或原进程里的待答复调用。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
@@ -160,7 +164,7 @@ export interface Message {
   `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
   不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
   不代表已确认实际服务档位；不增加自动降级重发逻辑。
-- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
+- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`tool_notice`、`usage`、`error`；旧 `approval_request` 仅解析兼容，不恢复审批），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
 
@@ -282,7 +286,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 - 通用设置 `preferences.networkProxy` 仅包含模式（默认沿用进程环境）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
 - 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
-- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
+- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和单向操作通知钩子，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
 - `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
 
 ### 7.8 上下文自动压缩
@@ -293,11 +297,11 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.9 输入框回复建议
 
-- 一轮真实 AI 回复正常 `agent_settled`（未中止、未出错）后，Renderer 仅在当前选中会话、输入框空闲、没有队列 / 待审批 / 图片 / 未发送草稿时，调用 `sessions:suggest-reply`，只传 `{ sessionId, roundId }`（roundId 是该轮 settled 事件的会话级 seq）。切换历史会话、重渲染、流式 token、普通打字都不触发新请求；同一轮（含空结果 / 失败）只请求一次。
-- Main 核对记录状态、未归档、没有待审批、`live` 仍空闲且 `lastSettledSeq === roundId`，再经既有 AgentCommand 通道让 worker 生成；Main 只保留最近轮次标记与有界的在途表（同时最多 2 条），不缓存对话正文，不把 key / 端点返回 Renderer。
+- 一轮真实 AI 回复正常 `agent_settled`（未中止、未出错）后，Renderer 仅在当前选中会话、输入框空闲、没有队列 / 图片 / 未发送草稿时，调用 `sessions:suggest-reply`，只传 `{ sessionId, roundId }`（roundId 是该轮 settled 事件的会话级 seq）。切换历史会话、重渲染、流式 token、普通打字都不触发新请求；同一轮（含空结果 / 失败）只请求一次。
+- Main 核对记录状态、未归档、`live` 仍空闲且 `lastSettledSeq === roundId`，再经既有 AgentCommand 通道让 worker 生成；Main 只保留最近轮次标记与有界的在途表（同时最多 2 条），不缓存对话正文，不把 key / 端点返回 Renderer。
 - worker 用该会话当前的 `ResolvedModel`（含换模型后的模型）在 live `AgentSession` 上另发一次独立、无工具、`maxRetries: 0`、约 8 秒超时、输出上限 256 token 的 `completeSimple` 请求；不传 `reasoning`，Anthropic 等支持的服务走非思考分支、不会再追加 2048 思考预算（该上限是输出预算，请求本身仍按正常 token 计费）。不调用 `session.prompt`，不写 pi jsonl / 消息历史，不派 worker、不执行工具。上下文只取最近 8 条 user / assistant 纯文本（总计约 8k 字符，单条约 2k；最新优先，assistant 保留尾部），要求预测用户的下一句话、跟随最近用户语言、空建议表示不展示，并禁止 markdown、多候选以及替用户同意删除 / 发布 / 付款 / 权限变更等破坏性确认。
 - 建议结果带 `requestId`、generation、sessionId、roundId 回 Main；Main 再核对轮次 / 状态并清洗成一行至多 200 字符。`prompt` / `steer` / `setModel` / `abort` / 删除 / 归档 / worker 崩溃都会取消在途请求或丢弃迟到回包；worker 生成前后都核对 generation、回合计数与空闲状态。失败、超时、取消一律静默返回空建议，不影响主聊天状态。
-- Renderer 的灰字建议与 draft 分离：不进入草稿、不使发送按钮可用、不被 Enter 发送；只有建议可见、无修饰键、未组字（`isComposing` / composition / keyCode 229）、无选区且光标在末尾时，右箭头才把建议写入本会话 draft 并把光标放到末尾，不自动发送。Esc 忽略本轮且不重新出现；草稿是建议前缀时只显示剩余灰字，不匹配的普通输入立即隐藏；运行中、错误、队列、审批、图片、历史浏览时不显示。
+- Renderer 的灰字建议与 draft 分离：不进入草稿、不使发送按钮可用、不被 Enter 发送；只有建议可见、无修饰键、未组字（`isComposing` / composition / keyCode 229）、无选区且光标在末尾时，右箭头才把建议写入本会话 draft 并把光标放到末尾，不自动发送。Esc 忽略本轮且不重新出现；草稿是建议前缀时只显示剩余灰字，不匹配的普通输入立即隐藏；运行中、错误、队列、图片、历史浏览时不显示。
 - 灰字层复用输入框排版与明暗主题，`pointer-events-none`、`aria-hidden`，另用简短 live region 提示右箭头采纳；长建议截断并随输入框滚动。不改正常对话 prompt / 工具 / thinking / Fast，不新增通用设置开关。
 
 ## 8. 分阶段
@@ -393,7 +397,7 @@ export interface SessionsApi {
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`。旧 `respond-approval` / `sessions:approval-request` 仅保留接口兼容：前者返回请求不存在，后者不再发送；上面的 `ApprovalRequest` / 订阅形状不代表存在可操作审批。
 
 - **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
   归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经
@@ -409,7 +413,7 @@ export interface SessionsApi {
 - **可选档位**（`sessions:model-options`）：Main 不加载 pi，经进程级的 `describe-models` / `models-described` 问 worker，结果按
   （协议, 模型 id, reasoning 标记）缓存；worker 用的是与注册模型同一份目录模板（同 id 同协议时官方 provider 的条目优先）。
 - **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型、档位与 Fast。显式指定的模型或角色模型
-  不继承 Fast。审批档位随主 agent：按派发时主 agent 会话的当前档位（用户可能切过），没有主 agent 时才用角色自己的。
+  不继承 Fast。通知范围随主 agent：沿用 approvalMode 旧字段，按派发时主 agent 会话的当前范围，没有主 agent 时才用角色自己的；所有范围均无需人工放行。
 
 ### 9.4 `window.fynvra.orchestration`（归属：orchestration-host；orchestration-ui 消费）
 ```ts
@@ -478,7 +482,7 @@ export interface AgentHost {
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。
-- **失效尝试恢复**：服务加载完成、launcher 接线完成后，只在会话注册表完整读取并证明 worker 会话缺失，或 Main 收到当前 generation 的明确 fatal、运行中进程退出、aborted/最终 error、退出应用中断时，将当前未结算 Dispatch 记为 failed，Task 从 in-progress 改为 failed，投递失败原因并持久化、广播 changed。启动加载中、注册表不可读/部分损坏、尚未 fork、正常 idle、审批与 askCoordinator 等待均不是失败证据；不按超时或无输出判断。每次检查重验当前 attempt，反馈投递中的新 Dispatch 暂不参与绑定或恢复，避免注册/投递竞态。snapshot/list/wait 可触发检查，删除/异常退出事件及时触发；用量 readSnapshot 保持只读。已有报告/历史和 worktree/分支保留，in-review/completed/abandoned 不改，重复检查不复写 outcome。成功汇报仍需协调者验收；接管合并或 Git 祖先关系不能自动将遗留任务标为 completed。
+- **失效尝试恢复**：服务加载完成、launcher 接线完成后，只在会话注册表完整读取并证明 worker 会话缺失，或 Main 收到当前 generation 的明确 fatal、运行中进程退出、aborted/最终 error、退出应用中断时，将当前未结算 Dispatch 记为 failed，Task 从 in-progress 改为 failed，投递失败原因并持久化、广播 changed。启动加载中、注册表不可读/部分损坏、尚未 fork、正常 idle、旧版审批状态与真正的 askCoordinator 等待均不是失败证据；不按超时或无输出判断。每次检查重验当前 attempt，反馈投递中的新 Dispatch 暂不参与绑定或恢复，避免注册/投递竞态。snapshot/list/wait 可触发检查，删除/异常退出事件及时触发；用量 readSnapshot 保持只读。已有报告/历史和 worktree/分支保留，in-review/completed/abandoned 不改，重复检查不复写 outcome。成功汇报仍需协调者验收；接管合并或 Git 祖先关系不能自动将遗留任务标为 completed。
 
 ### 9.6 `src/shared/types/llm.ts`（归属：settings-ui；agent-host 可逐字复制）
 ```ts

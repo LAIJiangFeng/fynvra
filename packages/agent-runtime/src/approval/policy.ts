@@ -38,14 +38,19 @@ const MODE_KINDS: Record<ApprovalMode, readonly ApprovalKind[]> = {
   full: [],
 };
 
-/** 工具的审批类别；只读与协调类工具（read / grep / report_done / dispatch_task …）返回 null，任何档位都不审批 */
+/** 工具的通知类别；只读与协调工具（含 ask_coordinator）不走操作通知。 */
 export function approvalKindOf(toolName: string): ApprovalKind | null {
   return TOOL_KINDS.get(toolName) ?? (toolName.startsWith('mcp__') ? 'mcp' : null);
 }
 
-/** 该档位是否要审批这一类工具；不认识的档位按 supervised 处理（fail-closed） */
-export function modeRequiresApproval(mode: ApprovalMode, kind: ApprovalKind): boolean {
+/** 旧档位仅控制通知范围；重点命令由 gate 在所有范围通知。 */
+export function modeNotifiesOperation(mode: ApprovalMode, kind: ApprovalKind): boolean {
   return (MODE_KINDS[mode] ?? MODE_KINDS.supervised).includes(kind);
+}
+
+/** @deprecated 所有档位均不请求人工审批；使用 modeNotifiesOperation 选择通知范围。 */
+export function modeRequiresApproval(_mode: ApprovalMode, _kind: ApprovalKind): boolean {
+  return false;
 }
 
 /** command 类工具参数里的命令全文 */
