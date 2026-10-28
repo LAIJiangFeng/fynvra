@@ -656,7 +656,8 @@ export const zhCN = {
       compactionNative: 'pi 原生自动压缩（默认）',
       compactionMagic: 'Magic Context（插件）',
       compactionOff: '关闭自动压缩',
-      compactionHint: '新会话或重启应用后生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求',
+      compactionHint:
+        '新会话或重启应用后生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求',
       off: '关闭',
       never: '永不',
       days: '{days} 天',

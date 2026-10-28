@@ -180,11 +180,12 @@ export function createMagicContextCompaction(
  * worker). This is app-wide and fixed for the worker lifetime, not a per-session
  * chdir or env swap.
  */
-function prepareHost():
-  | { ok: true; pluginDir: string }
-  | { ok: false; warning: string } {
+function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: string } {
   if (process.env.MAGIC_CONTEXT_FYNVRA_HOST !== '1') {
-    return { ok: false, warning: 'Magic Context host marker is missing; pi native compaction stays active.' };
+    return {
+      ok: false,
+      warning: 'Magic Context host marker is missing; pi native compaction stays active.',
+    };
   }
   const pluginDir = process.env.MAGIC_CONTEXT_PLUGIN_DIR?.trim() ?? '';
   const storageDir = process.env.MAGIC_CONTEXT_STORAGE_DIR?.trim() ?? '';
@@ -198,7 +199,8 @@ function prepareHost():
   if (!storageDir || !isAbsolute(storageDir)) {
     return {
       ok: false,
-      warning: 'Magic Context storage directory is missing or not absolute; pi native compaction stays active.',
+      warning:
+        'Magic Context storage directory is missing or not absolute; pi native compaction stays active.',
     };
   }
   if (!configFile || !existsSync(configFile)) {
@@ -254,9 +256,7 @@ function installRunner(): void {
 
 installRunner();
 
-async function runMagicSubagent(
-  options: MagicSubagentOptions
-): Promise<MagicSubagentResult> {
+async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSubagentResult> {
   const startedAt = Date.now();
   const sessionId = options.accountingSessionId;
   const runner = sessionId ? sessionRunners.get(sessionId) : undefined;
@@ -275,7 +275,11 @@ async function runMagicSubagent(
     );
   }
   if (runner.inFlight) {
-    return fail(startedAt, 'spawn_failed', 'a Magic Context historian run is already active for this session.');
+    return fail(
+      startedAt,
+      'spawn_failed',
+      'a Magic Context historian run is already active for this session.'
+    );
   }
   if (typeof options.userMessage !== 'string' || options.userMessage.length === 0) {
     return fail(startedAt, 'invalid_prompt', 'historian prompt is empty.');
@@ -389,10 +393,6 @@ async function runMagicSubagent(
   }
 }
 
-function fail(
-  startedAt: number,
-  reason: string,
-  error: string
-): MagicSubagentResult {
+function fail(startedAt: number, reason: string, error: string): MagicSubagentResult {
   return { ok: false, reason, error, durationMs: Date.now() - startedAt };
 }

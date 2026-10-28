@@ -62,7 +62,9 @@ function resolvePluginDir(): string {
     join(process.cwd(), 'packages', 'agent-runtime', 'vendor', 'magic-context'),
   ];
   return (
-    candidates.find((candidate) => existsSync(join(candidate, 'dist', 'index.js'))) ?? candidates[1]!
+    candidates.find((candidate) => existsSync(join(candidate, 'dist', 'index.js'))) ??
+    candidates[1] ??
+    ''
   );
 }
 
