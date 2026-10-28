@@ -1,5 +1,6 @@
 import { type FynvraSessionEvent, type FynvraSessionEventBody, getBuiltinRole } from '@fynvra/core';
 import type {
+  ApprovalDecision,
   ApprovalRequest,
   ChatImage,
   ChatMessage,
@@ -41,6 +42,7 @@ interface MockSession {
   /** 模拟 pi jsonl：消息在 message_end 时落盘，工具结果回填到发起它的消息上 */
   history: ChatMessage[];
   run: AbortController | null;
+  approvals: Map<string, (decision: ApprovalDecision) => void>;
 }
 
 class Aborted extends Error {}
@@ -138,6 +140,29 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         signal.removeEventListener('abort', onAbort);
         resolve();
       }, stepMs * steps);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  function waitForDecision(
+    session: MockSession,
+    requestId: string,
+    signal: AbortSignal
+  ): Promise<ApprovalDecision> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Aborted());
+        return;
+      }
+      const onAbort = () => {
+        session.approvals.delete(requestId);
+        reject(new Aborted());
+      };
+      session.approvals.set(requestId, (decision) => {
+        signal.removeEventListener('abort', onAbort);
+        session.approvals.delete(requestId);
+        resolve(decision);
+      });
       signal.addEventListener('abort', onAbort, { once: true });
     });
   }
@@ -248,7 +273,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       const intro = [
         `收到，我来处理「${request}」。`,
         '',
-        '> 当前是 **mock 模式**：没有连接真实模型，下面的流式输出、工具调用和操作通知都是演示数据。',
+        '> 当前是 **mock 模式**：没有连接真实模型，下面的流式输出、工具调用和审批都是演示数据。',
         '',
         '先看一下仓库结构，再跑一遍测试。',
       ].join('\n');
@@ -276,21 +301,43 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       await tool(ls, 'README.md\ndocs/\npackage.json\npackages/\nsrc/');
       await tool(read, '{\n  "name": "fynvra",\n  "private": true,\n  "type": "module"\n}');
 
-      // 与真实路径一致：仅发通知事件，不创建待答复请求。
+      // 与真实审批门一样看会话当前的档位：完全放行时命令不再询问。
+      let decision: ApprovalDecision = 'allow';
       if (session.summary.approvalMode !== 'full') {
+        const requestId = nextId('approval');
+        // 先注册等待，再推送请求，避免同步答复或中止时丢失决定。
+        const answer = waitForDecision(session, requestId, signal);
         emit(session, {
-          type: 'tool_notice',
+          type: 'approval_request',
+          requestId,
           toolCallId: bash.id,
           toolName: 'bash',
-          kind: 'command',
+          args: bash.args,
         });
+        const request: ApprovalRequest = {
+          id: requestId,
+          sessionId,
+          kind: 'command',
+          title: 'bash',
+          detail: 'pnpm test',
+          expiresAt: now() + 10 * 60_000,
+        };
+        for (const listener of approvalListeners) listener(request);
+        changed(session, 'waiting-approval');
+        decision = await answer;
+        changed(session, 'running');
       }
-      await tool(
-        bash,
-        ' RUN  v4.1.12\n\n Test Files  12 passed (12)\n      Tests  128 passed (128)\n   Duration  3.21s',
-        false,
-        14
-      );
+      const approved = decision !== 'deny';
+      if (approved) {
+        await tool(
+          bash,
+          ' RUN  v4.1.12\n\n Test Files  12 passed (12)\n      Tests  128 passed (128)\n   Duration  3.21s',
+          false,
+          14
+        );
+      } else {
+        await tool(bash, '用户拒绝了这次调用', true, 1);
+      }
 
       const extra: ChatToolCall[] = orchestrator
         ? [
@@ -316,8 +363,10 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
               id: nextId('call'),
               name: 'report_done',
               args: {
-                outcome: 'succeeded',
-                summary: '读了仓库结构并跑通测试，128 个用例全部通过。',
+                outcome: approved ? 'succeeded' : 'failed',
+                summary: approved
+                  ? '读了仓库结构并跑通测试，128 个用例全部通过。'
+                  : '测试命令的审批被拒绝，没能完成验证。',
                 files_modified: ['src/renderer/App.tsx'],
               },
               status: 'running',
@@ -341,7 +390,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         '| 步骤 | 结果 |',
         '| --- | --- |',
         '| 读取仓库结构 | ✅ |',
-        '| 运行测试 | ✅ 128 个用例通过 |',
+        `| 运行测试 | ${approved ? '✅ 128 个用例通过' : '⏭️ 已跳过（审批被拒绝）'} |`,
         '',
         '顺手给一段示例代码：',
         '',
@@ -479,6 +528,7 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
         seq: 0,
         history: [],
         run: null,
+        approvals: new Map(),
       };
       sessions.set(summary.id, session);
       lastModels.set(input.workspaceId, summary.model ?? MOCK_MODEL);
@@ -567,8 +617,11 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true, messages: structuredClone(session.history) };
     },
 
-    async respondApproval() {
-      return { ok: false, error: translate('sessions.errors.approvalGone') };
+    async respondApproval({ sessionId, requestId, decision }) {
+      const resolve = sessions.get(sessionId)?.approvals.get(requestId);
+      if (!resolve) return { ok: false, error: translate('sessions.errors.approvalGone') };
+      resolve(decision);
+      return { ok: true };
     },
 
     onEvent: subscribe(eventListeners),

@@ -449,7 +449,7 @@ describe('工具调用', () => {
 });
 
 describe('agent_settled / error / usage', () => {
-  it('agent_settled 置 idle、结束流式并将未结束工具标为 error，旧审批不入队', () => {
+  it('agent_settled 置 idle，结束流式、把没结果的工具调用标为 error、清空待审批', () => {
     const state = run([
       { type: 'message_end', role: 'assistant', text: '' },
       { type: 'tool_start', toolCallId: 'call-1', toolName: 'bash', args: {} },
@@ -467,7 +467,7 @@ describe('agent_settled / error / usage', () => {
     const messages = messagesOf(state);
     expect(messages.every((message) => !message.streaming)).toBe(true);
     expect(messages[0]?.toolCalls[0]?.status).toBe('error');
-    expect(state.pendingApprovals[S]).toBeUndefined();
+    expect(state.pendingApprovals[S]).toEqual([]);
     expect(runtimeOf(state)).toMatchObject({ status: 'idle', toolStartedAt: {} });
   });
 
@@ -513,7 +513,7 @@ describe('agent_settled / error / usage', () => {
   });
 });
 
-describe('旧审批兼容与操作通知', () => {
+describe('待审批队列与旧操作通知兼容', () => {
   const approvalEvent: Extract<FynvraSessionEventBody, { type: 'approval_request' }> = {
     type: 'approval_request',
     requestId: 'req-1',
@@ -523,11 +523,20 @@ describe('旧审批兼容与操作通知', () => {
     reason: '需要联网',
   };
 
-  it('approval_request 不创建等待或工具，只有真实 tool_start 才置 running', () => {
-    let state = run([approvalEvent]);
-    expect(state.pendingApprovals[S]).toBeUndefined();
-    expect(runtimeOf(state)?.status).toBe('idle');
-    expect(messagesOf(state)).toEqual([]);
+  it('approval_request 入队并置 waiting-approval；同一工具开始执行后出队、回到 running', () => {
+    let state = run([{ type: 'message_end', role: 'assistant', text: '' }, approvalEvent]);
+    expect(state.pendingApprovals[S]).toEqual([
+      {
+        id: 'req-1',
+        sessionId: S,
+        kind: 'command',
+        title: 'bash',
+        detail: 'pnpm install\n需要联网',
+        expiresAt: 0,
+        toolCallId: 'call-1',
+      },
+    ]);
+    expect(runtimeOf(state)?.status).toBe('waiting-approval');
 
     state = run(
       [
@@ -539,14 +548,14 @@ describe('旧审批兼容与操作通知', () => {
         },
       ],
       state,
-      2
+      3
     );
-    expect(state.pendingApprovals[S]).toBeUndefined();
+    expect(state.pendingApprovals[S]).toEqual([]);
     expect(runtimeOf(state)?.status).toBe('running');
     expect(messagesOf(state)[0]?.toolCalls[0]).toMatchObject({ id: 'call-1', status: 'running' });
   });
 
-  it('所有旧工具审批类型都忽略，通知只推进 seq 而不冒充执行', () => {
+  it('按工具名推断审批类型；旧通知不代替审批或工具执行，过期 seq 丢弃', () => {
     const state = run(
       [
         { ...approvalEvent, requestId: 'r1', toolName: 'edit', args: { path: 'a.ts' } },
@@ -555,20 +564,25 @@ describe('旧审批兼容与操作通知', () => {
       ].map(({ reason: _reason, ...event }) => event)
     );
 
-    expect(state.pendingApprovals[S]).toBeUndefined();
+    expect(state.pendingApprovals[S]?.map((request) => [request.kind, request.detail])).toEqual([
+      ['file-edit', 'a.ts'],
+      ['file-write', 'b.ts'],
+      ['mcp', '{}'],
+    ]);
     expect(messagesOf(state)).toEqual([]);
-    expect(runtimeOf(state)).toMatchObject({ status: 'idle', lastSeq: 3 });
+    expect(runtimeOf(state)).toMatchObject({ status: 'waiting-approval', lastSeq: 3 });
     const notified = run(
       [{ type: 'tool_notice', toolCallId: 'call-1', toolName: 'edit', kind: 'file-edit' }],
       state,
       4
     );
     expect(messagesOf(notified)).toEqual([]);
-    expect(runtimeOf(notified)).toMatchObject({ status: 'idle', lastSeq: 4 });
+    expect(runtimeOf(notified)).toMatchObject({ status: 'waiting-approval', lastSeq: 4 });
+    expect(notified.pendingApprovals).toBe(state.pendingApprovals);
     expect(run([approvalEvent], notified, 3)).toBe(notified);
   });
 
-  it('旧 Main 请求和时间线事件任意顺序、重复到达都不入队或创建等待', () => {
+  it('Main 推送的请求以 Main 的字段为准，保留事件带来的 toolCallId；重复推送不重复入队', () => {
     const request: ApprovalRequest = {
       id: 'req-1',
       sessionId: S,
@@ -581,43 +595,33 @@ describe('旧审批兼容与操作通知', () => {
     state = enqueueApproval(state, request);
     state = enqueueApproval(state, request);
 
-    expect(state.pendingApprovals[S]).toBeUndefined();
-    expect(runtimeOf(state)?.status).toBe('idle');
+    expect(state.pendingApprovals[S]).toEqual([{ ...request, toolCallId: 'call-1' }]);
+    expect(runtimeOf(state)?.status).toBe('waiting-approval');
     expect(messagesOf(state)).toEqual([]);
 
+    // 推送先到、事件后到：事件只补 toolCallId，不覆盖 Main 的字段。
     let reversed = enqueueApproval(emptyProjection(), request);
-    expect(runtimeOf(reversed)?.status).toBe('idle');
-    reversed = run([approvalEvent], reversed);
-    expect(reversed.pendingApprovals[S]).toBeUndefined();
+    expect(runtimeOf(reversed)?.status).toBe('waiting-approval');
+    reversed = run([approvalEvent, approvalEvent], reversed);
+    expect(reversed.pendingApprovals[S]).toEqual([{ ...request, toolCallId: 'call-1' }]);
     expect(messagesOf(reversed)).toEqual([]);
   });
 
-  it('清理旧队列后根据真实活动恢复状态，迟到答复不能启动工具', () => {
-    const request: ApprovalRequest = {
-      id: 'req-1',
-      sessionId: S,
-      kind: 'command',
-      title: 'bash',
-      detail: 'echo hi',
-      expiresAt: 0,
-    };
-    for (const active of [false, true]) {
-      let state = run(active ? [{ type: 'text_delta', delta: 'Working' }] : [approvalEvent]);
-      const runtime = runtimeOf(state);
-      if (!runtime) throw new Error('missing runtime');
-      state = {
-        ...state,
-        pendingApprovals: { [S]: [request, { ...request, id: 'req-2' }] },
-        runtimeBySession: { [S]: { ...runtime, status: 'waiting-approval' } },
-      };
-      const beforeMessages = state.messagesBySession;
-      state = dequeueApproval(state, S, 'req-1');
-      expect(state.pendingApprovals[S]).toEqual([]);
-      expect(runtimeOf(state)?.status).toBe(active ? 'running' : 'idle');
-      expect(state.messagesBySession).toBe(beforeMessages);
-      expect(dequeueApproval(state, S, 'req-2')).toBe(state);
-      expect(dequeueApproval(state, S, 'missing')).toBe(state);
-    }
+  it('出队后队列空了就回到 running，否则保持 waiting-approval', () => {
+    let state = run([
+      approvalEvent,
+      { ...approvalEvent, requestId: 'req-2', toolCallId: 'call-2' },
+    ]);
+    const beforeMessages = state.messagesBySession;
+    state = dequeueApproval(state, S, 'req-1');
+    expect(state.pendingApprovals[S]?.map((request) => request.id)).toEqual(['req-2']);
+    expect(runtimeOf(state)?.status).toBe('waiting-approval');
+
+    state = dequeueApproval(state, S, 'req-2');
+    expect(state.pendingApprovals[S]).toEqual([]);
+    expect(runtimeOf(state)?.status).toBe('running');
+    expect(state.messagesBySession).toBe(beforeMessages);
+    expect(dequeueApproval(state, S, 'missing')).toBe(state);
   });
 });
 
