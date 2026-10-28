@@ -4176,6 +4176,16 @@ kbd {
   background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+:root[data-theme="dark"] .strip {
+  border-block-color: rgb(255 255 255 / 6%);
+  background: transparent;
+}
+
+:root[data-theme="dark"] .strip-list li {
+  border-color: rgb(255 255 255 / 12%);
+  background: transparent;
+}
+
 :root[data-theme="dark"] .hero::after,
 :root[data-theme="dark"] .showcase::before,
 :root[data-theme="dark"] .docs-hero::after,
@@ -4210,8 +4220,8 @@ kbd {
 :root[data-theme="dark"] .card-tint,
 :root[data-theme="dark"] .card-tint-warm,
 :root[data-theme="dark"] .card-tint-mint {
-  border-color: var(--line);
-  background: var(--surface);
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
 }
 
 :root[data-theme="dark"] .card-spotlight {
@@ -4224,13 +4234,13 @@ kbd {
   --ink-3: #8a8a8a;
   --line: #262626;
   --line-2: #3a3a3a;
-  border-color: var(--line);
-  background: var(--surface);
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
 }
 
 :root[data-theme="dark"] .cta {
-  border-color: var(--line);
-  background: var(--surface);
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
   color: var(--ink);
 }
 
@@ -4289,6 +4299,12 @@ kbd {
   background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
+:root[data-theme="dark"] .guard {
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
+  box-shadow: none;
+}
+
 :root[data-theme="dark"] .guard-icon,
 :root[data-theme="dark"] .steps-list > li::before {
   border-color: var(--line-2);
@@ -4296,8 +4312,8 @@ kbd {
 
 :root[data-theme="dark"] .callout,
 :root[data-theme="dark"] .callout-warn {
-  border-color: var(--line);
-  background: var(--surface-2);
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
 }
 
 :root[data-theme="dark"] .callout {

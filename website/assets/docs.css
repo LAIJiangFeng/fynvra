@@ -1291,10 +1291,28 @@ html.docs-ready .docs-article {
   background: color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
+:root[data-theme="dark"] .docs-area-card,
+:root[data-theme="dark"] .docs-article.prose a.docs-next-card,
+:root[data-theme="dark"] .docs-pager-link {
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
+}
+
+:root[data-theme="dark"] .docs-article.prose a.docs-next-card:hover,
+:root[data-theme="dark"] .docs-pager-link:hover {
+  border-color: rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 4%);
+}
+
+:root[data-theme="dark"] .docs-article .callout {
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
+}
+
 :root[data-theme="dark"] .docs-article .callout-warn {
-  border-color: var(--line);
+  border-color: rgb(255 255 255 / 8%);
   border-left-color: var(--warn);
-  background: var(--surface-2);
+  background: rgb(255 255 255 / 2%);
 }
 
 html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
