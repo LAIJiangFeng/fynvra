@@ -43,7 +43,6 @@
         </a>
         <nav class="nav-links" id="site-menu">
           <a href="#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a>
-          <a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a>
           <a href="#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
           <a href="#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
           <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">Docs</span></a>
@@ -841,231 +840,67 @@
           <header class="section-head reveal">
             <p class="eyebrow"><b>01</b><span data-l="zh">能力</span><span data-l="en">Capabilities</span></p>
             <h2 class="section-title">
-              <span data-l="zh">把一句需求，变成一条可验收的流水线。</span
-              ><span data-l="en">Turn one request into a pipeline you can review.</span>
+              <span data-l="zh">一个工作台，装下多 Agent 开发。</span
+              ><span data-l="en">One workbench for multi-agent development.</span>
             </h2>
-            <p class="section-lead" data-l="zh">
-              主 Agent 负责拆解和派发，Worker 在各自的工作树里执行，最后统一审查、跑检查、合并。每一步都是可回看的工具调用，不是黑箱。
-            </p>
-            <p class="section-lead" data-l="en">
-              The orchestrator splits and dispatches. Workers execute in isolated worktrees. Review, checks, and merge
-              come back to one place — every step a tool call you can inspect.
-            </p>
           </header>
-
-          <article class="flow-spotlight reveal">
-            <div class="flow-copy">
-              <p class="flow-kicker">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>
-                Orchestrator
-              </p>
-              <h3><span data-l="zh">主 Agent 只派活，不动手。</span><span data-l="en">An orchestrator that delegates.</span></h3>
-              <p data-l="zh">
-                默认的主 Agent 只有只读工具和编排工具：拆任务、派发、回答 Worker 的提问、验收合并。派发之后它不会干等，你可以接着讨论下一件事；收件箱一来消息，Fynvra 就把它叫醒。
-              </p>
-              <p data-l="en">
-                The default orchestrator gets only read-only and orchestration tools. It plans, dispatches, answers
-                workers, reviews, and merges. It never idles after a dispatch — keep talking, and Fynvra wakes it when
-                the inbox has news.
-              </p>
-              <ol class="flow-steps">
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">拆解与派发</span><span data-l="en">Split and dispatch</span></b>
-                    <span data-l="zh">把目标拆成互不依赖的任务，为每个任务建 worktree。</span>
-                    <span data-l="en">Turn the goal into independent tasks, each with its own worktree.</span>
-                  </div>
-                </li>
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">并行执行</span><span data-l="en">Build in parallel</span></b>
-                    <span data-l="zh">Worker 在各自分支里改文件、提交；卡住与完成都回到收件箱。</span>
-                    <span data-l="en">Workers edit and commit on their own branches; questions and results return to the inbox.</span>
-                  </div>
-                </li>
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">验收与合并</span><span data-l="en">Review and merge</span></b>
-                    <span data-l="zh">审查改动、运行检查；通过后 merge --no-ff，不达标就退回重做。</span>
-                    <span data-l="en">Review the diff and run checks. Merge with --no-ff when it passes; send it back when it doesn't.</span>
-                  </div>
-                </li>
-              </ol>
-            </div>
-
-            <div class="flow-map" aria-hidden="true">
-              <div class="flow-source">
-                <span class="flow-source-label"><span data-l="zh">需求</span><span data-l="en">Request</span></span>
-                <p><span data-l="zh">“优化首页与文档”</span><span data-l="en">“Polish the homepage and docs”</span></p>
-              </div>
-              <div class="flow-core">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg>
-                <b>Orchestrator</b>
-                <span><span data-l="zh">只读 + 编排</span><span data-l="en">read-only + orchestration</span></span>
-              </div>
-              <div class="flow-task-grid">
-                <div class="flow-task">
-                  <b><span data-l="zh">首页：标题与演示</span><span data-l="en">Homepage: layout + demo</span></b>
-                  <code>fynvra/home-demo</code>
-                  <span class="flow-task-status"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><span data-l="zh">已完成</span><span data-l="en">Done</span></span>
-                </div>
-                <div class="flow-task">
-                  <b><span data-l="zh">文档：阅读与导航</span><span data-l="en">Docs: reading + nav</span></b>
-                  <code>fynvra/docs-nav</code>
-                  <span class="flow-task-status"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><span data-l="zh">已完成</span><span data-l="en">Done</span></span>
-                </div>
-              </div>
-              <div class="flow-merge">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 15 3 3-3 3M20 18h-7" /></svg>
-                <span>review_diff · run_checks</span>
-                <span class="is-ok">merge --no-ff ✓</span>
-              </div>
-            </div>
-          </article>
 
           <div class="cap-grid">
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg></span>
-              <p class="card-tag">Roles</p>
               <h3><span data-l="zh">角色随项目定制</span><span data-l="en">Roles shaped to your project</span></h3>
-              <p data-l="zh">提示词、模型与思考档位、工具策略、审批档位、技能和 MCP 组成一个角色。内置的 Orchestrator、Worker 也只是可改的模板。</p>
-              <p data-l="en">A role bundles a prompt, model and thinking level, tool policy, approval mode, skills, and MCP. Even the built-in Orchestrator and Worker are editable templates.</p>
-              <p class="cap-meta">roles/*.json · Orchestrator · Worker</p>
+              <p data-l="zh">自定义角色的提示词、模型、工具、技能和 MCP。</p>
+              <p data-l="en">Customize each role’s prompt, model, tools, skills, and MCP.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M9 9h6v6H9zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" /></svg></span>
-              <p class="card-tag">Models</p>
               <h3><span data-l="zh">模型自己选，配置可导入</span><span data-l="en">Your models, imported</span></h3>
-              <p data-l="zh">支持 Anthropic、OpenAI（Responses 与 Chat Completions）和 Google 协议；Claude Code、Codex、CC Switch 里的配置可直接导入。</p>
-              <p data-l="en">Speaks Anthropic, OpenAI (Responses and Chat Completions), and Google protocols. Import configs straight from Claude Code, Codex, and CC Switch.</p>
-              <p class="cap-meta">Anthropic · OpenAI · Google · import</p>
+              <p data-l="zh">挑好模型就能开工，其他工具里配好的模型和 MCP 也可以直接导入。</p>
+              <p data-l="en">Pick your model and go; import the providers and MCP servers you already set up elsewhere.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-              <p class="card-tag">Worktrees</p>
               <h3><span data-l="zh">每个任务，一个 worktree</span><span data-l="en">One worktree per task</span></h3>
-              <p data-l="zh">Worker 在各自的分支和目录里干活，互不踩踏；主仓库保持原样，直到验收通过。非 git 目录按原地模式逐个执行。</p>
-              <p data-l="en">Each worker gets its own branch and directory, so parallel agents never collide — and your main checkout stays untouched until review passes. Plain folders run in place, one task at a time.</p>
-              <p class="cap-meta">fynvra/&lt;slug&gt; · isolated directory</p>
+              <p data-l="zh">每个任务在自己的分支和目录里改，互不踩踏，主仓库在验收通过前保持原样。</p>
+              <p data-l="en">Each task works in its own branch and folder, so nothing collides and your main checkout stays untouched until review passes.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg></span>
-              <p class="card-tag">Collaboration</p>
               <h3><span data-l="zh">派发之后，不必干等</span><span data-l="en">Dispatch, then keep moving</span></h3>
-              <p data-l="zh">主 Agent 可以接着讨论下一件事；Worker 的提问、汇报和心跳进入收件箱，Fynvra 在需要时把它叫醒。</p>
-              <p data-l="en">Keep talking to the orchestrator after dispatch. Worker questions, reports, and heartbeats land in the inbox, and Fynvra wakes it when needed.</p>
-              <p class="cap-meta">ask_coordinator · report_done · inbox</p>
+              <p data-l="zh">派发后可以接着讨论下一件事，Worker 的提问和汇报会自动回到收件箱。</p>
+              <p data-l="en">Keep talking after dispatch; worker questions and reports come back to the inbox.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></svg></span>
-              <p class="card-tag">Files · Terminal · Diff</p>
               <h3><span data-l="zh">文件、终端、改动，不用切窗口</span><span data-l="en">Files, terminals, and diffs in one place</span></h3>
-              <p data-l="zh">从右侧目录树打开文件，在中央标签里与对话并排编辑；Markdown 支持编辑、预览、双栏，内置真正的终端。每个任务的改动逐文件可查。</p>
-              <p data-l="en">Open files from the tree and edit them in tabs beside the chat. Markdown has edit, preview, and split views; terminals are real. Every task's changes stay reviewable file by file.</p>
-              <p class="cap-meta">file tree · terminal · git diff</p>
+              <p data-l="zh">文件、终端和逐文件改动都并排在对话旁边，随时可查。</p>
+              <p data-l="en">Files, terminals, and per-file diffs sit beside the chat, always within reach.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg></span>
-              <p class="card-tag">Usage</p>
               <h3><span data-l="zh">花了多少，交付多少</span><span data-l="en">What it cost, what it shipped</span></h3>
-              <p data-l="zh">统计 Token、费用、缓存命中率，以及一次验收通过率和打回次数。数据只从本机会话记录里读。</p>
-              <p data-l="en">Tokens, cost, and cache hit rate — plus first-pass acceptance and rejections. Read only from local session files.</p>
-              <p class="cap-meta">tokens · cost · first-pass acceptance</p>
+              <p data-l="zh">Token、费用、缓存命中率和一次验收通过率，都从本机记录里统计。</p>
+              <p data-l="en">Tokens, cost, cache hit rate, and first-pass acceptance, counted from local records.</p>
             </article>
           </div>
-        </div>
-      </section>
-
-      <section class="section section-alt" id="workflow">
-        <div class="container">
-          <header class="section-head reveal">
-            <p class="eyebrow"><b>02</b><span data-l="zh">工作流</span><span data-l="en">Workflow</span></p>
-            <h2 class="section-title">
-              <span data-l="zh">从一句需求，到一次干净的合并。</span><span data-l="en">From one sentence to a clean merge.</span>
-            </h2>
-            <p class="section-lead" data-l="zh">
-              派发、执行、审查，然后打回或合并，每个环节都是一次工具调用，都留有记录。合并统一走 --no-ff，主分支历史一目了然。
-            </p>
-            <p class="section-lead" data-l="en">
-              Dispatch, execute, review, then reject or merge — every step is a tool call with a record. Merges always
-              use --no-ff, so your main branch history stays readable.
-            </p>
-          </header>
-
-          <ol class="wf-list reveal">
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">01</span>
-                <h3><span data-l="zh">说需求</span><span data-l="en">Describe</span></h3>
-                <p data-l="zh">在 Orchestrator 会话里说清目标、约束和要交给谁；不需要先写命令。</p>
-                <p data-l="en">Tell the orchestrator the goal, the constraints, and who should handle it. No commands required.</p>
-              </div>
-              <span class="wf-tool">chat</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">02</span>
-                <h3><span data-l="zh">派发</span><span data-l="en">Dispatch</span></h3>
-                <p data-l="zh"><code>dispatch_task</code> 建 worktree、启动 Worker、投递任务书；互不依赖的任务可以并行。</p>
-                <p data-l="en"><code>dispatch_task</code> creates a worktree, starts a worker, and hands over the brief. Independent tasks run in parallel.</p>
-              </div>
-              <span class="wf-tool">dispatch_task</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">03</span>
-                <h3><span data-l="zh">执行</span><span data-l="en">Build</span></h3>
-                <p data-l="zh">Worker 在自己的分支上改代码、提交。卡住用 <code>ask_coordinator</code> 提问，做完用 <code>report_done</code> 汇报。</p>
-                <p data-l="en">Workers code and commit on their own branches, <code>ask_coordinator</code> when stuck, and <code>report_done</code> when finished.</p>
-              </div>
-              <span class="wf-tool">ask_coordinator · report_done</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">04</span>
-                <h3><span data-l="zh">验收</span><span data-l="en">Review</span></h3>
-                <p data-l="zh">主 Agent 用 <code>review_diff</code> 读改动、<code>run_checks</code> 跑检查；不达标就 <code>reject_work</code> 打回重做。</p>
-                <p data-l="en">The orchestrator reads the diff and runs the checks; anything short of the bar goes back via <code>reject_work</code>.</p>
-              </div>
-              <span class="wf-tool">review_diff · run_checks</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">05</span>
-                <h3><span data-l="zh">合并</span><span data-l="en">Merge</span></h3>
-                <p data-l="zh"><code>merge_worktree</code> 合入当前分支，<code>cleanup_worktree</code> 收尾，再把结果和证据汇报给你。</p>
-                <p data-l="en"><code>merge_worktree</code> lands it, <code>cleanup_worktree</code> tidies up, and you get a report with evidence.</p>
-              </div>
-              <span class="wf-tool">merge_worktree · cleanup</span>
-            </li>
-          </ol>
         </div>
       </section>
 
       <section class="section" id="safety">
         <div class="container">
           <header class="section-head reveal">
-            <p class="eyebrow"><b>03</b><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></p>
+            <p class="eyebrow"><b>02</b><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></p>
             <h2 class="section-title">
               <span data-l="zh">放手让它干，底线不让步。</span><span data-l="en">Let it run. Keep the guardrails.</span>
             </h2>
-            <p class="section-lead" data-l="zh">权限由角色策略和运行时共同执行，不会因为改了提示词就被绕过。</p>
+            <p class="section-lead" data-l="zh">权限按你的角色配置执行，改了提示词也绕不过去。</p>
             <p class="section-lead" data-l="en">
-              Permissions are enforced by role policy and the runtime together — no prompt edit can talk its way around
-              them.
+              Permissions follow your role settings — no prompt can talk its way around them.
             </p>
           </header>
 
@@ -1084,7 +919,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">执行命令</span><span data-l="en">Commands</span>
-                      <small>bash · powershell · run_checks</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
@@ -1093,7 +927,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">写改文件</span><span data-l="en">File writes</span>
-                      <small>write · edit · apply_patch</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-auto"><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
@@ -1102,7 +935,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">MCP 工具</span><span data-l="en">MCP tools</span>
-                      <small>mcp</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
@@ -1135,9 +967,9 @@
                   </svg>
                 </span>
                 <div>
-                  <h3><span data-l="zh">密钥只在主进程</span><span data-l="en">Keys stay in the main process</span></h3>
-                  <p data-l="zh">API Key、MCP 环境变量和请求头的明文不会通过 IPC 回到界面。</p>
-                  <p data-l="en">Plaintext API keys, MCP env vars, and header values never cross IPC to the UI.</p>
+                  <h3><span data-l="zh">密钥本地保存</span><span data-l="en">Keys stored locally</span></h3>
+                  <p data-l="zh">API Key 保存在本地配置文件里，不是加密凭证库，请不要把应用数据目录分享给别人。</p>
+                  <p data-l="en">API keys live in local config files — not an encrypted vault — so don't share your app data folder.</p>
                 </div>
               </div>
               <div class="guard">
@@ -1162,8 +994,8 @@
                 </span>
                 <div>
                   <h3><span data-l="zh">文件访问有围栏</span><span data-l="en">Fenced file access</span></h3>
-                  <p data-l="zh">读写限定在登记的工作区内，界面只传不透明 id，越界链接一律拒绝。</p>
-                  <p data-l="en">Reads and writes stay inside registered workspaces; the UI passes only opaque ids, and out-of-bounds links are refused.</p>
+                  <p data-l="zh">内置文件工具只读写已挂入的工作区。</p>
+                  <p data-l="en">Built-in file tools read and write only within attached workspaces.</p>
                 </div>
               </div>
               <div class="guard">
@@ -1175,8 +1007,8 @@
                 </span>
                 <div>
                   <h3><span data-l="zh">本地运行，直连服务</span><span data-l="en">Local, with direct connections</span></h3>
-                  <p data-l="zh">Fynvra 没有中转服务器，模型请求直接发往你配置的服务地址。</p>
-                  <p data-l="en">There is no relay server; model requests go straight to the endpoints you configure.</p>
+                  <p data-l="zh">Fynvra 没有中转服务器，对话请求只发往你配置的模型服务地址。</p>
+                  <p data-l="en">There is no relay server; prompts go only to the endpoints you configure.</p>
                 </div>
               </div>
             </div>
@@ -1187,7 +1019,7 @@
       <section class="section section-alt" id="faq">
         <div class="container faq">
           <header class="section-head reveal">
-            <p class="eyebrow"><b>04</b><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></p>
+            <p class="eyebrow"><b>03</b><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></p>
             <h2 class="section-title"><span data-l="zh">装之前，先看看这些。</span><span data-l="en">Before you install.</span></h2>
             <p class="section-lead">
               <span data-l="zh">更完整的说明见</span><span data-l="en">For the full picture, read the</span>
@@ -1198,48 +1030,11 @@
 
           <div class="faq-list reveal">
             <details>
-              <summary>
-                <span data-l="zh">Fynvra 和 Claude Code、Codex 这类 CLI 有什么不同？</span
-                ><span data-l="en">How is Fynvra different from CLIs like Claude Code or Codex?</span>
-              </summary>
-              <p data-l="zh">
-                Claude Code、Codex 是单个 Agent 的命令行工具。Fynvra 是桌面工作台，内置基于 pi SDK 的 Agent 运行时，把主 Agent
-                编排、worktree 隔离、收件箱、审查和合并做成一个完整流程。你在这些工具里配好的模型服务和 MCP 服务器可以直接导入。
-              </p>
-              <p data-l="en">
-                Claude Code and Codex are single-agent CLIs. Fynvra is a desktop workbench with its own pi SDK–based
-                agent runtime that ties orchestration, worktree isolation, an inbox, review, and merge into one flow.
-                The providers and MCP servers you set up in those tools can be imported directly.
-              </p>
-            </details>
-            <details>
               <summary><span data-l="zh">收费吗？</span><span data-l="en">Is it free?</span></summary>
               <p data-l="zh">Fynvra 本身免费开源，使用 Apache-2.0 许可证。模型调用的费用和额度来自你自己的服务商账号。</p>
               <p data-l="en">
                 Fynvra itself is free and open source under Apache-2.0. Model usage is billed by whichever provider account
                 you connect.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">我的代码和 API Key 会被上传吗？</span><span data-l="en">Do my code and API keys leave my machine?</span></summary>
-              <p data-l="zh">
-                Fynvra 在本机运行，没有中转服务器，对话请求只发往你配置的模型服务地址。密钥明文只在主进程使用，但目前保存在本地配置文件中，并不是加密凭证库，请不要分享应用数据目录。
-              </p>
-              <p data-l="en">
-                Fynvra runs locally with no relay server; prompts go only to the provider endpoints you configure.
-                Plaintext keys are used only in the main process, but they are stored in local config files — not an
-                encrypted vault — so don't share your app data folder.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">主 Agent 会自己改代码吗？</span><span data-l="en">Will the orchestrator edit code itself?</span></summary>
-              <p data-l="zh">
-                默认不会。内置的 Orchestrator 使用「编排」工具策略，只能读文件、执行只读 git 和调用编排工具，不能写文件或执行任意命令。你可以在角色设置里调整。
-              </p>
-              <p data-l="en">
-                Not by default. The built-in Orchestrator uses the Orchestration tool policy: it can read files, run
-                read-only git, and call orchestration tools, but it can't write files or run arbitrary commands. You can
-                change this in role settings.
               </p>
             </details>
             <details>
@@ -1261,16 +1056,6 @@
                 automated releases or updates yet.
               </p>
             </details>
-            <details>
-              <summary><span data-l="zh">Worker 会不会 push 代码或删库？</span><span data-l="en">Can a worker push or wipe my repo?</span></summary>
-              <p data-l="zh">
-                git push、git reset --hard、rm -rf 等保护操作，在任何审批档位下都需要你确认，「本会话都允许」也不会豁免。
-              </p>
-              <p data-l="en">
-                Protected operations such as git push, git reset --hard, and rm -rf need your confirmation in every
-                approval mode, and “Allow for session” doesn't exempt them.
-              </p>
-            </details>
           </div>
         </div>
       </section>
@@ -1279,7 +1064,7 @@
         <div class="container">
           <div class="cta reveal">
             <div class="section-head">
-              <p class="eyebrow"><b>05</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
+              <p class="eyebrow"><b>04</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
               <h2 class="section-title">
                 <span data-l="zh">把下一个需求，交给主 Agent。</span><span data-l="en">Hand your next task to the orchestrator.</span>
               </h2>
@@ -1330,7 +1115,6 @@ pnpm dev</code></pre>
           <p class="footer-title"><span data-l="zh">产品</span><span data-l="en">Product</span></p>
           <ul class="footer-links">
             <li><a href="#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a></li>
-            <li><a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a></li>
             <li><a href="#safety"><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></a></li>
             <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l="zh">下载</span><span data-l="en">Download</span></a></li>
           </ul>
