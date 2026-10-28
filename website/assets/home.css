@@ -2138,3 +2138,48 @@
     transform: none;
   }
 }
+
+/* 暗色：演示窗口与流程卡改为中性黑，彩色只保留在文字与状态点上 */
+
+:root[data-theme="dark"] .fd-app {
+  --fd-bg: #080808;
+  --fd-chrome: #101010;
+  --fd-hover: #1a1a1a;
+  --fd-line: #1f1f1f;
+  --fd-line-2: #333333;
+  --fd-text: #f5f5f5;
+  --fd-soft: #d4d4d4;
+  --fd-muted: #8a8a8a;
+  --fd-dim: #6f6f6f;
+  border-color: #2a2a2a;
+}
+
+:root[data-theme="dark"] .fd-role.is-orch,
+:root[data-theme="dark"] .fd-model-tag,
+:root[data-theme="dark"] .fd-tool,
+:root[data-theme="dark"] .fd-chip-approval {
+  border-color: var(--fd-line-2);
+  background: rgb(255 255 255 / 6%);
+}
+
+:root[data-theme="dark"] .st-todo,
+:root[data-theme="dark"] .st-run,
+:root[data-theme="dark"] .st-review,
+:root[data-theme="dark"] .st-done {
+  background: rgb(255 255 255 / 8%);
+}
+
+:root[data-theme="dark"] .fd-send.is-hot {
+  background: var(--fd-text);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 12%);
+  color: #111111;
+}
+
+:root[data-theme="dark"] .flow-core {
+  border-color: var(--line-2);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .cap-card:hover {
+  box-shadow: 0 24px 48px -40px rgb(0 0 0 / 65%);
+}

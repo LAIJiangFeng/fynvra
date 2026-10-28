@@ -52,43 +52,43 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #0b0d0b;
-  --paper-2: #121511;
-  --surface: #161a15;
-  --surface-2: #1a1e18;
-  --ink: #f2f3ec;
-  --ink-2: #b4b7ad;
-  --ink-3: #858980;
-  --line: #292d27;
-  --line-2: #3c4138;
+  --paper: #080808;
+  --paper-2: #0c0c0c;
+  --surface: #101010;
+  --surface-2: #141414;
+  --ink: #f5f5f5;
+  --ink-2: #bdbdbd;
+  --ink-3: #8a8a8a;
+  --line: #242424;
+  --line-2: #383838;
   --accent: #8ba5ff;
   --accent-text: #a9bcff;
-  --accent-soft: #1c2542;
+  --accent-soft: #1a1a1a;
   --accent-2: #5fe0bd;
   --accent-3: #f0a06b;
-  --btn-bg: #f3f4ee;
-  --btn-ink: #121310;
+  --btn-bg: #f5f5f5;
+  --btn-ink: #0a0a0a;
   --ok: #68dda8;
   --warn: #f0c674;
   --bad: #ff8a80;
-  --lane-1: #f2f3ec;
+  --lane-1: #f5f5f5;
   --lane-2: #5fe0bd;
   --lane-3: #8ba5ff;
-  --grid: rgb(242 243 236 / 4.5%);
-  --code-bg: #070907;
-  --code-ink: #e8eae3;
-  --code-dim: #7d837a;
+  --grid: rgb(255 255 255 / 4.5%);
+  --code-bg: #0a0a0a;
+  --code-ink: #f0f0f0;
+  --code-dim: #8a8a8a;
   --code-ok: #79e2ae;
-  --app-bg: #121511;
-  --app-side: #0e110e;
-  --app-tool: #191d17;
-  --app-line: #2b2f28;
+  --app-bg: #111111;
+  --app-side: #0a0a0a;
+  --app-tool: #161616;
+  --app-line: #2a2a2a;
   --shadow-card: 0 1px 0 rgb(255 255 255 / 4%) inset, 0 20px 44px -36px rgb(0 0 0 / 60%);
   --shadow-lg: 0 70px 130px -50px rgb(0 0 0 / 80%), 0 0 0 1px rgb(255 255 255 / 5%);
-  --glow-blue: color-mix(in srgb, var(--accent) 15%, transparent);
-  --glow-mint: color-mix(in srgb, var(--accent-2) 12%, transparent);
-  --glow-warm: color-mix(in srgb, var(--accent-3) 10%, transparent);
-  --grain: 0.05;
+  --glow-blue: transparent;
+  --glow-mint: transparent;
+  --glow-warm: transparent;
+  --grain: 0;
 }
 
 /* 基础 */
@@ -4163,4 +4163,134 @@ kbd {
   .window-bar {
     grid-template-columns: 1fr;
   }
+}
+
+/* 暗色：中性黑底白字。全部规则只作用于 data-theme="dark"，亮色保持原样。 */
+
+:root[data-theme="dark"] ::selection {
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+
+:root[data-theme="dark"] .ui,
+:root[data-theme="dark"] .pill {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+:root[data-theme="dark"] .hero::after,
+:root[data-theme="dark"] .showcase::before,
+:root[data-theme="dark"] .docs-hero::after,
+:root[data-theme="dark"] .cta::before {
+  display: none;
+}
+
+:root[data-theme="dark"] .section-alt {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .btn-primary {
+  box-shadow: 0 14px 30px -18px rgb(0 0 0 / 70%);
+}
+
+:root[data-theme="dark"] .btn-primary:hover {
+  box-shadow: 0 20px 38px -20px rgb(0 0 0 / 65%);
+}
+
+:root[data-theme="dark"] .brand-mark {
+  filter: drop-shadow(0 5px 12px rgb(0 0 0 / 45%));
+}
+
+:root[data-theme="dark"] .card:hover {
+  box-shadow: 0 30px 60px -42px rgb(0 0 0 / 65%);
+}
+
+:root[data-theme="dark"] .card-showcase .vg-editor {
+  box-shadow: 0 26px 50px -38px rgb(0 0 0 / 70%);
+}
+
+:root[data-theme="dark"] .card-tint,
+:root[data-theme="dark"] .card-tint-warm,
+:root[data-theme="dark"] .card-tint-mint {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .card-spotlight {
+  --paper: #0a0a0a;
+  --paper-2: #101010;
+  --surface: #121212;
+  --surface-2: #161616;
+  --ink: #f5f5f5;
+  --ink-2: #bdbdbd;
+  --ink-3: #8a8a8a;
+  --line: #262626;
+  --line-2: #3a3a3a;
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .cta {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .cta .section-title {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .cta .section-lead {
+  color: var(--ink-2);
+}
+
+:root[data-theme="dark"] .cta .eyebrow,
+:root[data-theme="dark"] .cta .eyebrow b {
+  color: var(--accent-text);
+}
+
+:root[data-theme="dark"] .cta .eyebrow b::after {
+  background: var(--line-2);
+}
+
+:root[data-theme="dark"] .tool-tag,
+:root[data-theme="dark"] .avatar {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+:root[data-theme="dark"] .d-add,
+:root[data-theme="dark"] .d-del {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+:root[data-theme="dark"] .d-add {
+  color: var(--ok);
+}
+
+:root[data-theme="dark"] .d-del {
+  color: var(--bad);
+}
+
+:root[data-theme="dark"] .matrix tbody tr:hover,
+:root[data-theme="dark"] .prose tbody tr:hover,
+:root[data-theme="dark"] .matrix tbody tr.row-floor:hover,
+:root[data-theme="dark"] .row-floor {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+:root[data-theme="dark"] .guard-icon,
+:root[data-theme="dark"] .steps-list > li::before {
+  border-color: var(--line-2);
+}
+
+:root[data-theme="dark"] .callout,
+:root[data-theme="dark"] .callout-warn {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+:root[data-theme="dark"] .callout {
+  border-left-color: var(--accent);
+}
+
+:root[data-theme="dark"] .callout-warn {
+  border-left-color: var(--warn);
 }
