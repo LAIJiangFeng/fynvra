@@ -526,7 +526,7 @@ pnpm dev</code></pre>
                   </li>
                   <li>
                     <h3>确认 Git 可用</h3>
-                    <p>准备多 Agent 派发时，需要已有提交的 Git 仓库，以及本机 Git 用户名和邮箱。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。</p>
+                    <p>要用独立 Git worktree 派发，需要一个已有提交的 Git 仓库，以及本机 Git 用户名和邮箱。普通文件夹也能创建会话和派发 Worker，但 Worker 直接在目录里改，同一目录一次只派一个任务。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。</p>
                   </li>
                 </ol>
                 <p class="docs-note">开发版和正式安装版的数据分开。只有开发模式才认环境变量 <code>FYNVRA_USER_DATA_DIR</code>。</p>
@@ -543,7 +543,7 @@ pnpm dev</code></pre>
                   </li>
                   <li>
                     <h3>Check Git</h3>
-                    <p>For multi-agent dispatch you need a Git repository that already has commits, plus a local Git user name and email. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.</p>
+                    <p>To dispatch into separate Git worktrees, you need a Git repository that already has commits plus a local Git user name and email. Plain folders can also run sessions and dispatch workers, but a worker edits the folder in place and only one task runs there at a time. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.</p>
                   </li>
                 </ol>
                 <p class="docs-note">Dev and installed builds keep separate data. <code>FYNVRA_USER_DATA_DIR</code> is honored only in dev mode.</p>
@@ -585,14 +585,14 @@ pnpm dev</code></pre>
                 <p>Back in the main window, the model pill at the bottom-left of the composer confirms the provider is available. See <a href="#providers">Providers</a> for every field.</p>
               </div>
 
-              <h2 id="quickstart-workspace"><span data-l="zh">2. 挂入一个 Git 仓库</span><span data-l="en">2. Attach a Git repository</span></h2>
+              <h2 id="quickstart-workspace"><span data-l="zh">2. 挂入一个工作区</span><span data-l="en">2. Attach a workspace</span></h2>
               <div class="docs-lang" data-l="zh">
-                <p>在左栏「工作区」标题右侧点 <strong>+</strong>，或在空状态点「挂入目录」，然后选一个 Git 仓库。工作区项会显示名称和路径；再次点击当前工作区会展开它的会话列表。要使用多 Agent 派发，仓库需要已有提交。</p>
-                <p>普通文件夹也能挂入，但会显示「无 git」，Worker 直接在目录里改，不建 worktree。多 Agent 并行派发请使用 Git 仓库。</p>
+                <p>在左栏「工作区」标题右侧点 <strong>+</strong>，或在空状态点「挂入目录」，然后选一个 Git 仓库（普通文件夹也可以）。工作区项会显示名称和路径；再次点击当前工作区会展开它的会话列表。要用独立 Git worktree 派发，仓库需要已有提交。</p>
+                <p>普通文件夹也能创建会话并派发 Worker，但会显示「无 git」，Worker 直接在目录里改，不建 worktree；同一目录一次只派一个任务。需要并行派发时请使用 Git 仓库。</p>
               </div>
               <div class="docs-lang" data-l="en">
-                <p>Click <strong>+</strong> next to “Workspaces” in the left sidebar, or choose “Attach folder” in the empty state, then pick a Git repository. The workspace row shows its name and path; click the selected workspace again to expand its session list. Multi-agent dispatch requires the repository to have commits.</p>
-                <p>A plain folder can be attached too, but it shows “No git”; workers edit it in place and no worktree is created. Use a Git repository for parallel dispatch.</p>
+                <p>Click <strong>+</strong> next to “Workspaces” in the left sidebar, or choose “Attach folder” in the empty state, then pick a Git repository (a plain folder works too). The workspace row shows its name and path; click the selected workspace again to expand its session list. To dispatch into separate Git worktrees, the repository must already have commits.</p>
+                <p>Plain folders can also run sessions and dispatch workers, but they show “No git”; the worker edits the folder in place, no worktree is created, and only one task runs there at a time. Use a Git repository when you need parallel dispatch.</p>
               </div>
 
               <h2 id="quickstart-session"><span data-l="zh">3. 新建会话并选角色</span><span data-l="en">3. Create a session and pick a role</span></h2>
@@ -631,10 +631,10 @@ pnpm dev</code></pre>
                     <path d="M12 3 5 6v5c0 4.4 2.9 8.3 7 10 4.1-1.7 7-5.6 7-10V6Z" />
                     <path d="M12 8v5" /><path d="M12 16h.01" />
                   </svg>
-                  <span data-l="zh">派发条件</span><span data-l="en">Dispatch needs Git</span>
+                  <span data-l="zh">worktree 派发条件</span><span data-l="en">Worktree dispatch requirements</span>
                 </span>
-                <p data-l="zh">多 Agent 派发需要一个已有提交的 Git 仓库，并且本机配置了 Git 用户名和邮箱。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。</p>
-                <p data-l="en">Dispatch needs a Git repository that already has commits, plus a Git user name and email. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.</p>
+                <p data-l="zh">要用独立 Git worktree 派发，需要一个已有提交的 Git 仓库，并且本机配置了 Git 用户名和邮箱。普通文件夹仍可创建会话和派发 Worker，但 Worker 原地修改，同一目录一次只派一个任务。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。</p>
+                <p data-l="en">To dispatch into separate Git worktrees, you need a Git repository that already has commits plus a local Git user name and email. Plain folders can still run sessions and dispatch workers, but a worker edits in place and only one task runs in that folder at a time. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.</p>
               </aside>
             </div>
           </article>
@@ -751,8 +751,8 @@ pnpm dev</code></pre>
                   </svg>
                   <span data-l="zh">没有 git</span><span data-l="en">No git</span>
                 </span>
-                <p data-l="zh">普通文件夹走原地模式：不建 worktree，Worker 直接改这个目录，审查时列出它汇报的文件。并行的 Worker 会共用同一份文件，所以一次只派一个任务。</p>
-                <p data-l="en">A folder without git runs in place: no worktree, workers edit that folder, and review lists the files they reported. Parallel workers would share those files, so dispatch one task at a time.</p>
+                <p data-l="zh">普通文件夹仍可创建会话并派发 Worker，只是走原地模式：不建 worktree，Worker 直接改这个目录，审查时列出它汇报的文件。并行的 Worker 会共用同一份文件，所以一次只派一个任务。</p>
+                <p data-l="en">A plain folder can still run sessions and dispatch workers, but it runs in place: no worktree, workers edit that folder, and review lists the files they reported. Parallel workers would share those files, so dispatch one task at a time.</p>
               </aside>
             </div>
           </article>
@@ -1059,7 +1059,7 @@ pnpm dev</code></pre>
                   </li>
                   <li>
                     <h3>派发</h3>
-                    <p>每个任务一个 Worker，单独的 git worktree，分支名是 <code>fynvra/&lt;slug&gt;</code>。默认放在仓库同级的 <code>&lt;仓库目录名&gt;-worktrees</code>，可在「设置 → 通用」里改位置。没有指定角色时用默认的 Worker。</p>
+                    <p>在 Git 工作区，每个任务一个 Worker，单独的 git worktree，分支名是 <code>fynvra/&lt;slug&gt;</code>。默认放在仓库同级的 <code>&lt;仓库目录名&gt;-worktrees</code>，可在「设置 → 通用」里改位置。普通文件夹不建 worktree：Worker 直接在挂入的目录里改，同一目录一次只派一个任务。没有指定角色时用默认的 Worker。</p>
                   </li>
                   <li>
                     <h3>验收</h3>
@@ -1075,7 +1075,7 @@ pnpm dev</code></pre>
                   </li>
                   <li>
                     <h3>Dispatch</h3>
-                    <p>Each task gets its own worker and Git worktree on <code>fynvra/&lt;slug&gt;</code>. By default that folder sits beside the repo as <code>&lt;repo&gt;-worktrees</code>; change the location under Settings → General. Dispatch uses the default Worker role when none is named.</p>
+                    <p>In a Git workspace, each task gets its own worker and Git worktree on <code>fynvra/&lt;slug&gt;</code>. By default that folder sits beside the repo as <code>&lt;repo&gt;-worktrees</code>; change the location under Settings → General. Plain folders create no worktree: the worker edits the attached folder in place, and only one task runs there at a time. Dispatch uses the default Worker role when none is named.</p>
                   </li>
                   <li>
                     <h3>Review</h3>
@@ -1084,10 +1084,11 @@ pnpm dev</code></pre>
                 </ol>
               </div>
 
-              <h2 id="orchestration-conditions"><span data-l="zh">派发条件和默认边界</span><span data-l="en">Requirements and default boundaries</span></h2>
+              <h2 id="orchestration-conditions"><span data-l="zh">派发方式与默认边界</span><span data-l="en">Dispatch modes and default boundaries</span></h2>
               <div class="docs-lang" data-l="zh">
                 <ul>
-                  <li><strong>Git 仓库</strong>：已有一个提交，且本机配置了 Git 用户名和邮箱。Windows 上建议安装 Git for Windows；找不到 Bash 时在「设置 → 通用」指定 Windows 本地命令壳。</li>
+                  <li><strong>Git 仓库（worktree 隔离）</strong>：已有一个提交，且本机配置了 Git 用户名和邮箱。每个任务在独立 worktree 中执行；Windows 上建议安装 Git for Windows，找不到 Bash 时在「设置 → 通用」指定 Windows 本地命令壳。</li>
+                  <li><strong>普通目录（原地模式）</strong>：不需要 Git，Worker 直接修改挂入的目录；同一目录一次只派一个任务，也没有 worktree diff。</li>
                   <li><strong>默认 Worker</strong>：派发时没有指定角色就用 Worker；Worker 默认「全部工具 + 自动接受编辑」。</li>
                   <li><strong>主 Agent 不改代码</strong>：Orchestrator 的工具策略是「编排」，只能读、只读 Git 和派发/审查/合并工具，即使审批是「完全放行」也不能写文件或执行任意命令。</li>
                   <li><strong>任务状态</strong>：待开始 → 进行中 → 待验收 → 已完成；走不下去会标成失败或已放弃。改动以未提交 / 已提交分组，在任务详情里查看。</li>
@@ -1095,7 +1096,8 @@ pnpm dev</code></pre>
               </div>
               <div class="docs-lang" data-l="en">
                 <ul>
-                  <li><strong>Git repository</strong>: it already has a commit, and a local Git user name and email are configured. On Windows, Git for Windows is recommended; if Bash is missing, set the local agent shell under Settings → General.</li>
+                  <li><strong>Git repository (worktree isolation)</strong>: it already has a commit, and a local Git user name and email are configured. Each task runs in its own worktree. On Windows, Git for Windows is recommended; if Bash is missing, set the local agent shell under Settings → General.</li>
+                  <li><strong>Plain folder (in place)</strong>: Git is not required; the worker edits the attached folder directly. Only one task runs there at a time, and there is no worktree diff.</li>
                   <li><strong>Default Worker</strong>: dispatch uses Worker when no role is named; Worker defaults to All tools + Auto-accept edits.</li>
                   <li><strong>The orchestrator does not edit code</strong>: its tool policy is Orchestration — read files, read-only Git, and dispatch/review/merge tools. Even with Full approval it cannot write files or run arbitrary commands.</li>
                   <li><strong>Task status</strong>: Not started → In progress → In review → Completed; work that cannot continue becomes failed or abandoned. Changes are grouped into uncommitted and committed in the task details.</li>
@@ -1688,10 +1690,10 @@ pnpm dev</code></pre>
 
               <h2 id="mcp-import"><span data-l="zh">从本机导入</span><span data-l="en">Import from this computer</span></h2>
               <div class="docs-lang" data-l="zh">
-                <p>点「从本机导入…」，Fynvra 会扫描 Claude Code 与 VS Code 的 MCP 配置。没有找到会直接提示；找到后逐个确认要导入的服务器，URL 或命令相同的已有项会标记为重复。</p>
+                <p>点「从本机导入…」，Fynvra 会扫描 Claude Code、Codex、Grok CLI、Gemini CLI、Cursor、VS Code、OpenCode 和 CC Switch 的 MCP 配置。可以只勾选需要的来源；扫描结果先列成候选，确认后再导入。没有找到会直接提示；URL 或命令相同的已有项会标记为重复。</p>
               </div>
               <div class="docs-lang" data-l="en">
-                <p>Click “Import from this computer…”. Fynvra scans Claude Code and VS Code MCP configs. If nothing is found it says so; otherwise confirm each server. Existing entries with the same URL or command are marked as duplicates.</p>
+                <p>Click “Import from this computer…”. Fynvra scans MCP configs from Claude Code, Codex, Grok CLI, Gemini CLI, Cursor, VS Code, OpenCode, and CC Switch. Select only the sources you need; results appear as candidates for confirmation before import. If nothing is found it says so, and existing entries with the same URL or command are marked as duplicates.</p>
               </div>
 
               <h2 id="mcp-manage"><span data-l="zh">启停、编辑、删除与分配</span><span data-l="en">Toggle, edit, remove, and assign</span></h2>

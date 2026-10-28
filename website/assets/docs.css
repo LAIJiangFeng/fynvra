@@ -61,10 +61,6 @@ html.docs-ready body.docs-app {
   min-height: 100vh;
 }
 
-html.docs-ready .docs-shell {
-  display: grid;
-}
-
 html.docs-ready .docs-sidebar {
   align-self: start;
 }
@@ -225,7 +221,7 @@ html.docs-ready .docs-article {
   height: 15px;
 }
 
-.docs-search.has-query .docs-search-kbd {
+.docs-search-wrap.has-query .docs-search-kbd {
   display: none;
 }
 
@@ -1057,7 +1053,8 @@ html.docs-ready .docs-article {
     --docs-gutter: 22px;
   }
 
-  .docs-shell {
+  .docs-shell,
+  html.docs-ready .docs-shell {
     display: block;
   }
 
