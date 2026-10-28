@@ -124,6 +124,7 @@ export interface SessionsState extends ChatProjection {
   /** 从会话的草稿里移除第 index 张图片 */
   removeDraftImage(sessionId: string, index: number): void;
   dismissNotice(): void;
+  dismissWarning(sessionId: string): void;
   /** 读可选模型；传工作区时一并读它上一次用过的模型（缺省为当前工作区） */
   loadModelOptions(workspaceId?: string | null): Promise<void>;
   /**
@@ -350,7 +351,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const state = get();
       if (state.activeSessionId !== sessionId) return;
       const runtime = state.runtimeBySession[sessionId];
-      if (runtime?.settledSeq !== roundId || runtime.lastSeq !== roundId) return;
+      if (runtime?.settledSeq !== roundId || (runtime.activitySeq ?? runtime.lastSeq) !== roundId) return;
       // 同一轮已经发起过（含结果为空 / 失败）：保留已有的（若有），不重复请求
       if (suggestionTried.get(sessionId) === roundId) return;
       if (suggestionIgnored.get(sessionId) === roundId) {
@@ -385,7 +386,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const current = get();
         if (current.activeSessionId !== sessionId) return;
         const currentRuntime = current.runtimeBySession[sessionId];
-        if (currentRuntime?.settledSeq !== roundId || currentRuntime.lastSeq !== roundId) return;
+        if (currentRuntime?.settledSeq !== roundId || (currentRuntime.activitySeq ?? currentRuntime.lastSeq) !== roundId) return;
         if (statusOf(current, sessionId) !== 'idle') return;
         if ((current.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
         if ((current.queuedBySession[sessionId]?.length ?? 0) > 0) return;
@@ -414,6 +415,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       for (const { sessionId, event } of batch) {
         if (event.type === 'tool_notice' || event.type === 'approval_request') continue;
         if (event.type === 'agent_settled' && !event.aborted) continue;
+        // 服务告警不改变对话轮次，保留当前输入框建议。
+        if (event.type === 'warning') continue;
         clearSuggestion(sessionId);
       }
       // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
@@ -873,6 +876,18 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         });
       },
 
+      dismissWarning(sessionId) {
+        set((state) => {
+          const runtime = state.runtimeBySession[sessionId];
+          if (!runtime?.warningSeq) return state;
+          return {
+            runtimeBySession: {
+              ...state.runtimeBySession,
+              [sessionId]: { ...runtime, dismissedWarningSeq: runtime.warningSeq },
+            },
+          };
+        });
+      },
       dismissNotice() {
         set({ notice: null });
       },

@@ -108,6 +108,8 @@ export const mainZhCN = {
     approvalTitle: '{title} · 历史操作',
     operationTitle: '{title} · 工具操作',
     operationBody: '{tool} · {action}，无需确认，继续执行。',
+    compactionWarningTitle: '{title} · 上下文压缩',
+    compactionWarningBody: 'Magic Context 未能在当前会话启用或继续管理，已改用 pi 原生自动压缩。',
     actions: {
       command: '执行命令',
       'file-edit': '编辑文件',

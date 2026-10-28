@@ -265,6 +265,8 @@ export const en: MessagesShape<typeof zhCN> = {
     thinking: 'Thinking…',
     thoughts: 'Thoughts',
     tokensHint: 'Total input / output tokens',
+    magicContextFallback:
+      'Magic Context could not run or continue managing this session; pi native auto-compaction is active.',
     costHint: 'Total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
@@ -330,7 +332,11 @@ export const en: MessagesShape<typeof zhCN> = {
   },
   approval: {
     title: 'Operation notifications',
-    modes: { supervised: 'All operations', 'auto-edits': 'Commands and MCP', full: 'Key actions only' },
+    modes: {
+      supervised: 'All operations',
+      'auto-edits': 'Commands and MCP',
+      full: 'Key actions only',
+    },
     cycleHint: 'Shift+Tab to switch notifications; no manual confirmation',
     statusHint: 'Operation notifications (Shift+Tab to switch); no approval wait',
     hint: 'Every scope runs without manual confirmation. Key commands always notify, subject to notification settings. Tool permissions remain separate.',
@@ -663,8 +669,10 @@ export const en: MessagesShape<typeof zhCN> = {
       sessions: 'Sessions',
       compaction: 'Context compaction',
       compactionNative: 'pi native auto-compaction (default)',
+      compactionMagic: 'Magic Context (plugin)',
       compactionOff: 'Turn off auto-compaction',
-      compactionHint: 'Applies to new sessions or after restarting the app',
+      compactionHint:
+        'Applies to new sessions or after restarting the app; Magic Context uses the current session model in the background, which may add model requests',
       off: 'Off',
       never: 'Never',
       days: '{days} {days|day|days}',
@@ -963,7 +971,8 @@ export const en: MessagesShape<typeof zhCN> = {
       mainAgentOnly: 'Main agent only',
       mainAgentOnlyHint: 'Worker done / failed not shown',
       askAndApproval: 'Questions and operations',
-      askAndApprovalHint: 'Worker questions, escalations and tool notices; operation notices do not pause tasks',
+      askAndApprovalHint:
+        'Worker questions, escalations and tool notices; operation notices do not pause tasks',
       sound: 'Sound',
       loadFailed: 'Failed to load: {error}',
       test: 'Send test notification',

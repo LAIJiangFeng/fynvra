@@ -1,6 +1,7 @@
 import { utilityProcess } from 'electron';
 // electron-vite 把 src/agent/index.ts 单独构建成 out/main 下的一个 chunk，这里拿到的是它的绝对路径
 import agentWorkerPath from '../../../agent/index?modulePath';
+import { prepareMagicContextHost } from './magicContextHost';
 import type { WorkerProcess } from './workerClient';
 
 /**
@@ -11,7 +12,11 @@ import type { WorkerProcess } from './workerClient';
 export function forkAgentWorker(agentDir: string): WorkerProcess {
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: 'fynvra-agent-worker',
-    env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+    env: {
+      ...process.env,
+      PI_CODING_AGENT_DIR: agentDir,
+      ...prepareMagicContextHost(),
+    },
   });
   return {
     postMessage: (message) => child.postMessage(message),

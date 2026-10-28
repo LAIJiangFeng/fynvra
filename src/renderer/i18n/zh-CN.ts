@@ -256,6 +256,8 @@ export const zhCN = {
     thinking: '思考中…',
     thoughts: '思考过程',
     tokensHint: '累计输入 / 输出 tokens',
+    magicContextFallback:
+      'Magic Context 未能在当前会话启用或继续管理上下文，已改用 pi 原生自动压缩。',
     costHint: '累计费用',
     branchHint: '当前分支（{cwd}）',
     image: '图片 {index}',
@@ -644,8 +646,10 @@ export const zhCN = {
       sessions: '会话',
       compaction: '上下文压缩',
       compactionNative: 'pi 原生自动压缩（默认）',
+      compactionMagic: 'Magic Context（插件）',
       compactionOff: '关闭自动压缩',
-      compactionHint: '新会话或重启应用后生效',
+      compactionHint:
+        '新会话或重启应用后生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求',
       off: '关闭',
       never: '永不',
       days: '{days} 天',

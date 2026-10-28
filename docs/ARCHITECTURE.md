@@ -46,7 +46,7 @@ Renderer(React) ⇄ preload(typed API) ⇄ Main(ipc/*, services/*) ⇄ Agent Wor
 ```
 
 - 工具执行与通知（本次行为变更）：运行时的人工审批改为单向通知后立即继续；Main 与 Worker 一致，任何旧 `approvalMode` 都不创建人工等待。参数校验、角色工具白名单、路径边界、编排权限、Stop / abort 与真正的 `ask_coordinator` 提问保持独立执行。
-- 必改层：agent-runtime 的工具通知钩子与会话接线；core / shared 的 `tool_notice` 事件及 unknown parser；supervisor 与 Main agentHost 的旧审批兼容；Main notifications 与双语文案；Renderer 审批入口 / 旧事件投影 / 通知范围标签及 mock。不改 Magic Context、模型配置、任务审查合并或灰字建议算法。
+- 必改层：agent-runtime 的工具通知钩子与会话接线；core / shared 的 `tool_notice` 事件及 unknown parser；supervisor 与 Main agentHost 的旧审批兼容；Main notifications 与双语文案；Renderer 审批入口 / 旧事件投影 / 通知范围标签及 mock。本次审批变更不改 Magic Context 的压缩策略（Magic 自己的回退见 §7.8）、模型配置、任务审查合并或灰字建议算法。
 - Main 是权威：settings、roles、workspaces、orchestration 状态、worktree 注册表都在 Main 持久化。
 - 一个 Agent Worker 进程托管多个 pi 会话。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
 - Renderer 只持有投影；pi jsonl 是会话正文权威源。
@@ -135,6 +135,7 @@ export interface Message {
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
+    extensions?: readonly InlineExtension[]; // Fynvra 受控的附加扩展（当前为 Magic Context）；不由设置或文件发现产生
     approval?: ApprovalPolicyHooks;     // 兼容字段名：工具操作的单向通知钩子，缺省或发送失败均不等待人工
   }
   interface RoleSession {
@@ -164,7 +165,7 @@ export interface Message {
   `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
   不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
   不代表已确认实际服务档位；不增加自动降级重发逻辑。
-- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`tool_notice`、`usage`、`error`；旧 `approval_request` 仅解析兼容，不恢复审批），每条带 `seq`。
+- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`tool_notice`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`；旧 `approval_request` 仅解析兼容，不恢复审批），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
 
@@ -291,9 +292,19 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.8 上下文自动压缩
 
-- 通用设置 `preferences.compactionStrategy` 只有 `native`（默认）与 `off` 两种；`settings:update` 严格校验枚举，旧记录、缺省或磁盘上的非法值按 `native` 读取。`native` 沿用 pi 原生自动压缩及其阈值 / 保留量默认值，只配置这一个开关。
-- Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态。
-- 已有会话不打断、不重建、不热切换策略，worker 崩溃重启也沿用该会话打开时的缓存 spec；更改在新会话或重启应用后生效，不新增热更新通道。关闭只停用自动压缩，不改变模型的上下文上限，也没有手动压缩入口；不读取本机 pi / 扩展配置，不接入第三方 compaction 扩展。
+本轮修复的行为差异：Magic 只在 historian 校验并发布后记录成功；超时、最终校验/无进展与存储失败按会话退役，Stop/关闭只取消。Agent host 与 vendored 插件共同为异步操作绑定会话取消代际，在 SQLite、context 返回及 marker 追加处复验，防止退役或关闭后的迟到写入。预算使用当前模型的保守 UTF-8 字节估算并按完整块切分，不截断 XML。必改范围为 `src/agent/magicContext.ts` / `piSession.ts`、vendored Magic、会话 warning / suggestion 投影及本节文档；不改变工具通知、权限、官网、Fast 或模型路由配置。
+
+- 通用设置 `preferences.compactionStrategy` 有 `native`（默认）、`off`、`magic-context` 三种；`settings:update` 严格校验枚举，旧记录、缺省或磁盘上的非法值按 `native` 读取。`native` 沿用 pi 原生自动压缩及其阈值 / 保留量默认值。
+- Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。`native` 不加载任何压缩扩展；`magic-context` 把受控的 Magic Context 内联扩展交给 `createRoleSession`，并保留 pi 原生压缩作为插件未就绪、运行期失效或模型窗口装不下时的回退。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态；Magic 的接管状态按会话独立失效，一个会话回退不影响其他会话。
+- Magic Context 固定为 `@cortexkit/pi-magic-context` 0.41.3（MIT），资源在 `packages/agent-runtime/vendor/magic-context/`：只保留扩展入口、storage/core、日志/路径所需分片、TUI 桩与许可证，不包含 OpenCode/OMP TUI、子进程 runner、dreamer/sidekick/memory/embedding/quickjs/transformers 分片。打包时固定从 `resources/magic-context` 解析，开发时固定从 `app.getAppPath()/packages/agent-runtime/vendor/magic-context` 解析；资源缺失就保留 native 并提示，不回退到 `process.cwd()` 或用户工作目录里的副本。不扫描外部扩展，不读本机 `~/.pi` / `~/.config/cortexkit`，不迁移或共享终端 Magic 数据库。
+- 插件数据全部在应用目录：配置 `userData/magic-context/config/cortexkit/magic-context.jsonc`，SQLite `userData/magic-context/storage/context.db`，historian dump `userData/magic-context/artifacts/`，日志 `userData/magic-context/magic-context.log`。配置只读 Main 生成的固定文件，缺失/损坏不扫描终端或工作区、不降为启用可选功能的默认配置；禁用旧终端 DB 迁移、终端 tokenizer 搜索、window overlay 与 CortexKit wake 服务探测。生成的配置关闭 dreamer、sidekick、跨会话 memory/auto-search、embedding 与 todowrite；`ctx_search` 显式关闭 memory/embedding/git 检索，smart note 条件因 dreamer 关闭而不可用。环境变量在 worker 生命周期内固定，不按会话 `chdir` 或改 env。
+- Historian 不启动终端 pi 或 Electron 子进程：vendored 插件的 `PiSubagentRunner` 交给 `src/agent/magicContext.ts`，后者按 Pi session id 路由到该会话的模型 getter 与中止信号，用会话自己的 `ModelRuntime`/model 在进程内完成请求。路由表没有“当前会话/当前模型”的进程级全局值；并发会话各有自己的条目与 in-flight 标记。每次 historian 使用请求开始时的当前会话模型；换模型和 Stop 使旧操作失效，下一次重新计算预算。单次超时默认 180 秒、硬上限 5 分钟，SDK 返回 aborted、抛异常或未及时结束都经过同一 deadline 分类；真正的会话取消不计故障。请求无工具、`maxRetries: 0`，由 vendor 有限重试同一个当前模型，不把占位模型名当作真实 fallback 模型。
+- Historian 预算由 host 的当前 `ResolvedModel.contextWindow/maxTokens` 给出：用 UTF-8 字节数保守估算文本 token，扣除实际 system prompt、至少 2048 token / 窗口 5% 的 framing 预留，以及不超过模型上限、窗口 20% 和 32000 的输出额度。Vendor 按完整块的字节数切分，计入 reference/user prompt 开销后最多再调整三次，host 发送前复核；小于 1024 的输出 cap、无效窗口或不可拆分的超大块明确回退，不截断 XML。此估算针对已支持的 byte/subword tokenizer，不能保证未知 provider 模板或错误模型元数据下的绝对上界。插件自身的调度/历史衰减仍使用上游字符估算；不加载、搜索或安装 `ai-tokenizer`。密钥只在 Main → worker 的 spawn 路径及会话 `ModelRuntime` 内存，不写插件配置或命令行。
+- Magic 自己处理 tag、drop、historian 结果与 `<session-history>` 注入，并把 compartment 写入自己的 SQLite；pi jsonl 仍是权威源，Magic 只追加自己的 compaction 标记，不删除原始对话，Fynvra 历史投影不依赖 Magic 数据。Magic 的 `ctx_*` 工具只操作它自己的上下文存储，不新增命令执行、工作区文件写入或网络能力；角色原有的 bash/文件/MCP 工具白名单和操作通知范围仍由 Fynvra 决定。默认不启用 Dreamer/Sidekick/跨会话 memory/语义 embedding，也不会下载 embedding 模型。
+- 生命周期：插件绑定前建立会话路由；用宿主自有空 facade 转发 SDK 1.4 API，保留方法 receiver，避免冻结对象的 Proxy invariants。仅在 boot ready、`session_start` 成功、historian 配置/路由及模型预算可用后接管；部分注册、缺少启动报告或迟到 boot 均不接管。成功只指 historian 的 XML/覆盖范围校验通过并提交 compartments/drop 队列/marker 状态，单纯 HTTP 成功不会清零失败计数。Transient 请求至多三次，验证只修复一次；最终校验失败、无进展、存储/发布或 context 故障按会话退役。`session_before_compact` 在未就绪或退役时放行 pi native，不在正常路径仅因触达原生阈值就冒充回退。
+- 每个插件 hook、`ctx_*` 工具及其派生后台任务通过 `AsyncLocalStorage` 携带会话取消代际；SQLite 执行、延迟索引、marker 追加、await 后的 context/historian 发布与返回都复验。Context 在副本上变换，失效时丢弃；Stop/换模型同步释放 historian 租约与预算预留并使旧操作失效，dispose 在等待 Pi shutdown 前中止并清路由/ready/suspended。退役也停止新注入和 marker 排队，旧 shutdown 不清掉替代会话的状态，其他会话不受影响。已有 marker 保存上游衰减渲染的累计历史快照，native 回退不只得到标题列表；不删除或改写 pi jsonl 原始消息。
+- 回退通过非阻塞 `warning` 事件显示固定文案，不标会话 error、不等待确认、不带 prompt/provider 原始错误；每个运行实例只发一次。关闭状态按 sessionId 与告警 seq 保存在 Renderer store，切换会话/视图重挂载不会串用关闭状态。Main 仍使用独立 `compaction-warning` 桌面通知，按通知设置/seq 去重与节流，聚焦当前会话时只显示会话内提示。Warning 推进传输 seq；Main/Renderer 独立保留最近对话活动 seq，灰字建议仍严格绑定 settled 轮次，警告不会使本轮建议消失，也不会复活旧轮建议。`fail_closed_blocking: false` 保持初始化失败时的 native 路径，Fynvra 不注册终端插件命令/快捷键或持久化终端 status 错误。新会话/重启读取策略，没有手动压缩入口。
+- 尚未做真实长会话的现网压缩验证；historian 是额外的模型请求，按会话当前模型计费，插件自带的状态/命令 UI 在 Fynvra 中不可达。
 
 ### 7.9 输入框回复建议
 
@@ -307,7 +318,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
-- **Wave 2**：Main 接入 worker 进程与两个包；聊天 UI（流式、工具卡片、审批条）；Providers / Roles / Skills / MCP 设置页；Orchestration 面板（任务卡、worker 实时输出、diff）。
+- **Wave 2**：Main 接入 worker 进程与两个包；聊天 UI（流式、工具卡片、操作通知）；Providers / Roles / Skills / MCP 设置页；Orchestration 面板（任务卡、worker 实时输出、diff）。
 - **Wave 3**：导入本机 Claude Code / Codex 配置；Git Checkpoint；打包发布。
 
 ## 9. Wave 2 跨卡契约（并行卡片的共同边界）

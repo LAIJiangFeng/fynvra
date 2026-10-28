@@ -8,11 +8,12 @@ import {
   type ResolvedModel,
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
-import type { Role } from '@fynvra/core';
+import type { MagicContextFallbackReason, Role } from '@fynvra/core';
 import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import { type ChatImage, normalizeReplySuggestion } from '@shared/types/chat';
+import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import type { OpenSession } from './supervisor';
 
@@ -73,57 +74,92 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       dirname(spec.sessionFile),
       spec.cwd
     );
-    let gate: ApprovalGate | undefined;
-    const created = await createRoleSession({
-      role: roleWithShellPrompt(spec.role, spec.shellPath),
-      cwd: spec.cwd,
-      model,
-      sessionManager,
-      host,
-      workerHost,
-      // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
-      ...(approval
-        ? {
-            approval: {
-              ...approval,
-              onGate: (built: ApprovalGate) => {
-                gate = built;
-                approval.onGate?.(built);
-              },
+    // Create the Magic routing entry before bindExtensions: the plugin may
+    // recover a deferred historian run during session_start.
+    let activeModel = model;
+    let pendingFallback: MagicContextFallbackReason | undefined;
+    let emitFallback: ((reason: MagicContextFallbackReason) => void) | undefined;
+    const magic =
+      spec.compactionStrategy === 'magic-context'
+        ? createMagicContextCompaction(() => activeModel, {
+            onFallback: (reason) => {
+              if (emitFallback) emitFallback(reason);
+              else pendingFallback ??= reason;
             },
-          }
-        : {}),
-      resourcePaths: {
-        skills: spec.skills,
-        mcpServers: spec.mcpServers.map(toMcpServerConfig),
-        ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
-      },
-      agentDir: options.agentDir,
-      roles: spec.roles,
-      ...(spec.inPlace ? { inPlace: true } : {}),
-      settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
-      ...(spec.networkProxy
-        ? {
-            commandEnv: (env: NodeJS.ProcessEnv) =>
-              commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
-          }
-        : {}),
-    });
+          })
+        : undefined;
+    magic?.attach(sessionManager.getSessionId());
+    let gate: ApprovalGate | undefined;
+    let created: Awaited<ReturnType<typeof createRoleSession>>;
+    try {
+      created = await createRoleSession({
+        role: roleWithShellPrompt(spec.role, spec.shellPath),
+        cwd: spec.cwd,
+        model,
+        sessionManager,
+        host,
+        workerHost,
+        // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
+        ...(approval
+          ? {
+              approval: {
+                ...approval,
+                onGate: (built: ApprovalGate) => {
+                  gate = built;
+                  approval.onGate?.(built);
+                },
+              },
+            }
+          : {}),
+        resourcePaths: {
+          skills: spec.skills,
+          mcpServers: spec.mcpServers.map(toMcpServerConfig),
+          ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
+        },
+        agentDir: options.agentDir,
+        roles: spec.roles,
+        ...(spec.inPlace ? { inPlace: true } : {}),
+        ...(magic ? { extensions: [magic.extension] } : {}),
+        settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
+        ...(spec.networkProxy
+          ? {
+              commandEnv: (env: NodeJS.ProcessEnv) =>
+                commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
+            }
+          : {}),
+      });
+    } catch (error) {
+      magic?.dispose();
+      throw error;
+    }
     const { session } = created;
     dropEmptyUserText(session);
     const setFastMode = installFastMode(session, spec.model.fastMode === true);
     // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
-    let activeModel = model;
     options.onModelSelected?.(identity.sessionId, model);
     return {
-      warnings: created.warnings,
+      warnings: [...created.warnings, ...(magic?.warnings ?? [])],
       subscribe: (listener) => {
         const subscription = subscribeNormalized(
           session,
           listener,
           options.onListenerError ? { onListenerError: options.onListenerError } : {}
         );
-        return { unsubscribe: subscription.unsubscribe, emit: subscription.emit };
+        const emitWarning = (reason: MagicContextFallbackReason) =>
+          subscription.emit({ type: 'warning', source: 'magic-context', reason });
+        emitFallback = emitWarning;
+        if (pendingFallback) {
+          const reason = pendingFallback;
+          pendingFallback = undefined;
+          emitWarning(reason);
+        }
+        return {
+          unsubscribe: () => {
+            if (emitFallback === emitWarning) emitFallback = undefined;
+            subscription.unsubscribe();
+          },
+          emit: subscription.emit,
+        };
       },
       prompt: (text, images) =>
         session.prompt(text, {
@@ -136,6 +172,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
+        magic?.interrupt();
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
         // Fast 与模型 / 档位独立：下一次请求起按新切换的值；不支持的协议在请求时也不会带字段
@@ -147,10 +184,16 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         if (!gate) throw new Error('this session has no approval gate to switch');
         gate.setMode(mode);
       },
-      abort: () => session.abort(),
+      abort: () => {
+        magic?.interrupt();
+        return session.abort();
+      },
       isIdle: () => session.isIdle,
       suggestReply: ({ signal }) => suggestReply(session, activeModel, signal),
       dispose: async () => {
+        // Invalidate before waiting for Pi: background historian/ctx work must
+        // not publish while session_shutdown is draining.
+        magic?.dispose();
         if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
         await created.dispose();
       },

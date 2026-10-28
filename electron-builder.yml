@@ -9,6 +9,10 @@ directories:
 files:
   - out/**
   - '!**/*.map'
+# Magic Context 是运行时可解析的 vendored ESM 目录（不在 asar 内，Worker 用绝对路径动态 import）
+extraResources:
+  - from: packages/agent-runtime/vendor/magic-context
+    to: magic-context
 asarUnpack:
   - node_modules/node-pty/**
 win:

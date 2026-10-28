@@ -116,6 +116,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     approvalTitle: '{title} · Legacy operation',
     operationTitle: '{title} · Tool operation',
     operationBody: '{tool} · {action}. Continuing without confirmation.',
+    compactionWarningTitle: '{title} · Context compaction',
+    compactionWarningBody:
+      'Magic Context could not run or continue managing this session; pi native auto-compaction is active.',
     actions: {
       command: 'Run command',
       'file-edit': 'Edit file',

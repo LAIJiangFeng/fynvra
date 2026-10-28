@@ -181,6 +181,9 @@ export interface Message {
   ackedAt?: number;
 }
 
+/** Magic Context 交给宿主的回退原因；只用于非阻塞提示，不把会话标记为失败。 */
+export type MagicContextFallbackReason = 'startup' | 'runtime' | 'context' | 'budget';
+
 /** 单向工具操作通知；不含原始参数、命令或路径，不代表工具已成功执行。 */
 export interface ToolOperationNotice {
   toolCallId: string;
@@ -242,6 +245,12 @@ export type FynvraSessionEventBody =
       totalTokens: number;
       /** 美元，pi 按模型价目计算。 */
       cost: number;
+    }
+  | {
+      /** 非阻塞提示：Magic Context 已把该会话交回 pi 原生压缩；不改变会话状态。 */
+      type: 'warning';
+      source: 'magic-context';
+      reason: MagicContextFallbackReason;
     }
   | { type: 'error'; source: 'model' | 'compaction' | 'host'; message: string };
 

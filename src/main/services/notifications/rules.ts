@@ -26,6 +26,8 @@ export type NotificationKind =
   | 'escalation'
   /** 单向工具操作通知，不等待确认 */
   | 'tool-notice'
+  /** Magic Context 交回原生压缩；独立于工具操作通知 */
+  | 'compaction-warning'
   /** @deprecated 旧审批事件不再通知 */
   | 'approval';
 
@@ -62,6 +64,9 @@ export function allowedBy(preferences: NotificationPreferences, kind: Notificati
     case 'escalation':
     case 'tool-notice':
       return preferences.askAndApproval;
+    case 'compaction-warning':
+      // 服务回退是功能告警，不绑定“提问与操作”开关；总开关仍然生效。
+      return true;
     case 'approval':
       return false;
   }
@@ -70,7 +75,9 @@ export function allowedBy(preferences: NotificationPreferences, kind: Notificati
 /** 普通通知在聚焦当前会话时不弹；操作通知可提醒，但不会抢焦点。 */
 export function hiddenByView(candidate: NotificationCandidate, view: ViewState): boolean {
   return (
-    candidate.kind !== 'tool-notice' && view.focused && view.viewingSessionId === candidate.sessionId
+    candidate.kind !== 'tool-notice' &&
+    view.focused &&
+    view.viewingSessionId === candidate.sessionId
   );
 }
 
@@ -167,6 +174,16 @@ export function toolNoticeCandidate(
       tool: notice.toolName,
       action: translate(`notifications.actions.${notice.kind}`),
     })
+  );
+}
+
+/** Magic Context 回退提示只用固定安全文案，不带原因详情、prompt 或 provider 错误。 */
+export function compactionWarningCandidate(session: NotifiedSession): NotificationCandidate {
+  return candidate(
+    'compaction-warning',
+    session,
+    translate('notifications.compactionWarningTitle', { title: excerpt(session.title) }),
+    translate('notifications.compactionWarningBody')
   );
 }
 
