@@ -1991,7 +1991,101 @@
   }
 }
 
+/* 首页模型厂商循环栏 */
+
+.providers-marquee {
+  min-width: 0;
+  overflow: hidden;
+  padding-block: 2px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+
+.providers-track {
+  display: flex;
+  width: max-content;
+  animation: providers-scroll 36s linear infinite;
+}
+
+/* 每份副本末尾留出一份间距，三份等宽副本才能用 -100% / 3 无缝接回 */
+.providers-set {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: clamp(30px, 4vw, 54px);
+  margin: 0;
+  padding: 0 clamp(30px, 4vw, 54px) 0 0;
+  list-style: none;
+}
+
+.provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.provider-mark {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  opacity: 0.68;
+}
+
+:root[data-theme="dark"] .provider-mark {
+  filter: invert(1);
+  opacity: 0.7;
+}
+
+.providers-marquee:hover .providers-track,
+.providers-marquee:focus-within .providers-track {
+  animation-play-state: paused;
+}
+
+@keyframes providers-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(calc(-100% / 3), 0, 0);
+  }
+}
+
+@media (max-width: 720px) {
+  .providers-track {
+    animation-duration: 28s;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .providers-marquee {
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .providers-track {
+    display: block;
+    width: auto;
+    animation: none;
+    transform: none;
+  }
+
+  .providers-set {
+    flex-wrap: wrap;
+    row-gap: 14px;
+    padding-right: 0;
+  }
+
+  .providers-set[aria-hidden="true"] {
+    display: none;
+  }
+
   .fd-showcase[data-enhanced="true"] [data-appear].is-shown,
   .fd-dot.is-run,
   .fd-caret,
