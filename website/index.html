@@ -86,11 +86,6 @@
       <section class="hero">
         <div class="container">
           <div class="hero-intro">
-            <p class="hero-badge rise" style="--i: 0">
-              <span class="badge-dot" aria-hidden="true"></span
-              ><span data-l="zh">开源 · 本地优先 · 内置多 Agent 编排</span
-              ><span data-l="en">Open source · Local-first · Multi-agent built in</span>
-            </p>
             <h1 class="hero-title rise" style="--i: 1">
               <span data-l="zh"
                 ><span class="hero-title-line">只和一个 Agent 对话，</span
@@ -111,13 +106,10 @@
             </h1>
             <div class="hero-copy rise" style="--i: 2">
               <p class="hero-lead" data-l="zh">
-                Fynvra 是开源的桌面 AI 编程工作台。主 Agent 把你的需求拆成任务，为每个任务开一个独立的 git worktree
-                交给 Worker，再审查改动、运行检查、验收合并。你只需要说清楚要做什么。
+                Fynvra 是多 Agent AI 编程工作台，支持任务并行协作、指定 Worker 模型与改动审查合并。
               </p>
               <p class="hero-lead" data-l="en">
-                Fynvra is an open-source desktop workbench for AI coding. The orchestrator splits your request into
-                tasks, gives each one its own git worktree and worker, then reviews the diff, runs the checks, and
-                merges what passes. You just describe the goal.
+                Fynvra is a multi-agent AI coding workbench: parallel tasks, per-task worker models, reviewed merges.
               </p>
               <div class="hero-actions">
                 <a class="btn btn-primary" href="https://github.com/LAIJiangFeng/fynvra/releases">
@@ -142,14 +134,7 @@
             </div>
           </div>
 
-          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo aria-labelledby="fd-caption">
-            <div class="showcase-caption">
-              <span class="showcase-tag"
-                ><i aria-hidden="true"></i><span data-l="zh">产品流程演示</span><span data-l="en">Product walkthrough</span></span
-              >
-              <span><span data-l="zh">界面示意 · 非截图 · 非联网操作</span><span data-l="en">Interface illustration, not a screenshot or network session</span></span>
-            </div>
-
+          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo aria-label="界面演示 / Interface demo">
             <fieldset class="fd-scene-switch" aria-label="演示场景 / Demo scene">
               <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
                 <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
@@ -736,11 +721,6 @@
                 </div>
               </div>
             </div>
-
-            <figcaption class="fd-caption" id="fd-caption">
-              <span data-l="zh">任务协作：一条需求拆成两个独立 Worker 任务，在各自 worktree 中执行、审查并合并。指定 Worker 模型：直接在需求里写清每个任务用哪个模型，主 Agent 按任务派发。两种界面均为流程示意，动画自动循环；模型名称仅作示例，不代表内置配置。</span>
-              <span data-l="en">Task collaboration: one request becomes two independent worker tasks, each in its own worktree, then reviewed and merged. Assign worker models: name a model for each task in the request and the orchestrator dispatches accordingly. Both views are illustrations and loop automatically; model names are examples, not bundled providers.</span>
-            </figcaption>
           </figure>
 
           <div class="spec-strip rise" style="--i: 4">
