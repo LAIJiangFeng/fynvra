@@ -74,6 +74,10 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     if (run === undefined || task.runId !== run.id) {
       return fail(`dispatch ${dispatchId} does not belong to run ${runId}`);
     }
+    const current = store.dispatches.list((entry) => entry.taskId === task.id).at(-1);
+    if (current?.id !== dispatch.id) {
+      return fail(`dispatch ${dispatch.id} was superseded by ${current?.id}`);
+    }
     return { ok: true as const, dispatch, task, run };
   };
 
@@ -126,10 +130,6 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
           body: describeReport(summary, files),
         };
 
-        const current = store.dispatches.list((entry) => entry.taskId === task.id).at(-1);
-        if (current?.id !== dispatch.id) {
-          return fail(`dispatch ${dispatch.id} was superseded by ${current?.id}`);
-        }
         if (isDispatchSettled(dispatch)) {
           return fail(
             `report_done was already recorded for attempt ${dispatch.id}; use reject_work for a new attempt`

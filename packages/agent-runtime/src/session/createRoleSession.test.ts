@@ -357,6 +357,36 @@ describe('createRoleSession end to end with a scripted model', () => {
     expect(host.reportDone.mock.calls.map((call) => call[1])).toEqual(['first', 'new run']);
   });
 
+  it('does not lose feedback submitted at the terminate/agent_settled boundary', async () => {
+    const host = workerHost();
+    const { session } = await open({ role: role({}), workerHost: host });
+    const events: FynvraSessionEvent[] = [];
+    subscribeNormalized(session, (event) => events.push(event));
+    const report = (summary: string) =>
+      fauxAssistantMessage(fauxToolCall('report_done', { outcome: 'succeeded', summary }), {
+        stopReason: 'toolUse',
+      });
+    faux.setResponses([report('first'), report('retry at settle')]);
+    let queued = false;
+    session.subscribe((event) => {
+      if (event.type !== 'agent_settled' || queued) return;
+      queued = true;
+      // Main can react to idle before the outer prompt promise returns. pi defers this to a new run.
+      void session.prompt('Feedback at the idle boundary', { streamingBehavior: 'followUp' });
+    });
+    await session.prompt('First attempt');
+    expect(host.reportDone.mock.calls.map((call) => call[1])).toEqual(['first', 'retry at settle']);
+    expect(faux.getPendingResponseCount()).toBe(0);
+    expect(
+      events.filter((event) => event.type === 'tool_end' && event.toolName === 'report_done')
+    ).toEqual([
+      expect.objectContaining({ isError: false }),
+      expect.objectContaining({ isError: false }),
+    ]);
+    expect(events.filter((event) => event.type === 'agent_settled')).toHaveLength(2);
+    expect(session.isIdle).toBe(true);
+  });
+
   it('reopens report_done when a new run starts, e.g. after reject_work feedback', async () => {
     const host = workerHost();
     const { session } = await open({ role: role({}), workerHost: host });

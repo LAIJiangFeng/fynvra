@@ -157,6 +157,20 @@ describe('createWorkerHost · askCoordinator', () => {
     seedDispatch();
   });
 
+  it('rejects a superseded attempt before posting or blocking on a new question', async () => {
+    const old = host();
+    await old.reportDone('succeeded', 'First attempt');
+    seedDispatch('dispatch_2');
+    store.tasks.update('task_1', { status: 'in-progress' });
+    expect(await old.askCoordinator('Late old-round question', 60_000)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('dispatch_2'),
+    });
+    expect(toCoordinator().filter((message) => message.type === 'question')).toEqual([]);
+    expect(pendingQuestionOf(inbox, WORKER)).toBeUndefined();
+    expect(store.dispatches.get('dispatch_2')?.outcome).toBeUndefined();
+  });
+
   it('投 question，阻塞到 replyTo 指向它的 reply；答复被确认，挂起表清空', async () => {
     const asking = host().askCoordinator('  Which API?  ', 5_000);
     const [question] = toCoordinator();

@@ -354,6 +354,7 @@ describe('worker attempt lifecycle', () => {
     };
     const next: WorkerHost = {
       ...first,
+      askCoordinator: vi.fn<WorkerHost['askCoordinator']>(async () => ({ ok: true, answer: null })),
       reportDone: vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true })),
     };
     let current = first;
@@ -367,6 +368,15 @@ describe('worker attempt lifecycle', () => {
         method: 'reportDone',
         input: { outcome: 'succeeded', summary: callId },
       });
+    const question = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: env.identity,
+        callId,
+        kind: 'worker',
+        method: 'askCoordinator',
+        input: { question: callId, timeoutMs: 60_000 },
+      });
     report('first');
     await flush();
     current = next; // reject_work registered its next dispatch while the old run is finishing.
@@ -378,16 +388,34 @@ describe('worker attempt lifecycle', () => {
     await flush();
     expect(env.sent('prompt')).toHaveLength(1);
     expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    expect(await env.host.steer(sessionId, 'User steering remains immediate')).toEqual({
+      ok: true,
+    });
+    expect(env.sent('steer')).toHaveLength(1);
+    expect(env.sent('prompt')).toHaveLength(1);
     report('late');
+    question('old question');
     await flush();
     expect(first.reportDone).toHaveBeenCalledTimes(2);
+    expect(first.askCoordinator).toHaveBeenCalledWith(
+      'old question',
+      60_000,
+      expect.any(AbortSignal)
+    );
     expect(next.reportDone).not.toHaveBeenCalled();
+    expect(next.askCoordinator).not.toHaveBeenCalled();
     env.worker().emit({ type: 'session-status', identity: env.identity, status: 'idle' });
     expect(await delivery).toEqual({ ok: true });
     expect(env.sent('prompt')).toHaveLength(2);
     report('retry');
+    question('new question');
     await flush();
     expect(next.reportDone).toHaveBeenCalledWith('succeeded', 'retry', undefined);
+    expect(next.askCoordinator).toHaveBeenCalledWith(
+      'new question',
+      60_000,
+      expect.any(AbortSignal)
+    );
   });
 
   it.each(['remove', 'abort', 'dispose'] as const)(

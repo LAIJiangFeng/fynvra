@@ -44,8 +44,10 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   `dispatchId` / `runId` / `worktreeId` 可以记进 `SessionSummary`（§9.2 有 `dispatchId`、`worktreeId` 字段）。
 - **WorkerHost 工厂按 run 绑定**：收到 worker 的首次 host 调用时才 `workerHostFor(sessionId)`（Dispatch 写入之前返回
   `null`）。返回的 WorkerHost 固定绑定该次尝试，Main 保留到下一次真实新 run 才重新查找；旧调用不能动态绑定到新尝试。
+  两个 worker 方法共用当前 attempt 校验：被替代的旧轮不能新发提问；已经挂起的问题仍按原 question/replyTo 收到答复。
 - **`promptSession`**：编排指令/打回反馈先在 Main 排队，等旧 run 真正 idle 后才开始新 run（重跑 `before_agent_start`，
   重新开放本地 `report_done` guard）。pi streaming `followUp` 可以在旧 run 内消费，不能当作新 run；
+  `agent_settled` 发出前 pi 已清掉 run-active，恰在该回调中提交的新 prompt 由 SDK deferred-settled 队列启动新 run，不被 terminate 丢弃；
   删除、abort、dispose、崩溃会取消尚未投递的反馈。审批/askCoordinator 等待不当作 idle；挂起提问的 reply 仍直接投收件箱。
 - **`sessionFailure` / `onSessionFailure`**：同步读取可信的缺失或明确异常终止证据，并在删除/异常终止时通知注册表。
   undefined 是正常或未知，不能凭 idle、未 fork、超时、注册表尚未接线或损坏判失败。
