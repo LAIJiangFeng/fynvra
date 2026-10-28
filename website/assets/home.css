@@ -1993,7 +1993,11 @@
 
 /* 首页模型厂商循环栏 */
 
+/* .providers 是 .strip-inner 网格的直接子项：默认 min-width:auto 会取内容
+   （max-content 的三份轨道）作为自动最小尺寸并上传给网格列，把整条 .strip 撑开。
+   显式 min-width:0 让列宽只由容器决定，再由 viewport 的 overflow:hidden 裁剪轨道。 */
 .providers {
+  min-width: 0;
   padding-block: 4px 6px;
 }
 
@@ -2008,6 +2012,9 @@
 }
 
 .providers-marquee {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border-radius: 16px;
 }
 
@@ -2017,6 +2024,9 @@
 }
 
 .providers-viewport {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   padding-block: clamp(10px, 1.6vw, 20px);
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
