@@ -14,7 +14,7 @@
       name="description"
       content="Fynvra 使用文档：安装、配置模型、开会话，以及主 Agent 如何派发、审查和合并。User guide for installing Fynvra, connecting a model, and running multi-agent tasks."
     />
-    <meta name="theme-color" content="#f3f1ec" />
+    <meta name="theme-color" content="#f7f6f2" />
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -75,32 +75,72 @@
 
     <main id="main">
       <section class="docs-hero">
-        <div class="container">
-          <p class="eyebrow"><b>Docs</b><span data-l="zh">使用文档</span><span data-l="en">User guide</span></p>
-          <h1><span data-l="zh">从安装到第一次派发。</span><span data-l="en">From install to the first dispatch.</span></h1>
-          <p class="section-lead" data-l="zh">
-            Fynvra 在本机运行。你只和主 Agent 对话，它把需求拆成任务，交给各自独立的 Worker，再审查并合并。
-          </p>
-          <p class="section-lead" data-l="en">
-            Fynvra runs on your machine. You talk to one orchestrator; it splits the work, hands each piece to its own
-            worker, then reviews and merges.
-          </p>
-          <p class="docs-meta">
-            <span>Windows x64 · macOS</span>
-            <span data-l="zh">本地优先 · 无中转服务器</span>
-            <span data-l="en">Local-first · no relay server</span>
-          </p>
-          <div class="docs-jump">
-            <a class="btn btn-ghost btn-sm" href="#quickstart"><span data-l="zh">快速开始</span><span data-l="en">Quick start</span></a>
-            <a class="btn btn-ghost btn-sm" href="#orchestration"><span data-l="zh">编排</span><span data-l="en">Orchestration</span></a>
-            <a class="btn btn-ghost btn-sm" href="#shortcuts"><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></a>
+        <div class="container docs-hero-grid">
+          <div class="docs-hero-copy">
+            <p class="eyebrow"><b>Docs</b><span data-l="zh">使用文档</span><span data-l="en">User guide</span></p>
+            <h1><span data-l="zh">从安装到第一次派发。</span><span data-l="en">From install to the first dispatch.</span></h1>
+            <p class="section-lead" data-l="zh">
+              Fynvra 在本机运行。你只和主 Agent 对话，它把需求拆成任务，交给各自独立的 Worker，再审查并合并。
+            </p>
+            <p class="section-lead" data-l="en">
+              Fynvra runs on your machine. You talk to one orchestrator; it splits the work, hands each piece to its own
+              worker, then reviews and merges.
+            </p>
+            <p class="docs-meta">
+              <span>Windows x64 · macOS</span>
+              <span data-l="zh">本地优先 · 无中转服务器</span>
+              <span data-l="en">Local-first · no relay server</span>
+            </p>
           </div>
+          <aside class="docs-jump" aria-label="Quick links / 快速入口">
+            <p class="docs-jump-title">
+              <span class="spec-kicker"
+                ><span data-l="zh">常用入口</span><span data-l="en">Quick links</span></span
+              >
+            </p>
+            <a class="jump-link" href="#install">
+              <span class="jump-num">01</span>
+              <span class="jump-copy">
+                <span class="jump-label"><span data-l="zh">安装</span><span data-l="en">Install</span></span>
+                <span class="jump-desc"><span data-l="zh">安装包，或从源码运行</span><span data-l="en">Installer or run from source</span></span>
+              </span>
+              <span class="jump-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="jump-link" href="#quickstart">
+              <span class="jump-num">02</span>
+              <span class="jump-copy">
+                <span class="jump-label"><span data-l="zh">快速开始</span><span data-l="en">Quick start</span></span>
+                <span class="jump-desc"><span data-l="zh">模型、目录、会话、第一次派发</span><span data-l="en">Model, folder, session, first dispatch</span></span>
+              </span>
+              <span class="jump-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="jump-link" href="#orchestration">
+              <span class="jump-num">03</span>
+              <span class="jump-copy">
+                <span class="jump-label"><span data-l="zh">编排</span><span data-l="en">Orchestration</span></span>
+                <span class="jump-desc"><span data-l="zh">主 Agent 如何派发、验收、合并</span><span data-l="en">How dispatch, review, and merge work</span></span>
+              </span>
+              <span class="jump-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="jump-link" href="#shortcuts">
+              <span class="jump-num">04</span>
+              <span class="jump-copy">
+                <span class="jump-label"><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></span>
+                <span class="jump-desc"><span data-l="zh">默认按键一览</span><span data-l="en">Every default binding</span></span>
+              </span>
+              <span class="jump-arrow" aria-hidden="true">→</span>
+            </a>
+            <p class="docs-jump-foot">
+              <a href="index.html"><span data-l="zh">← 返回产品首页</span><span data-l="en">← Back to the product site</span></a>
+            </p>
+          </aside>
         </div>
       </section>
 
       <div class="container docs-layout">
-        <nav class="toc" aria-label="目录">
+        <nav class="toc" aria-label="On this page / 目录">
           <p class="toc-title"><span data-l="zh">本页</span><span data-l="en">On this page</span></p>
+          <div class="toc-progress" aria-hidden="true"><i data-toc-progress></i></div>
           <ol>
             <li>
               <a href="#overview"><span class="toc-num">01</span><span data-l="zh">概览</span><span data-l="en">Overview</span></a>
