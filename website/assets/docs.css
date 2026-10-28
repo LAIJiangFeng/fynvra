@@ -5,7 +5,8 @@
 
 .docs-app {
   --nav-h: 64px;
-  --docs-sidebar: 280px;
+  --docs-sidebar: 300px;
+  --docs-sidebar-pad: 24px;
   --docs-viewport-height: 100vh;
   --docs-reading: 780px;
   --docs-gutter: clamp(24px, 4.6vw, 56px);
@@ -138,7 +139,7 @@ html.docs-ready .docs-article {
   position: relative;
   z-index: 3;
   flex: none;
-  padding: 16px 14px 8px;
+  padding: 16px var(--docs-sidebar-pad) 8px;
   background: var(--paper);
 }
 
@@ -150,7 +151,7 @@ html.docs-ready .docs-article {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 36px;
+  height: 38px;
   padding: 0 8px 0 11px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -186,7 +187,7 @@ html.docs-ready .docs-article {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -351,7 +352,7 @@ html.docs-ready .docs-article {
 .docs-nav-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 6px 10px 16px;
+  padding: 8px var(--docs-sidebar-pad) 18px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -361,25 +362,26 @@ html.docs-ready .docs-article {
 .docs-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .docs-group + .docs-group {
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .docs-group-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 7px 8px;
+  min-height: 36px;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--ink-3);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1.4;
@@ -397,8 +399,8 @@ html.docs-ready .docs-article {
 }
 
 .docs-group-toggle .docs-group-chevron {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   transition: transform 0.18s var(--ease);
 }
 
@@ -422,11 +424,11 @@ html.docs-ready .docs-article {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 7px;
+  min-height: 44px;
+  padding: 10px;
+  border-radius: 9px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: 15.5px;
   line-height: 1.4;
   text-decoration: none;
   transition:
@@ -463,19 +465,19 @@ html.docs-ready .docs-article {
 
 .docs-nav-sub {
   display: grid;
-  gap: 0;
-  margin: 2px 0 8px;
-  padding: 0 0 0 27px;
+  gap: 1px;
+  margin: 2px 0 10px;
+  padding: 0 0 0 22px;
   list-style: none;
 }
 
 .docs-nav-sub a {
   display: block;
-  padding: 5px 8px 5px 11px;
+  padding: 8px 10px 8px 12px;
   border-left: 1px solid var(--line);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 8px 8px 0;
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: 14px;
   line-height: 1.45;
   text-decoration: none;
   transition:
@@ -501,8 +503,9 @@ html.docs-ready .docs-article {
 .docs-sidebar-foot {
   display: grid;
   flex: none;
-  gap: 1px;
-  padding: 12px 14px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px var(--docs-sidebar-pad) 14px;
   border-top: 1px solid var(--line);
   background: var(--paper);
 }
@@ -510,27 +513,34 @@ html.docs-ready .docs-article {
 .docs-foot-link {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 2px;
-  color: var(--ink-3);
-  font-size: 12.5px;
-  line-height: 1.45;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--ink-2);
   text-decoration: none;
-  transition: color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background-color 0.15s;
 }
 
 .docs-foot-link:hover {
+  border-color: var(--line-2);
+  background: var(--paper-2);
   color: var(--ink);
 }
 
 .docs-foot-download {
   color: var(--accent-text);
-  font-weight: 600;
 }
 
 .docs-foot-link .doc-icon {
-  width: 18px;
-  height: 18px;
+  width: 23px;
+  height: 23px;
 }
 
 /* 移动端目录按钮与遮罩 */
@@ -1067,7 +1077,7 @@ html.docs-ready .docs-article {
 
 @media (max-width: 1120px) and (min-width: 901px) {
   .docs-app {
-    --docs-sidebar: 264px;
+    --docs-sidebar: 278px;
     --docs-gutter: clamp(24px, 3.6vw, 44px);
   }
 
@@ -1085,6 +1095,7 @@ html.docs-ready .docs-article {
 @media (max-width: 900px) {
   .docs-app {
     --docs-gutter: 22px;
+    --docs-sidebar-pad: 18px;
   }
 
   .docs-shell,
@@ -1149,7 +1160,7 @@ html.docs-ready .docs-article {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 12px 0 16px;
+    padding: 10px 12px 0 18px;
   }
 
   .docs-sidebar-mobiletitle {
@@ -1231,6 +1242,7 @@ html.docs-ready .docs-article {
 @media (max-width: 640px) {
   .docs-app {
     --docs-gutter: 18px;
+    --docs-sidebar-pad: 16px;
   }
 
   .docs-article.prose {
@@ -1273,18 +1285,50 @@ html.docs-ready .docs-article {
   }
 }
 
-/* 暗色：目录选中、搜索命中与提示框改为中性底，颜色只留在文字和左边线 */
+/* 暗色：目录当前项/hover/焦点只用中性白与透明白层，不再用蓝色 */
 
 :root[data-theme="dark"] .docs-app {
-  --docs-active: color-mix(in srgb, var(--ink) 8%, transparent);
+  --docs-active: rgb(255 255 255 / 8%);
 }
 
+:root[data-theme="dark"] .docs-nav-link[aria-current="page"],
 :root[data-theme="dark"] .docs-nav-link[aria-current="page"]:hover {
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  background: rgb(255 255 255 / 8%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+  color: var(--ink);
 }
 
 :root[data-theme="dark"] .docs-nav-sub a[aria-current="location"] {
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-left-color: rgb(255 255 255 / 40%);
+  background: rgb(255 255 255 / 6%);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .docs-search:focus-within {
+  border-color: rgb(255 255 255 / 26%);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 7%);
+}
+
+:root[data-theme="dark"]
+  .docs-sidebar
+  :is(.docs-nav-link, .docs-group-toggle, .docs-foot-link, .docs-nav-close):focus-visible {
+  outline-color: rgb(255 255 255 / 55%);
+}
+
+:root[data-theme="dark"] .docs-foot-link {
+  border-color: rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 3%);
+  color: var(--ink-2);
+}
+
+:root[data-theme="dark"] .docs-foot-link:hover {
+  border-color: rgb(255 255 255 / 18%);
+  background: rgb(255 255 255 / 7%);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .docs-foot-download {
+  color: var(--ink);
 }
 
 :root[data-theme="dark"] .docs-result mark {
