@@ -44,7 +44,6 @@
         <nav class="nav-links" id="site-menu">
           <a href="#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a>
           <a href="#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
-          <a href="#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
           <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">Docs</span></a>
         </nav>
         <div class="nav-actions">
@@ -1016,55 +1015,11 @@
         </div>
       </section>
 
-      <section class="section section-alt" id="faq">
-        <div class="container faq">
-          <header class="section-head reveal">
-            <p class="eyebrow"><b>03</b><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></p>
-            <h2 class="section-title"><span data-l="zh">装之前，先看看这些。</span><span data-l="en">Before you install.</span></h2>
-            <p class="section-lead">
-              <span data-l="zh">更完整的说明见</span><span data-l="en">For the full picture, read the</span>
-              <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">user guide</span></a><span data-l="zh">。</span
-              ><span data-l="en">.</span>
-            </p>
-          </header>
-
-          <div class="faq-list reveal">
-            <details>
-              <summary><span data-l="zh">收费吗？</span><span data-l="en">Is it free?</span></summary>
-              <p data-l="zh">Fynvra 本身免费开源，使用 Apache-2.0 许可证。模型调用的费用和额度来自你自己的服务商账号。</p>
-              <p data-l="en">
-                Fynvra itself is free and open source under Apache-2.0. Model usage is billed by whichever provider account
-                you connect.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">没有 git 的项目能用吗？</span><span data-l="en">Can I use it without git?</span></summary>
-              <p data-l="zh">
-                能。非 git 目录按原地模式工作：不建 worktree，Worker 直接在目录里修改，审查时列出它汇报的改动文件。并行的 Worker
-                会共用同一个目录，建议一次只派一个任务。
-              </p>
-              <p data-l="en">
-                Yes. Folders without git run in in-place mode: no worktrees, workers edit the folder directly, and review
-                lists the files they reported. Parallel workers would share the folder, so dispatch one task at a time.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">支持哪些平台？</span><span data-l="en">Which platforms are supported?</span></summary>
-              <p data-l="zh">Windows x64 和 macOS（Intel / Apple Silicon）。Linux 有 AppImage 构建配置，但暂未纳入自动发布与更新。</p>
-              <p data-l="en">
-                Windows x64 and macOS (Intel and Apple Silicon). Linux has an AppImage build config but isn't part of
-                automated releases or updates yet.
-              </p>
-            </details>
-          </div>
-        </div>
-      </section>
-
       <section class="section" id="start">
         <div class="container">
           <div class="cta reveal">
             <div class="section-head">
-              <p class="eyebrow"><b>04</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
+              <p class="eyebrow"><b>03</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
               <h2 class="section-title">
                 <span data-l="zh">把下一个需求，交给主 Agent。</span><span data-l="en">Hand your next task to the orchestrator.</span>
               </h2>
