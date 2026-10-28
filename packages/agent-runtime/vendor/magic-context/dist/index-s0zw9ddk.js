@@ -14642,7 +14642,7 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
     CREATE INDEX IF NOT EXISTS idx_pending_ops_session ON pending_ops(session_id);
     CREATE INDEX IF NOT EXISTS idx_pending_ops_session_tag_id ON pending_ops(session_id, tag_id);
     CREATE INDEX IF NOT EXISTS idx_source_contents_session ON source_contents(session_id);
-    
+
     CREATE TABLE IF NOT EXISTS recomp_compartments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -24852,7 +24852,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
             })));
           }
         }
-        
+
         if (${id}.value === undefined) {
           if (${k} in input) {
             newResult[${k}] = undefined;
@@ -24860,7 +24860,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         } else {
           newResult[${k}] = ${id}.value;
         }
-        
+
       `);
       } else if (!isOptionalIn) {
         doc.write(`
@@ -24897,7 +24897,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
             path: iss.path ? [${k}, ...iss.path] : [${k}]
           })));
         }
-        
+
         if (${id}.value === undefined) {
           if (${k} in input) {
             newResult[${k}] = undefined;
@@ -24905,7 +24905,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         } else {
           newResult[${k}] = ${id}.value;
         }
-        
+
       `);
       }
     }
