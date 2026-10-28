@@ -22,7 +22,7 @@
 
 .hero-lead {
   max-width: 76ch;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 :root[data-locale="zh"] .hero-lead {
@@ -35,7 +35,7 @@
 
 .section-head .section-lead {
   max-width: 80ch;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 :root[data-locale="zh"] .section-head .section-lead {
@@ -499,7 +499,8 @@
 }
 
 .fd-chat-head[data-state="run"] .fd-st-idle,
-.fd-chat-head[data-state="done"] .fd-st-run {
+.fd-chat-head[data-state="done"] .fd-st-run,
+.fd-chat-head[data-state="idle"] .fd-st-run {
   display: none;
 }
 
@@ -993,6 +994,7 @@
   transition: width 0.45s var(--ease);
 }
 
+/* 进度状态放在无 data-l 的外层，内层双语只由语言规则控制显示 */
 .fd-run .pg {
   display: none;
 }
@@ -1204,6 +1206,17 @@
   background: var(--line);
 }
 
+.fd-pause-label,
+.fd-resume-label,
+.fd-end-label {
+  align-items: center;
+  gap: 6px;
+}
+
+.fd-pause-label {
+  display: inline-flex;
+}
+
 .fd-resume-label,
 .fd-end-label {
   display: none;
@@ -1285,7 +1298,7 @@
   color: var(--ink-3);
   font-size: 12px;
   line-height: 1.6;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 /* 动画开关：没有 JS 时完整呈现最终状态 */
@@ -1296,6 +1309,18 @@
 
 .fd-showcase[data-enhanced="true"] [data-appear].is-shown {
   animation: fd-in 0.34s var(--ease);
+}
+
+.fd-showcase[data-active="false"] [data-appear].is-shown,
+.fd-showcase[data-active="false"] .fd-dot.is-run,
+.fd-showcase[data-active="false"] .fd-caret,
+.fd-showcase[data-active="false"] .fd-send.is-hot {
+  animation: none;
+}
+
+.fd-showcase[data-active="false"] .fd-progress i,
+.fd-showcase[data-active="false"] .fd-task {
+  transition: none;
 }
 
 .fd-empty[hidden] {
@@ -1387,7 +1412,7 @@
   color: var(--ink-2);
   font-size: 0.97rem;
   line-height: 1.7;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 .flow-steps {
@@ -1633,7 +1658,7 @@
   color: var(--ink-2);
   font-size: 0.95rem;
   line-height: 1.67;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 .cap-meta {
@@ -1712,7 +1737,7 @@
   color: var(--ink-2);
   font-size: 0.95rem;
   line-height: 1.65;
-  text-wrap: pretty;
+  text-wrap: wrap;
 }
 
 .wf-tool {
@@ -1754,46 +1779,20 @@
 @media (max-width: 1000px) {
   .fd-body {
     grid-template-columns: minmax(0, 1fr) 232px;
-    height: 580px;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 590px;
   }
 
-  .fd-side {
-    display: none;
-  }
-
-  .cap-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .wf-item {
-    grid-template-columns: 40px minmax(0, 1fr);
-  }
-
-  .wf-tool {
-    grid-column: 2;
-    justify-self: start;
-    margin-top: 2px;
-  }
-}
-
-@media (max-width: 720px) {
-  .hero-title {
-    font-size: clamp(1.78rem, 7vw, 2.75rem);
-  }
-
-  .fd-body {
-    display: flex;
-    height: auto;
-    flex-direction: column;
-  }
-
+  /* 平板：保留一条紧凑的会话带，Worker 出现和完成仍然看得见 */
   .fd-side {
     display: flex;
+    grid-column: 1 / -1;
+    grid-row: 1;
     flex-direction: row;
     align-items: center;
     gap: 5px;
     overflow-x: auto;
-    padding: 7px 8px;
+    padding: 6px 8px;
     border-right: 0;
     border-bottom: 1px solid var(--fd-line);
     scrollbar-width: none;
@@ -1849,6 +1848,43 @@
 
   .fd-session-time {
     display: none;
+  }
+
+  .fd-main {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+  }
+
+  .fd-panel {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .cap-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wf-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .wf-tool {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-title {
+    font-size: clamp(1.78rem, 7vw, 2.75rem);
+  }
+
+  .fd-body {
+    display: flex;
+    height: auto;
+    flex-direction: column;
   }
 
   .fd-main {

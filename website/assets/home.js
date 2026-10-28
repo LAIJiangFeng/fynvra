@@ -32,6 +32,7 @@
   if (!app || !timeline) return;
 
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const TYPE_INTERVAL = 27;
   const requestText = {
     zh: '优化官网首页：标题收紧一点，把顶部演示改成真实操作流程；文档页交给另一个 Worker。',
     en: 'Polish the homepage: smaller title, a real workflow demo. Give the docs page to another worker.',
@@ -39,7 +40,7 @@
 
   // 每个相位只增加一层信息；同一套界面连续演完，不切换样板。
   const phases = [
-    { delay: 1600 }, // 0 输入
+    { delay: 0 }, // 0 输入（等待时长按文本长度计算）
     { delay: 2200 }, // 1 可发送
     { delay: 2200 }, // 2 用户消息 + 主 Agent 回复
     { delay: 2300 }, // 3 派发首页
@@ -63,6 +64,9 @@
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
   const fullText = () => requestText[locale()];
   const shouldRun = () => !paused && !motion.matches && inView && !document.hidden;
+
+  // 英文请求更长：等它完整打完，再留一小段阅读时间进入发送态。
+  const typingDelay = () => Math.max(2200, fullText().length * TYPE_INTERVAL + 700);
 
   function clearAuto() {
     if (!autoTimer) return;
@@ -113,7 +117,7 @@
     if (!shouldRun()) return;
     tickTypewriter();
     if (typedIndex >= fullText().length) return;
-    typeTimer = window.setInterval(tickTypewriter, 27);
+    typeTimer = window.setInterval(tickTypewriter, TYPE_INTERVAL);
   }
 
   function scrollTimeline() {
@@ -123,6 +127,7 @@
   }
 
   function syncTimerState() {
+    root.dataset.active = String(shouldRun());
     clearAuto();
     if (!shouldRun()) {
       clearTypewriter();
@@ -132,10 +137,11 @@
       startTypewriter(false);
     }
     if (phase >= LAST) return;
+    const delay = phase === 0 ? typingDelay() : phases[phase].delay;
     autoTimer = window.setTimeout(() => {
       autoTimer = 0;
       applyPhase(phase + 1);
-    }, phases[phase].delay);
+    }, delay);
   }
 
   function renderTasks() {
@@ -154,9 +160,12 @@
 
     sessionHome?.classList.toggle('is-idle', phase >= 7);
     sessionDocs?.classList.toggle('is-idle', phase >= 9);
-    sessionOrchestrator?.classList.toggle('is-idle', phase >= 9);
-    chatHead?.classList.toggle('is-idle', phase >= 9);
-    if (chatHead) chatHead.dataset.state = phase >= 9 ? 'done' : 'run';
+    const orchestratorActive = phase >= 2 && phase < 9;
+    sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
+    chatHead?.classList.toggle('is-idle', !orchestratorActive);
+    if (chatHead) {
+      chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
+    }
   }
 
   function renderPanel() {
@@ -181,9 +190,8 @@
     }
     if (prevButton) prevButton.setAttribute('aria-disabled', String(phase === 0));
     if (nextButton) nextButton.setAttribute('aria-disabled', String(phase === LAST));
-    for (const button of chapterButtons) {
-      const target = Number(button.dataset.chapter);
-      if (target === chapterOf[phase]) button.setAttribute('aria-current', 'step');
+    for (const [index, button] of chapterButtons.entries()) {
+      if (index === chapterOf[phase]) button.setAttribute('aria-current', 'step');
       else button.removeAttribute('aria-current');
     }
     for (const counter of counters) counter.textContent = String(phase + 1);
@@ -282,7 +290,7 @@
   if (typeof motion.addEventListener === 'function') motion.addEventListener('change', handleMotion);
   else motion.addListener(handleMotion);
 
-  // 语言切换不重启动画，只把正在输入的演示文本换成当前语言。
+  // 语言切换不重启动画，只重打当前语言的输入文本，并重排这一段的等待时长。
   new MutationObserver(() => {
     if (phase === 0) {
       if (paused) {
@@ -291,6 +299,7 @@
       } else {
         startTypewriter(true);
       }
+      syncTimerState();
     } else if (phase === 1) {
       setTyped(fullText());
     }
