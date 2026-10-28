@@ -134,13 +134,10 @@ export type HostCallResult =
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
-/** 待审批请求的有效期：worker 超时按 deny 处理，Main 据此给出 ApprovalRequest.expiresAt。 */
+/** @deprecated 旧协议常量；新工具执行路径没有人工等待期限。 */
 export const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
-/**
- * 审批门挂起的一次工具调用（worker 侧 agent-runtime 已分类并生成展示文本）。
- * Main 不加载 agent-runtime，审批条的 kind / title / detail 一律以这里为准。
- */
+/** 旧协议兼容形状；Main 丢弃旧审批请求，不能重新生成可操作审批。 */
 export interface AgentApprovalRequest {
   requestId: string;
   toolCallId: string;
@@ -149,7 +146,7 @@ export interface AgentApprovalRequest {
   title: string;
   /** 命令全文 / 文件路径 / 参数预览 */
   detail: string;
-  /** 命中的保护底线（如 `git push`）：任何档位都要人确认 */
+  /** 旧版重点动作标签，新版不再要求人工确认。 */
   protectedAction?: string;
   /** epoch ms：worker 到期按 deny 结束 */
   expiresAt: number;
@@ -183,10 +180,7 @@ export type AgentCommand =
    * 下一次 prompt 起生效，pi 的会话历史保留
    */
   | { type: 'set-model'; identity: SessionIdentity; model: ResolvedModelSpec }
-  /**
-   * 换会话的审批档位：worker 调审批门的 setMode，即时生效（运行中也可以，下一次需要审批的工具调用起按新档位）。
-   * allowSession 的记忆保留，从 full 切回更严的档位时清空
-   */
+  /** 换工具操作通知范围：保留旧通道名，运行中也可生效，不改变执行权限。 */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
   /**
    * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
@@ -224,10 +218,7 @@ export type AgentWorkerEvent =
     }
   /** 调用方已放弃（工具被中止或等待超时），Main 应中止对应的 host 调用 */
   | { type: 'host-cancel'; identity: SessionIdentity; callId: string }
-  /**
-   * 审批门在等人确认：Main 记下待审批并推 `sessions:approval-request`。
-   * 紧接着还有同一 requestId 的 approval_request 会话事件，供时间线关联工具调用。
-   */
+  /** @deprecated 旧协议兼容；Main 忽略，不推送审批或答复执行许可。 */
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
@@ -712,6 +703,26 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
   },
   agent_settled: ({ aborted }) =>
     typeof aborted === 'boolean' ? { type: 'agent_settled', aborted } : null,
+  tool_notice: ({ toolCallId, toolName, kind }) => {
+    if (!isNonEmptyString(toolCallId) || toolCallId.length > 256 || !isString(toolName)) {
+      return null;
+    }
+    // 固定标签 + 类别白名单：通知不接收命令、路径、MCP 名称或任意动作描述。
+    const kinds: Record<string, string> = {
+      bash: 'command',
+      powershell: 'command',
+      run_checks: 'command',
+      write: 'file-write',
+      edit: 'file-edit',
+      apply_patch: 'file-edit',
+      mcp: 'mcp',
+    };
+    if (!Object.hasOwn(kinds, toolName) || kinds[toolName] !== kind) return null;
+    if (kind !== 'command' && kind !== 'file-write' && kind !== 'file-edit' && kind !== 'mcp') {
+      return null;
+    }
+    return { type: 'tool_notice', toolCallId, toolName, kind };
+  },
   approval_request: ({ requestId, toolCallId, toolName, args, reason }) => {
     if (!isNonEmptyString(requestId) || !isString(toolCallId) || !isString(toolName)) return null;
     if (!isOptional(reason, isString)) return null;
