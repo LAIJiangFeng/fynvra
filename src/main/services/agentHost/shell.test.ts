@@ -14,6 +14,7 @@ const PROGRAM_FILES_X86_BASH = 'C:\\Program Files (x86)\\Git\\bin\\bash.exe';
 const LOCAL_APP_DATA_BASH = 'C:\\Users\\me\\AppData\\Local\\Programs\\Git\\bin\\bash.exe';
 const WINDOWS_POWERSHELL = 'C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const PWSH = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+const PWSH_ALIAS = `${ENV.LOCALAPPDATA}\\Microsoft\\WindowsApps\\pwsh.exe`;
 
 /** where.exe 的输出（null 表示 where 失败：git 不在 PATH 上时退出码 1）与磁盘上存在的文件 */
 function probe(
@@ -150,6 +151,7 @@ describe('createShellPathResolver', () => {
 
   it.each([
     [[WINDOWS_POWERSHELL, PWSH], WINDOWS_POWERSHELL, 'Windows PowerShell 5.1'],
+    [[WINDOWS_POWERSHELL], WINDOWS_POWERSHELL, 'Windows PowerShell 5.1'],
     [[PWSH], PWSH, 'PowerShell 7'],
   ] as const)(
     'falls back without Git Bash using %s, and warns once',
@@ -161,7 +163,10 @@ describe('createShellPathResolver', () => {
       });
       expect(await Promise.all([resolve(), resolve()])).toEqual([expected, expected]);
       expect(await resolve()).toBe(expected);
-      expect(env.exec).toHaveBeenCalledTimes(2);
+      expect(env.exec.mock.calls.filter(([file]) => file === WHERE)).toHaveLength(2);
+      expect(env.exec.mock.calls.filter(([file]) => file !== WHERE).map(([file]) => file)).toEqual(
+        existing.some((path) => path === PWSH) ? [] : [WINDOWS_POWERSHELL, PWSH_ALIAS]
+      );
       expect(env.logs).toEqual([
         `warn: no Git Bash found; worker sessions fall back to ${label} at ${expected}`,
       ]);
@@ -181,7 +186,10 @@ describe('createShellPathResolver', () => {
     const attempts = await Promise.allSettled([resolve(), resolve()]);
     expect(attempts.map((attempt) => attempt.status)).toEqual(['rejected', 'rejected']);
     await expect(resolve()).rejects.toThrow('No usable Windows agent shell found');
-    expect(env.exec).toHaveBeenCalledTimes(2);
+    expect(env.exec.mock.calls.filter(([file]) => file === WHERE)).toHaveLength(2);
+    expect(env.exec.mock.calls.filter(([file]) => file !== WHERE).map(([file]) => file)).toEqual([
+      PWSH_ALIAS,
+    ]);
     expect(env.exec).not.toHaveBeenCalledWith(WHERE, ['bash.exe']);
     expect(env.logs.filter((line) => line.startsWith('warn:'))).toHaveLength(1);
   });
@@ -238,6 +246,9 @@ describe('createShellPathResolver', () => {
     expect(await resolve()).toBe('C:\\msys64\\usr\\bin\\bash.exe');
     settings = settingsWith();
     expect(await resolve()).toBe('D:\\Software\\Git\\bin\\bash.exe');
-    expect(env.exec).toHaveBeenCalledTimes(2);
+    expect(env.exec.mock.calls.filter(([file]) => file === WHERE)).toHaveLength(2);
+    expect(env.exec.mock.calls.filter(([file]) => file !== WHERE).map(([file]) => file)).toEqual([
+      PWSH_ALIAS,
+    ]);
   });
 });
