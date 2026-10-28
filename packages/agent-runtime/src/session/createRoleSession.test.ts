@@ -14,14 +14,9 @@ import {
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
-import {
-  getBuiltinRole,
-  ORCHESTRATOR_ROLE_ID,
-  type Role,
-  type ToolOperationNotice,
-} from '@fynvra/core';
+import { getBuiltinRole, ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ApprovalRequestFn } from '../approval/gate';
+import type { ApprovalGateRequest, ApprovalRequestFn } from '../approval/gate';
 import type { ApprovalDecision } from '../approval/policy';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
@@ -590,15 +585,15 @@ describe('command environment injection through real pi tools', () => {
   );
 });
 
-describe('createRoleSession operation notices', () => {
-  /** 保留旧决定作为兼容探针；执行只发送不含参数的通知。 */
+describe('createRoleSession approval gate', () => {
+  /** 审批通道：按顺序给出决定（缺省 allow），记下每次请求 */
   function approver(...decisions: ApprovalDecision[]) {
-    const notices: ToolOperationNotice[] = [];
-    const request = vi.fn<ApprovalRequestFn>(async () => decisions.shift() ?? 'allow');
-    const notify = vi.fn((notice: ToolOperationNotice) => {
-      notices.push(notice);
+    const requests: ApprovalGateRequest[] = [];
+    const request = vi.fn<ApprovalRequestFn>(async (req) => {
+      requests.push(req);
+      return decisions.shift() ?? 'allow';
     });
-    return { notices, request, notify };
+    return { requests, request };
   }
 
   /** 模型依次发出这些工具调用，每次请求都记下上下文（含上一个工具结果），最后回一句话结束 */
@@ -627,22 +622,29 @@ describe('createRoleSession operation notices', () => {
     return { isError: result.isError, text };
   }
 
-  it('notifies before a supervised write without waiting for approval', async () => {
+  it('asks before a supervised write and runs it once allowed', async () => {
     const approval = approver('allow');
     const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
     const contexts = script({ name: 'write', args: { path: 'allowed.txt', content: 'hello' } });
 
     await session.prompt('Write the file.');
 
-    expect(approval.notices).toEqual([
-      { toolCallId: 'call-0', toolName: 'write', kind: 'file-write' },
+    expect(approval.requests).toEqual([
+      {
+        toolCallId: 'call-0',
+        toolName: 'write',
+        kind: 'file-write',
+        title: 'write',
+        detail: 'allowed.txt',
+        args: { path: 'allowed.txt', content: 'hello' },
+        expiresAt: expect.any(Number),
+      },
     ]);
-    expect(approval.request).not.toHaveBeenCalled();
     expect(await readFile(path.join(workdir, 'allowed.txt'), 'utf8')).toBe('hello');
     expect(lastToolResult(contexts[1]).isError).toBe(false);
   });
 
-  it('does not consult a legacy deny hook and gives the model the real tool result', async () => {
+  it('returns the refusal to the model and skips the tool when denied', async () => {
     const approval = approver('deny');
     const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
     const contexts = script({ name: 'write', args: { path: 'denied.txt', content: 'nope' } });
@@ -652,19 +654,20 @@ describe('createRoleSession operation notices', () => {
     await session.prompt('Write the file.');
     subscription.unsubscribe();
 
-    expect(await readFile(path.join(workdir, 'denied.txt'), 'utf8')).toBe('nope');
-    expect(approval.request).not.toHaveBeenCalled();
-    expect(approval.notify).toHaveBeenCalledTimes(1);
-    expect(lastToolResult(contexts[1]).isError).toBe(false);
+    expect(existsSync(path.join(workdir, 'denied.txt'))).toBe(false);
+    const seen = lastToolResult(contexts[1]);
+    expect(seen.isError).toBe(true);
+    expect(seen.text).toContain('The user denied writing denied.txt');
     expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
       toolName: 'write',
-      isError: false,
+      isError: true,
+      output: expect.stringContaining('denied'),
     });
-    expect(events.some((event) => event.type === 'approval_request')).toBe(false);
+    // 拒绝不打断回合：模型拿到拒绝文本后继续回答
     expect(events.at(-1)).toMatchObject({ type: 'agent_settled', aborted: false });
   });
 
-  it('auto-edits notifies only about bash while both tools execute', async () => {
+  it('lets auto-edits write files without asking but still asks about bash', async () => {
     const approval = approver('deny');
     const { session } = await open({ role: role({ approvalMode: 'auto-edits' }), approval });
     const contexts = script(
@@ -675,13 +678,14 @@ describe('createRoleSession operation notices', () => {
     await session.prompt('Write, then run a command.');
 
     expect(await readFile(path.join(workdir, 'auto.txt'), 'utf8')).toBe('auto');
-    expect(approval.notices).toEqual([{ toolCallId: 'call-1', toolName: 'bash', kind: 'command' }]);
-    expect(approval.request).not.toHaveBeenCalled();
-    expect((await readFile(path.join(workdir, 'bash.txt'), 'utf8')).trim()).toBe('hi');
-    expect(lastToolResult(contexts[2]).isError).toBe(false);
+    expect(approval.requests.map((request) => [request.kind, request.detail])).toEqual([
+      ['command', 'echo hi > bash.txt'],
+    ]);
+    expect(existsSync(path.join(workdir, 'bash.txt'))).toBe(false);
+    expect(lastToolResult(contexts[2]).text).toContain('The user denied the command `echo hi');
   });
 
-  it('full still notifies about important commands and preserves the shell environment hook', async () => {
+  it('asks about protected commands in full mode and blocks them when denied', async () => {
     const approval = approver('deny');
     const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
       ...env,
@@ -694,19 +698,20 @@ describe('createRoleSession operation notices', () => {
     });
     const contexts = script(
       { name: 'write', args: { path: 'full.txt', content: 'full' } },
-      { name: 'bash', args: { command: 'git push --help' } }
+      { name: 'bash', args: { command: 'git push origin main' } }
     );
 
-    await session.prompt('Write, then show push help.');
+    await session.prompt('Write, then push.');
 
     expect(await readFile(path.join(workdir, 'full.txt'), 'utf8')).toBe('full');
-    expect(approval.notices).toEqual([{ toolCallId: 'call-1', toolName: 'bash', kind: 'command' }]);
-    expect(approval.request).not.toHaveBeenCalled();
-    expect(lastToolResult(contexts[2]).text).not.toContain('denied');
-    expect(transform).toHaveBeenCalledTimes(1);
+    expect(approval.requests).toEqual([
+      expect.objectContaining({ kind: 'command', protectedAction: 'git push' }),
+    ]);
+    expect(lastToolResult(contexts[2]).text).toContain('protected action (git push)');
+    expect(transform).not.toHaveBeenCalled();
   });
 
-  it('notifies for repeated tools without an allowSession cache', async () => {
+  it('remembers allowSession for the same kind and tool', async () => {
     const approval = approver('allowSession');
     const { session } = await open({ role: role({ approvalMode: 'supervised' }), approval });
     script(
@@ -716,34 +721,34 @@ describe('createRoleSession operation notices', () => {
 
     await session.prompt('Write two files.');
 
-    expect(approval.request).not.toHaveBeenCalled();
-    expect(approval.notices.map((notice) => notice.toolCallId)).toEqual(['call-0', 'call-1']);
+    expect(approval.request).toHaveBeenCalledTimes(1);
     expect(await readFile(path.join(workdir, 'two.txt'), 'utf8')).toBe('2');
   });
 
-  it('Stop during notification still prevents the tool from writing', async () => {
-    const request = vi.fn<ApprovalRequestFn>(() => new Promise(() => {}));
-    const notify = vi.fn(() => {
-      void session.abort();
-    });
+  it('withdraws a pending approval when the run is aborted', async () => {
+    let withdrawn: AbortSignal | undefined;
+    const request = vi.fn<ApprovalRequestFn>(
+      (_req, signal) =>
+        new Promise<ApprovalDecision>(() => {
+          withdrawn = signal;
+        })
+    );
     const { session } = await open({
       role: role({ approvalMode: 'supervised' }),
-      approval: { request, notify },
+      approval: { request },
     });
     script({ name: 'write', args: { path: 'aborted.txt', content: 'x' } });
-    const events: FynvraSessionEvent[] = [];
-    const subscription = subscribeNormalized(session, (event) => events.push(event));
 
-    await session.prompt('Write the file.');
-    subscription.unsubscribe();
+    const run = session.prompt('Write the file.');
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    await session.abort();
+    await run;
 
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(request).not.toHaveBeenCalled();
+    expect(withdrawn?.aborted).toBe(true);
     expect(existsSync(path.join(workdir, 'aborted.txt'))).toBe(false);
-    expect(events.at(-1)).toMatchObject({ type: 'agent_settled', aborted: true });
   });
 
-  it('continues when no notification channel is supplied', async () => {
+  it('denies calls that need approval when no approval channel is given (fail-closed)', async () => {
     const { session } = await open({ role: role({ approvalMode: 'auto-edits' }) });
     const contexts = script(
       { name: 'bash', args: { command: 'echo hi > unapproved.txt' } },
@@ -752,12 +757,12 @@ describe('createRoleSession operation notices', () => {
 
     await session.prompt('Run a command, then write.');
 
-    expect((await readFile(path.join(workdir, 'unapproved.txt'), 'utf8')).trim()).toBe('hi');
-    expect(lastToolResult(contexts[1]).isError).toBe(false);
+    expect(existsSync(path.join(workdir, 'unapproved.txt'))).toBe(false);
+    expect(lastToolResult(contexts[1]).text).toContain('no approval channel');
     expect(await readFile(path.join(workdir, 'unapproved-write.txt'), 'utf8')).toBe('ok');
   });
 
-  it('notifies about important run_checks commands without bypassing the orchestrator host', async () => {
+  it('puts run_checks of a full orchestrator through the protected floor', async () => {
     const approval = approver('deny');
     const runChecks = vi.fn<OrchestrationHost['runChecks']>(async () => ({
       ok: true,
@@ -777,13 +782,7 @@ describe('createRoleSession operation notices', () => {
 
     await session.prompt('Check the work.');
 
-    expect(approval.notices).toEqual([
-      { toolCallId: 'call-1', toolName: 'run_checks', kind: 'command' },
-    ]);
-    expect(approval.request).not.toHaveBeenCalled();
-    expect(runChecks.mock.calls.map(([input]) => input.command)).toEqual([
-      'pnpm test',
-      'pnpm test && git push',
-    ]);
+    expect(approval.requests.map((request) => request.protectedAction)).toEqual(['git push']);
+    expect(runChecks.mock.calls.map(([input]) => input.command)).toEqual(['pnpm test']);
   });
 });
