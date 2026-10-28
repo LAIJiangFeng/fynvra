@@ -71,6 +71,8 @@ function resolvePluginDir(): string {
 
 const HOST_CONFIG = {
   enabled: true,
+  // No npm self-update/network checks in the desktop app.
+  auto_update: false,
   // Storage failure must leave pi native compaction in charge.
   fail_closed_blocking: false,
   compaction: { enabled: true },
