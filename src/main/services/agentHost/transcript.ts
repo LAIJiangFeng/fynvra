@@ -66,10 +66,14 @@ export class Transcript {
         this.#line(toolEnd(event.toolName, event.isError, event.output));
         return;
       case 'approval_request':
-        this.#line(`[approval] ${event.toolName}`);
+      case 'tool_notice':
+        // 通知不是正文、执行结果或需回答的问题，不重建历史审批。
         return;
       case 'error':
         this.#line(`[error] ${event.message}`);
+        return;
+      case 'warning':
+        this.#line('[warning] magic-context fallback to native compaction');
         return;
       case 'agent_settled':
         this.#line(event.aborted ? '[aborted]' : '[settled]');

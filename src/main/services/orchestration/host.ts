@@ -27,6 +27,7 @@ import {
   type ExecFn,
   type GitWorktreeManager,
   type Inbox,
+  isDispatchSettled,
   type Message,
   newId,
   type OrchestrationStore,
@@ -211,10 +212,19 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return found;
   }
 
-  async function promptWorker(sessionId: string, text: string, freshAttempt = false) {
+  async function promptWorker(
+    sessionId: string,
+    text: string,
+    freshAttempt = false,
+    signal?: AbortSignal
+  ) {
+    if (signal?.aborted) return fail('feedback delivery was aborted');
     try {
       return freshAttempt
-        ? await launcher.promptSession(sessionId, text, { freshAttempt: true })
+        ? await launcher.promptSession(sessionId, text, {
+            freshAttempt: true,
+            ...(signal ? { signal } : {}),
+          })
         : await launcher.promptSession(sessionId, text);
     } catch (error) {
       return fail(errorMessage(error));
@@ -685,7 +695,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     };
   }
 
-  async function rejectWork(input: RejectWorkInput): Promise<HostResult<RejectWorkOutput>> {
+  async function rejectWork(
+    input: RejectWorkInput,
+    signal?: AbortSignal
+  ): Promise<HostResult<RejectWorkOutput>> {
+    if (signal?.aborted) return fail('reject_work was aborted');
     const found = resolveCurrent(input.dispatchId);
     if (!found.ok) return found;
     const feedback = input.feedback.trim();
@@ -704,6 +718,12 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
     const previous = latestDispatch(task.id);
     if (previous === undefined) return fail(`task ${task.id} has no previous attempt`);
+    // No await between this check and insertion: a waiting ask must be answered on the old run.
+    if (pendingQuestionOf(inbox, previous.workerSessionId) !== undefined) {
+      return fail(
+        `worker ${previous.workerSessionId} is waiting for an ask_coordinator reply; first use send_to_worker to answer, then wait for the worker's current run to finish before calling reject_work`
+      );
+    }
 
     // 打回 = 同一 worktree（普通目录则是同一目录）、同一 worker 会话上的一次新尝试
     const next: Dispatch = {
@@ -722,38 +742,52 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       store.dispatches.delete(next.id);
       return reopened;
     }
-    const instruction = unwrap(
-      inbox.post({
-        runId: run.id,
-        dispatchId: next.id,
-        from: coordinatorSessionId,
-        to: next.workerSessionId,
-        type: 'instruction',
-        subject: 'review feedback',
-        body: feedback,
-      })
-    );
+    let instructionId: string | undefined;
+    let delivered = false;
     // pi followUp can stay inside the old run. The launcher waits for a real run boundary.
     deps.pendingDispatches?.add(next.id);
     try {
-      const delivered = await promptWorker(
+      const instruction = unwrap(
+        inbox.post({
+          runId: run.id,
+          dispatchId: next.id,
+          from: coordinatorSessionId,
+          to: next.workerSessionId,
+          type: 'instruction',
+          subject: 'review feedback',
+          body: feedback,
+        })
+      );
+      instructionId = instruction.message.id;
+      const result = await promptWorker(
         next.workerSessionId,
         feedbackPrompt(feedback, next.id, isInPlace(next)),
-        true
+        true,
+        signal
       );
-      if (!delivered.ok) {
-        store.messages.delete(instruction.message.id);
-        // Cancellation/cleanup may have settled this attempt while delivery was pending.
+      if (!result.ok) {
+        return fail(`could not deliver the feedback to the worker: ${result.error}`);
+      }
+      // Delivery is the commit point; a later abort must not undo a run already started.
+      delivered = true;
+      inbox.ack(instructionId);
+      return { ok: true, messageId: instructionId };
+    } finally {
+      if (!delivered) {
+        if (instructionId !== undefined) store.messages.delete(instructionId);
+        // Report/cleanup may have settled this attempt while delivery was pending.
         const current = store.tasks.get(task.id);
-        if (latestDispatch(task.id)?.id === next.id && current?.status === 'in-progress') {
+        const attempt = store.dispatches.get(next.id);
+        if (
+          attempt !== undefined &&
+          !isDispatchSettled(attempt) &&
+          latestDispatch(task.id)?.id === next.id &&
+          current?.status === 'in-progress'
+        ) {
           store.dispatches.delete(next.id);
           store.tasks.update(task.id, { status: task.status });
         }
-        return fail(`could not deliver the feedback to the worker: ${delivered.error}`);
       }
-      inbox.ack(instruction.message.id);
-      return { ok: true, messageId: instruction.message.id };
-    } finally {
       deps.pendingDispatches?.delete(next.id);
       deps.reconcileWorkers?.();
     }
@@ -838,7 +872,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     reviewDiff: (input) => guard(() => reviewDiff(input)),
     runChecks: (input, signal) => guard(() => runChecks(input, signal)),
     mergeWorktree: (input) => guard(() => mergeWorktree(input)),
-    rejectWork: (input) => guard(() => rejectWork(input)),
+    rejectWork: (input, signal) => guard(() => rejectWork(input, signal)),
     cleanupWorktree: (input) => guard(() => cleanupWorktree(input)),
   };
 }

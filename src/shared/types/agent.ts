@@ -15,10 +15,12 @@ import {
   type ApprovalKind,
   type ChatImage,
   isThinkingSource,
+  MAX_REPLY_SUGGESTION_CHARS,
   type ModelThinkingCapability,
   parseChatImages,
   type SessionStatus,
 } from './chat';
+import { type CompactionStrategy, isCompactionStrategy } from './settings';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -42,6 +44,8 @@ export interface ResolvedModelSpec {
   apiKey?: string;
   modelId: string;
   thinking?: ThinkingLevel;
+  /** 会话自己的 Fast（优先服务）开关；只对 OpenAI Responses / Chat Completions 发送 service_tier */
+  fastMode?: boolean;
   /**
    * 设置里模型条目的 reasoning 标记：只对 pi 内置目录里没有、也推断不出的模型生效（按协议兜底）；
    * 目录里有的、按目录推断出来的，以目录为准
@@ -109,6 +113,12 @@ export interface SpawnSessionSpec {
    */
   shellPath?: string;
   /**
+   * 上下文自动压缩策略：缺省为 pi 原生自动压缩。`off` 关掉自动压缩；`magic-context`
+   * 加载内置的 Magic Context 插件（原生压缩在插件就绪前/失败时仍作为回退）。
+   * Main 在新会话或应用重启后恢复会话时读取已保存的设置；运行中的会话不热切换
+   */
+  compactionStrategy?: CompactionStrategy;
+  /**
    * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
    */
@@ -125,13 +135,10 @@ export type HostCallResult =
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
-/** 待审批请求的有效期：worker 超时按 deny 处理，Main 据此给出 ApprovalRequest.expiresAt。 */
+/** @deprecated 旧协议常量；新工具执行路径没有人工等待期限。 */
 export const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
-/**
- * 审批门挂起的一次工具调用（worker 侧 agent-runtime 已分类并生成展示文本）。
- * Main 不加载 agent-runtime，审批条的 kind / title / detail 一律以这里为准。
- */
+/** 旧协议兼容形状；Main 丢弃旧审批请求，不能重新生成可操作审批。 */
 export interface AgentApprovalRequest {
   requestId: string;
   toolCallId: string;
@@ -140,7 +147,7 @@ export interface AgentApprovalRequest {
   title: string;
   /** 命令全文 / 文件路径 / 参数预览 */
   detail: string;
-  /** 命中的保护底线（如 `git push`）：任何档位都要人确认 */
+  /** 旧版重点动作标签，新版不再要求人工确认。 */
   protectedAction?: string;
   /** epoch ms：worker 到期按 deny 结束 */
   expiresAt: number;
@@ -174,11 +181,22 @@ export type AgentCommand =
    * 下一次 prompt 起生效，pi 的会话历史保留
    */
   | { type: 'set-model'; identity: SessionIdentity; model: ResolvedModelSpec }
-  /**
-   * 换会话的审批档位：worker 调审批门的 setMode，即时生效（运行中也可以，下一次需要审批的工具调用起按新档位）。
-   * allowSession 的记忆保留，从 full 切回更严的档位时清空
-   */
+  /** 换工具操作通知范围：保留旧通道名，运行中也可生效，不改变执行权限。 */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  /**
+   * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
+   * worker 只在会话当前空闲且 generation 未变时生成；结果必须回同一 requestId 与 roundId
+   */
+  | {
+      type: 'suggest-reply';
+      identity: SessionIdentity;
+      requestId: string;
+      roundId: number;
+      /** worker 侧的轮次计数（每正常 settle 一次 +1）：生成前后都要与发送时一致 */
+      round: number;
+    }
+  /** 用户已开始新一轮 / 换模型 / 切会话了：中止仍在途的建议请求 */
+  | { type: 'cancel-suggestion'; identity: SessionIdentity; requestId: string }
   /** 查模型的思考档位（进程级，不带 identity）；worker 回同一 requestId 的 models-described */
   | { type: 'describe-models'; requestId: string; models: ModelQuery[] }
   /** 关闭全部会话后退出进程（进程级，不带 identity） */
@@ -201,13 +219,19 @@ export type AgentWorkerEvent =
     }
   /** 调用方已放弃（工具被中止或等待超时），Main 应中止对应的 host 调用 */
   | { type: 'host-cancel'; identity: SessionIdentity; callId: string }
-  /**
-   * 审批门在等人确认：Main 记下待审批并推 `sessions:approval-request`。
-   * 紧接着还有同一 requestId 的 approval_request 会话事件，供时间线关联工具调用。
-   */
+  /** @deprecated 旧协议兼容；Main 忽略，不推送审批或答复执行许可。 */
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
+  /** 建议请求的结果：text 为空表示没有明确建议或生成失败；Main 只认仍挂在表里的 requestId */
+  | {
+      type: 'suggestion-result';
+      identity: SessionIdentity;
+      requestId: string;
+      roundId: number;
+      round: number;
+      text: string;
+    }
   /** describe-models 的回答（进程级） */
   | { type: 'models-described'; requestId: string; result: ModelsDescribedResult }
   /** 诊断日志（进程级） */
@@ -271,6 +295,16 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
     case 'set-approval-mode':
       return isApprovalMode(record.mode)
         ? { type: 'set-approval-mode', identity, mode: record.mode }
+        : null;
+    case 'suggest-reply': {
+      const { requestId, roundId, round } = record;
+      return isNonEmptyString(requestId) && isPositiveInteger(roundId) && isPositiveInteger(round)
+        ? { type: 'suggest-reply', identity, requestId, roundId, round }
+        : null;
+    }
+    case 'cancel-suggestion':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'cancel-suggestion', identity, requestId: record.requestId }
         : null;
     case 'prompt': {
       const { text } = record;
@@ -349,6 +383,16 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       const { error, fatal } = record;
       return typeof error === 'string' && typeof fatal === 'boolean'
         ? { type: 'session-error', identity, error, fatal }
+        : null;
+    }
+    case 'suggestion-result': {
+      const { requestId, roundId, round, text } = record;
+      return isNonEmptyString(requestId) &&
+        isPositiveInteger(roundId) &&
+        isPositiveInteger(round) &&
+        typeof text === 'string' &&
+        text.length <= MAX_REPLY_SUGGESTION_CHARS
+        ? { type: 'suggestion-result', identity, requestId, roundId, round, text }
         : null;
     }
     case 'approval-request': {
@@ -446,13 +490,19 @@ function isBoolean(value: unknown): value is boolean {
 function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { providerId, api, baseUrl, apiKey, modelId, thinking, reasoning } = record;
+  const { providerId, api, baseUrl, apiKey, modelId, thinking, fastMode, reasoning } = record;
   if (!isNonEmptyString(providerId) || !isNonEmptyString(api) || !isNonEmptyString(modelId)) {
     return null;
   }
   if (!isOptional(baseUrl, isNonEmptyString) || !isOptional(apiKey, isNonEmptyString)) return null;
   const level = normalizeThinkingLevel(thinking);
-  if ((thinking !== undefined && !level) || !isOptional(reasoning, isBoolean)) return null;
+  if (
+    (thinking !== undefined && !level) ||
+    !isOptional(fastMode, isBoolean) ||
+    !isOptional(reasoning, isBoolean)
+  ) {
+    return null;
+  }
   return {
     providerId,
     api,
@@ -460,6 +510,7 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(baseUrl !== undefined ? { baseUrl: baseUrl as string } : {}),
     ...(apiKey !== undefined ? { apiKey: apiKey as string } : {}),
     ...(level ? { thinking: level } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
     ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
   };
 }
@@ -555,6 +606,13 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
   const { cwd, sessionFile, worker, shellPath, inPlace } = record;
+  const compactionStrategy =
+    record.compactionStrategy === undefined
+      ? undefined
+      : isCompactionStrategy(record.compactionStrategy)
+        ? record.compactionStrategy
+        : null;
+  if (compactionStrategy === null) return null;
   const instructionFile =
     record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
   if (
@@ -588,6 +646,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
         }
       : {}),
     ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
+    ...(compactionStrategy ? { compactionStrategy } : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
   };
 }
@@ -645,6 +704,26 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
   },
   agent_settled: ({ aborted }) =>
     typeof aborted === 'boolean' ? { type: 'agent_settled', aborted } : null,
+  tool_notice: ({ toolCallId, toolName, kind }) => {
+    if (!isNonEmptyString(toolCallId) || toolCallId.length > 256 || !isString(toolName)) {
+      return null;
+    }
+    // 固定标签 + 类别白名单：通知不接收命令、路径、MCP 名称或任意动作描述。
+    const kinds: Record<string, string> = {
+      bash: 'command',
+      powershell: 'command',
+      run_checks: 'command',
+      write: 'file-write',
+      edit: 'file-edit',
+      apply_patch: 'file-edit',
+      mcp: 'mcp',
+    };
+    if (!Object.hasOwn(kinds, toolName) || kinds[toolName] !== kind) return null;
+    if (kind !== 'command' && kind !== 'file-write' && kind !== 'file-edit' && kind !== 'mcp') {
+      return null;
+    }
+    return { type: 'tool_notice', toolCallId, toolName, kind };
+  },
   approval_request: ({ requestId, toolCallId, toolName, args, reason }) => {
     if (!isNonEmptyString(requestId) || !isString(toolCallId) || !isString(toolName)) return null;
     if (!isOptional(reason, isString)) return null;
@@ -677,6 +756,15 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
   error: ({ source, message }) => {
     if (source !== 'model' && source !== 'compaction' && source !== 'host') return null;
     return isString(message) ? { type: 'error', source, message } : null;
+  },
+  warning: ({ source, reason }) => {
+    if (source !== 'magic-context') return null;
+    return reason === 'startup' ||
+      reason === 'runtime' ||
+      reason === 'context' ||
+      reason === 'budget'
+      ? { type: 'warning', source, reason }
+      : null;
   },
 };
 

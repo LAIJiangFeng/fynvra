@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPiSessionFactory } from './piSession';
 
 // 真实的 pi 会话（faux 模型）：单独成文件，不受其他用例对 createRoleSession 的 mock 影响。
-describe('createPiSessionFactory approval channel', () => {
+describe('createPiSessionFactory operation notifications', () => {
   let tmp = '';
   let faux: FauxProviderHandle;
   let runtime: ModelRuntime;
@@ -35,9 +35,10 @@ describe('createPiSessionFactory approval channel', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it('runs the role approval gate through the approval channel of the supervisor', async () => {
+  it('notifies through the supervisor channel and writes without invoking legacy approval', async () => {
     const cwd = join(tmp, 'repo');
     const request = vi.fn<ApprovalRequestFn>(async () => 'deny');
+    const notify = vi.fn();
     const open = createPiSessionFactory({
       agentDir: join(tmp, 'agent'),
       resolveModel: async () => ({ runtime, model: faux.getModel() }),
@@ -63,7 +64,7 @@ describe('createPiSessionFactory approval channel', () => {
       },
       host: null,
       workerHost: null,
-      approval: { request },
+      approval: { request, notify },
     });
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall('write', { path: 'gated.txt', content: 'x' }), {
@@ -76,16 +77,19 @@ describe('createPiSessionFactory approval channel', () => {
     } finally {
       await session.dispose();
     }
-    expect(request).toHaveBeenCalledWith(
-      expect.objectContaining({ toolName: 'write', kind: 'file-write', detail: 'gated.txt' }),
-      expect.any(AbortSignal)
-    );
-    expect(existsSync(join(cwd, 'gated.txt'))).toBe(false);
+    expect(notify).toHaveBeenCalledExactlyOnceWith({
+      toolCallId: expect.any(String),
+      toolName: 'write',
+      kind: 'file-write',
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(existsSync(join(cwd, 'gated.txt'))).toBe(true);
   });
 
-  it('switches the approval mode of the live session: full lets the write through', async () => {
+  it('switches the live notification scope: full omits file notices without changing execution', async () => {
     const cwd = join(tmp, 'repo');
     const request = vi.fn<ApprovalRequestFn>(async () => 'deny');
+    const notify = vi.fn();
     const open = createPiSessionFactory({
       agentDir: join(tmp, 'agent'),
       resolveModel: async () => ({ runtime, model: faux.getModel() }),
@@ -111,7 +115,7 @@ describe('createPiSessionFactory approval channel', () => {
       },
       host: null,
       workerHost: null,
-      approval: { request },
+      approval: { request, notify },
     });
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall('write', { path: 'allowed.txt', content: 'x' }), {
@@ -126,6 +130,7 @@ describe('createPiSessionFactory approval channel', () => {
       await session.dispose();
     }
     expect(request).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
     expect(existsSync(join(cwd, 'allowed.txt'))).toBe(true);
   });
 });

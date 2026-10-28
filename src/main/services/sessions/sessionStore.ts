@@ -192,12 +192,13 @@ function parseStoredSession(raw: unknown): StoredSession | null {
   if (record.model !== undefined) {
     const model = asRecord(record.model);
     if (!isNonEmptyString(model?.providerId) || !isNonEmptyString(model?.modelId)) return null;
-    // 不认识的档位（如更新版本写的）只丢档位，不丢会话：回到模型的默认档位
-    const { thinking } = model;
+    // 不认识的档位 / Fast（如更新版本写的）只丢该字段，不丢会话：回到模型的默认档位、关闭 Fast
+    const { thinking, fastMode } = model;
     session.model = {
       providerId: model.providerId,
       modelId: model.modelId,
       ...(isThinkingLevel(thinking) ? { thinking } : {}),
+      ...(fastMode === true ? { fastMode: true } : {}),
     };
   }
   // 归档时间读不懂只丢时间（回到会话列表），不丢会话

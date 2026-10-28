@@ -7,15 +7,18 @@ import {
 import { asRecord } from '../guards';
 import type { ProviderApi } from './llm';
 
+/** waiting-approval 仅用于读取旧记录；新版按实际 live 状态恢复，不再生成。 */
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
 /**
- * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位。
+ * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位与 Fast。
  * 档位缺省时 worker 依次取角色的 model.thinking、模型的默认档位（{@link pickThinkingLevel}）。
+ * fastMode 是会话自己的请求选项，与档位独立；只对 OpenAI Responses / Chat Completions 生效，缺省关闭。
  */
 export interface SessionModelRef {
   providerId: string;
   modelId: string;
   thinking?: ThinkingLevel;
+  fastMode?: boolean;
 }
 export interface SessionSummary {
   id: string;
@@ -30,7 +33,7 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;
-  /** 审批档位：创建时取角色的值，之后是会话自己的设置（`sessions:set-approval-mode`，运行中也能切） */
+  /** 兼容旧字段：操作通知范围，创建时取角色值，可在运行中切换，不改变执行权限。 */
   approvalMode: ApprovalMode;
   /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
   branch?: string;
@@ -94,6 +97,52 @@ export interface ApprovalRequest {
 export interface SessionEventEnvelope {
   sessionId: string;
   event: FynvraSessionEvent;
+}
+
+/** 输入框灰字回复建议的最长字符数：只放一行短的下一句，不做长文或候选列表 */
+export const MAX_REPLY_SUGGESTION_CHARS = 200;
+/**
+ * 一轮正常结束后生成的一条「用户下一句话」建议。`roundId` 是该轮 settled 事件的会话级 seq，
+ * Renderer 只回传它，Main / worker 用它拒绝旧轮或别的会话的回包。建议只存在于 Renderer 内存，
+ * 不写入 pi jsonl，也不等于输入框草稿
+ */
+export interface ReplySuggestion {
+  sessionId: string;
+  roundId: number;
+  text: string;
+}
+
+/**
+ * 把模型输出收敛成一条可展示的建议：取第一行非空文本，去掉明确的列表 / 标题前缀、
+ * 整句外围的引号或成对 Markdown 包裹，压成一行并按 {@link MAX_REPLY_SUGGESTION_CHARS} 截断。
+ * 只清理可识别的外围标记，不全局删除 `_`、`*`、`#` 等字符，避免把 `src/foo_bar.ts` 或 `*.ts` 改坏。
+ * 空串表示「没有明确建议」。Main 与 worker 都过一遍，不依赖某一端单独清洗。
+ */
+export function normalizeReplySuggestion(raw: string): string {
+  const line = raw
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part !== '');
+  if (!line || line.includes('```')) return '';
+  let text = line
+    .replace(/^(?:suggestion|reply|建议|回复)\s*[:：]\s*/i, '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^(?:[-*•>]|\d+[.)])\s+/, '')
+    .trim();
+  // 只去整句外围的成对引号；内部内容（包括文件名、标识符）保持原样
+  text = text.replace(/^(["'“”‘’])([\s\S]*)\1$/, '$2');
+  // 只去整句外围的成对粗体 / 斜体星号；中间或标识符里的 * 不碰
+  text = text.replace(/^(\*\*|\*)([\s\S]+)\1$/, '$2');
+  // 成对反引号只在包住整句时当作 Markdown 外壳去掉；句中的命令 / 标识符不动
+  text = text
+    .replace(/^`([^`\n]+)`$/, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (text.length > MAX_REPLY_SUGGESTION_CHARS) {
+    text = `${text.slice(0, MAX_REPLY_SUGGESTION_CHARS - 1).trimEnd()}…`;
+  }
+  return text;
 }
 
 export function isChatImageMimeType(value: unknown): value is ChatImageMimeType {

@@ -9,7 +9,6 @@ import type {
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
-  AgentApprovalRequest,
   AgentCommand,
   AgentMcpServer,
   AgentRoleOption,
@@ -29,13 +28,16 @@ import type {
   ChatMessage,
   ModelOptions,
   ModelThinkingCapability,
+  ReplySuggestion,
   SessionEventEnvelope,
   SessionModelRef,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
+import { normalizeReplySuggestion } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
+import type { CompactionStrategy } from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
@@ -85,6 +87,8 @@ export interface AgentHostDeps {
   resolveResources?(role: Role): Promise<RoleResources>;
   /** 会话 bash 工具用的 shell（生产为 createShellPathResolver）；缺省或返回 undefined 时由 pi 自己找 */
   resolveShellPath?(): Promise<string | undefined>;
+  /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 native */
+  resolveCompactionStrategy?(): CompactionStrategy;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   workerOptions?: Pick<
     WorkerClientOptions,
@@ -117,9 +121,10 @@ export interface RespondApprovalInput {
   decision: ApprovalDecision;
 }
 
-/** 旁路观察者（桌面通知用）：拿到的与推给 Renderer 的 sessions:event / sessions:approval-request 相同 */
+/** 旁路观察者（桌面通知用）：与 Renderer 共用 sessions:event 的会话级 seq。 */
 export interface SessionObserver {
   event?(envelope: SessionEventEnvelope): void;
+  /** @deprecated 旧观察者形状保留；新版不再发布审批请求。 */
   approval?(request: ApprovalRequest): void;
   /** Main-only scheduling signals; automatic prompts do not emit `prompt`. */
   activity?(sessionId: string, action: 'prompt' | 'abort' | 'idle'): void;
@@ -151,6 +156,15 @@ export interface AgentHostService extends AgentHost {
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
   /**
+   * 为刚正常结束的一轮生成一条输入框灰字建议（`roundId` = settled 事件的会话级 seq）。
+   * 只接受当前空闲、未归档、没有待审批的会话；同一轮只请求一次（含空结果），并发有界，
+   * 失败 / 超时 / 旧轮 / 旧 generation 一律返回空建议，不影响主对话
+   */
+  suggestReply(input: {
+    sessionId: string;
+    roundId: number;
+  }): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>>;
+  /**
    * 换会话的模型 / 思考档位：解析成功后更新记录（落 sessions.json），会话在 worker 里时发 set-model，
    * 下一次 prompt 起生效。运行中拒绝；解析失败返回可读错误，记录不变。
    */
@@ -158,7 +172,7 @@ export interface AgentHostService extends AgentHost {
   /** 启用且有 key 的服务与模型，每个模型带 worker 按 pi 目录给出的思考档位；传 workspaceId 时带上次用过的模型 */
   modelOptions(input: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
   /**
-   * 换会话的审批档位：更新记录（落 sessions.json），会话在 worker 里时发 set-approval-mode。
+   * 换会话的通知范围：沿用旧字段和通道名，更新记录并发 set-approval-mode。
    * 运行中也可以切（即时生效，这是与换模型的区别）；会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
@@ -166,7 +180,7 @@ export interface AgentHostService extends AgentHost {
   refreshBranches(): void;
   /** 会话的 IPC 视图；不存在时 undefined */
   get(sessionId: string): SessionSummary | undefined;
-  /** 订阅推给 Renderer 的会话事件与审批请求；观察者抛异常只记日志，不影响推送。返回取消订阅 */
+  /** 订阅会话事件（含单向工具通知）；观察者出错不影响执行。返回取消订阅。 */
   observe(observer: SessionObserver): () => void;
 }
 
@@ -184,6 +198,8 @@ interface LiveSession {
   workerSeq: number;
   /** 推给 Renderer 的会话级 seq：跨 generation 单调递增，Renderer 的「过期 seq 丢弃」在重启后依然成立 */
   sessionSeq: number;
+  /** Warnings preserve suggestion validity but still participate in ordered delivery. */
+  activitySeq: number;
   running: boolean;
   /** 还在途的 prompt（spawn / 发出之前）：这期间不能换模型，否则 spawn 用的还是旧模型 */
   prompting: number;
@@ -198,12 +214,22 @@ interface LiveSession {
   lastError?: string;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
+  /** 最近一次正常结束（非 aborted）的 agent_settled 的会话级 seq；新一轮开始 / 换模型时清 0 */
+  lastSettledSeq: number;
+  /** 当前 generation 里正常结束的回合数：与 worker 同步计数，用于双重核对轮次 */
+  settledRounds: number;
+  /** 最近一次已发起建议请求的 settled 轮次：同一轮不再请求（含空结果 / 失败） */
+  suggestedRound: number;
 }
 
-interface PendingApproval {
+interface PendingSuggestion {
   sessionId: string;
   generation: number;
-  expiresAt: number;
+  roundId: number;
+  /** worker 侧的回合计数，回包必须原样带回 */
+  round: number;
+  timer: ReturnType<typeof setTimeout>;
+  resolve(result: Result<{ suggestion: ReplySuggestion | null }>): void;
 }
 
 type Result<T extends object = object> = IpcResult<T>;
@@ -214,6 +240,10 @@ const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
 const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
+/** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
+const SUGGESTION_TIMEOUT_MS = 10_000;
+/** 同时最多几条建议请求：辅助功能不能与主对话争资源 */
+const MAX_CONCURRENT_SUGGESTIONS = 2;
 /** dispatch_task 认不出模型时错误里最多列出的可选模型数 */
 const MODEL_OPTIONS_SHOWN = 30;
 
@@ -223,7 +253,7 @@ const MODEL_OPTIONS_SHOWN = 30;
  * - 会话注册表在 sessions.json，正文在 pi jsonl；会话首次使用时才在 worker 里 spawn（新 generation）；
  * - worker 事件已由 workerClient 收窄，这里再丢弃过期 generation / 重复 seq，改写为会话级 seq 后推给 Renderer；
  * - 编排 / worker 工具的 host-invoke 交给注入的 OrchestrationHost / WorkerHost 工厂执行；
- * - 审批门的 approval-request 记为待审批并推给 Renderer，respondApproval 只回给提出请求的 generation；
+ * - tool_notice 经同一事件序列单向送通知；旧审批事件忽略，不保存待审批或重放动作；
  * - worker 崩溃后 generation+1 重新 spawn 崩溃前的会话，进行中的回合按中止处理。
  */
 export function createAgentHost(deps: AgentHostDeps): AgentHostService {
@@ -234,9 +264,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.resolveResources ??
     (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const resolveShellPath = deps.resolveShellPath ?? (async () => undefined);
+  const resolveCompactionStrategy = deps.resolveCompactionStrategy ?? (() => 'native' as const);
   const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
-  const approvals = new Map<string, PendingApproval>();
+  /** 在途的建议请求：requestId → 结算；同时用它限制并发并丢弃旧回包 */
+  const suggestions = new Map<string, PendingSuggestion>();
+  let suggestionSeq = 0;
   /** 模型的思考档位：pi 目录随 worker 版本固定，同一（协议, 模型, reasoning 标记）的回答不会变 */
   const capabilities = new Map<string, ModelThinkingCapability>();
   /** 等 worker 回答的 describe-models：requestId → 结算 */
@@ -251,7 +284,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const observers = new Set<SessionObserver>();
   const failureListeners = new Set<() => void>();
   const roundWaiters = new Set<() => void>();
-  const roundQueue = new Map<string, Promise<Result>>();
+  /** Removable queue entries preserve ordering when a waiting call is cancelled. */
+  const roundQueue = new Map<string, Set<symbol>>();
 
   const wakeRounds = () => {
     for (const wake of [...roundWaiters]) wake();
@@ -291,6 +325,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         spec: null,
         workerSeq: 0,
         sessionSeq: 0,
+        activitySeq: 0,
         running: false,
         prompting: 0,
         activity: 0,
@@ -298,6 +333,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         calls: new Map(),
         workerHost: null,
         roundEpoch: 0,
+        lastSettledSeq: 0,
+        settledRounds: 0,
+        suggestedRound: 0,
       };
       live.set(sessionId, state);
     }
@@ -326,7 +364,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   /** IPC 视图：去掉内部字段，带上分支 */
   function summaryOf(stored: StoredSession): SessionSummary {
-    return withBranch(toSummary(stored));
+    const summary = toSummary(stored);
+    if (summary.status === 'waiting-approval') {
+      const state = live.get(stored.id);
+      summary.status = state?.running || (state?.prompting ?? 0) > 0 ? 'running' : 'idle';
+    }
+    return withBranch(summary);
   }
 
   /**
@@ -375,6 +418,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   function deliver(sessionId: string, state: LiveSession, event: FynvraSessionEventBody): void {
     state.transcript?.append(event);
     state.sessionSeq += 1;
+    if (event.type !== 'warning') state.activitySeq = state.sessionSeq;
     const envelope: SessionEventEnvelope = {
       sessionId,
       event: { ...event, seq: state.sessionSeq } as FynvraSessionEvent,
@@ -383,24 +427,64 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     tellObservers((observer) => observer.event?.(envelope));
   }
 
-  /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求 */
+  /** 会话不再在 worker 里：中止它进行中的 host 调用，丢弃建议 */
   function detach(sessionId: string, state: LiveSession): void {
     state.spawned = false;
     state.running = false;
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
+    cancelSuggestions(sessionId, false);
     for (const controller of state.calls.values()) controller.abort();
     state.calls.clear();
-    for (const [requestId, pending] of approvals) {
-      if (pending.sessionId === sessionId) approvals.delete(requestId);
-    }
   }
 
   function send(command: AgentCommand): boolean {
     return client.send(command);
   }
 
+  /** 结算一条建议请求：删表、清定时器，只结算一次 */
+  function settleSuggestion(
+    requestId: string,
+    result: Result<{ suggestion: ReplySuggestion | null }>
+  ): void {
+    const pending = suggestions.get(requestId);
+    if (!pending) return;
+    suggestions.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(result);
+  }
+
+  /**
+   * 丢弃一个会话所有在途建议：立即结算为空（不阻塞调用方），并让 worker 中止请求。
+   * 会话关闭 / 崩溃时 notifyWorker 为 false（worker 进程已经不在了）
+   */
+  function cancelSuggestions(sessionId: string, notifyWorker: boolean): void {
+    for (const [requestId, pending] of suggestions) {
+      if (pending.sessionId !== sessionId) continue;
+      const command: AgentCommand = {
+        type: 'cancel-suggestion',
+        identity: { sessionId, generation: pending.generation },
+        requestId,
+      };
+      if (notifyWorker) send(command);
+      settleSuggestion(requestId, { ok: true, suggestion: null });
+    }
+  }
+
+  /** 新轮 / 换模型 / 停止 / 删除：旧轮的建议不能再出现 */
+  function invalidateSuggestion(sessionId: string, state: LiveSession): void {
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
+    cancelSuggestions(sessionId, state.spawned);
+  }
+
   function spawnWith(sessionId: string, state: LiveSession, spec: SpawnSessionSpec): boolean {
     state.generation += 1;
     state.workerSeq = 0;
+    // worker 里的回合计数从 0 重新开始，Main 同步重置（建议请求的 round 要两边一致）
+    state.settledRounds = 0;
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
     state.spec = spec;
     state.spawned = send({ type: 'spawn-session', identity: identityOf(sessionId, state), spec });
     return state.spawned;
@@ -418,12 +502,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
+      const compactionStrategy = resolveCompactionStrategy();
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
         ok: true,
         spec: {
-          // 审批门按会话自己的档位建（创建时取自角色，之后可能被用户切过）
+          // 通知范围取自会话记录（创建时取角色默认值）。
           role: { ...role, approvalMode: stored.approvalMode },
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
@@ -435,6 +520,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           roles,
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
+          ...(compactionStrategy !== 'native' ? { compactionStrategy } : {}),
           ...(inPlace ? { inPlace: true } : {}),
         },
       };
@@ -574,15 +660,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     for (const settle of [...describing.values()]) settle(fail(error));
   }
 
-  /** 正在跑一轮、等审批，或有 prompt 在途：这时换模型，spawn / 当前回合用的就对不上记录了 */
+  /** 正在跑一轮或有 prompt 在途：换模型会使当前回合与记录不一致。 */
   function isBusy(stored: StoredSession): boolean {
     const state = live.get(stored.id);
-    return (
-      stored.status === 'running' ||
-      stored.status === 'waiting-approval' ||
-      state?.running === true ||
-      (state?.prompting ?? 0) > 0
-    );
+    return stored.status === 'running' || state?.running === true || (state?.prompting ?? 0) > 0;
   }
 
   async function loadTranscript(stored: StoredSession): Promise<Transcript> {
@@ -623,15 +704,22 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         // 过期 generation、重复或乱序的 seq 一律丢弃
         if (!state || event.seq <= state.workerSeq) return;
         state.workerSeq = event.seq;
+        // 历史 / 旧版本的审批事件不重建等待，也不能自动允许或重放动作。
+        if (event.event.type === 'approval_request') return;
         const { sessionId } = event.identity;
         if (event.event.type === 'error') state.lastError = event.event.message;
         if (event.event.type === 'agent_settled' && event.event.aborted) {
           interrupted(sessionId, state, 'Worker attempt interrupted: the agent run was aborted');
+          state.lastSettledSeq = 0;
+          cancelSuggestions(sessionId, state.spawned);
         }
         deliver(sessionId, state, event.event);
         if (event.event.type === 'agent_settled') {
-          for (const [requestId, pending] of approvals) {
-            if (pending.sessionId === sessionId) approvals.delete(requestId);
+          // 不再有进行中的回合：状态事件可能稍后才到，建议请求不必等它
+          state.running = false;
+          if (!event.event.aborted) {
+            state.lastSettledSeq = state.sessionSeq;
+            state.settledRounds += 1;
           }
           // 这一轮里 agent 可能切过分支：不等节流，重读一次
           const stored = deps.store.get(sessionId);
@@ -642,15 +730,23 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       case 'session-status': {
         const state = currentOf(event.identity);
         if (!state) return;
-        state.running = event.status === 'running' || event.status === 'waiting-approval';
-        if (event.status === 'error') {
+        const status =
+          event.status === 'waiting-approval'
+            ? state.running || state.prompting > 0
+              ? 'running'
+              : deps.store.get(event.identity.sessionId)?.status === 'error'
+                ? 'error'
+                : 'idle'
+            : event.status;
+        state.running = status === 'running';
+        if (status === 'error') {
           interrupted(
             event.identity.sessionId,
             state,
             `Worker attempt interrupted: ${state.lastError ?? 'the agent run ended with an error'}`
           );
         }
-        setStatus(event.identity.sessionId, event.status);
+        setStatus(event.identity.sessionId, status);
         return;
       }
       case 'host-invoke':
@@ -662,21 +758,52 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ?.abort();
         return;
       case 'approval-request':
-        // 过期 generation 的请求没有人在等，不推给 Renderer
-        if (!currentOf(event.identity)) return;
-        announceApproval(event.identity, event.request);
+        // 兼容旧协议，但不发布可操作请求或回复执行许可。
         return;
       case 'session-error': {
         const state = currentOf(event.identity);
         if (!state) return;
         const { sessionId } = event.identity;
         state.lastError = event.error;
+        state.lastSettledSeq = 0;
+        cancelSuggestions(sessionId, false);
         if (event.fatal) {
           detach(sessionId, state);
           interrupted(sessionId, state, `Worker attempt interrupted: ${event.error}`);
         }
         deliver(sessionId, state, { type: 'error', source: 'host', message: event.error });
         setStatus(sessionId, 'error');
+        return;
+      }
+      case 'suggestion-result': {
+        const pending = suggestions.get(event.requestId);
+        const { sessionId, generation } = event.identity;
+        // requestId / generation / 会话 / 轮次任一对不上就是过期回包
+        if (
+          !pending ||
+          pending.sessionId !== sessionId ||
+          pending.generation !== generation ||
+          pending.roundId !== event.roundId ||
+          pending.round !== event.round
+        ) {
+          return;
+        }
+        const stored = deps.store.get(sessionId);
+        const state = live.get(sessionId);
+        const text = normalizeReplySuggestion(event.text);
+        const current =
+          stored !== undefined &&
+          stored.archivedAt === undefined &&
+          stored.status !== 'error' &&
+          state !== undefined &&
+          state.lastSettledSeq === event.roundId &&
+          state.activitySeq === event.roundId &&
+          state.settledRounds === event.round &&
+          !state.running;
+        settleSuggestion(event.requestId, {
+          ok: true,
+          suggestion: current && text ? { sessionId, roundId: event.roundId, text } : null,
+        });
         return;
       }
       case 'models-described':
@@ -724,25 +851,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // 结果无法跨进程传递（如带函数）时至少让工具拿到错误，而不是等到超时
       send({ ...command, result: fail(`${method} returned a result that cannot be delivered`) });
     }
-  }
-
-  /** 审批门的请求：记为待审批，推给 Renderer 的审批条（kind / 标题 / 详情 / 到期时间以 worker 为准） */
-  function announceApproval(identity: SessionIdentity, request: AgentApprovalRequest): void {
-    const { sessionId, generation } = identity;
-    const { requestId, kind, title, detail, protectedAction, expiresAt } = request;
-    approvals.set(requestId, { sessionId, generation, expiresAt });
-    const pushed: ApprovalRequest = {
-      id: requestId,
-      sessionId,
-      kind,
-      title: protectedAction
-        ? translate('agent.protectedTitle', { title, action: protectedAction })
-        : title,
-      detail,
-      expiresAt,
-    };
-    deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, pushed);
-    tellObservers((observer) => observer.approval?.(pushed));
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
@@ -803,6 +911,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
     const state = liveOf(sessionId);
     const activity = state.activity;
+    // 自动继续也算新一轮：旧轮的建议不能再出现 / 返回
+    invalidateSuggestion(sessionId, state);
     state.prompting += 1;
     try {
       const spawned = await ensureSpawned(stored);
@@ -829,22 +939,80 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
+  /**
+   * 在 Renderer 已确认输入框空闲、没有队列 / 待审批 / 图片 / 草稿之后，为刚结束的一轮生成建议。
+   * 这里再核对 Main 记录的会话状态与轮次；worker 还会在生成前后核对自己的空闲状态与 generation。
+   * 任何失败、超时、旧轮都返回空建议，不向 Renderer 抛错
+   */
+  async function suggestReply({
+    sessionId,
+    roundId,
+  }: {
+    sessionId: string;
+    roundId: number;
+  }): Promise<Result<{ suggestion: ReplySuggestion | null }>> {
+    const empty: Result<{ suggestion: ReplySuggestion | null }> = {
+      ok: true,
+      suggestion: null,
+    };
+    const stored = deps.store.get(sessionId);
+    if (!stored || stored.archivedAt !== undefined) return empty;
+    // 状态事件可能比 Renderer 的请求晚到：真正权威的是本轮 settled 的 seq 与运行态；
+    // 出错或仍在运行的会话不生成。
+    if (stored.status === 'error') return empty;
+    const state = live.get(sessionId);
+    if (!state?.spawned || state.running || state.prompting > 0) return empty;
+    if (state.lastSettledSeq !== roundId || state.activitySeq !== roundId) return empty;
+    const round = state.settledRounds;
+    if (round <= 0) return empty;
+    // 每轮只发起一次，空结果 / 失败也算（避免 Renderer 重渲染时反复请求）
+    if (state.suggestedRound === roundId) return empty;
+    if (suggestions.size >= MAX_CONCURRENT_SUGGESTIONS) return empty;
+
+    const requestId = `suggest-${++suggestionSeq}`;
+    const identity = identityOf(sessionId, state);
+    state.suggestedRound = roundId;
+    const answer = new Promise<Result<{ suggestion: ReplySuggestion | null }>>((resolve) => {
+      const timer = setTimeout(() => {
+        send({ type: 'cancel-suggestion', identity, requestId });
+        settleSuggestion(requestId, empty);
+      }, SUGGESTION_TIMEOUT_MS);
+      suggestions.set(requestId, {
+        sessionId,
+        generation: identity.generation,
+        roundId,
+        round,
+        timer,
+        resolve,
+      });
+    });
+    if (!send({ type: 'suggest-reply', identity, requestId, roundId, round })) {
+      settleSuggestion(requestId, empty);
+    }
+    return answer;
+  }
+
   async function deliverMessage(
     type: 'prompt' | 'steer',
     sessionId: string,
     text: string,
     images?: ChatImage[],
-    freshRound = false
+    freshRound = false,
+    signal?: AbortSignal
   ): Promise<Result> {
+    if (signal?.aborted) return fail('feedback delivery was aborted');
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
+    // 用户开始新一轮（或插话）：旧轮的建议立即作废，worker 里的在途请求也中止
+    invalidateSuggestion(sessionId, pending);
     const epoch = pending.roundEpoch;
     pending.activity += 1;
     tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
     pending.prompting += 1;
     try {
       const spawned = await ensureSpawned(stored);
+      if (signal?.aborted) return fail('feedback delivery was aborted');
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
       if (freshRound && (state.roundEpoch !== epoch || !deps.store.get(sessionId))) {
@@ -882,32 +1050,42 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /** pi followUp stays in the old run; keep fresh-attempt feedback in Main until it really ends. */
-  function promptWorkerRound(sessionId: string, text: string): Promise<Result> {
+  async function promptWorkerRound(
+    sessionId: string,
+    text: string,
+    signal?: AbortSignal
+  ): Promise<Result> {
+    if (signal?.aborted) return fail('feedback delivery was aborted');
     const state = liveOf(sessionId);
     const epoch = state.roundEpoch;
-    const previous = roundQueue.get(sessionId) ?? Promise.resolve({ ok: true } as const);
-    const next = previous.then(async (): Promise<Result> => {
+    const queue = roundQueue.get(sessionId) ?? new Set<symbol>();
+    const turn = Symbol();
+    queue.add(turn);
+    roundQueue.set(sessionId, queue);
+    try {
       for (;;) {
+        if (signal?.aborted) return fail('feedback delivery was aborted');
         const stored = deps.store.get(sessionId);
         if (!stored) return fail(translate('common.sessionNotFound'));
         if (state.roundEpoch !== epoch)
           return fail('the worker was interrupted before feedback delivery');
-        if (!isBusy(stored)) break;
+        if (queue.values().next().value === turn && !isBusy(stored)) break;
         await new Promise<void>((resolve) => {
           const wake = () => {
             roundWaiters.delete(wake);
+            signal?.removeEventListener('abort', wake);
             resolve();
           };
           roundWaiters.add(wake);
+          signal?.addEventListener('abort', wake, { once: true });
         });
       }
-      return deliverMessage('prompt', sessionId, text, undefined, true);
-    });
-    roundQueue.set(sessionId, next);
-    void next.finally(() => {
-      if (roundQueue.get(sessionId) === next) roundQueue.delete(sessionId);
-    });
-    return next;
+      return await deliverMessage('prompt', sessionId, text, undefined, true, signal);
+    } finally {
+      queue.delete(turn);
+      if (queue.size === 0) roundQueue.delete(sessionId);
+      wakeRounds();
+    }
   }
 
   /**
@@ -928,7 +1106,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!current) return fail(translate('common.sessionNotFound'));
     if (isBusy(current)) return fail(translate('agent.switchWhileRunning'));
 
-    const next = sessionModelOf(resolved.ref, model.thinking);
+    const next = sessionModelOf(resolved.ref, model.thinking, resolved.model.fastMode);
     const updated =
       deps.store.update(sessionId, {
         model: next,
@@ -937,6 +1115,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ...(current.status === 'error' ? { status: 'idle' as const } : {}),
       }) ?? current;
     const state = live.get(sessionId);
+    if (state) invalidateSuggestion(sessionId, state);
     // 缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），重建时不会退回旧模型
     const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
     if (state?.spec) state.spec = { ...state.spec, model: spec };
@@ -952,7 +1131,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /**
-   * 换审批档位：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
+   * 换通知范围：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
    * 重建时不会退回旧档位；会话在 worker 里时再发 set-approval-mode，不论是否在跑。
    */
   async function setApprovalMode({
@@ -1050,7 +1229,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
-      // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
+      // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型、思考档位与 Fast
       let requested: SessionModelRef | undefined;
       if (input.model !== undefined) {
         const picked = await pickModel(input.model);
@@ -1082,7 +1261,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: sessionModelOf(resolved.ref, requested?.thinking),
+        model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
         // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
         approvalMode:
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
@@ -1100,7 +1279,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     async promptSession(sessionId, text, options) {
       const result = options?.freshAttempt
-        ? await promptWorkerRound(sessionId, text)
+        ? await promptWorkerRound(sessionId, text, options.signal)
         : await prompt(sessionId, text);
       return result.ok ? { ok: true } : result;
     },
@@ -1185,7 +1364,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const requested = input.model ?? modelRefOf(role);
       const resolved = await deps.models.resolve(requested && bareRef(requested));
       if (!resolved.ok) return resolved;
-      const model = sessionModelOf(resolved.ref, requested?.thinking);
+      const model = sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -1209,9 +1388,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     prompt,
     promptWhenIdle,
     steer,
+    suggestReply,
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
+      invalidateSuggestion(sessionId, state);
       state.activity += 1;
       state.roundEpoch += 1;
       wakeRounds();
@@ -1234,20 +1415,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         return fail(translate('agent.historyFailed', { error: errorMessage(error) }));
       }
     },
-    async respondApproval({ sessionId, requestId, decision }) {
-      const pending = approvals.get(requestId);
-      if (!pending || pending.sessionId !== sessionId)
-        return fail(translate('agent.approvalNotFound'));
-      approvals.delete(requestId);
-      if (now() > pending.expiresAt) return fail(translate('agent.approvalExpired'));
-      const state = live.get(sessionId);
-      if (!state?.spawned || state.generation !== pending.generation) {
-        return fail(translate('agent.approvalStale'));
-      }
-      const identity = { sessionId, generation: pending.generation };
-      return send({ type: 'respond-approval', identity, requestId, decision })
-        ? { ok: true }
-        : fail(translate('agent.workerUnavailable'));
+    async respondApproval() {
+      // 保留 IPC 形状；旧请求不能在升级后触发动作。
+      return fail(translate('agent.approvalNotFound'));
     },
     setModel,
     modelOptions,
@@ -1287,17 +1457,26 @@ function qualifiedModelId({ providerId, modelId }: ModelRef): string {
   return `${providerId}/${modelId}`;
 }
 
-/** 交给解析器的引用：只有服务 id 与模型 id，思考档位由会话记录另外带 */
-function bareRef({ providerId, modelId }: ModelRef): ModelRef {
-  return { providerId, modelId };
+/** 交给解析器的引用：服务 id、模型 id 与 Fast 开关；思考档位由会话记录另外带 */
+function bareRef({ providerId, modelId, fastMode }: ModelRef): ModelRef {
+  return { providerId, modelId, ...(fastMode === true ? { fastMode: true } : {}) };
 }
 
-/** 会话记录只存设置里的服务 id、模型 id 与思考档位（不带运行时 provider 键、key 等） */
+/**
+ * 会话记录只存设置里的服务 id、模型 id、思考档位与 Fast（不带运行时 provider 键、key 等）。
+ * Fast 只取解析器确认过协议后的值：切到不支持的模型时记录里自动清掉。
+ */
 function sessionModelOf(
   { providerId, modelId }: ModelRef,
-  thinking?: ThinkingLevel
+  thinking?: ThinkingLevel,
+  fastMode?: boolean
 ): SessionModelRef {
-  return { providerId, modelId, ...(thinking ? { thinking } : {}) };
+  return {
+    providerId,
+    modelId,
+    ...(thinking ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 function withThinking(spec: ResolvedModelSpec, thinking?: ThinkingLevel): ResolvedModelSpec {

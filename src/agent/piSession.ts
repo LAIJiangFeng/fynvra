@@ -8,15 +8,46 @@ import {
   type ResolvedModel,
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
-import type { Role } from '@fynvra/core';
+import type { MagicContextFallbackReason, Role } from '@fynvra/core';
+import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
-import type { ChatImage } from '@shared/types/chat';
+import { type ChatImage, normalizeReplySuggestion } from '@shared/types/chat';
+import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import type { OpenSession } from './supervisor';
 
 /** dispose 前先中止进行中的回合（pi 的 bash 是独立进程组，只在中止时整树结束），最多等这么久 */
 const ABORT_BEFORE_DISPOSE_MS = 5_000;
+
+/** 建议请求只带最近几段纯文本，总预算固定；最新的一段优先保留 */
+const SUGGESTION_MAX_MESSAGES = 8;
+const SUGGESTION_MAX_TOTAL_CHARS = 8_000;
+const SUGGESTION_MAX_MESSAGE_CHARS = 2_000;
+/**
+ * 辅助请求的显式小输出上限。不传 reasoning：Anthropic 的非思考分支不会再加 2048 思考预算，
+ * OpenAI 等其他适配器也按各自的非思考 / 模型默认路径处理；辅助请求仍会产生正常 token 费用
+ */
+const SUGGESTION_MAX_TOKENS = 256;
+const SUGGESTION_INSTRUCTION =
+  '[suggestion task] Write only the human user’s most likely next message now, or output an empty response.';
+const SUGGESTION_SYSTEM_PROMPT = [
+  'You predict the next short message the human user will type in the conversation.',
+  'Use only the recent conversation; follow the language of the most recent user messages.',
+  'Output exactly that next user message: one concise line, no markdown, no quotes, no numbering, no explanations, no multiple options.',
+  'Do not answer the assistant’s question or continue the assistant’s reply. Do not repeat or summarize the assistant message. Do not reply with a generic “continue”.',
+  'Do not suggest approving destructive or irreversible actions such as deleting, publishing, paying, or changing permissions/roles, unless the user already clearly asked for it.',
+  'If no likely user message is evident, output nothing.',
+].join(' ');
+
+const EMPTY_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
 
 export interface PiSessionFactoryOptions {
   /** fynvra 的 pi agentDir（userData/agent），与 PI_CODING_AGENT_DIR 相同 */
@@ -43,54 +74,92 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       dirname(spec.sessionFile),
       spec.cwd
     );
-    let gate: ApprovalGate | undefined;
-    const created = await createRoleSession({
-      role: roleWithShellPrompt(spec.role, spec.shellPath),
-      cwd: spec.cwd,
-      model,
-      sessionManager,
-      host,
-      workerHost,
-      // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
-      ...(approval
-        ? {
-            approval: {
-              ...approval,
-              onGate: (built: ApprovalGate) => {
-                gate = built;
-                approval.onGate?.(built);
-              },
+    // Create the Magic routing entry before bindExtensions: the plugin may
+    // recover a deferred historian run during session_start.
+    let activeModel = model;
+    let pendingFallback: MagicContextFallbackReason | undefined;
+    let emitFallback: ((reason: MagicContextFallbackReason) => void) | undefined;
+    const magic =
+      spec.compactionStrategy === 'magic-context'
+        ? createMagicContextCompaction(() => activeModel, {
+            onFallback: (reason) => {
+              if (emitFallback) emitFallback(reason);
+              else pendingFallback ??= reason;
             },
-          }
-        : {}),
-      resourcePaths: {
-        skills: spec.skills,
-        mcpServers: spec.mcpServers.map(toMcpServerConfig),
-        ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
-      },
-      agentDir: options.agentDir,
-      roles: spec.roles,
-      ...(spec.inPlace ? { inPlace: true } : {}),
-      settingsManager: createSessionSettings(spec.shellPath),
-      ...(spec.networkProxy
-        ? {
-            commandEnv: (env: NodeJS.ProcessEnv) =>
-              commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
-          }
-        : {}),
-    });
+          })
+        : undefined;
+    magic?.attach(sessionManager.getSessionId());
+    let gate: ApprovalGate | undefined;
+    let created: Awaited<ReturnType<typeof createRoleSession>>;
+    try {
+      created = await createRoleSession({
+        role: roleWithShellPrompt(spec.role, spec.shellPath),
+        cwd: spec.cwd,
+        model,
+        sessionManager,
+        host,
+        workerHost,
+        // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
+        ...(approval
+          ? {
+              approval: {
+                ...approval,
+                onGate: (built: ApprovalGate) => {
+                  gate = built;
+                  approval.onGate?.(built);
+                },
+              },
+            }
+          : {}),
+        resourcePaths: {
+          skills: spec.skills,
+          mcpServers: spec.mcpServers.map(toMcpServerConfig),
+          ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
+        },
+        agentDir: options.agentDir,
+        roles: spec.roles,
+        ...(spec.inPlace ? { inPlace: true } : {}),
+        ...(magic ? { extensions: [magic.extension] } : {}),
+        settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
+        ...(spec.networkProxy
+          ? {
+              commandEnv: (env: NodeJS.ProcessEnv) =>
+                commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
+            }
+          : {}),
+      });
+    } catch (error) {
+      magic?.dispose();
+      throw error;
+    }
     const { session } = created;
     dropEmptyUserText(session);
+    const setFastMode = installFastMode(session, spec.model.fastMode === true);
+    // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
     options.onModelSelected?.(identity.sessionId, model);
     return {
-      warnings: created.warnings,
+      warnings: [...created.warnings, ...(magic?.warnings ?? [])],
       subscribe: (listener) => {
         const subscription = subscribeNormalized(
           session,
           listener,
           options.onListenerError ? { onListenerError: options.onListenerError } : {}
         );
-        return { unsubscribe: subscription.unsubscribe, emit: subscription.emit };
+        const emitWarning = (reason: MagicContextFallbackReason) =>
+          subscription.emit({ type: 'warning', source: 'magic-context', reason });
+        emitFallback = emitWarning;
+        if (pendingFallback) {
+          const reason = pendingFallback;
+          pendingFallback = undefined;
+          emitWarning(reason);
+        }
+        return {
+          unsubscribe: () => {
+            if (emitFallback === emitWarning) emitFallback = undefined;
+            subscription.unsubscribe();
+          },
+          emit: subscription.emit,
+        };
       },
       prompt: (text, images) =>
         session.prompt(text, {
@@ -103,21 +172,50 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
+        magic?.interrupt();
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
+        // Fast 与模型 / 档位独立：下一次请求起按新切换的值；不支持的协议在请求时也不会带字段
+        setFastMode(next.fastMode === true);
+        activeModel = resolved;
         options.onModelSelected?.(identity.sessionId, resolved);
       },
       setApprovalMode: (mode) => {
         if (!gate) throw new Error('this session has no approval gate to switch');
         gate.setMode(mode);
       },
-      abort: () => session.abort(),
+      abort: () => {
+        magic?.interrupt();
+        return session.abort();
+      },
       isIdle: () => session.isIdle,
+      suggestReply: ({ signal }) => suggestReply(session, activeModel, signal),
       dispose: async () => {
+        // Invalidate before waiting for Pi: background historian/ctx work must
+        // not publish while session_shutdown is draining.
+        magic?.dispose();
         if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
         await created.dispose();
       },
     };
+  };
+}
+
+/**
+ * Fast 是每个会话自己的请求选项，不改共享的 provider / model：在 SDK 的 onPayload 上再包一层，
+ * 保留扩展的 before_provider_request 变换，只在开关打开且协议支持时补 service_tier。
+ * 只包本会话的 agent，并发会话互不影响；关闭或切到不支持的协议后原样返回。
+ */
+function installFastMode(session: AgentSession, initial: boolean): (enabled: boolean) => void {
+  let enabled = initial;
+  const original = session.agent.onPayload;
+  session.agent.onPayload = async (payload, model) => {
+    const next = await original?.(payload, model);
+    if (!enabled || !supportsFastMode(model.api)) return next;
+    return withFastServiceTier(next === undefined ? payload : next);
+  };
+  return (value) => {
+    enabled = value;
   };
 }
 
@@ -130,6 +228,102 @@ function withRoleThinking(model: ResolvedModelSpec, role: Role): ResolvedModelSp
 /** 粘贴的图片 → pi 的 ImageContent（缩放、转 PNG 由 pi 的 prompt 自己做） */
 function toImageContent({ data, mimeType }: ChatImage): ImageContent {
   return { type: 'image', data, mimeType };
+}
+
+/**
+ * 独立的辅助生成：直接调 ModelRuntime，不经过 AgentSession.prompt，不写 jsonl、不用工具、不派 worker。
+ * 只在这轮已 settle（调用方已确认空闲）且最近有纯文本对话时调用；超时 / 取消 / 任何错误都由调用方当空结果处理。
+ */
+async function suggestReply(
+  session: AgentSession,
+  model: ResolvedModel,
+  signal: AbortSignal
+): Promise<string> {
+  if (!session.isIdle) return '';
+  const recent = recentConversation(session.messages);
+  if (recent.length === 0) return '';
+  const answer = await model.runtime.completeSimple(
+    model.model,
+    {
+      systemPrompt: SUGGESTION_SYSTEM_PROMPT,
+      messages: [
+        ...recent.map(({ role, text }): Message => {
+          if (role === 'user') return { role: 'user', content: text, timestamp: 0 };
+          return {
+            role: 'assistant',
+            content: [{ type: 'text', text }],
+            api: model.model.api,
+            provider: model.model.provider,
+            model: model.model.id,
+            usage: EMPTY_USAGE,
+            stopReason: 'stop',
+            timestamp: 0,
+          };
+        }),
+        { role: 'user', content: SUGGESTION_INSTRUCTION, timestamp: 0 },
+      ],
+    },
+    { maxTokens: SUGGESTION_MAX_TOKENS, maxRetries: 0, signal }
+  );
+  if (answer.stopReason !== 'stop') return '';
+  const text = answer.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+  return normalizeReplySuggestion(text);
+}
+
+type PlainConversationMessage = { role: string; content?: unknown };
+
+/**
+ * 最近几条 user / assistant 纯文本，按新到旧取到固定预算后再恢复顺序：
+ * 最新消息先占预算；assistant 超长保留结论（尾部），user 超长保留开头。工具调用、thinking、图片不进建议上下文。
+ */
+function recentConversation(
+  messages: readonly PlainConversationMessage[]
+): { role: 'user' | 'assistant'; text: string }[] {
+  const selected: { role: 'user' | 'assistant'; text: string }[] = [];
+  let total = 0;
+  for (
+    let index = messages.length - 1;
+    index >= 0 && selected.length < SUGGESTION_MAX_MESSAGES;
+    index--
+  ) {
+    const message = messages[index];
+    if (!message) continue;
+    const role =
+      message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : null;
+    if (!role) continue;
+    const text = messageText(message.content).trim();
+    if (!text) continue;
+    const clipped = clipMessage(text, role === 'assistant');
+    const cost = clipped.length + 8;
+    if (total + cost > SUGGESTION_MAX_TOTAL_CHARS) break;
+    selected.push({ role, text: clipped });
+    total += cost;
+  }
+  return selected.reverse();
+}
+
+/** 只取文本块；图片、thinking、工具调用与自定义消息都不算对话正文 */
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const { type, text } = block as { type?: unknown; text?: unknown };
+    if (type === 'text' && typeof text === 'string') parts.push(text);
+  }
+  return parts.join('\n');
+}
+
+function clipMessage(text: string, keepTail: boolean): string {
+  if (text.length <= SUGGESTION_MAX_MESSAGE_CHARS) return text;
+  const slice = keepTail
+    ? text.slice(text.length - (SUGGESTION_MAX_MESSAGE_CHARS - 1))
+    : text.slice(0, SUGGESTION_MAX_MESSAGE_CHARS - 1);
+  return keepTail ? `…${slice}` : `${slice}…`;
 }
 
 /**

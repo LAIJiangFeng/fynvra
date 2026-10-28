@@ -7,10 +7,11 @@ import type { WorkerSessionLauncher } from '../orchestration/launcher';
 // WorkerSessionLauncher 归 orchestration-host（launcher.ts），agent host 实现它。
 export type { ResolvedModelSpec, WorkerSessionLauncher };
 
-/** 设置里的模型引用：providerId 是「设置 → 模型服务」里的服务 id */
+/** 设置里的模型引用：providerId 是「设置 → 模型服务」里的服务 id；fastMode 是会话自己的请求选项 */
 export interface ModelRef {
   providerId: string;
   modelId: string;
+  fastMode?: boolean;
 }
 
 /**

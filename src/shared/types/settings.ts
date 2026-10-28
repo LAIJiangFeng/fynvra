@@ -172,6 +172,9 @@ export interface Preferences {
   // --- language ---
   /** 界面语言（Renderer 与 Main 的文案）；没写过时跟随系统（读取用 {@link languageOf}） */
   language?: Language;
+  // --- context ---
+  /** 上下文自动压缩策略；没写过时用 pi 原生自动压缩（读取用 {@link compactionStrategyOf}） */
+  compactionStrategy?: CompactionStrategy;
 }
 
 /**
@@ -222,6 +225,21 @@ export type WorktreesRootInfoResult = IpcResult<{ info: WorktreesRootInfo }>;
 export type PickWorktreesRootResult =
   | { ok: true; preferences: Preferences }
   | { ok: false; code: 'canceled' | 'invalid' | 'failed'; error: string };
+
+/** 上下文自动压缩：pi 原生、关闭，或使用内置的 Magic Context 插件 */
+export const COMPACTION_STRATEGIES = ['native', 'off', 'magic-context'] as const;
+export type CompactionStrategy = (typeof COMPACTION_STRATEGIES)[number];
+
+export function isCompactionStrategy(value: unknown): value is CompactionStrategy {
+  return typeof value === 'string' && (COMPACTION_STRATEGIES as readonly string[]).includes(value);
+}
+
+/** 生效的压缩策略：没写过或磁盘上的值不合法时沿用 pi 原生自动压缩 */
+export function compactionStrategyOf(
+  preferences: Pick<Preferences, 'compactionStrategy'>
+): CompactionStrategy {
+  return preferences.compactionStrategy ?? 'native';
+}
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   theme: 'system',
@@ -335,9 +353,15 @@ function parseModelRef(raw: unknown): SessionModelRef | null {
   if (!record || !isNonEmptyString(record.providerId) || !isNonEmptyString(record.modelId)) {
     return null;
   }
-  const { providerId, modelId, thinking } = record;
+  const { providerId, modelId, thinking, fastMode } = record;
   if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
-  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
+  if (fastMode !== undefined && typeof fastMode !== 'boolean') return null;
+  return {
+    providerId,
+    modelId,
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 /** 键须是合法的工作区 id，值只取 id 引用；逐条丢弃非法项，一条不剩时返回 undefined。 */
@@ -371,6 +395,7 @@ export function parsePreferences(raw: unknown): Preferences {
   const keybindings = parseKeybindingOverrides(record?.keybindings);
   // --- language ---
   const language = record?.language;
+  const compactionStrategy = record?.compactionStrategy;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
@@ -392,6 +417,8 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(keybindings ? { keybindings } : {}),
     // --- language ---
     ...(isLanguage(language) ? { language } : {}),
+    // --- context ---
+    ...(isCompactionStrategy(compactionStrategy) ? { compactionStrategy } : {}),
   };
 }
 
@@ -495,6 +522,11 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         if (!isLanguage(value)) return null;
         patch.language = value;
         break;
+      // --- context ---
+      case 'compactionStrategy':
+        if (!isCompactionStrategy(value)) return null;
+        patch.compactionStrategy = value;
+        break;
       default:
         return null;
     }
@@ -533,9 +565,9 @@ export function parseWorktreesRootInfoInput(raw: unknown): { usage: boolean } | 
 export interface NotificationPreferences {
   /** 总开关 */
   enabled: boolean;
-  /** 完成 / 失败只弹主 agent 的：worker 的完成、失败不弹，提问与审批照弹 */
+  /** 完成 / 失败只弹主 agent 的：worker 的完成、失败不弹，提问与操作通知照弹 */
   mainAgentOnly: boolean;
-  /** worker 提问、上报，以及任何会话的审批请求 */
+  /** 兼容旧字段名：worker 提问、上报，以及任何会话的单向工具操作通知 */
   askAndApproval: boolean;
   /** 系统默认提示音 */
   sound: boolean;

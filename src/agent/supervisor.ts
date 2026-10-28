@@ -1,31 +1,35 @@
-import { randomUUID } from 'node:crypto';
 import type {
   ApprovalGateRequest,
   ApprovalPolicyHooks,
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
-import type { ApprovalMode, FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
-import { errorMessage } from '@shared/guards';
-import {
-  type AgentCommand,
-  type AgentWorkerEvent,
-  APPROVAL_TIMEOUT_MS,
-  type HostKind,
-  type LogLevel,
-  type ModelQuery,
-  type ModelsDescribedResult,
-  type ResolvedModelSpec,
-  type SessionIdentity,
-  type SpawnSessionSpec,
-} from '@shared/types/agent';
+import { approvalKindOf } from '@fynvra/agent-runtime';
 import type {
-  ApprovalDecision,
-  ChatImage,
-  ModelThinkingCapability,
-  SessionStatus,
+  ApprovalMode,
+  FynvraSessionEvent,
+  FynvraSessionEventBody,
+  ToolOperationNotice,
+} from '@fynvra/core';
+import { errorMessage } from '@shared/guards';
+import type {
+  AgentCommand,
+  AgentWorkerEvent,
+  HostKind,
+  LogLevel,
+  ModelQuery,
+  ModelsDescribedResult,
+  ResolvedModelSpec,
+  SessionIdentity,
+  SpawnSessionSpec,
+} from '@shared/types/agent';
+import {
+  type ApprovalDecision,
+  type ChatImage,
+  type ModelThinkingCapability,
+  normalizeReplySuggestion,
+  type SessionStatus,
 } from '@shared/types/chat';
-import { ApprovalBroker } from './approvals';
 import {
   createHostInvoker,
   type HostCall,
@@ -47,11 +51,16 @@ export interface SupervisedSession {
   steer(text: string, images?: ChatImage[]): Promise<void>;
   /** 换模型 / 思考档位：下一次请求起生效，会话历史保留；失败抛错 */
   setModel(spec: ResolvedModelSpec): Promise<void>;
-  /** 换审批档位：从下一次需要审批的工具调用起生效，回合进行中也可以；失败抛错 */
+  /** 换操作通知范围：下一次工具调用起生效，不改变权限或等待用户。 */
   setApprovalMode(mode: ApprovalMode): void;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
+  /**
+   * 可选：为刚结束的一轮生成一条输入框灰字建议。生产会话（piSession）实现为独立的小模型请求；
+   * 脚本化测试会话可以不实现（supervisor 会当空结果处理）。调用前后 supervisor 都会核对会话仍空闲
+   */
+  suggestReply?(input: { roundId: number; signal: AbortSignal }): Promise<string>;
   dispose(): Promise<void>;
 }
 
@@ -67,10 +76,7 @@ export interface OpenSessionInput {
   host: OrchestrationHost | null;
   /** 仅 `spec.worker` 的会话有：ask_coordinator / report_done 经 host-invoke 转给 Main */
   workerHost: WorkerHost | null;
-  /**
-   * 审批门的通道（createRoleSession 的 `approval`）：请求经 Main 交给 Renderer 的审批条。
-   * supervisor 总会提供；缺省时需要审批的调用一律拒绝（fail-closed）。
-   */
+  /** 单向操作通知钩子；旧 request 接口只作立即返回的兼容入口。 */
   approval?: ApprovalPolicyHooks;
 }
 
@@ -82,6 +88,7 @@ export interface SupervisorOptions {
   /** describe-models：按 pi 内置目录算模型的思考档位，结果与 queries 一一对应 */
   describeModels?: (queries: ModelQuery[]) => Promise<ModelThinkingCapability[]>;
   hostCalls?: HostInvokerOptions;
+  /** @deprecated 旧选项兼容；不再创建审批超时。 */
   approvalTimeoutMs?: number;
 }
 
@@ -90,11 +97,21 @@ interface ManagedSession {
   /** 创建完成（失败为 null）；同一会话的命令都排在它之后，换模型也接在它上面 */
   opening: Promise<SupervisedSession | null>;
   events: SessionEvents | null;
-  status: SessionStatus;
+  status: Exclude<SessionStatus, 'waiting-approval'>;
   /** 本轮出过错：settle 后报 error 而不是 idle */
   failed: boolean;
   closed: boolean;
+  /** 当前 generation 里正常结束的回合数：建议请求用它核对还是同一轮 */
+  settledRounds: number;
 }
+
+interface RunningSuggestion {
+  sessionId: string;
+  controller: AbortController;
+}
+
+/** 建议请求最多等这么久（Main 另有 10 s 总上限）；超时按空结果，不重试 */
+const SUGGESTION_TIMEOUT_MS = 8_000;
 
 /**
  * Agent worker 进程里的多会话托管。
@@ -105,9 +122,9 @@ export class SessionSupervisor {
   readonly #open: OpenSession;
   readonly #describeModels: SupervisorOptions['describeModels'];
   readonly #invoker: HostInvoker;
-  readonly #approvals = new ApprovalBroker();
-  readonly #approvalTimeoutMs: number;
   readonly #sessions = new Map<string, ManagedSession>();
+  /** 在途建议：requestId → 中止器；同一会话至多一条（新请求 / 新一轮会取消旧的） */
+  readonly #suggestions = new Map<string, RunningSuggestion>();
   #shutdown: Promise<void> | null = null;
 
   constructor(options: SupervisorOptions) {
@@ -115,7 +132,6 @@ export class SessionSupervisor {
     this.#open = options.openSession;
     this.#describeModels = options.describeModels;
     this.#invoker = createHostInvoker(options.post, options.hostCalls);
-    this.#approvalTimeoutMs = options.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS;
   }
 
   /** 处理一条已收窄的命令。永不抛异常，异步失败转成 session-error / log。 */
@@ -140,15 +156,9 @@ export class SessionSupervisor {
       case 'dispose-session':
         void this.#dispose(command.identity);
         return;
-      case 'respond-approval': {
-        const { identity, requestId, decision } = command;
-        const answered =
-          this.#current(identity) !== undefined &&
-          this.#approvals.respond(identity.sessionId, requestId, decision);
-        if (!answered)
-          this.#log('warn', `no pending approval ${requestId} for ${identity.sessionId}`);
+      // 旧版本可能有迟到答复；不再创建或结算人工审批请求。
+      case 'respond-approval':
         return;
-      }
       case 'host-result':
         if (!this.#invoker.settle(command.identity, command.callId, command.result)) {
           this.#log('info', `dropped host-result ${command.callId}: the call is no longer pending`);
@@ -160,6 +170,17 @@ export class SessionSupervisor {
       case 'set-approval-mode':
         this.#setApprovalMode(command.identity, command.mode);
         return;
+      case 'suggest-reply':
+        void this.#suggest(command.identity, command.requestId, command.roundId, command.round);
+        return;
+      case 'cancel-suggestion': {
+        const running = this.#suggestions.get(command.requestId);
+        if (running && running.sessionId === command.identity.sessionId) {
+          this.#suggestions.delete(command.requestId);
+          running.controller.abort();
+        }
+        return;
+      }
       case 'describe-models':
         void this.#describe(command.requestId, command.models);
         return;
@@ -180,11 +201,7 @@ export class SessionSupervisor {
     return this.#shutdown;
   }
 
-  /**
-   * 审批门（agent-runtime 按 role.approvalMode 拦截的工具调用）的人工审批：
-   * 先发 approval-request 让 Main 记下并推审批条，再发 approval_request 会话事件进时间线，然后挂起，
-   * 直到 Main 回 respond-approval。审批门撤回（超时、回合中止）、会话中止 / 关闭 / settle 都按 deny 结束。
-   */
+  /** @deprecated 旧接线兼容：通知后立即返回，不保存 Promise 或等待人工。 */
   async requestApproval(
     identity: SessionIdentity,
     request: ApprovalGateRequest,
@@ -192,44 +209,26 @@ export class SessionSupervisor {
   ): Promise<ApprovalDecision> {
     const managed = this.#current(identity);
     if (!managed?.events || managed.closed || signal?.aborted) return 'deny';
-    const requestId = randomUUID();
-    const decision = this.#approvals.request(
-      identity.sessionId,
-      requestId,
-      this.#approvalTimeoutMs
-    );
-    const withdraw = () => this.#approvals.cancel(requestId);
-    signal?.addEventListener('abort', withdraw, { once: true });
-    const { toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } = request;
-    this.#post({
-      type: 'approval-request',
-      identity,
-      request: {
-        requestId,
-        toolCallId,
-        toolName,
+    const kind = approvalKindOf(request.toolName);
+    if (kind) {
+      this.#notifyToolOperation(identity, {
+        toolCallId: request.toolCallId,
+        toolName: kind === 'mcp' ? 'mcp' : request.toolName,
         kind,
-        title,
-        detail,
-        ...(protectedAction ? { protectedAction } : {}),
-        expiresAt,
-      },
-    });
-    managed.events.emit({
-      type: 'approval_request',
-      requestId,
-      toolCallId,
-      toolName,
-      args: request.args,
-      ...(protectedAction ? { reason: `protected action: ${protectedAction}` } : {}),
-    });
-    this.#setStatus(managed, 'waiting-approval');
-    const result = await decision;
-    signal?.removeEventListener('abort', withdraw);
-    if (managed.status === 'waiting-approval' && !this.#approvals.hasPending(identity.sessionId)) {
-      this.#setStatus(managed, 'running');
+      });
     }
-    return result;
+    return signal?.aborted ? 'deny' : 'allow';
+  }
+
+  #notifyToolOperation(identity: SessionIdentity, notice: ToolOperationNotice): void {
+    const managed = this.#current(identity);
+    if (!managed?.events || managed.closed) return;
+    try {
+      // 复用归一化事件的 seq / generation；不发 approval-request、不改运行态。
+      managed.events.emit({ type: 'tool_notice', ...notice });
+    } catch {
+      // 单向通知的发送失败不能改变工具结果，也不启动重试 / 人工等待。
+    }
   }
 
   #spawn(identity: SessionIdentity, spec: SpawnSessionSpec): void {
@@ -249,6 +248,7 @@ export class SessionSupervisor {
       status: 'idle',
       failed: false,
       closed: false,
+      settledRounds: 0,
     };
     managed.opening = this.#openManaged(managed, spec);
     this.#sessions.set(identity.sessionId, managed);
@@ -272,8 +272,8 @@ export class SessionSupervisor {
           spec.role.tools === 'orchestrator' ? orchestrationHostProxy(call('orchestration')) : null,
         workerHost: spec.worker ? workerHostProxy(call('worker')) : null,
         approval: {
+          notify: (notice) => this.#notifyToolOperation(identity, notice),
           request: (request, signal) => this.requestApproval(identity, request, signal),
-          timeoutMs: this.#approvalTimeoutMs,
         },
       });
     } catch (error) {
@@ -306,7 +306,7 @@ export class SessionSupervisor {
     if (event.type === 'error') managed.failed = true;
     this.#post({ type: 'session-event', identity: managed.identity, seq: event.seq, event });
     if (event.type === 'agent_settled') {
-      this.#approvals.cancelSession(managed.identity.sessionId);
+      if (!event.aborted) managed.settledRounds += 1;
       this.#setStatus(managed, managed.failed ? 'error' : 'idle');
     }
   }
@@ -322,9 +322,11 @@ export class SessionSupervisor {
       this.#reportMissing(identity, mode);
       return;
     }
+    // 新轮 / 插话开始：旧轮的建议请求立即中止，回包即使迟到也不会被采用
+    this.#cancelSuggestions(identity.sessionId);
     const session = await managed.opening;
     if (!session || managed.closed) return;
-    const busy = managed.status === 'running' || managed.status === 'waiting-approval';
+    const busy = managed.status === 'running';
     const steering = mode === 'steer' && busy;
     if (!busy) {
       managed.failed = false;
@@ -352,9 +354,11 @@ export class SessionSupervisor {
       this.#reportMissing(identity, 'set-model');
       return;
     }
+    // 换模型后旧模型的建议不再适用
+    this.#cancelSuggestions(identity.sessionId);
     managed.opening = managed.opening.then(async (session) => {
       if (!session || managed.closed) return session;
-      if (managed.status === 'running' || managed.status === 'waiting-approval') {
+      if (managed.status === 'running') {
         this.#log(
           'warn',
           `session ${identity.sessionId}: the model was switched during a turn; the rest of the turn uses the new model`
@@ -374,8 +378,8 @@ export class SessionSupervisor {
   }
 
   /**
-   * 换审批档位同样接在 opening 上（排在已到达的命令之后），但不看回合：运行中也立即生效。
-   * 换不成功时审批门可能还停在比记录宽松的旧档位：关掉会话并报 fatal，Main 下次使用前按记录重新 spawn。
+   * 换通知范围同样接在 opening 上（排在已到达的命令之后），运行中也立即生效。
+   * 换不成功时关掉会话并报 fatal，Main 下次使用前按记录重新 spawn。
    */
   #setApprovalMode(identity: SessionIdentity, mode: ApprovalMode): void {
     const managed = this.#current(identity);
@@ -411,6 +415,96 @@ export class SessionSupervisor {
     await session.dispose().catch((reason) => this.#log('warn', errorMessage(reason)));
   }
 
+  /**
+   * 生成一条建议：先在前后核对会话仍是当前 generation、仍空闲，再调用生产会话的独立小请求。
+   * 失败 / 超时 / 被取消都回空文本；Main 还会核对 requestId、generation、轮次与当前状态。
+   */
+  async #suggest(
+    identity: SessionIdentity,
+    requestId: string,
+    roundId: number,
+    round: number
+  ): Promise<void> {
+    const managed = this.#current(identity);
+    if (
+      !managed ||
+      managed.closed ||
+      managed.status !== 'idle' ||
+      managed.settledRounds !== round
+    ) {
+      this.#postSuggestion(identity, requestId, roundId, round, '');
+      return;
+    }
+    // 同一会话只保留一条：新请求取消旧请求
+    this.#cancelSuggestions(identity.sessionId);
+    const session = await managed.opening;
+    if (!session || managed.closed) {
+      this.#postSuggestion(identity, requestId, roundId, round, '');
+      return;
+    }
+    // 生成前后都核对：会话可能在这两次检查之间开始了新一轮
+    if (
+      this.#current(identity) !== managed ||
+      managed.status !== 'idle' ||
+      managed.settledRounds !== round ||
+      !session.isIdle() ||
+      !session.suggestReply
+    ) {
+      this.#postSuggestion(identity, requestId, roundId, round, '');
+      return;
+    }
+    const running: RunningSuggestion = {
+      sessionId: identity.sessionId,
+      controller: new AbortController(),
+    };
+    this.#suggestions.set(requestId, running);
+    const timer = setTimeout(() => running.controller.abort(), SUGGESTION_TIMEOUT_MS);
+    let text = '';
+    try {
+      text = normalizeReplySuggestion(
+        await session.suggestReply({ roundId, signal: running.controller.signal })
+      );
+    } catch {
+      text = '';
+    } finally {
+      clearTimeout(timer);
+    }
+    // 被 cancel-suggestion 取消（表项已删）或会话已关闭 / 换 generation：不回报
+    if (this.#suggestions.get(requestId) !== running) return;
+    this.#suggestions.delete(requestId);
+    if (this.#current(identity) !== managed || managed.closed) return;
+    if (managed.status !== 'idle' || managed.settledRounds !== round || !session.isIdle()) {
+      text = '';
+    }
+    this.#postSuggestion(identity, requestId, roundId, round, text);
+  }
+
+  #postSuggestion(
+    identity: SessionIdentity,
+    requestId: string,
+    roundId: number,
+    round: number,
+    text: string
+  ): void {
+    this.#post({
+      type: 'suggestion-result',
+      identity,
+      requestId,
+      roundId,
+      round,
+      text: normalizeReplySuggestion(text),
+    });
+  }
+
+  /** 中止这个会话所有在途建议；迟到的回包由 Main 的 requestId 检查丢弃 */
+  #cancelSuggestions(sessionId: string): void {
+    for (const [requestId, running] of this.#suggestions) {
+      if (running.sessionId !== sessionId) continue;
+      this.#suggestions.delete(requestId);
+      running.controller.abort();
+    }
+  }
+
   /** 进程级查询：总是回一条 models-described，失败也回，Main 不必等到超时 */
   async #describe(requestId: string, models: ModelQuery[]): Promise<void> {
     let result: ModelsDescribedResult;
@@ -426,9 +520,9 @@ export class SessionSupervisor {
   async #abort(identity: SessionIdentity): Promise<void> {
     const managed = this.#current(identity);
     if (!managed) return;
+    this.#cancelSuggestions(identity.sessionId);
     const session = await managed.opening;
     if (!session || managed.closed) return;
-    this.#approvals.cancelSession(identity.sessionId);
     try {
       await session.abort();
     } catch (error) {
@@ -456,11 +550,11 @@ export class SessionSupervisor {
     }
   }
 
-  /** 不再托管这个会话：结束它的 host 调用与待审批，停止转发事件；还是当前会话就从表里移除 */
+  /** 不再托管会话：结束 host 调用，停止转发事件；当前会话从表里移除。 */
   #detach(managed: ManagedSession): void {
     managed.closed = true;
+    this.#cancelSuggestions(managed.identity.sessionId);
     this.#invoker.cancelSession(managed.identity, 'the session was closed');
-    this.#approvals.cancelSession(managed.identity.sessionId);
     managed.events?.unsubscribe();
     if (this.#sessions.get(managed.identity.sessionId) === managed) {
       this.#sessions.delete(managed.identity.sessionId);
@@ -469,12 +563,12 @@ export class SessionSupervisor {
 
   #settleIfIdle(managed: ManagedSession, session: SupervisedSession): void {
     if (managed.closed || !session.isIdle()) return;
-    if (managed.status === 'running' || managed.status === 'waiting-approval') {
+    if (managed.status === 'running') {
       this.#setStatus(managed, managed.failed ? 'error' : 'idle');
     }
   }
 
-  #setStatus(managed: ManagedSession, status: SessionStatus): void {
+  #setStatus(managed: ManagedSession, status: ManagedSession['status']): void {
     if (managed.closed || managed.status === status) return;
     managed.status = status;
     this.#post({ type: 'session-status', identity: managed.identity, status });

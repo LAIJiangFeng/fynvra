@@ -5,7 +5,7 @@
   const LOCALE_KEY = 'fynvra-site-locale';
   const FONT_URL =
     'https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400..700&display=swap';
-  const THEME_COLORS = { light: '#f3f1ec', dark: '#0f0f0d' };
+  const THEME_COLORS = { light: '#f7f6f2', dark: '#0b0d0b' };
   const STRINGS = {
     zh: {
       toDark: '切换到暗色主题',
@@ -361,6 +361,24 @@
     update();
   }
 
+  function setupTocProgress() {
+    const bar = document.querySelector('[data-toc-progress]');
+    if (!bar) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const ratio = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      bar.style.width = `${(ratio * 100).toFixed(2)}%`;
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    update();
+  }
+
   function ready() {
     statusRegion = document.createElement('p');
     statusRegion.className = 'sr-only';
@@ -379,6 +397,7 @@
     setupCopy();
     setupReveal();
     setupScrollSpy();
+    setupTocProgress();
     setupStage();
     setupBench();
   }

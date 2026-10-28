@@ -1,13 +1,14 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
+import { supportsFastMode } from '@shared/modelFast';
 import {
   describeThinkingSource,
   type ModelProviderOption,
   type SessionModelRef,
   type ThinkingSource,
 } from '@shared/types/chat';
-import { Check, ChevronsUpDown, Cpu, Search } from 'lucide-react';
+import { Check, ChevronsUpDown, Cpu, Search, Zap } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -20,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import type { T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
@@ -54,11 +56,15 @@ export function useSessionModel(sessionId: string) {
   );
   const current = findModel(providers, session?.model);
   const thinking = effectiveThinking(current?.model, session?.model?.thinking, roleThinking);
+  // 服务信息还没读到时按会话记录显示；读到了就只在协议支持时显示（切到别的协议后 Main 也会清）
+  const fastMode =
+    (current ? supportsFastMode(current.provider.api) : true) && session?.model?.fastMode === true;
   return {
     session,
     providers,
     current,
     thinking,
+    fastMode,
     label: modelLabel(providers, session?.model, thinking),
   };
 }
@@ -70,7 +76,7 @@ export function useSessionModel(sessionId: string) {
  * 状态栏上的模型名打开的是同一个（store 的 modelPickerFor）。选了就切（sessions:set-model），运行中不能切。
  */
 export function ModelPicker({ sessionId }: { sessionId: string }) {
-  const { session, providers, current, thinking, label } = useSessionModel(sessionId);
+  const { session, providers, current, thinking, fastMode, label } = useSessionModel(sessionId);
   const status = useSessionsStore(selectStatusOf(sessionId));
   const loaded = useSessionsStore((state) => state.modelProviders !== null);
   const optionsError = useSessionsStore((state) => state.modelOptionsError);
@@ -96,10 +102,11 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
     void setSessionModel(sessionId, choice);
   };
   const pickModel = (found: FoundModel) => {
-    // 当前档位不在新模型的集合里就回落到它的默认档位
-    pick(chooseModel(found, thinking));
+    // 当前档位不在新模型的集合里就回落到它的默认档位；Fast 只在支持的新服务上保留
+    pick(chooseModel(found, thinking, fastMode));
     closePicker();
   };
+  const fastAvailable = current !== undefined && supportsFastMode(current.provider.api);
 
   return (
     <Popover
@@ -128,6 +135,15 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
             ? [label.provider, label.model, label.thinking].filter(Boolean).join(' · ')
             : t('model.pick')}
         </span>
+        {fastMode && (
+          <span
+            title={t('model.fastHint')}
+            className="flex shrink-0 items-center gap-0.5 font-medium text-amber-700 dark:text-amber-300"
+          >
+            <Zap aria-hidden className="size-3" />
+            {t('model.fast')}
+          </span>
+        )}
         <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-60" />
       </PopoverTrigger>
       <PopoverContent side="top" className="flex w-80 flex-col" initialFocus={search}>
@@ -206,7 +222,21 @@ export function ModelPicker({ sessionId }: { sessionId: string }) {
               levels={current.model.thinkingLevels}
               value={thinking}
               disabled={busy}
-              onChange={(level) => pick(chooseModel(current, level))}
+              onChange={(level) => pick(chooseModel(current, level, fastMode))}
+            />
+          </div>
+        )}
+        {fastAvailable && (
+          <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
+            <Zap aria-hidden className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="min-w-0 flex-1 font-medium text-xs">{t('model.fast')}</span>
+            <Switch
+              aria-label={t('model.fast')}
+              checked={fastMode}
+              disabled={busy}
+              onCheckedChange={(next) => {
+                if (current) pick(chooseModel(current, thinking, next));
+              }}
             />
           </div>
         )}

@@ -1,4 +1,4 @@
-import { GitBranch } from 'lucide-react';
+import { GitBranch, Zap } from 'lucide-react';
 import { useT } from '@/i18n/I18nProvider';
 import { useSessionsStore } from '@/stores/sessions';
 import { ApprovalModeStatus } from './ApprovalModePicker';
@@ -17,7 +17,7 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   const t = useT();
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
-  const { label } = useSessionModel(sessionId);
+  const { label, fastMode } = useSessionModel(sessionId);
   const model = label ? [label.model, label.thinking].filter(Boolean).join(' · ') : reportedModel;
 
   return (
@@ -39,6 +39,15 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
           >
             <GitBranch aria-hidden className="size-3 shrink-0" />
             <span className="truncate">{branch.branch}</span>
+          </span>
+        )}
+        {fastMode && (
+          <span
+            title={t('model.fastHint')}
+            className="flex shrink-0 items-center gap-1 font-medium text-amber-700 dark:text-amber-300"
+          >
+            <Zap aria-hidden className="size-3 shrink-0" />
+            {t('model.fast')}
           </span>
         )}
         {model && (

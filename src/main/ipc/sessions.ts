@@ -7,11 +7,12 @@ import {
   type ChatMessage,
   type ModelOptions,
   parseChatImages,
+  type ReplySuggestion,
   type SessionModelRef,
   type SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import { sessionPreferencesOf } from '@shared/types/settings';
+import { compactionStrategyOf, sessionPreferencesOf } from '@shared/types/settings';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
@@ -126,6 +127,7 @@ function createAppAgentHost(): AgentHostService {
       mcpServers: getMcpRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
+    resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     broadcast: sendToAllWindows,
   });
@@ -246,6 +248,16 @@ export function registerSessionHandlers(
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SUGGEST_REPLY,
+    (_event, raw: unknown): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>> => {
+      const input = parseSuggestReplyInput(raw);
+      return input
+        ? guard(() => host().suggestReply(input))
+        : invalid(translate('common.invalidArgs'));
+    }
+  );
+
   // 用户可能在外部终端里切过分支：窗口重新获得焦点时重读（按目录节流，有变化才广播 sessions:changed）
   app.on('browser-window-focus', () => {
     try {
@@ -288,7 +300,7 @@ export function parseCreateSessionInput(raw: unknown): CreateSessionInput | null
   return model ? { workspaceId, roleId, model } : null;
 }
 
-/** `{ sessionId, model: { providerId, modelId, thinking? } }`：只有设置里的 id 引用，不带地址或 key */
+/** `{ sessionId, model: { providerId, modelId, thinking?, fastMode? } }`：只有设置里的 id 引用，不带地址或 key */
 export function parseSetModelInput(raw: unknown): SetModelInput | null {
   const record = strictRecord(raw, ['sessionId', 'model']);
   const sessionId = parseSessionId(record?.sessionId);
@@ -304,6 +316,18 @@ export function parseSetApprovalModeInput(raw: unknown): SetApprovalModeInput | 
   return sessionId && isApprovalMode(mode) ? { sessionId, mode } : null;
 }
 
+/** `{ sessionId, roundId }`：roundId 是 settled 事件的会话级 seq，只接受正整数，不带其他字段 */
+export function parseSuggestReplyInput(
+  raw: unknown
+): { sessionId: string; roundId: number } | null {
+  const record = strictRecord(raw, ['sessionId', 'roundId']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const roundId = record?.roundId;
+  return sessionId && typeof roundId === 'number' && Number.isSafeInteger(roundId) && roundId > 0
+    ? { sessionId, roundId }
+    : null;
+}
+
 /** 无参或 `{ workspaceId? }` */
 export function parseModelOptionsInput(raw: unknown): { workspaceId?: string } | null {
   if (raw === undefined) return {};
@@ -315,11 +339,17 @@ export function parseModelOptionsInput(raw: unknown): { workspaceId?: string } |
 }
 
 function parseModelRef(raw: unknown): SessionModelRef | null {
-  const model = strictRecord(raw, ['providerId', 'modelId', 'thinking']);
+  const model = strictRecord(raw, ['providerId', 'modelId', 'thinking', 'fastMode']);
   if (!model || !isRef(model.providerId) || !isRef(model.modelId)) return null;
-  const { providerId, modelId, thinking } = model;
+  const { providerId, modelId, thinking, fastMode } = model;
   if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
-  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
+  if (fastMode !== undefined && typeof fastMode !== 'boolean') return null;
+  return {
+    providerId,
+    modelId,
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 /**
