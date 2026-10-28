@@ -123,28 +123,7 @@ function run(file: string, source: string) {
 
 // Isolate the bootstrap from host capabilities while executing its actual PowerShell code.
 const fakeReadLine = `
-Add-Type -TypeDefinition @'
-namespace Microsoft.PowerShell {
-    public static class PSConsoleReadLine {
-        public static string Line = "cd";
-        public static int Cursor = 2;
-        public static string Suggestion;
-        public static bool FailAccept;
-        public static int AcceptCalls;
-        public static int BackwardCalls;
-        public static void GetBufferState(ref string line, ref int cursor) { line = Line; cursor = Cursor; }
-        public static void AcceptSuggestion(object key, object arg) {
-            AcceptCalls++;
-            if (FailAccept) throw new System.InvalidOperationException("unavailable prediction");
-            if (!string.IsNullOrEmpty(Suggestion)) { Line = Suggestion; Cursor = Line.Length; }
-        }
-        public static void BackwardChar(object key, object arg) {
-            BackwardCalls++;
-            Cursor = System.Math.Max(0, Cursor - 1);
-        }
-    }
-}
-'@
+$global:Bindings = @()
 New-Module -Name PSReadLine -ScriptBlock {
     function Set-PSReadLineOption {
         [CmdletBinding()]
@@ -153,9 +132,8 @@ New-Module -Name PSReadLine -ScriptBlock {
     }
     function Set-PSReadLineKeyHandler {
         [CmdletBinding()]
-        param($Key, $BriefDescription, $ScriptBlock)
-        $global:BoundKey = $Key
-        $global:Handler = $ScriptBlock
+        param($Key, $Function, [scriptblock]$ScriptBlock)
+        $global:Bindings += @(@{ Key = $Key; Function = $Function; Custom = ($null -ne $ScriptBlock) })
     }
     Export-ModuleMember -Function Set-PSReadLineOption, Set-PSReadLineKeyHandler
 } | Import-Module -Global
@@ -169,20 +147,15 @@ function Import-Module {
 
 for (const { file, available } of hosts) {
   describe.skipIf(!available)(`PowerShell bootstrap in ${file}`, () => {
-    it('configures only History/InlineView/color and LeftArrow in the current session', () => {
+    it('configures History/InlineView/color and binds only RightArrow to native ForwardChar', () => {
       const output = run(
         file,
         `${fakeReadLine}\n${bootstrap}\n
-        if (-not $global:Handler) { throw "Handler missing: $($Error[0])" }
-        if (Get-Variable options -Scope Global -ErrorAction SilentlyContinue) {
-          # The only global Options here is the fixture capture, not a leaked bootstrap local.
-          if ($global:Options -isnot [System.Collections.IDictionary]) { throw 'Scope leaked' }
-        }
         @{
           Source = $global:Options.PredictionSource
           View = $global:Options.PredictionViewStyle
           Color = $global:Options.Colors.InlinePrediction.ToString()
-          Key = $global:BoundKey
+          Bindings = $global:Bindings
         } | ConvertTo-Json -Compress
       `
       );
@@ -190,38 +163,8 @@ for (const { file, available } of hosts) {
         Source: 'History',
         View: 'InlineView',
         Color: 'DarkGray',
-        Key: 'LeftArrow',
+        Bindings: [{ Key: 'RightArrow', Function: 'ForwardChar', Custom: false }],
       });
-    }, 30_000);
-
-    it('accepts only at line end and falls back on absent, unchanged, or throwing suggestions', () => {
-      const output = run(
-        file,
-        `${fakeReadLine}\n${bootstrap}\n
-        $t = [Microsoft.PowerShell.PSConsoleReadLine]
-        function Check($line, $cursor, $suggestion, $fail, $expectedLine, $expectedCursor, $accept, $backward) {
-          $t::Line = $line
-          $t::Cursor = $cursor
-          $t::Suggestion = $suggestion
-          $t::FailAccept = $fail
-          $t::AcceptCalls = 0
-          $t::BackwardCalls = 0
-          & $global:Handler $null $null
-          if ($t::Line -cne $expectedLine -or $t::Cursor -ne $expectedCursor -or
-              $t::AcceptCalls -ne $accept -or $t::BackwardCalls -ne $backward) {
-            throw "Unexpected result for '$line' at $cursor (suggestion '$suggestion'): '$($t::Line)' at $($t::Cursor), accept $($t::AcceptCalls), backward $($t::BackwardCalls)"
-          }
-        }
-        Check 'cd' 2 'cd example' $false 'cd example' 10 1 0
-        Check 'cd' 1 'cd example' $false 'cd' 0 0 1
-        Check 'cd' 2 $null $false 'cd' 1 1 1
-        Check 'cd' 2 'cd' $false 'cd' 1 1 1
-        Check 'cd' 2 'cd example' $true 'cd' 1 1 1
-        Check '' 0 $null $false '' 0 1 1
-        'passed'
-      `
-      );
-      expect(output).toBe('passed');
     }, 30_000);
 
     it('handles missing modules without preventing the next command', () => {
@@ -243,9 +186,9 @@ for (const { file, available } of hosts) {
         file,
         String.raw`
         Import-Module PSReadLine -ErrorAction Stop
-        $before = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
+        $before = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
         ${bootstrap}
-        $after = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
+        $after = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
         if (Compare-Object $before $after) { throw 'Native key binding changed' }
         'terminal still usable'
       `
@@ -255,18 +198,13 @@ for (const { file, available } of hosts) {
       expect(output).toContain('terminal still usable');
     }, 30_000);
 
-    it('falls back after the real AcceptSuggestion returns without accepting a prediction', () => {
+    it('uses native RightArrow acceptance only at line end and leaves LeftArrow untouched', () => {
       const output = run(
         file,
         String.raw`
         Import-Module PSReadLine -ErrorAction Stop
         $t = [Microsoft.PowerShell.PSConsoleReadLine]
         if (-not $t.GetMember('AcceptSuggestion')) { 'unsupported'; exit 0 }
-        $flags = [Reflection.BindingFlags]'Instance,NonPublic'
-        $instance = $t.GetField('_singleton', [Reflection.BindingFlags]'Static,NonPublic').GetValue($null)
-        $buffer = $t.GetField('_buffer', $flags).GetValue($instance)
-        [void]$buffer.Append('cd')
-        $t.GetField('_current', $flags).SetValue($instance, 2)
         $source = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}'))
         $tokens = $null
         $errors = $null
@@ -276,23 +214,54 @@ for (const { file, available } of hosts) {
           $node -is [Management.Automation.Language.CommandAst] -and
           $node.GetCommandName() -eq 'PSReadLine\Set-PSReadLineKeyHandler'
         }, $true)
-        $handler = ($command.CommandElements | Where-Object {
-          $_ -is [Management.Automation.Language.ScriptBlockExpressionAst]
-        }).ScriptBlock.Extent.Text
-        # Only intercept the final cursor movement: it needs a real console device.
-        # AcceptSuggestion and GetBufferState still use the installed PSReadLine implementation.
-        Add-Type 'public static class BackwardProbe { public static int Calls; public static void BackwardChar(object key, object arg) { Calls++; } }'
-        $handler = $handler.Replace('[Microsoft.PowerShell.PSConsoleReadLine]::BackwardChar', '[BackwardProbe]::BackwardChar')
-        $block = [ScriptBlock]::Create($handler.Substring(1, $handler.Length - 2))
-        & $block $null $null
-        $line = ''
-        $cursor = 0
-        $t::GetBufferState([ref]$line, [ref]$cursor)
-        if ($line -cne 'cd' -or [BackwardProbe]::Calls -ne 1) { throw 'No-op accept swallowed LeftArrow' }
-        'native fallback passed'
+        # Execute the shipped binding against the real module; enabling VT output itself
+        # needs a terminal, so only the configuration test above substitutes that command.
+        PSReadLine\Set-PSReadLineKeyHandler -Key RightArrow -Function EndOfLine
+        PSReadLine\Set-PSReadLineKeyHandler -Key LeftArrow -Function BeginningOfLine
+        & ([ScriptBlock]::Create($command.Extent.Text))
+        $right = PSReadLine\Get-PSReadLineKeyHandler -Chord RightArrow
+        $left = PSReadLine\Get-PSReadLineKeyHandler -Chord LeftArrow
+        if ($right.Function -ne 'ForwardChar' -or $left.Function -ne 'BeginningOfLine') {
+          throw 'Incorrect arrow bindings'
+        }
+        $forward = $t.GetMethod($right.Function)
+        $flags = [Reflection.BindingFlags]'Instance,Static,NonPublic'
+        $instance = $t.GetField('_singleton', $flags).GetValue($null)
+        $buffer = $t.GetField('_buffer', $flags).GetValue($instance)
+        $current = $t.GetField('_current', $flags)
+        $prediction = $t.GetField('_prediction', $flags).GetValue($instance)
+        $view = $prediction.GetType().GetField('_inlineView', $flags).GetValue($prediction)
+        $suggestion = $view.GetType().GetField('_suggestionText', $flags)
+        # Use PSReadLine's deferred-render path to test real buffer edits headlessly.
+        # No ReadLine(), console device, history file, or substitute editing method is used.
+        $queued = $t.GetField('_queuedKeys', $flags).GetValue($instance)
+        1..11 | ForEach-Object { $queued.Enqueue($null) }
+        $t.GetField('_lastRenderTime', $flags).SetValue($instance, (New-Object Diagnostics.Stopwatch))
+        $t.GetField('_waitingToRender', $flags).SetValue($instance, $true)
+        $edits = $t.GetField('_edits', $flags)
+        $edits.SetValue($instance, [Activator]::CreateInstance($edits.FieldType))
+        function Check($text, $cursor, $predictionText, $expectedText, $expectedCursor) {
+          [void]$buffer.Clear()
+          [void]$buffer.Append($text)
+          $current.SetValue($instance, $cursor)
+          $suggestion.SetValue($view, $predictionText)
+          [void]$forward.Invoke($null, @($null, $null))
+          $line = ''
+          $position = 0
+          $t::GetBufferState([ref]$line, [ref]$position)
+          if ($line -cne $expectedText -or $position -ne $expectedCursor) {
+            throw "Expected '$expectedText' at $expectedCursor, got '$line' at $position"
+          }
+        }
+        Check 'cd' 2 $null 'cd' 2
+        Check 'cd' 0 'cd example' 'cd' 1
+        Check 'cd' 0 $null 'cd' 1
+        Check '' 0 $null '' 0
+        Check 'cd' 2 'cd example' 'cd example' 10
+        'native RightArrow checks passed'
       `
       );
-      expect(['unsupported', 'native fallback passed']).toContain(output);
+      expect(['unsupported', 'native RightArrow checks passed']).toContain(output);
     }, 30_000);
   });
 }
