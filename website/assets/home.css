@@ -68,10 +68,6 @@
   margin-top: clamp(40px, 5.5vw, 66px);
 }
 
-.fd-showcase .showcase-caption {
-  margin-bottom: 10px;
-}
-
 /* 场景切换只在增强后出现；无 JS 时保留默认可读的协作流程。 */
 .fd-scene-switch {
   display: none;
@@ -1260,15 +1256,6 @@
   width: 10px;
   height: 10px;
   flex: none;
-}
-
-.fd-caption {
-  margin-top: 9px;
-  padding: 0 4px;
-  color: var(--ink-3);
-  font-size: 12px;
-  line-height: 1.6;
-  text-wrap: wrap;
 }
 
 /* 动画开关：没有 JS 时完整呈现最终状态 */

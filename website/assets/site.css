@@ -598,30 +598,6 @@ kbd {
   text-align: center;
 }
 
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 15px 7px 11px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: 0 8px 24px -20px rgb(18 19 16 / 45%);
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(8px);
-}
-
-.badge-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: pulse 2.2s ease-out infinite;
-}
-
 .hero-title {
   max-width: 1040px;
   margin-top: 30px;
@@ -807,37 +783,6 @@ kbd {
   filter: blur(48px);
   opacity: 0.7;
   pointer-events: none;
-}
-
-.showcase-caption {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 18px;
-  margin-bottom: 10px;
-  padding: 0 6px;
-  color: var(--ink-3);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-
-.showcase-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink-2);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.showcase-tag i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-2);
 }
 
 .showcase .window {
@@ -4217,13 +4162,5 @@ kbd {
 
   .window-bar {
     grid-template-columns: 1fr;
-  }
-
-  .showcase-caption {
-    font-size: 10.5px;
-  }
-
-  .showcase-tag {
-    font-size: 10px;
   }
 }
