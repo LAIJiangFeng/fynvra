@@ -182,21 +182,42 @@ for (const { file, available } of hosts) {
       expect(output).toContain('terminal still usable');
     }, 30_000);
 
-    it('checks installed capabilities, keeps native bindings, and handles unsupported/redirected hosts', () => {
+    it('checks installed capabilities, keeps native bindings, and handles host configuration outcomes', () => {
       const output = run(
         file,
         String.raw`
         Import-Module PSReadLine -ErrorAction Stop
-        $before = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
-        ${bootstrap}
-        $after = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Select-Object Key,Function | ConvertTo-Json -Compress)
-        if (Compare-Object $before $after) { throw 'Native key binding changed' }
-        'terminal still usable'
+        $before = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Sort-Object Key | Select-Object Key,Function)
+        $messages = @(& { ${bootstrap} } 6>&1 | ForEach-Object { $_.ToString() })
+        $options = PSReadLine\Get-PSReadLineOption
+        $after = @(PSReadLine\Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -in @('Tab', 'RightArrow', 'LeftArrow', 'Ctrl+c') } | Sort-Object Key | Select-Object Key,Function)
+        @{
+          Messages = $messages
+          Source = [string]$options.PredictionSource
+          View = [string]$options.PredictionViewStyle
+          Before = $before
+          After = $after
+          NextCommand = 'terminal still usable'
+        } | ConvertTo-Json -Depth 4 -Compress
       `
       );
-      // Even modern PSReadLine cannot enable VT prediction when stdout is redirected.
-      expect(output).toContain('History suggestions unavailable.');
-      expect(output).toContain('terminal still usable');
+      const { Messages, Source, View, Before, After, NextCommand } = JSON.parse(output);
+      expect(NextCommand).toBe('terminal still usable');
+      if (Messages.length === 0) {
+        expect(Source).toBe('History');
+        expect(View).toBe('InlineView');
+        expect(After).toContainEqual({ Key: 'RightArrow', Function: 'ForwardChar' });
+        expect(After).toEqual(
+          Before.map((binding: { Key: string; Function: string }) =>
+            binding.Key === 'RightArrow' ? { ...binding, Function: 'ForwardChar' } : binding
+          )
+        );
+      } else {
+        expect(Messages).toEqual([
+          'Fynvra: History suggestions unavailable. Upgrade PSReadLine to 2.2+ or select PowerShell 7 in General settings, then open a new terminal. Tab completion is unchanged.',
+        ]);
+        expect(After).toEqual(Before);
+      }
     }, 30_000);
 
     it('uses native RightArrow acceptance only at line end and leaves LeftArrow untouched', () => {
