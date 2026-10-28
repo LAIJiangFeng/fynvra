@@ -199,6 +199,8 @@
 .fd-body {
   display: grid;
   grid-template-columns: minmax(140px, 15%) minmax(0, 1fr) minmax(220px, 22.5%);
+  /* 固定行高而不是让长对话把行撑大：内容只能在中栏 timeline 里滚 */
+  grid-template-rows: minmax(0, 1fr);
   height: 600px;
 }
 
@@ -398,7 +400,9 @@
 .fd-main {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   background: var(--fd-bg);
 }
 
@@ -667,6 +671,7 @@
 }
 
 .fd-composer {
+  flex: none;
   padding: 7px 16px 8px;
 }
 
@@ -681,11 +686,18 @@
 }
 
 .fd-composer-input {
-  min-height: 42px;
-  padding: 9px 12px 1px;
+  min-height: 38px;
+  padding: 10px 13px 2px;
   color: var(--fd-text);
   font-size: 12px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
+  /* 源文件里 span 之间的换行缩进不能当成文字排版；只有真正打出来的文字保留空格 */
+  text-align: left;
+  white-space: normal;
+}
+
+.fd-composer-input [data-typed] {
   white-space: pre-wrap;
 }
 
@@ -714,14 +726,32 @@
 .fd-composer-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
-  padding: 5px 7px 7px;
+  padding: 2px 7px 7px;
+}
+
+/* 下行左侧一组控件可收缩，右侧发送不被挤出去 */
+.fd-composer-tools {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
 }
 
 .fd-composer-bar .fd-chip {
   overflow: hidden;
+  min-width: 0;
   max-width: 45%;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+}
+
+.fd-chip-label {
+  overflow: hidden;
+  min-width: 0;
   text-overflow: ellipsis;
 }
 
@@ -737,6 +767,7 @@
 
 .fd-send {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   height: 25px;
@@ -767,6 +798,7 @@
 
 .fd-statusbar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 12px;
   height: 24px;
@@ -813,7 +845,9 @@
 .fd-panel {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
   border-left: 1px solid var(--fd-line);
   background: var(--fd-chrome);
 }
