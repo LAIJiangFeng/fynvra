@@ -64,8 +64,8 @@ html.js:not(.docs-ready) .docs-article:not(.is-active):not(:target) {
 }
 
 .docs-app .nav-download .doc-icon {
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
 }
 
 /* 布局 */
@@ -608,6 +608,11 @@ html.docs-ready .docs-article {
   background: var(--surface);
   color: var(--ink-2);
   text-decoration: none;
+}
+
+.docs-mobilebar-download .doc-icon {
+  width: 20px;
+  height: 20px;
 }
 
 /* 正文 */
