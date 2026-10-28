@@ -928,7 +928,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!current) return fail(translate('common.sessionNotFound'));
     if (isBusy(current)) return fail(translate('agent.switchWhileRunning'));
 
-    const next = sessionModelOf(resolved.ref, model.thinking);
+    const next = sessionModelOf(resolved.ref, model.thinking, resolved.model.fastMode);
     const updated =
       deps.store.update(sessionId, {
         model: next,
@@ -1050,7 +1050,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
-      // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型与思考档位
+      // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型、思考档位与 Fast
       let requested: SessionModelRef | undefined;
       if (input.model !== undefined) {
         const picked = await pickModel(input.model);
@@ -1082,7 +1082,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: sessionModelOf(resolved.ref, requested?.thinking),
+        model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
         // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
         approvalMode:
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
@@ -1185,7 +1185,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const requested = input.model ?? modelRefOf(role);
       const resolved = await deps.models.resolve(requested && bareRef(requested));
       if (!resolved.ok) return resolved;
-      const model = sessionModelOf(resolved.ref, requested?.thinking);
+      const model = sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -1287,17 +1287,26 @@ function qualifiedModelId({ providerId, modelId }: ModelRef): string {
   return `${providerId}/${modelId}`;
 }
 
-/** 交给解析器的引用：只有服务 id 与模型 id，思考档位由会话记录另外带 */
-function bareRef({ providerId, modelId }: ModelRef): ModelRef {
-  return { providerId, modelId };
+/** 交给解析器的引用：服务 id、模型 id 与 Fast 开关；思考档位由会话记录另外带 */
+function bareRef({ providerId, modelId, fastMode }: ModelRef): ModelRef {
+  return { providerId, modelId, ...(fastMode === true ? { fastMode: true } : {}) };
 }
 
-/** 会话记录只存设置里的服务 id、模型 id 与思考档位（不带运行时 provider 键、key 等） */
+/**
+ * 会话记录只存设置里的服务 id、模型 id、思考档位与 Fast（不带运行时 provider 键、key 等）。
+ * Fast 只取解析器确认过协议后的值：切到不支持的模型时记录里自动清掉。
+ */
 function sessionModelOf(
   { providerId, modelId }: ModelRef,
-  thinking?: ThinkingLevel
+  thinking?: ThinkingLevel,
+  fastMode?: boolean
 ): SessionModelRef {
-  return { providerId, modelId, ...(thinking ? { thinking } : {}) };
+  return {
+    providerId,
+    modelId,
+    ...(thinking ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 function withThinking(spec: ResolvedModelSpec, thinking?: ThinkingLevel): ResolvedModelSpec {

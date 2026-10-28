@@ -40,7 +40,7 @@ export interface SessionsApi {
     requestId: string;
     decision: ApprovalDecision;
   }): Promise<IpcResult>;
-  /** 换模型 / 思考档位（只传设置里的 id 引用）：会话运行中返回错误；下一次 prompt 起生效 */
+  /** 换模型 / 思考档位 / Fast（只传设置里的 id 引用）：会话运行中返回错误；下一次 prompt 起生效 */
   setModel(input: {
     sessionId: string;
     model: SessionModelRef;

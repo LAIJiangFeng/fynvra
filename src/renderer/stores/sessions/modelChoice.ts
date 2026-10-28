@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from '@fynvra/core';
+import { supportsFastMode } from '@shared/modelFast';
 import {
   type ModelOption,
   type ModelProviderOption,
@@ -50,23 +51,25 @@ export function findModel(
 
 /**
  * 选中一个模型：当前档位在它的可选集合里就沿用，否则回落到它的默认档位；不支持推理就不带档位。
- * 与 worker 落定档位是同一条规则（pickThinkingLevel）。
+ * 与 worker 落定档位是同一条规则（pickThinkingLevel）。Fast 独立于档位，只在新服务支持时保留。
  */
 export function chooseModel(
   { provider, model }: FoundModel,
-  thinking?: ThinkingLevel
+  thinking?: ThinkingLevel,
+  fastMode?: boolean
 ): SessionModelRef {
   const level = pickThinkingLevel(model, thinking);
   return {
     providerId: provider.providerId,
     modelId: model.id,
     ...(level ? { thinking: level } : {}),
+    ...(fastMode === true && supportsFastMode(provider.api) ? { fastMode: true } : {}),
   };
 }
 
 /**
  * 新建会话弹层的默认模型：角色的 model → 该工作区上一次用过的 → 列表第一个。
- * 引用的服务停用、没 key 或模型已删（不在列表里）时跳到下一项；档位按各自带的档位落定。
+ * 引用的服务停用、没 key 或模型已删（不在列表里）时跳到下一项；档位与 Fast 按各自带的值落定。
  */
 export function defaultModelChoice({
   providers,
@@ -79,7 +82,7 @@ export function defaultModelChoice({
 }): SessionModelRef | undefined {
   for (const ref of [roleModel, lastUsed]) {
     const found = findModel(providers, ref);
-    if (found) return chooseModel(found, ref?.thinking);
+    if (found) return chooseModel(found, ref?.thinking, ref?.fastMode);
   }
   const [provider] = providers;
   const model = provider?.models[0];

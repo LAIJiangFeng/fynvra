@@ -1,8 +1,9 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
 import { ORCHESTRATOR_ROLE_ID, type Role } from '@fynvra/core';
+import { supportsFastMode } from '@shared/modelFast';
 import type { SessionModelRef } from '@shared/types/chat';
-import { Crown, Plus } from 'lucide-react';
+import { Crown, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useId, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { useActionHandler } from '@/lib/keybindings';
 import { useRolesStore } from '@/stores/roles';
@@ -72,6 +74,7 @@ export function NewSessionButton({
   const selected = pickRole(roles, roleId);
   const model = picked ?? defaultModelChoice({ providers, roleModel: selected?.model, lastUsed });
   const found = findModel(providers, model);
+  const fastAvailable = found !== undefined && supportsFastMode(found.provider.api);
 
   const submit = async () => {
     if (!selected || !workspaceId) return;
@@ -151,7 +154,7 @@ export function NewSessionButton({
               id={`${id}-model`}
               providers={providers}
               value={model}
-              onChange={(next) => setPicked(chooseModel(next, model?.thinking))}
+              onChange={(next) => setPicked(chooseModel(next, model?.thinking, model?.fastMode))}
             />
             {optionsError ? (
               <p className="text-muted-foreground text-xs">
@@ -175,7 +178,22 @@ export function NewSessionButton({
               <ThinkingLevelPicker
                 levels={found.model.thinkingLevels}
                 value={model?.thinking}
-                onChange={(level) => setPicked(chooseModel(found, level))}
+                onChange={(level) => setPicked(chooseModel(found, level, model?.fastMode))}
+              />
+            </div>
+          )}
+          {found && fastAvailable && (
+            <div className="flex items-center gap-2">
+              <Zap aria-hidden className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm">{t('model.fast')}</p>
+                <p className="text-muted-foreground text-xs">{t('model.fastHint')}</p>
+              </div>
+              <Switch
+                aria-label={t('model.fast')}
+                checked={model?.fastMode === true}
+                disabled={creating}
+                onCheckedChange={(next) => setPicked(chooseModel(found, model?.thinking, next))}
               />
             </div>
           )}

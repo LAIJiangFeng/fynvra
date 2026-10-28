@@ -9,6 +9,7 @@ import {
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
 import type { Role } from '@fynvra/core';
+import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import type { ChatImage } from '@shared/types/chat';
@@ -81,6 +82,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     });
     const { session } = created;
     dropEmptyUserText(session);
+    const setFastMode = installFastMode(session, spec.model.fastMode === true);
     options.onModelSelected?.(identity.sessionId, model);
     return {
       warnings: created.warnings,
@@ -105,6 +107,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
+        // Fast 与模型 / 档位独立：下一次请求起按新切换的值；不支持的协议在请求时也不会带字段
+        setFastMode(next.fastMode === true);
         options.onModelSelected?.(identity.sessionId, resolved);
       },
       setApprovalMode: (mode) => {
@@ -118,6 +122,24 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         await created.dispose();
       },
     };
+  };
+}
+
+/**
+ * Fast 是每个会话自己的请求选项，不改共享的 provider / model：在 SDK 的 onPayload 上再包一层，
+ * 保留扩展的 before_provider_request 变换，只在开关打开且协议支持时补 service_tier。
+ * 只包本会话的 agent，并发会话互不影响；关闭或切到不支持的协议后原样返回。
+ */
+function installFastMode(session: AgentSession, initial: boolean): (enabled: boolean) => void {
+  let enabled = initial;
+  const original = session.agent.onPayload;
+  session.agent.onPayload = async (payload, model) => {
+    const next = await original?.(payload, model);
+    if (!enabled || !supportsFastMode(model.api)) return next;
+    return withFastServiceTier(next === undefined ? payload : next);
+  };
+  return (value) => {
+    enabled = value;
   };
 }
 
