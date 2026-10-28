@@ -588,7 +588,7 @@ export const zhCN = {
       compatibility: 'Git 兼容模式',
       compatibilityHint: '使用 HTTP/1.1 与 Git protocol v0，不降低 TLS 验证',
       effective:
-        '保存后 Main 新命令立即生效；Agent 会话下次启动或恢复、新终端下次创建时生效。不会重启已有活跃会话或终端',
+        '保存后，应用新发起的 Git 操作和命令使用此设置；Agent 命令在会话下次启动或恢复时生效，终端在下次新建时生效。已有会话和终端不会自动重启',
       invalid: '请输入合法 HTTP/HTTPS 代理地址与端口，不支持账号密码、路径、查询参数或片段',
       test: '测试连接',
       testHint:

@@ -13,6 +13,43 @@ export const NETWORK_TEST_TIMEOUT_MS = 15_000;
 const API_URL = 'https://api.github.com/';
 const GIT_URL = 'https://github.com/LAIJiangFeng/fynvra.git';
 
+/** URL-specific config beats generic http.sslVerify, even at lower config scope. */
+export const NETWORK_TEST_GIT_OPTIONS = [
+  '-c',
+  'credential.helper=',
+  '-c',
+  'core.askPass=',
+  '-c',
+  'credential.interactive=false',
+  '-c',
+  'http.sslVerify=true',
+  '-c',
+  `http.${GIT_URL}.sslVerify=true`,
+  '-c',
+  `http.${GIT_URL}/.sslVerify=true`,
+] as const;
+
+/** Git treats the presence of GIT_SSL_NO_VERIFY (even "0") as disabling verification. */
+function gitDiagnosticEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const copy = { ...env };
+  for (const key of Object.keys(copy)) {
+    if (/^GIT_(?:PROXY_)?SSL_NO_VERIFY$/i.test(key)) delete copy[key];
+  }
+  return {
+    ...copy,
+    GIT_TERMINAL_PROMPT: '0',
+    GCM_INTERACTIVE: 'never',
+    GIT_ASKPASS: '',
+    SSH_ASKPASS: '',
+  };
+}
+
+function disablesNodeTlsVerification(env: NodeJS.ProcessEnv): boolean {
+  return Object.entries(env).some(
+    ([key, value]) => key.toUpperCase() === 'NODE_TLS_REJECT_UNAUTHORIZED' && value === '0'
+  );
+}
+
 type Probe = (env: NodeJS.ProcessEnv, signal: AbortSignal) => Promise<NetworkProbeResult>;
 export interface NetworkTestDeps {
   api: Probe;
@@ -24,6 +61,12 @@ export interface NetworkTestDeps {
 /** A private agent honors only this command's environment; no global dispatcher or OS proxy. */
 const probeApi: Probe = (env, signal) =>
   new Promise((resolve) => {
+    // Node's proxy TLS handshake does not inherit the request's rejectUnauthorized option.
+    // Refuse this diagnostic if the process-wide TLS default is disabled; never mutate it.
+    if (disablesNodeTlsVerification(env) || disablesNodeTlsVerification(process.env)) {
+      resolve({ status: 'failed' });
+      return;
+    }
     // proxyEnv is available in Electron's Node 24.5+ (also Node 22.21+).
     // Older development runtimes must never silently test a direct connection instead.
     const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
@@ -82,31 +125,10 @@ const probeGit: Probe = (env, signal) =>
     try {
       child = spawn(
         'git',
-        [
-          '-c',
-          'credential.helper=',
-          '-c',
-          'core.askPass=',
-          '-c',
-          'credential.interactive=false',
-          '-c',
-          'http.sslVerify=true',
-          '-c',
-          'http.proxySSLVerify=true',
-          'ls-remote',
-          '--exit-code',
-          GIT_URL,
-          'HEAD',
-        ],
+        [...NETWORK_TEST_GIT_OPTIONS, 'ls-remote', '--exit-code', GIT_URL, 'HEAD'],
         {
           cwd: tmpdir(),
-          env: {
-            ...env,
-            GIT_TERMINAL_PROMPT: '0',
-            GCM_INTERACTIVE: 'never',
-            GIT_ASKPASS: '',
-            SSH_ASKPASS: '',
-          },
+          env: gitDiagnosticEnvironment(env),
           detached: process.platform !== 'win32',
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'ignore'],

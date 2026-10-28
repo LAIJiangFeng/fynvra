@@ -85,7 +85,9 @@ describe('fixed network probe transports', () => {
       '-c',
       'http.sslVerify=true',
       '-c',
-      'http.proxySSLVerify=true',
+      'http.https://github.com/LAIJiangFeng/fynvra.git.sslVerify=true',
+      '-c',
+      'http.https://github.com/LAIJiangFeng/fynvra.git/.sslVerify=true',
       'ls-remote',
       '--exit-code',
       'https://github.com/LAIJiangFeng/fynvra.git',
@@ -98,6 +100,62 @@ describe('fixed network probe transports', () => {
       GIT_CONFIG_COUNT: '3',
     });
     expect(mocks.destroy).toHaveBeenCalled();
+  });
+  it.each(['GIT_SSL_NO_VERIFY', 'git_ssl_no_verify', 'Git_Ssl_No_Verify'])(
+    'removes diagnostic-only TLS bypass %s, including value 0, while preserving CA settings',
+    async (key) => {
+      const env = {
+        [key]: '0',
+        GIT_PROXY_SSL_NO_VERIFY: '1',
+        GIT_SSL_CAINFO: '/fixture/origin-ca.pem',
+        GIT_SSL_CAPATH: '/fixture/ca',
+        GIT_PROXY_SSL_CAINFO: '/fixture/proxy-ca.pem',
+        NODE_EXTRA_CA_CERTS: '/fixture/node-ca.pem',
+        HTTPS_PROXY: 'https://proxy.example:7890',
+        KEEP: 'retained',
+      };
+      const before = { ...env };
+      await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, { env });
+      const childEnv = mocks.spawn.mock.calls[0]?.[2].env;
+      expect(
+        Object.keys(childEnv).some((name) => /^GIT_(?:PROXY_)?SSL_NO_VERIFY$/i.test(name))
+      ).toBe(false);
+      expect(childEnv).toMatchObject({
+        GIT_SSL_CAINFO: env.GIT_SSL_CAINFO,
+        GIT_SSL_CAPATH: env.GIT_SSL_CAPATH,
+        GIT_PROXY_SSL_CAINFO: env.GIT_PROXY_SSL_CAINFO,
+        NODE_EXTRA_CA_CERTS: env.NODE_EXTRA_CA_CERTS,
+        HTTPS_PROXY: env.HTTPS_PROXY,
+        KEEP: 'retained',
+      });
+      expect(env).toEqual(before);
+    }
+  );
+  it.each(['NODE_TLS_REJECT_UNAUTHORIZED', 'Node_Tls_Reject_Unauthorized'])(
+    'fails the API diagnostic before an HTTPS proxy handshake when %s is 0',
+    async (key) => {
+      const env = { [key]: '0', HTTPS_PROXY: 'https://proxy.example:7890' };
+      const result = await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, {
+        env,
+      });
+      expect(result.api.status).toBe('failed');
+      expect(mocks.agent).not.toHaveBeenCalled();
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(env[key]).toBe('0');
+    }
+  );
+  it('also checks the actual Node process TLS default without changing it', async () => {
+    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '0');
+    try {
+      const result = await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, {
+        env: {},
+      });
+      expect(result.api.status).toBe('failed');
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe('0');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
   it('never returns process stderr or proxy errors; missing Git is distinct', async () => {
     mocks.get.mockImplementation(() => {

@@ -604,7 +604,7 @@ export const en: MessagesShape<typeof zhCN> = {
       compatibility: 'Git compatibility mode',
       compatibilityHint: 'Use HTTP/1.1 and Git protocol v0. TLS verification is not weakened',
       effective:
-        'After saving, new Main commands apply immediately. Start or resume a session, or open a new terminal, to use the setting there. Active sessions and terminals are not restarted',
+        'After saving, new Git operations and commands run by the app use these settings. Agent commands use them when a session next starts or resumes, and terminals when newly opened. Existing sessions and terminals are not automatically restarted',
       invalid:
         'Enter an HTTP/HTTPS proxy URL without credentials, a path, query or fragment, and with a valid port',
       test: 'Test connection',
