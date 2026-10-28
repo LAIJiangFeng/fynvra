@@ -221,6 +221,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
       sidekick?: { disable?: unknown };
       memory?: { enabled?: unknown };
       embedding?: { provider?: unknown };
+      todowrite?: { enabled?: unknown };
     };
     if (
       config.fail_closed_blocking !== false ||
@@ -228,7 +229,8 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
       config.dreamer?.disable !== true ||
       config.sidekick?.disable !== true ||
       config.memory?.enabled !== false ||
-      config.embedding?.provider !== 'off'
+      config.embedding?.provider !== 'off' ||
+      config.todowrite?.enabled !== false
     ) {
       throw new Error('host config does not match the compression-only policy');
     }
