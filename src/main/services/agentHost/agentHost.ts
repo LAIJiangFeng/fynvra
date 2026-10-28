@@ -29,11 +29,13 @@ import type {
   ChatMessage,
   ModelOptions,
   ModelThinkingCapability,
+  ReplySuggestion,
   SessionEventEnvelope,
   SessionModelRef,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
+import { normalizeReplySuggestion } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
 import type { CompactionStrategy } from '@shared/types/settings';
@@ -154,6 +156,15 @@ export interface AgentHostService extends AgentHost {
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
   /**
+   * 为刚正常结束的一轮生成一条输入框灰字建议（`roundId` = settled 事件的会话级 seq）。
+   * 只接受当前空闲、未归档、没有待审批的会话；同一轮只请求一次（含空结果），并发有界，
+   * 失败 / 超时 / 旧轮 / 旧 generation 一律返回空建议，不影响主对话
+   */
+  suggestReply(input: {
+    sessionId: string;
+    roundId: number;
+  }): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>>;
+  /**
    * 换会话的模型 / 思考档位：解析成功后更新记录（落 sessions.json），会话在 worker 里时发 set-model，
    * 下一次 prompt 起生效。运行中拒绝；解析失败返回可读错误，记录不变。
    */
@@ -201,12 +212,28 @@ interface LiveSession {
   lastError?: string;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
+  /** 最近一次正常结束（非 aborted）的 agent_settled 的会话级 seq；新一轮开始 / 换模型时清 0 */
+  lastSettledSeq: number;
+  /** 当前 generation 里正常结束的回合数：与 worker 同步计数，用于双重核对轮次 */
+  settledRounds: number;
+  /** 最近一次已发起建议请求的 settled 轮次：同一轮不再请求（含空结果 / 失败） */
+  suggestedRound: number;
 }
 
 interface PendingApproval {
   sessionId: string;
   generation: number;
   expiresAt: number;
+}
+
+interface PendingSuggestion {
+  sessionId: string;
+  generation: number;
+  roundId: number;
+  /** worker 侧的回合计数，回包必须原样带回 */
+  round: number;
+  timer: ReturnType<typeof setTimeout>;
+  resolve(result: Result<{ suggestion: ReplySuggestion | null }>): void;
 }
 
 type Result<T extends object = object> = IpcResult<T>;
@@ -217,6 +244,10 @@ const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
 const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
+/** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
+const SUGGESTION_TIMEOUT_MS = 10_000;
+/** 同时最多几条建议请求：辅助功能不能与主对话争资源 */
+const MAX_CONCURRENT_SUGGESTIONS = 2;
 /** dispatch_task 认不出模型时错误里最多列出的可选模型数 */
 const MODEL_OPTIONS_SHOWN = 30;
 
@@ -241,6 +272,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
+  /** 在途的建议请求：requestId → 结算；同时用它限制并发并丢弃旧回包 */
+  const suggestions = new Map<string, PendingSuggestion>();
+  let suggestionSeq = 0;
   /** 模型的思考档位：pi 目录随 worker 版本固定，同一（协议, 模型, reasoning 标记）的回答不会变 */
   const capabilities = new Map<string, ModelThinkingCapability>();
   /** 等 worker 回答的 describe-models：requestId → 结算 */
@@ -302,6 +336,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         calls: new Map(),
         workerHost: null,
         roundEpoch: 0,
+        lastSettledSeq: 0,
+        settledRounds: 0,
+        suggestedRound: 0,
       };
       live.set(sessionId, state);
     }
@@ -387,10 +424,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     tellObservers((observer) => observer.event?.(envelope));
   }
 
-  /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求 */
+  /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求，丢弃建议 */
   function detach(sessionId: string, state: LiveSession): void {
     state.spawned = false;
     state.running = false;
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
+    cancelSuggestions(sessionId, false);
     for (const controller of state.calls.values()) controller.abort();
     state.calls.clear();
     for (const [requestId, pending] of approvals) {
@@ -402,9 +442,49 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return client.send(command);
   }
 
+  /** 结算一条建议请求：删表、清定时器，只结算一次 */
+  function settleSuggestion(
+    requestId: string,
+    result: Result<{ suggestion: ReplySuggestion | null }>
+  ): void {
+    const pending = suggestions.get(requestId);
+    if (!pending) return;
+    suggestions.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(result);
+  }
+
+  /**
+   * 丢弃一个会话所有在途建议：立即结算为空（不阻塞调用方），并让 worker 中止请求。
+   * 会话关闭 / 崩溃时 notifyWorker 为 false（worker 进程已经不在了）
+   */
+  function cancelSuggestions(sessionId: string, notifyWorker: boolean): void {
+    for (const [requestId, pending] of suggestions) {
+      if (pending.sessionId !== sessionId) continue;
+      const command: AgentCommand = {
+        type: 'cancel-suggestion',
+        identity: { sessionId, generation: pending.generation },
+        requestId,
+      };
+      if (notifyWorker) send(command);
+      settleSuggestion(requestId, { ok: true, suggestion: null });
+    }
+  }
+
+  /** 新轮 / 换模型 / 停止 / 删除：旧轮的建议不能再出现 */
+  function invalidateSuggestion(sessionId: string, state: LiveSession): void {
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
+    cancelSuggestions(sessionId, state.spawned);
+  }
+
   function spawnWith(sessionId: string, state: LiveSession, spec: SpawnSessionSpec): boolean {
     state.generation += 1;
     state.workerSeq = 0;
+    // worker 里的回合计数从 0 重新开始，Main 同步重置（建议请求的 round 要两边一致）
+    state.settledRounds = 0;
+    state.lastSettledSeq = 0;
+    state.suggestedRound = 0;
     state.spec = spec;
     state.spawned = send({ type: 'spawn-session', identity: identityOf(sessionId, state), spec });
     return state.spawned;
@@ -633,9 +713,17 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (event.event.type === 'error') state.lastError = event.event.message;
         if (event.event.type === 'agent_settled' && event.event.aborted) {
           interrupted(sessionId, state, 'Worker attempt interrupted: the agent run was aborted');
+          state.lastSettledSeq = 0;
+          cancelSuggestions(sessionId, state.spawned);
         }
         deliver(sessionId, state, event.event);
         if (event.event.type === 'agent_settled') {
+          // 不再有进行中的回合：状态事件可能稍后才到，建议请求不必等它
+          state.running = false;
+          if (!event.event.aborted) {
+            state.lastSettledSeq = state.sessionSeq;
+            state.settledRounds += 1;
+          }
           for (const [requestId, pending] of approvals) {
             if (pending.sessionId === sessionId) approvals.delete(requestId);
           }
@@ -677,12 +765,45 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!state) return;
         const { sessionId } = event.identity;
         state.lastError = event.error;
+        state.lastSettledSeq = 0;
+        cancelSuggestions(sessionId, false);
         if (event.fatal) {
           detach(sessionId, state);
           interrupted(sessionId, state, `Worker attempt interrupted: ${event.error}`);
         }
         deliver(sessionId, state, { type: 'error', source: 'host', message: event.error });
         setStatus(sessionId, 'error');
+        return;
+      }
+      case 'suggestion-result': {
+        const pending = suggestions.get(event.requestId);
+        const { sessionId, generation } = event.identity;
+        // requestId / generation / 会话 / 轮次任一对不上就是过期回包
+        if (
+          !pending ||
+          pending.sessionId !== sessionId ||
+          pending.generation !== generation ||
+          pending.roundId !== event.roundId ||
+          pending.round !== event.round
+        ) {
+          return;
+        }
+        const stored = deps.store.get(sessionId);
+        const state = live.get(sessionId);
+        const text = normalizeReplySuggestion(event.text);
+        const current =
+          stored !== undefined &&
+          stored.archivedAt === undefined &&
+          stored.status !== 'error' &&
+          state !== undefined &&
+          state.lastSettledSeq === event.roundId &&
+          state.sessionSeq === event.roundId &&
+          state.settledRounds === event.round &&
+          !state.running;
+        settleSuggestion(event.requestId, {
+          ok: true,
+          suggestion: current && text ? { sessionId, roundId: event.roundId, text } : null,
+        });
         return;
       }
       case 'models-described':
@@ -809,6 +930,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
     const state = liveOf(sessionId);
     const activity = state.activity;
+    // 自动继续也算新一轮：旧轮的建议不能再出现 / 返回
+    invalidateSuggestion(sessionId, state);
     state.prompting += 1;
     try {
       const spawned = await ensureSpawned(stored);
@@ -835,6 +958,62 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
+  /**
+   * 在 Renderer 已确认输入框空闲、没有队列 / 待审批 / 图片 / 草稿之后，为刚结束的一轮生成建议。
+   * 这里再核对 Main 记录的会话状态与轮次；worker 还会在生成前后核对自己的空闲状态与 generation。
+   * 任何失败、超时、旧轮都返回空建议，不向 Renderer 抛错
+   */
+  async function suggestReply({
+    sessionId,
+    roundId,
+  }: {
+    sessionId: string;
+    roundId: number;
+  }): Promise<Result<{ suggestion: ReplySuggestion | null }>> {
+    const empty: Result<{ suggestion: ReplySuggestion | null }> = {
+      ok: true,
+      suggestion: null,
+    };
+    const stored = deps.store.get(sessionId);
+    if (!stored || stored.archivedAt !== undefined) return empty;
+    // 状态事件可能比 Renderer 的请求晚到：真正权威的是本轮 settled 的 seq 与运行态；
+    // 错误 / 等审批永远不生成
+    if (stored.status === 'error' || stored.status === 'waiting-approval') return empty;
+    const state = live.get(sessionId);
+    if (!state?.spawned || state.running || state.prompting > 0) return empty;
+    if (state.lastSettledSeq !== roundId || state.sessionSeq !== roundId) return empty;
+    const round = state.settledRounds;
+    if (round <= 0) return empty;
+    // 每轮只发起一次，空结果 / 失败也算（避免 Renderer 重渲染时反复请求）
+    if (state.suggestedRound === roundId) return empty;
+    if (suggestions.size >= MAX_CONCURRENT_SUGGESTIONS) return empty;
+    for (const pending of approvals.values()) {
+      if (pending.sessionId === sessionId) return empty;
+    }
+
+    const requestId = `suggest-${++suggestionSeq}`;
+    const identity = identityOf(sessionId, state);
+    state.suggestedRound = roundId;
+    const answer = new Promise<Result<{ suggestion: ReplySuggestion | null }>>((resolve) => {
+      const timer = setTimeout(() => {
+        send({ type: 'cancel-suggestion', identity, requestId });
+        settleSuggestion(requestId, empty);
+      }, SUGGESTION_TIMEOUT_MS);
+      suggestions.set(requestId, {
+        sessionId,
+        generation: identity.generation,
+        roundId,
+        round,
+        timer,
+        resolve,
+      });
+    });
+    if (!send({ type: 'suggest-reply', identity, requestId, roundId, round })) {
+      settleSuggestion(requestId, empty);
+    }
+    return answer;
+  }
+
   async function deliverMessage(
     type: 'prompt' | 'steer',
     sessionId: string,
@@ -845,6 +1024,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
+    // 用户开始新一轮（或插话）：旧轮的建议立即作废，worker 里的在途请求也中止
+    invalidateSuggestion(sessionId, pending);
     const epoch = pending.roundEpoch;
     pending.activity += 1;
     tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
@@ -943,6 +1124,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ...(current.status === 'error' ? { status: 'idle' as const } : {}),
       }) ?? current;
     const state = live.get(sessionId);
+    if (state) invalidateSuggestion(sessionId, state);
     // 缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），重建时不会退回旧模型
     const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
     if (state?.spec) state.spec = { ...state.spec, model: spec };
@@ -1215,9 +1397,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     prompt,
     promptWhenIdle,
     steer,
+    suggestReply,
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
+      invalidateSuggestion(sessionId, state);
       state.activity += 1;
       state.roundEpoch += 1;
       wakeRounds();

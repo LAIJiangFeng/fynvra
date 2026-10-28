@@ -172,6 +172,7 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         removed: 0,
       })
     ),
+    suggestReply: vi.fn(async () => ({ ok: true as const, suggestion: null })),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),
     onApprovalRequest: on(listeners.approval),

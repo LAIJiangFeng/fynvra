@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ModelOptions,
   parseChatImages,
+  type ReplySuggestion,
   type SessionModelRef,
   type SessionSummary,
 } from '@shared/types/chat';
@@ -247,6 +248,16 @@ export function registerSessionHandlers(
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SUGGEST_REPLY,
+    (_event, raw: unknown): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>> => {
+      const input = parseSuggestReplyInput(raw);
+      return input
+        ? guard(() => host().suggestReply(input))
+        : invalid(translate('common.invalidArgs'));
+    }
+  );
+
   // 用户可能在外部终端里切过分支：窗口重新获得焦点时重读（按目录节流，有变化才广播 sessions:changed）
   app.on('browser-window-focus', () => {
     try {
@@ -303,6 +314,18 @@ export function parseSetApprovalModeInput(raw: unknown): SetApprovalModeInput | 
   const sessionId = parseSessionId(record?.sessionId);
   const mode = record?.mode;
   return sessionId && isApprovalMode(mode) ? { sessionId, mode } : null;
+}
+
+/** `{ sessionId, roundId }`：roundId 是 settled 事件的会话级 seq，只接受正整数，不带其他字段 */
+export function parseSuggestReplyInput(
+  raw: unknown
+): { sessionId: string; roundId: number } | null {
+  const record = strictRecord(raw, ['sessionId', 'roundId']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const roundId = record?.roundId;
+  return sessionId && typeof roundId === 'number' && Number.isSafeInteger(roundId) && roundId > 0
+    ? { sessionId, roundId }
+    : null;
 }
 
 /** 无参或 `{ workspaceId? }` */

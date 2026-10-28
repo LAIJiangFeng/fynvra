@@ -39,6 +39,7 @@ const host = {
   setModel: vi.fn(async () => ({ ok: true })),
   modelOptions: vi.fn(async () => ({ ok: true, providers: [] })),
   setApprovalMode: vi.fn(async () => ({ ok: true })),
+  suggestReply: vi.fn(async () => ({ ok: true, suggestion: null })),
   refreshBranches: vi.fn(),
 };
 
@@ -178,6 +179,7 @@ describe('sessions IPC', () => {
         'sessions:set-model',
         'sessions:set-approval-mode',
         'sessions:steer',
+        'sessions:suggest-reply',
         'sessions:sweep',
         'sessions:unarchive',
       ].sort()

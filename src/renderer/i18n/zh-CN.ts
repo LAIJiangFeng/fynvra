@@ -275,6 +275,7 @@ export const zhCN = {
     queuedImageOnly: '（仅图片）',
     sendNow: '立即发送（{chord}）',
     removeQueued: '从队列中移除',
+    replySuggestionHint: '回复建议：{suggestion}。按右箭头填入输入框',
   },
   model: {
     pick: '选择模型',

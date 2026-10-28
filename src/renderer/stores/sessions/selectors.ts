@@ -1,6 +1,7 @@
 import type {
   ChatImage,
   ModelProviderOption,
+  ReplySuggestion,
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
@@ -93,6 +94,12 @@ export const selectDraftImagesOf =
   (sessionId: string) =>
   (state: SessionsState): ChatImage[] =>
     state.draftImages[sessionId] ?? EMPTY_IMAGES;
+
+/** 当前会话的灰字回复建议；没有或已丢弃时为 undefined */
+export const selectReplySuggestionOf =
+  (sessionId: string) =>
+  (state: SessionsState): ReplySuggestion | undefined =>
+    state.replySuggestions[sessionId];
 
 /** Messages queued while the session runs, oldest first */
 export const selectQueueOf =

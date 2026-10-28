@@ -98,6 +98,45 @@ export interface SessionEventEnvelope {
   event: FynvraSessionEvent;
 }
 
+/** 输入框灰字回复建议的最长字符数：只放一行短的下一句，不做长文或候选列表 */
+export const MAX_REPLY_SUGGESTION_CHARS = 200;
+/**
+ * 一轮正常结束后生成的一条「用户下一句话」建议。`roundId` 是该轮 settled 事件的会话级 seq，
+ * Renderer 只回传它，Main / worker 用它拒绝旧轮或别的会话的回包。建议只存在于 Renderer 内存，
+ * 不写入 pi jsonl，也不等于输入框草稿
+ */
+export interface ReplySuggestion {
+  sessionId: string;
+  roundId: number;
+  text: string;
+}
+
+/**
+ * 把模型输出收敛成一条可展示的建议：取第一行非空文本，去掉列表符号、包住整句的引号、
+ * 代码围栏与 Markdown 强调符，压成一行并按 {@link MAX_REPLY_SUGGESTION_CHARS} 截断。
+ * 空串表示「没有明确建议」。Main 与 worker 都过一遍，不依赖某一端单独清洗。
+ */
+export function normalizeReplySuggestion(raw: string): string {
+  const line = raw
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part !== '');
+  if (!line || line.includes('```')) return '';
+  let text = line
+    .replace(/^(?:suggestion|reply|建议|回复)\s*[:：]\s*/i, '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^(?:[-*•>]|\d+[.)])\s+/, '')
+    .replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '')
+    .replace(/[*_`]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (text.length > MAX_REPLY_SUGGESTION_CHARS) {
+    text = `${text.slice(0, MAX_REPLY_SUGGESTION_CHARS - 1).trimEnd()}…`;
+  }
+  return text;
+}
+
 export function isChatImageMimeType(value: unknown): value is ChatImageMimeType {
   return (CHAT_IMAGE_MIME_TYPES as readonly unknown[]).includes(value);
 }

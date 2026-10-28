@@ -101,6 +101,11 @@ export const IPC_CHANNELS = {
   SESSIONS_MODEL_OPTIONS: 'sessions:model-options',
   /** 换会话的审批档位：Renderer 只传会话 id 与档位；运行中也可以切，即时生效 */
   SESSIONS_SET_APPROVAL_MODE: 'sessions:set-approval-mode',
+  /**
+   * 为刚正常结束的一轮生成一条输入框回复建议：Renderer 只传 `{ sessionId, roundId }`（settled 事件的会话级 seq），
+   * 不传对话正文 / 模型 / 路径；失败或超时返回空建议，不影响主对话
+   */
+  SESSIONS_SUGGEST_REPLY: 'sessions:suggest-reply',
   /** 归档会话（只传会话 id）：运行中拒绝；按设置清理它绑定的、已合并且干净的 worktree */
   SESSIONS_ARCHIVE: 'sessions:archive',
   /** 恢复归档的会话（只传会话 id），闲置计时从现在重新开始 */

@@ -10,6 +10,7 @@ import {
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGES_TOTAL_BYTES,
   type ModelProviderOption,
+  type ReplySuggestion,
   type SessionEventEnvelope,
   type SessionModelRef,
   type SessionSummary,
@@ -60,6 +61,8 @@ export interface SessionsState extends ChatProjection {
   drafts: Record<string, string>;
   /** 输入框里粘贴的图片，按会话保存（与 drafts 并列，切换会话不丢） */
   draftImages: Record<string, ChatImage[]>;
+  /** 刚结束一轮生成的灰字建议；只在内存，与草稿分开，切换会话 / 新轮 / 换模型时清掉 */
+  replySuggestions: Record<string, ReplySuggestion>;
   /**
    * Messages queued while the session was running, oldest first. Sent one at a time as prompts when
    * the turn settles to idle; kept (not sent) after a stop or an error until the user sends again
@@ -108,6 +111,11 @@ export interface SessionsState extends ChatProjection {
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
+  /**
+   * 丢掉这个会话当前的回复建议（Esc 忽略 / → 采纳）：本轮不再出现，也不会有迟到的回包补回来。
+   * 只影响灰字，不改变草稿
+   */
+  ignoreSuggestion(sessionId: string): void;
   /** 恢复已发送的图片或保存的草稿：原样替换，不重新检查上限 */
   setDraftImages(sessionId: string, images: ChatImage[]): void;
   /**
@@ -276,6 +284,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
   /** 在途的换审批档位：同上 */
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
+  /** 每个会话最近一次已发起建议的轮次（含空结果 / 失败）：同一轮不重复请求 */
+  const suggestionTried = new Map<string, number>();
+  /** 每个会话被 Esc 忽略的轮次；迟到的回包不再展示 */
+  const suggestionIgnored = new Map<string, number>();
+  /** 会话切换代数：请求发出后只要切过会话，回包就丢掉，不允许串会话 */
+  let suggestionNavigation = 0;
   let modelOptionsRequest = 0;
   const modelOptionsByWorkspace = new Map<string | null, number>();
   // 任何后续导航 / 创建都使旧创建的自动选中失效，即使用户又切回了同一工作区
@@ -286,6 +300,51 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   let queueSeq = 0;
 
   return create<SessionsState>()((set, get) => {
+    /** 只清灰字建议，不动草稿 */
+    function clearSuggestion(sessionId: string): void {
+      if (!get().replySuggestions[sessionId]) return;
+      set((state) => ({ replySuggestions: omitKey(state.replySuggestions, sessionId) }));
+    }
+
+    /**
+     * 一轮正常结束后，只有它是当前选中会话、输入框完全空闲时才请求一次建议：
+     * 没有队列 / 待审批 / 图片 / 草稿，状态 idle。这里只碰回复建议，不改消息、draft 或状态；
+     * 同一轮（含空结果 / 失败）不重复请求，切过会话的回包直接丢弃
+     */
+    function maybeRequestSuggestion(sessionId: string, roundId: number): void {
+      const state = get();
+      if (state.activeSessionId !== sessionId) return;
+      if (state.runtimeBySession[sessionId]?.settledSeq !== roundId) return;
+      if (state.runtimeBySession[sessionId]?.lastSeq !== roundId) return;
+      if (statusOf(state, sessionId) !== 'idle') return;
+      if ((state.queuedBySession[sessionId]?.length ?? 0) > 0) return;
+      if ((state.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
+      if ((state.drafts[sessionId] ?? '') !== '') return;
+      if ((state.draftImages[sessionId]?.length ?? 0) > 0) return;
+      if (suggestionTried.get(sessionId) === roundId) return;
+      if (suggestionIgnored.get(sessionId) === roundId) return;
+      suggestionTried.set(sessionId, roundId);
+      const navigation = suggestionNavigation;
+      void safely(() => api.suggestReply({ sessionId, roundId })).then((result) => {
+        if (suggestionNavigation !== navigation) return;
+        const current = get();
+        if (current.activeSessionId !== sessionId) return;
+        if (current.runtimeBySession[sessionId]?.settledSeq !== roundId) return;
+        if (current.runtimeBySession[sessionId]?.lastSeq !== roundId) return;
+        if (suggestionIgnored.get(sessionId) === roundId) return;
+        if (!result.ok || !result.suggestion) return;
+        const suggestion = result.suggestion;
+        if (suggestion.sessionId !== sessionId || suggestion.roundId !== roundId) return;
+        if (!suggestion.text) return;
+        if (statusOf(current, sessionId) !== 'idle') return;
+        if ((current.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
+        if ((current.queuedBySession[sessionId]?.length ?? 0) > 0) return;
+        set((state) => ({
+          replySuggestions: { ...state.replySuggestions, [sessionId]: suggestion },
+        }));
+      });
+    }
+
     function flushEvents(): void {
       scheduled = false;
       if (pending.length === 0) return;
@@ -298,12 +357,16 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       });
       // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
       const settled = new Set<string>();
+      const normal = new Map<string, number>();
       for (const { sessionId, event } of batch) {
         if (event.type !== 'agent_settled') continue;
         if (event.aborted) heldQueues.add(sessionId);
+        else normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
       for (const sessionId of settled) drainQueue(sessionId);
+      // 队列真的空了、状态仍 idle 才请求；drainQueue 发了下一条时这里会看到 running
+      for (const [sessionId, roundId] of normal) maybeRequestSuggestion(sessionId, roundId);
     }
 
     function queueOf(sessionId: string): QueuedMessage[] {
@@ -333,6 +396,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       restore: (state: SessionsState) => Partial<SessionsState>
     ): Promise<boolean> {
       const previous = statusOf(get(), sessionId);
+      clearSuggestion(sessionId);
       sending.add(sessionId);
       const id = `local-${++localSeq}`;
       set((state) =>
@@ -394,6 +458,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       if (archived && (sending.has(sessionId) || isBusy(statusOf(get(), sessionId)))) {
         return { ok: false, error: translate('sessions.errors.archiveWhileBusy') };
       }
+      if (archived) clearSuggestion(sessionId);
       const { workspaceId, archivedAt: previous } = session;
       const mark = (archivedAt: number | undefined, updatedAt?: number) =>
         set((state) => {
@@ -431,6 +496,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       activeSessionId: null,
       drafts: {},
       draftImages: {},
+      replySuggestions: {},
       queuedBySession: {},
       loadingHistory: {},
       listErrors: {},
@@ -532,8 +598,16 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ? (findSession(state, sessionId)?.workspaceId ?? workspaceId ?? state.workspaceId)
           : state.workspaceId;
         selectionVersion++;
+        // 切会话就丢弃旧的灰字建议与在途回包；回到同一会话也不复活
+        if (state.activeSessionId !== sessionId) suggestionNavigation += 1;
         // 一次更新会话 store 的两个选中字段，外部同步再读时不会清掉刚选的会话
-        set({ workspaceId: target, activeSessionId: sessionId });
+        set({
+          workspaceId: target,
+          activeSessionId: sessionId,
+          ...(state.activeSessionId !== sessionId && Object.keys(state.replySuggestions).length > 0
+            ? { replySuggestions: {} }
+            : {}),
+        });
         if (!sessionId) return;
         if (target) {
           options.onSelectSession?.(target);
@@ -598,6 +672,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       async steer(sessionId, queuedId) {
+        clearSuggestion(sessionId);
         const queue = queueOf(sessionId);
         const item = queuedId
           ? queue.find((candidate) => candidate.id === queuedId)
@@ -674,6 +749,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       async abort() {
         const sessionId = get().activeSessionId;
         if (!sessionId) return;
+        clearSuggestion(sessionId);
         // Stop keeps the queue but pauses it: the user decides what to send next
         heldQueues.add(sessionId);
         const result = await safely(() => api.abort(sessionId));
@@ -720,6 +796,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set((state) => ({
           drafts: text ? { ...state.drafts, [sessionId]: text } : omitKey(state.drafts, sessionId),
         }));
+      },
+
+      ignoreSuggestion(sessionId) {
+        const suggestion = get().replySuggestions[sessionId];
+        if (suggestion) suggestionIgnored.set(sessionId, suggestion.roundId);
+        clearSuggestion(sessionId);
       },
 
       setDraftImages(sessionId, images) {
@@ -806,6 +888,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (sending.has(sessionId) || isBusy(statusOf(get(), sessionId))) {
           return { ok: false, error: translate('sessions.errors.switchWhileBusy') };
         }
+        clearSuggestion(sessionId);
         const request = ++requestSeq;
         const previous = session.model;
         modelSwitches.set(sessionId, { request, model });
@@ -887,6 +970,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           return { ok: false, error };
         }
         const { workspaceId } = session;
+        clearSuggestion(sessionId);
         const lists = placeSessions(
           before,
           workspaceId,
@@ -914,6 +998,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (result.ok) {
           modelSwitches.delete(sessionId);
           approvalSwitches.delete(sessionId);
+          suggestionTried.delete(sessionId);
+          suggestionIgnored.delete(sessionId);
           return result;
         }
         removedSessions.delete(sessionId);
