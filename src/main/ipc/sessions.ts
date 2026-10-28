@@ -288,7 +288,7 @@ export function parseCreateSessionInput(raw: unknown): CreateSessionInput | null
   return model ? { workspaceId, roleId, model } : null;
 }
 
-/** `{ sessionId, model: { providerId, modelId, thinking? } }`：只有设置里的 id 引用，不带地址或 key */
+/** `{ sessionId, model: { providerId, modelId, thinking?, fastMode? } }`：只有设置里的 id 引用，不带地址或 key */
 export function parseSetModelInput(raw: unknown): SetModelInput | null {
   const record = strictRecord(raw, ['sessionId', 'model']);
   const sessionId = parseSessionId(record?.sessionId);
@@ -315,11 +315,17 @@ export function parseModelOptionsInput(raw: unknown): { workspaceId?: string } |
 }
 
 function parseModelRef(raw: unknown): SessionModelRef | null {
-  const model = strictRecord(raw, ['providerId', 'modelId', 'thinking']);
+  const model = strictRecord(raw, ['providerId', 'modelId', 'thinking', 'fastMode']);
   if (!model || !isRef(model.providerId) || !isRef(model.modelId)) return null;
-  const { providerId, modelId, thinking } = model;
+  const { providerId, modelId, thinking, fastMode } = model;
   if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
-  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
+  if (fastMode !== undefined && typeof fastMode !== 'boolean') return null;
+  return {
+    providerId,
+    modelId,
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 /**

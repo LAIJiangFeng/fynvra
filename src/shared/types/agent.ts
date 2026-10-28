@@ -42,6 +42,8 @@ export interface ResolvedModelSpec {
   apiKey?: string;
   modelId: string;
   thinking?: ThinkingLevel;
+  /** 会话自己的 Fast（优先服务）开关；只对 OpenAI Responses / Chat Completions 发送 service_tier */
+  fastMode?: boolean;
   /**
    * 设置里模型条目的 reasoning 标记：只对 pi 内置目录里没有、也推断不出的模型生效（按协议兜底）；
    * 目录里有的、按目录推断出来的，以目录为准
@@ -446,13 +448,19 @@ function isBoolean(value: unknown): value is boolean {
 function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { providerId, api, baseUrl, apiKey, modelId, thinking, reasoning } = record;
+  const { providerId, api, baseUrl, apiKey, modelId, thinking, fastMode, reasoning } = record;
   if (!isNonEmptyString(providerId) || !isNonEmptyString(api) || !isNonEmptyString(modelId)) {
     return null;
   }
   if (!isOptional(baseUrl, isNonEmptyString) || !isOptional(apiKey, isNonEmptyString)) return null;
   const level = normalizeThinkingLevel(thinking);
-  if ((thinking !== undefined && !level) || !isOptional(reasoning, isBoolean)) return null;
+  if (
+    (thinking !== undefined && !level) ||
+    !isOptional(fastMode, isBoolean) ||
+    !isOptional(reasoning, isBoolean)
+  ) {
+    return null;
+  }
   return {
     providerId,
     api,
@@ -460,6 +468,7 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(baseUrl !== undefined ? { baseUrl: baseUrl as string } : {}),
     ...(apiKey !== undefined ? { apiKey: apiKey as string } : {}),
     ...(level ? { thinking: level } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
     ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
   };
 }

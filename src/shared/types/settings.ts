@@ -335,9 +335,15 @@ function parseModelRef(raw: unknown): SessionModelRef | null {
   if (!record || !isNonEmptyString(record.providerId) || !isNonEmptyString(record.modelId)) {
     return null;
   }
-  const { providerId, modelId, thinking } = record;
+  const { providerId, modelId, thinking, fastMode } = record;
   if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
-  return { providerId, modelId, ...(thinking !== undefined ? { thinking } : {}) };
+  if (fastMode !== undefined && typeof fastMode !== 'boolean') return null;
+  return {
+    providerId,
+    modelId,
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(fastMode === true ? { fastMode: true } : {}),
+  };
 }
 
 /** 键须是合法的工作区 id，值只取 id 引用；逐条丢弃非法项，一条不剩时返回 undefined。 */

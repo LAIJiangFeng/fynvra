@@ -296,6 +296,9 @@ export const en: MessagesShape<typeof zhCN> = {
     searchPlaceholder: 'Search providers or models',
     noMatch: 'No matching models',
     loadFailed: 'Failed to load models: {error}',
+    fast: 'Fast',
+    fastHint:
+      'Request priority processing. May increase cost and usage; the provider must support it.',
   },
   thinking: {
     title: 'Thinking',

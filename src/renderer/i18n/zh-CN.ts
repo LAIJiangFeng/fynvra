@@ -287,6 +287,8 @@ export const zhCN = {
     searchPlaceholder: '搜索服务或模型',
     noMatch: '没有匹配的模型',
     loadFailed: '读取模型失败：{error}',
+    fast: 'Fast',
+    fastHint: '请求优先处理，可能增加费用与用量，需服务商支持',
   },
   thinking: {
     title: '思考档位',

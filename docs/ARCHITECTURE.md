@@ -156,6 +156,10 @@ export interface Message {
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
 - worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 显式传 Main launcher 的 `{ freshAttempt: true }`，反馈等待旧 run 真正 idle 后才作为新 prompt 发出；普通 `send_to_worker` 指令仍及时投递并返回，不等待 idle，以便协调者能回答 worker 随后提出的问题；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
+- Fast（会话级优先服务）：`SessionModelRef.fastMode` 随会话记录与 last-used 持久化，与 thinking 独立。piSession 在会话自己的
+  `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
+  不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
+  不代表已确认实际服务档位；不增加自动降级重发逻辑。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
@@ -307,8 +311,8 @@ Wave 2 的卡片并行开发，彼此只能通过本节定义的接口对接。*
 import type { FynvraSessionEvent, ThinkingLevel } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
-/** 设置里的服务 id + 模型 id（只存 id 引用）+ 思考档位（Task 17） */
-export interface SessionModelRef { providerId: string; modelId: string; thinking?: ThinkingLevel; }
+/** 设置里的服务 id + 模型 id（只存 id 引用）+ 思考档位（Task 17）+ Fast（可选，缺省关闭） */
+export interface SessionModelRef { providerId: string; modelId: string; thinking?: ThinkingLevel; fastMode?: boolean; }
 export interface SessionSummary {
   id: string; workspaceId: string; roleId: string; title: string; cwd: string;
   worktreeId?: string; parentSessionId?: string; dispatchId?: string;
@@ -344,7 +348,7 @@ export interface ModelThinkingCapability { thinkingLevels: ThinkingLevel[]; defa
 export function pickThinkingLevel(capability: ModelThinkingCapability, requested?: ThinkingLevel): ThinkingLevel | undefined;
 export interface ModelOption extends ModelThinkingCapability { id: string; name: string; }
 export interface ModelProviderOption { providerId: string; name: string; api: ProviderApi; models: ModelOption[]; } // 只列启用且有 key 的服务，不带 key 与地址
-export interface ModelOptions { providers: ModelProviderOption[]; lastUsed?: SessionModelRef; }  // lastUsed：settings.json preferences.lastModelByWorkspace
+export interface ModelOptions { providers: ModelProviderOption[]; lastUsed?: SessionModelRef; }  // lastUsed：settings.json preferences.lastModelByWorkspace（含思考档位与 Fast）
 ```
 
 ### 9.3 `window.fynvra.sessions`（归属：agent-host；chat-ui 消费）
@@ -363,7 +367,7 @@ export interface SessionsApi {
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
   respondApproval(input: { sessionId: string; requestId: string; decision: ApprovalDecision }): Promise<IpcResult>;
-  /** 换模型 / 思考档位：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
+  /** 换模型 / 思考档位 / Fast：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
   setModel(input: { sessionId: string; model: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
   archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;   // 运行中拒绝
@@ -383,13 +387,14 @@ export interface SessionsApi {
   Main 启动后 30 秒、之后每小时按 `preferences.archiveIdleDays` / `deleteArchivedDays` 扫描（`sessions:sweep` 立即扫一次），
   删除与 `sessions:remove` 相同（pi jsonl 保留）。
 
-- **换模型**（`sessions:set-model`）：Main 用 `ModelResolver` 解析 → 更新会话记录（sessions.json）→ 会话已在 worker 里时发
-  `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`）→ worker 注册 provider 后调 pi 的 `setModel` / `setThinkingLevel`。
-  换不成功时 worker 关掉该会话并报 fatal `session-error`，Main 下次使用前按记录重新 spawn。
+- **换模型 / Fast**（`sessions:set-model`）：Main 用 `ModelResolver` 解析（协议不支持 Fast 时清掉该开关）→ 更新会话记录（sessions.json）→
+  会话已在 worker 里时发 `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`，带 `fastMode`）→ worker 注册 provider 后调 pi 的
+  `setModel` / `setThinkingLevel`，并更新本会话 onPayload 的 Fast 开关。换不成功时 worker 关掉该会话并报 fatal `session-error`，
+  Main 下次使用前按记录重新 spawn。
 - **可选档位**（`sessions:model-options`）：Main 不加载 pi，经进程级的 `describe-models` / `models-described` 问 worker，结果按
   （协议, 模型 id, reasoning 标记）缓存；worker 用的是与注册模型同一份目录模板（同 id 同协议时官方 provider 的条目优先）。
-- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型与档位。审批档位随主 agent：
-  按派发时主 agent 会话的当前档位（用户可能切过），没有主 agent 时才用角色自己的。
+- **派发的 worker 会话**：用角色的 `model`；角色没配时继承主 agent 会话当前的模型、档位与 Fast。显式指定的模型或角色模型
+  不继承 Fast。审批档位随主 agent：按派发时主 agent 会话的当前档位（用户可能切过），没有主 agent 时才用角色自己的。
 
 ### 9.4 `window.fynvra.orchestration`（归属：orchestration-host；orchestration-ui 消费）
 ```ts
@@ -436,12 +441,13 @@ export function createOrchestrationHost(deps: {
 export function createWorkerHost(deps: { store: OrchestrationStore; inbox: Inbox; runId: string; dispatchId: string; now?: () => number }): WorkerHost;
 
 // 归属：agent-host，文件 src/main/services/agentHost/types.ts
-/** 设置里的模型引用：providerId 是「设置 → 模型服务」里的服务 id */
-export interface ModelRef { providerId: string; modelId: string; }
+/** 设置里的模型引用：providerId 是「设置 → 模型服务」里的服务 id；fastMode 是会话自己的请求选项 */
+export interface ModelRef { providerId: string; modelId: string; fastMode?: boolean; }
 export interface ModelResolver { resolve(ref: ModelRef | undefined): Promise<{ ok: true; model: ResolvedModelSpec; ref: ModelRef } | { ok: false; error: string }>; }
 /** 跨进程可序列化的模型描述；worker 进程内再换成 agent-runtime 的 ResolvedModel */
 export interface ResolvedModelSpec {
   providerId: string; api: string; baseUrl?: string; apiKey?: string; modelId: string; thinking?: ThinkingLevel;
+  fastMode?: boolean; // 会话自己的 Fast 开关；只对 OpenAI Responses / Chat Completions 发送 service_tier
   reasoning?: boolean; // 设置里模型条目的 reasoning 标记：只对 pi 目录里没有的模型生效（Task 17）
 }
 export interface AgentHost {
@@ -453,7 +459,7 @@ export interface AgentHost {
 
 - **模型引用与运行时 provider 键**：`ResolvedModelSpec.providerId` 是运行时 provider 键（`fynvra-` + baseUrl 与 key 的哈希），
   worker 按它注册 pi provider，不是设置里的服务 id；`ref` 是实际解析的设置引用（ref 缺省时即选中的默认模型），
-  会话记录与 `SessionSummary.model` 存它，每次 spawn 再按它解析。
+  会话记录与 `SessionSummary.model` 存它，每次 spawn 再按它解析。`fastMode` 只在服务协议支持时写进 spec，Main 解析时统一校验。
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。

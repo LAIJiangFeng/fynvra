@@ -9,13 +9,15 @@ import type { ProviderApi } from './llm';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
 /**
- * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位。
+ * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位与 Fast。
  * 档位缺省时 worker 依次取角色的 model.thinking、模型的默认档位（{@link pickThinkingLevel}）。
+ * fastMode 是会话自己的请求选项，与档位独立；只对 OpenAI Responses / Chat Completions 生效，缺省关闭。
  */
 export interface SessionModelRef {
   providerId: string;
   modelId: string;
   thinking?: ThinkingLevel;
+  fastMode?: boolean;
 }
 export interface SessionSummary {
   id: string;

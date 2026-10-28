@@ -23,6 +23,10 @@ Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) S
 每个 worker 会话绑定一个 worktree（分支 `fynvra/<task-slug>`）。worker 的工具：pi 默认编程工具 + `ask_coordinator`（阻塞提问）+ `report_done`（一次性汇报，带 succeeded/failed）。
 worker 的审批档位随主 agent 派发时的当前档位（主 agent 免确认，worker 也免确认；保护底线如 `rm -rf`、`git push` 任何档位仍要人确认）；模型按角色配置，角色没配则用主 agent 当前的。
 
+## Fast（优先服务）
+支持的两种 OpenAI 协议（Responses / Chat Completions）模型可在会话模型选择器里开启 Fast：为请求附加优先处理参数，独立于思考档位，默认关闭、随会话保存。
+标记只代表请求模式，不代表已确认实际服务档位：服务商可能拒绝或忽略，速度与费用由其决定并可能增加费用或用量；本功能不增加自动降级重发逻辑。
+
 ## 一句话用户旅程
 挂入仓库 → 在该仓库开一个 Orchestrator 会话 → 说「做 X，Y 用测试工程师角色」→ 侧栏出现多个 worker 卡片（各自 worktree、实时输出、状态）→ 主 agent 验收合并 → 用户在自己的浏览器/终端验证效果。
 

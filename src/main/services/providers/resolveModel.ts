@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 import { isThinkingLevel, type ThinkingLevel } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
+import { supportsFastMode } from '@shared/modelFast';
 import { translate } from '../../i18n';
 import { getProviderStore } from '../../ipc/providers';
 import type { ModelRef, ModelResolver } from '../agentHost/types';
 import type { ProviderStore, StoredProvider } from './providerStore';
 
-/** Role.model 也可以直接当引用传入：带着的 thinking 写进 spec。 */
+/** Role.model 也可以直接当引用传入：带着的 thinking / fastMode 写进 spec。 */
 type RoleModelRef = ModelRef & { thinking?: ThinkingLevel };
 
 type ResolveResult = Awaited<ReturnType<ModelResolver['resolve']>>;
@@ -57,7 +58,7 @@ function resolveRef(providers: StoredProvider[], ref: RoleModelRef): ResolveResu
       error: translate('providers.modelMissing', { name: provider.name, model: ref.modelId }),
     };
   }
-  return toSpec(provider, ref.modelId, ref.thinking);
+  return toSpec(provider, ref.modelId, ref.thinking, ref.fastMode);
 }
 
 function resolveDefault(providers: StoredProvider[]): ResolveResult {
@@ -71,7 +72,12 @@ function resolveDefault(providers: StoredProvider[]): ResolveResult {
   };
 }
 
-function toSpec(provider: StoredProvider, modelId: string, thinking?: unknown): ResolveResult {
+function toSpec(
+  provider: StoredProvider,
+  modelId: string,
+  thinking?: unknown,
+  fastMode?: unknown
+): ResolveResult {
   const { apiKey } = provider;
   if (!apiKey)
     return { ok: false, error: translate('providers.noApiKeyFor', { name: provider.name }) };
@@ -85,6 +91,8 @@ function toSpec(provider: StoredProvider, modelId: string, thinking?: unknown): 
       apiKey,
       modelId,
       ...(isThinkingLevel(thinking) ? { thinking } : {}),
+      // Main 也在这里校验协议：切到不支持 Fast 的服务时清掉，不把旧开关带进请求
+      ...(fastMode === true && supportsFastMode(provider.api) ? { fastMode: true } : {}),
     },
     ref: { providerId: provider.id, modelId },
   };
