@@ -415,6 +415,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       // agent_settled 正常结束由下面的 maybeRequestSuggestion 统一处理，避免重复推进代数。
       for (const { sessionId, event } of batch) {
         if (event.type === 'agent_settled' && !event.aborted) continue;
+        // 服务告警不改变对话轮次，保留当前输入框建议。
+        if (event.type === 'warning') continue;
         clearSuggestion(sessionId);
       }
       // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
