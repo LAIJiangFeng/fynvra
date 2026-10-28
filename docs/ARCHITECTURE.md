@@ -155,7 +155,7 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
-- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（每轮只能成功调用一次，同一轮再次调用返回错误；新的 agent run 开始时重新开放，因此 Main 要把 `reject_work` 的 feedback 作为新 prompt 发给 worker，worker 才能再次汇报）。
+- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 显式传 Main launcher 的 `{ freshAttempt: true }`，反馈等待旧 run 真正 idle 后才作为新 prompt 发出；普通 `send_to_worker` 指令仍及时投递并返回，不等待 idle，以便协调者能回答 worker 随后提出的问题；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
@@ -178,7 +178,11 @@ export interface Message {
 `completed` 在任何清理路径上都不变；清理前检查干净且无新增未合并提交，以非强制删除目录和分支保护验收后的改动。
 只有放弃的任务才强制丢弃 worktree / 分支；清理不自动验收或合并。无 worktree 记录的重复清理不按旧分支名删资源。
 
-**改动的生命周期**：`review_diff` 与面板共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
+**当前对话的改动**：`orchestration:changes` 只接受 `{ workspaceId, sessionId? }`，拒绝其它键和路径；无会话时读工作区主目录，主 / 调度会话也读登记主目录，worker 仅读与 session / dispatch / worktree 登记一致的目录。Main 验证真实 Git root、common-dir 与 worktree 登记归属，读取实际 branch / HEAD，绝不启动 agent、切分支、写 index 或创建 worktree；目录已清理时只报告该来源不可用，不回退到主目录或其它任务。
+未提交包含 staged / unstaged / untracked（内容读取有界且拒绝越界链接）；无 HEAD、detached HEAD 可读。worker 仍在登记分支时以登记 baseCommit 为基准；其它情况优先与默认分支 origin ref、其次本地 ref 的 merge-base 比较，没有不同基准时显示 HEAD 的最近一次提交（根提交比较空树），无 HEAD 则为空。返回实际比较范围及范围内至多 500 条提交，读取错误不能伪装成空结果。
+右栏改动跟随当前工作区 / 会话，不依赖 run 或任务数；进入、会话切换和手动刷新重新读取。中央 diff 的来源区分当前目录与历史 dispatch，已打开标签始终绑定原来源；请求按来源去重，刷新使旧响应失效。任务抽屉可明确进入历史审查，切换对话后恢复当前来源。文件浏览和任务执行语义不变。
+
+**改动的生命周期**：历史任务 `review_diff` 与明确的任务审查入口共用 Main 查询，在工作区主仓库读取提交差异，不依赖 worker 目录仍是 Git worktree。
 合并时将创建基准和 worker 提交 SHA 写入 Task 的可选 `mergedDiff`，随编排快照保存；正常清理、归档清理、重启后仍读这对提交，
 不拿主仓库当前 HEAD 代替 worker 提交。旧快照没有此字段时，沿用尚存的 worktree 基准与 worker 分支；两者已清理且无历史范围时明确报不可用。
 此修复必改 core 的 `types.ts`、`orchestration/store.ts`、`git/GitWorktreeManager.ts`，Main 的 `orchestration/{host,queries,service}.ts`，
@@ -244,7 +248,10 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 - 中央标签栏「＋ → 终端」创建真正的终端标签，与对话、文件并排；内容在应用内显示，不启动外部终端窗口。「＋ → 对话」复用新建会话流程。
 - Main 用 node-pty 托管 PTY，Windows 默认启动 PowerShell（`-NoLogo -NoProfile`），其他平台启动登录 shell；cwd 从工作区 id 查注册表，创建终端的 IPC 不接收路径、shell 或环境变量。
-- 通用设置的 `agentShell` / `terminalShell` 存 shell id 或自定义绝对路径；Main 检测可执行文件并通过 `settings:available-shells` 返回可选项与生效路径，`settings:pick-shell` 仅接收设置目标 id，由 Main 选择文件。终端选择失效时回到系统默认；显式选择 PowerShell 使用 `-NoLogo`（加载用户 profile），Git Bash 使用 `--login -i`，cmd / WSL / 自定义不附加参数。仅新终端生效。
+- 通用设置的 `agentShell` / `terminalShell` 存 shell id 或自定义绝对路径；Main 检测可执行文件并通过 `settings:available-shells` 返回可选项与生效路径，`settings:pick-shell` 仅接收设置目标 id，由 Main 选择文件。终端选择失效时回到系统默认；显式选择 PowerShell 使用 `-NoLogo`（加载用户 profile），Git Bash 使用 `--login -i`，cmd / WSL / 非 PowerShell 自定义不附加参数。仅新终端生效。
+- Windows 的 PowerShell 7 发现先检查 PATH 与常规 Program Files 安装；缺失时用系统 Windows PowerShell 无 profile、有超时地查询当前用户 `Microsoft.PowerShell` Appx 安装位置，再尝试 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` 的无 profile 探测。执行别名可能可启动却无法通过 Node 文件校验，因此补探测返回安装目录中的真实 `pwsh.exe`，发现与后续选择仍使用同一文件校验；命令失败、坏输出或真实文件不可访问时保持未安装降级，不扫描全盘、不读取用户 profile / history、不改 PATH 或 shell 设置。
+- Main 的终端专用 helper 按绝对可执行路径 basename 识别 PowerShell（含自定义路径、非 Windows 的 pwsh），在既有参数后追加 `-NoExit -EncodedCommand`，执行随 Main bundle 内嵌的固定脚本；保留默认 `-NoProfile` 与显式选择加载 profile 的语义，不切换 shell，不拼入 cwd / 用户输入，不向 PTY 假装键入启动命令。PSReadLine 支持时启用 `History` / `InlineView` 灰色历史预测；RightArrow 绑定原生 `ForwardChar`，由 PSReadLine 在编辑行尾接受预测、无预测或行中正常右移，不重复实现接受逻辑。LeftArrow 不注册 handler，保留原有行为；Tab、Ctrl+C、粘贴及外部程序输入沿用原生行为。
+- 预测要求 PSReadLine 2.2+ 对应能力；默认 Windows PowerShell 5.1 常见的 2.0 模块不支持，启动时温和提示升级 PSReadLine 或在通用设置的终端 Shell 中选择带新版模块的 PowerShell 7，然后新开终端使用预测（旧终端不重启），普通终端与 Tab 仍可用。只配置本 app 新终端会话，不自动安装模块，不写 profile / ExecutionPolicy / 系统设置，不读取或另存用户历史；历史过滤与存储由 PSReadLine 管理。改动限于 Main 终端启动接线、终端 helper、相关测试和本节文档，不改 Renderer、IPC 契约或 agent shell 执行。
 - Windows agent 默认依次探测 Git Bash → Windows PowerShell 5.1 → PowerShell 7；未安装 Git 时以警告日志说明 PowerShell 回退，保证无 git 工作区也能启动会话。只有三者均不可用时才报错，禁止交给 pi 自动选到 WSL。手写 `shellPath` 仍优先；否则按 `agentShell` 选择，失效时按上述默认顺序回退。pi 1.4 的 bash 工具通过 `spawn(shellPath, ['-c', command])` 执行（没有 shell args 设置，`shellCommandPrefix` 仅追加命令文本），故支持 Git Bash / PowerShell 7 / Windows PowerShell，不提供 cmd / WSL；自定义须兼容 `-c`。非 bash 的语法说明经既有 role systemPrompt 追加路径传给 pi，不改 pi 内部或角色持久化。仅下次启动会话生效，非 Windows 隐藏 agent 选项。
 - `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
@@ -266,6 +273,13 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 编排展示「本期派发任务的当前结果」：按首次 dispatch.startedAt 归组，统计当前 completed / abandoned / failed 状态；快照无合并 / 放弃时间，不将 settledAt 伪装成合并时间。一次验收通过率和平均尝试数只计该组已合并任务；打回次数为本期开始的非首次 dispatch（含旧任务）。每个合并任务的 Worker 费用取该组已合并任务经 dispatchId 关联的会话全量费用（含跨期和重试，同一会话只计一次），关联或 transcript 缺失则省略，无已合并任务时省略比率。
 - 用量 IPC 注入 session / workspace / orchestration getters；编排 registry 的 readSnapshot 读取已打开服务的当前快照，或只读解析持久化 JSON，绝不因用量查询打开服务、修复或重命名文件。页面为响应式双栏总览、SVG 趋势、角色 / 缓存卡片和排名，活动仅为紧凑小时条。
 - 改动层限于 shared 用量类型、Main 服务 / handler 与两个只读访问出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
+
+### 7.7 Git 与命令网络代理
+
+- 通用设置 `preferences.networkProxy` 仅包含模式（默认沿用进程环境）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
+- 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
+- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
+- `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
 
 ## 8. 分阶段
 
@@ -386,10 +400,11 @@ export interface OrchestrationApi {
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: { dispatchId: string; cursor: number }): Promise<IpcResult<{ text: string; total: number; done: boolean }>>;
   reviewDiff(dispatchId: string): Promise<IpcResult<{ branch: string; baseCommit: string; files: string[]; stat: string; diff: string }>>;
+  changes(input: { workspaceId: string; sessionId?: string }): Promise<IpcResult<SessionChanges>>;
   onChanged(cb: (workspaceId: string) => void): Unsubscribe;
 }
 ```
-通道：`orchestration:snapshot|read-worker-output|review-diff`，推送 `orchestration:changed`。
+通道：`orchestration:snapshot|read-worker-output|review-diff|changes`，推送 `orchestration:changed`。
 
 ### 9.5 Main 内部接口（agent-host ⇄ orchestration-host，最终在 `src/main/index.ts` 接线）
 ```ts
@@ -397,7 +412,11 @@ export interface OrchestrationApi {
 export interface WorkerSessionLauncher {
   // worktreeId：in-place 的尝试（工作区没有 git）没有，cwd 就是工作区目录
   createWorkerSession(input: { workspaceId: string; runId: string; dispatchId: string; roleId: string; cwd: string; worktreeId?: string; brief: string }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
-  promptSession(sessionId: string, text: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  // Ordinary instructions return after delivery; only freshAttempt waits for a real run boundary
+  promptSession(sessionId: string, text: string, options?: { freshAttempt?: boolean }): Promise<{ ok: true } | { ok: false; error: string }>;
+  // Undefined means present/unknown, not failed; registry loading must have finished
+  sessionFailure?(sessionId: string): string | undefined;
+  onSessionFailure?(listener: () => void): () => void;
   readTranscript(sessionId: string, cursor: number): Promise<{ ok: true; text: string; total: number; done: boolean } | { ok: false; error: string }>;
   disposeSession(sessionId: string): Promise<void>;
 }
@@ -438,6 +457,7 @@ export interface AgentHost {
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。
+- **失效尝试恢复**：服务加载完成、launcher 接线完成后，只在会话注册表完整读取并证明 worker 会话缺失，或 Main 收到当前 generation 的明确 fatal、运行中进程退出、aborted/最终 error、退出应用中断时，将当前未结算 Dispatch 记为 failed，Task 从 in-progress 改为 failed，投递失败原因并持久化、广播 changed。启动加载中、注册表不可读/部分损坏、尚未 fork、正常 idle、审批与 askCoordinator 等待均不是失败证据；不按超时或无输出判断。每次检查重验当前 attempt，反馈投递中的新 Dispatch 暂不参与绑定或恢复，避免注册/投递竞态。snapshot/list/wait 可触发检查，删除/异常退出事件及时触发；用量 readSnapshot 保持只读。已有报告/历史和 worktree/分支保留，in-review/completed/abandoned 不改，重复检查不复写 outcome。成功汇报仍需协调者验收；接管合并或 Git 祖先关系不能自动将遗留任务标为 completed。
 
 ### 9.6 `src/shared/types/llm.ts`（归属：settings-ui；agent-host 可逐字复制）
 ```ts

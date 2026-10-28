@@ -1,5 +1,6 @@
-import { lstat, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { HostResult, ReadWorkerOutputOutput, ReviewDiffOutput } from '@fynvra/agent-runtime';
 import {
   type Dispatch,
@@ -149,14 +150,56 @@ export async function worktreeUncommitted(
 }
 
 /** 未跟踪文件 → `new file` patch；二进制、过大、非普通文件（符号链接等）只给文件头，不读内容。 */
-async function untrackedPatch(root: string, path: string): Promise<string> {
-  const header = [`diff --git a/${path} b/${path}`, 'new file mode 100644'];
+export async function untrackedPatch(root: string, path: string, strict = false): Promise<string> {
+  const quote = (value: string) =>
+    [...value].some((char) => char.charCodeAt(0) < 32 || char === '"' || char === '\\')
+      ? JSON.stringify(value)
+      : value;
+  const header = [`diff --git ${quote(`a/${path}`)} ${quote(`b/${path}`)}`, 'new file mode 100644'];
   let content: Buffer | undefined;
   try {
-    const info = await lstat(join(root, path));
-    if (info.isFile() && info.size <= MAX_UNTRACKED_BYTES)
-      content = await readFile(join(root, path));
-  } catch {
+    const target = resolve(root, path);
+    const withinRoot = (file: string) => {
+      const rel = relative(root, file);
+      return (
+        rel !== '' &&
+        rel !== '..' &&
+        !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) &&
+        !isAbsolute(rel)
+      );
+    };
+    if (!withinRoot(target)) throw new Error('Untracked path escapes its worktree');
+    // Inspect every component: never traverse a directory symlink/junction, even one pointing inside.
+    const parts = relative(root, target).split(/[\\/]/);
+    let current = root;
+    for (const part of parts) {
+      current = join(current, part);
+      if ((await lstat(current)).isSymbolicLink()) return `${header.join('\n')}\n`;
+    }
+    const canonical = await realpath(target);
+    if (!withinRoot(canonical)) throw new Error('Untracked path escapes its worktree');
+    const info = await lstat(canonical, { bigint: true });
+    if (info.isFile() && info.size <= MAX_UNTRACKED_BYTES) {
+      const handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = await handle.stat({ bigint: true });
+        // Windows lstat may report an unknown device (0), while fstat returns its volume id.
+        if (
+          (info.dev !== 0n && opened.dev !== info.dev) ||
+          opened.ino !== info.ino ||
+          !opened.isFile() ||
+          (await realpath(target)) !== canonical
+        )
+          throw new Error('Untracked file changed during read');
+        const buffer = Buffer.alloc(MAX_UNTRACKED_BYTES + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        if (bytesRead <= MAX_UNTRACKED_BYTES) content = buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch (error) {
+    if (strict) throw error;
     content = undefined;
   }
   if (content === undefined) return `${header.join('\n')}\n`;
@@ -168,7 +211,12 @@ async function untrackedPatch(root: string, path: string): Promise<string> {
   const lines = text.split('\n');
   const missingNewline = !text.endsWith('\n');
   if (!missingNewline) lines.pop();
-  const out = [...header, '--- /dev/null', `+++ b/${path}`, `@@ -0,0 +1,${lines.length} @@`];
+  const out = [
+    ...header,
+    '--- /dev/null',
+    `+++ ${quote(`b/${path}`)}`,
+    `@@ -0,0 +1,${lines.length} @@`,
+  ];
   for (const line of lines) out.push(`+${line}`);
   if (missingNewline) out.push('\\ No newline at end of file');
   return `${out.join('\n')}\n`;

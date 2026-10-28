@@ -93,8 +93,9 @@ export function createOrchestrationRegistry(
   // 服务拿到的是转发到「当前」launcher 的代理，setLauncher 之前打开的服务也会用上新的
   const delegate: WorkerSessionLauncher = {
     createWorkerSession: (input) => launcher.createWorkerSession(input),
-    promptSession: (sessionId, text) => launcher.promptSession(sessionId, text),
+    promptSession: (sessionId, text, options) => launcher.promptSession(sessionId, text, options),
     readTranscript: (sessionId, cursor) => launcher.readTranscript(sessionId, cursor),
+    sessionFailure: (sessionId) => launcher.sessionFailure?.(sessionId),
     disposeSession: (sessionId) => launcher.disposeSession(sessionId),
   };
   const exec = options.exec ?? nodeExec;
@@ -107,6 +108,10 @@ export function createOrchestrationRegistry(
     log: options.log,
   });
   const services = new Map<string, OrchestrationService>();
+  const reconcileWorkers = () => {
+    for (const service of services.values()) service.reconcileWorkers();
+  };
+  let unsubscribeFailures = launcher.onSessionFailure?.(reconcileWorkers);
   const messageListeners = new Set<(workspaceId: string, message: Message) => void>();
   const log = options.log ?? ((message: string) => console.warn(`[orchestration] ${message}`));
 
@@ -154,12 +159,15 @@ export function createOrchestrationRegistry(
 
   return {
     setLauncher(next) {
+      unsubscribeFailures?.();
       launcher = next;
+      unsubscribeFailures = launcher.onSessionFailure?.(reconcileWorkers);
+      reconcileWorkers();
     },
     serviceFor,
     async readSnapshot(workspaceId) {
       const existing = services.get(workspaceId);
-      if (existing) return existing.snapshot();
+      if (existing) return existing.snapshot({ reconcile: false });
       if (!options.listWorkspaces().some((workspace) => workspace.id === workspaceId))
         return undefined;
       try {

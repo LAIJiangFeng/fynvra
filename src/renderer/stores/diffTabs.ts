@@ -3,11 +3,22 @@ import type { DiffFileStatus } from '../components/orchestration/diff';
 import type { FilesStore } from './files';
 
 export type DiffSection = 'committed' | 'uncommitted';
+export type DiffSource =
+  | { kind: 'session'; workspaceId: string; sessionId?: string }
+  | { kind: 'dispatch'; workspaceId: string; dispatchId: string };
+
+export function diffSourceKey(source: DiffSource): string {
+  return JSON.stringify([
+    source.kind,
+    source.workspaceId,
+    source.kind === 'session' ? (source.sessionId ?? null) : source.dispatchId,
+  ]);
+}
 
 export interface DiffTab {
   id: string;
   workspaceId: string;
-  dispatchId: string;
+  source: DiffSource;
   section: DiffSection;
   path: string;
   oldPath?: string;
@@ -24,8 +35,8 @@ interface DiffTabsState {
   select(id: string | null): void;
 }
 
-export function diffTabId(tab: Pick<DiffTab, 'dispatchId' | 'section' | 'path'>): string {
-  return JSON.stringify([tab.dispatchId, tab.section, tab.path]);
+export function diffTabId(tab: Pick<DiffTab, 'source' | 'section' | 'path'>): string {
+  return JSON.stringify([diffSourceKey(tab.source), tab.section, tab.path]);
 }
 
 export function createDiffTabsStore(workspaceId: string) {

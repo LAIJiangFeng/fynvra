@@ -1,8 +1,13 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
+import type {
+  OrchestrationSnapshotView,
+  SessionChanges,
+  SessionChangesInput,
+} from '@shared/types/orchestration';
 import type { Unsubscribe } from '../types';
 
 export interface OrchestrationApi {
+  changes(input: SessionChangesInput): Promise<IpcResult<SessionChanges>>;
   snapshot(workspaceId: string): Promise<IpcResult<OrchestrationSnapshotView>>;
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: {
@@ -40,6 +45,11 @@ export function createOrchestrationApi(ipc: PreloadIpc): OrchestrationApi {
   const call = <T>(channel: string, ...args: unknown[]) =>
     ipc.invoke(channel, ...args) as Promise<T>;
   return {
+    changes: (input) =>
+      call(IPC_CHANNELS.ORCHESTRATION_CHANGES, {
+        workspaceId: input.workspaceId,
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      }),
     snapshot: (workspaceId) => call(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, workspaceId),
     readWorkerOutput: (input) =>
       call(IPC_CHANNELS.ORCHESTRATION_READ_WORKER_OUTPUT, {

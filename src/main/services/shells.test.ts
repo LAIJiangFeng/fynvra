@@ -51,6 +51,7 @@ describe('availableShells', () => {
       { id: 'wsl', label: 'WSL', path: paths.wsl, agentSupported: false },
     ]);
     expect(deps.exec).toHaveBeenCalledWith('C:\\Windows\\System32\\where.exe', ['pwsh.exe']);
+    expect(deps.exec).toHaveBeenCalledTimes(2);
   });
 
   it('omits missing and relative executables', async () => {
@@ -84,6 +85,17 @@ describe('availableShells', () => {
     expect((await availableShells(deps))[0]?.path).toBe(paths.pwsh);
   });
 
+  it('prefers a regular ProgramFiles install without probing Appx or aliases', async () => {
+    const pwsh = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+    const exec = vi.fn(async () => '');
+    const { deps } = fake([pwsh, paths.powershell], {
+      env: { ProgramFiles: 'C:\\Program Files', LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' },
+      exec,
+    });
+    expect((await availableShells(deps))[0]?.path).toBe(pwsh);
+    expect(exec.mock.calls).toHaveLength(2);
+  });
+
   it('lists only login shell and existing minimal Unix shells without invoking where', async () => {
     const { deps } = fake(['/usr/local/bin/fish', '/bin/bash', '/bin/sh'], {
       platform: 'darwin',
@@ -95,6 +107,156 @@ describe('availableShells', () => {
       { id: 'sh', path: '/bin/sh' },
     ]);
     expect(deps.exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('Store PowerShell discovery', () => {
+  const local = 'C:\\Users\\测试 用户\\AppData\\Local';
+  const aliasPath = `${local}\\Microsoft\\WindowsApps\\pwsh.exe`;
+  const home = 'D:\\应用 安装\\WindowsApps\\Microsoft.PowerShell_7.5.0.0_x64__8wekyb3d8bbwe';
+  const executable = `${home}\\pwsh.exe`;
+  const where = 'C:\\Windows\\System32\\where.exe';
+
+  function probe(
+    appx: string | Error,
+    alias: string | Error = new Error('alias disabled'),
+    pathResult = '',
+    existing = [paths.powershell, paths['git-bash'], executable]
+  ) {
+    return fake(existing, {
+      env: { SystemRoot: 'C:\\Windows', LOCALAPPDATA: local },
+      exec: vi.fn(async (file, args) => {
+        if (file === where) {
+          return args[0] === 'pwsh.exe' ? pathResult : 'D:\\Git\\cmd\\git.exe';
+        }
+        const result = file === paths.powershell ? appx : alias;
+        if (result instanceof Error) throw result;
+        return result;
+      }),
+    });
+  }
+
+  it.each(['', aliasPath])(
+    'resolves a Store install when PATH returns %j and the alias fails the file check',
+    async (pathResult) => {
+      const { deps, files } = probe(JSON.stringify([home]), undefined, pathResult);
+      const preferences = parsePreferences({
+        terminalShell: { kind: 'pwsh' },
+        agentShell: { kind: 'pwsh' },
+      });
+      const info = await describeShells(preferences, deps);
+      expect(info).toMatchObject({
+        shells: expect.arrayContaining([
+          { id: 'pwsh', label: 'PowerShell 7', path: executable, agentSupported: true },
+        ]),
+        terminalPath: executable,
+        agentPath: executable,
+        defaultTerminalPath: paths.powershell,
+        defaultAgentPath: paths['git-bash'],
+      });
+      expect(resolveTerminalShell(preferences.terminalShell, info.shells, deps)).toEqual({
+        path: executable,
+        args: ['-NoLogo'],
+      });
+      expect(
+        resolveTerminalShell({ kind: 'custom', path: executable }, info.shells, deps).path
+      ).toBe(executable);
+      expect(deps.exec).toHaveBeenCalledWith(paths.powershell, [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        expect.stringContaining('Get-AppxPackage -Name Microsoft.PowerShell -ErrorAction Stop'),
+      ]);
+      expect(deps.exec).not.toHaveBeenCalledWith(aliasPath, expect.anything());
+      files.delete(executable);
+      expect(resolveTerminalShell(preferences.terminalShell, info.shells, deps)).toEqual(
+        defaultTerminalShell(deps)
+      );
+      expect(resolveAgentShell(preferences, info.shells, deps)).toBe(paths['git-bash']);
+    }
+  );
+
+  it.each([
+    new Error('EACCES'),
+    new Error('ETIMEDOUT'),
+    '',
+    'invalid json',
+    'null',
+    '{}',
+    JSON.stringify(home),
+    '[]',
+    JSON.stringify([null, {}, 'relative', 'C:relative', '\\rooted', 'C:\\gone']),
+  ])(
+    'resolves the known alias to a regular executable after unusable Appx output %j',
+    async (appx) => {
+      const { deps } = probe(appx, JSON.stringify(home));
+      const info = await describeShells(
+        parsePreferences({ terminalShell: { kind: 'pwsh' } }),
+        deps
+      );
+      expect(info.terminalPath).toBe(executable);
+      expect(info.shells.find((shell) => shell.id === 'pwsh')?.path).toBe(executable);
+      expect(deps.exec).toHaveBeenCalledWith(aliasPath, [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        expect.stringContaining('$PSHOME'),
+      ]);
+    }
+  );
+
+  it('uses the alias when Windows PowerShell/Appx is unavailable', async () => {
+    const { deps } = probe('', JSON.stringify(home), '', [executable]);
+    const info = await describeShells(
+      parsePreferences({ terminalShell: { kind: 'pwsh' }, agentShell: { kind: 'pwsh' } }),
+      deps
+    );
+    expect(info.terminalPath).toBe(executable);
+    expect(info.agentPath).toBe(executable);
+    expect(deps.exec).not.toHaveBeenCalledWith(paths.powershell, expect.anything());
+  });
+
+  it('skips inaccessible or stale Appx locations before the usable install', async () => {
+    const { deps } = probe(JSON.stringify(['C:\\inaccessible', 'C:\\removed', home]));
+    expect((await availableShells(deps))[0]?.path).toBe(executable);
+  });
+
+  it.each([
+    new Error('ENOENT'),
+    new Error('EACCES'),
+    new Error('ETIMEDOUT'),
+    '',
+    'invalid json',
+    'null',
+    '{}',
+    '[]',
+    JSON.stringify('relative'),
+    JSON.stringify('C:relative'),
+    JSON.stringify('\\rooted'),
+    JSON.stringify('C:\\gone'),
+  ])('keeps other shells and defaults when Appx and alias cannot resolve: %j', async (alias) => {
+    const { deps } = probe('[]', alias);
+    const info = await describeShells(
+      parsePreferences({ terminalShell: { kind: 'pwsh' }, agentShell: { kind: 'pwsh' } }),
+      deps
+    );
+    expect(info.shells.map((shell) => shell.id)).toEqual(['powershell', 'git-bash']);
+    expect(info.terminalPath).toBe(paths.powershell);
+    expect(info.agentPath).toBe(paths['git-bash']);
+  });
+
+  it('rejects an alias home whose real executable fails the file check', async () => {
+    const { deps } = probe('[]', JSON.stringify(home), aliasPath, [paths.powershell]);
+    expect((await availableShells(deps)).map((shell) => shell.id)).toEqual(['powershell']);
+  });
+
+  it('never launches a relative LOCALAPPDATA alias', async () => {
+    const { deps } = probe('[]', JSON.stringify(home));
+    deps.env.LOCALAPPDATA = 'relative';
+    expect((await availableShells(deps)).some((shell) => shell.id === 'pwsh')).toBe(false);
+    expect(deps.exec).toHaveBeenCalledTimes(3);
   });
 });
 

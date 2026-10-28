@@ -5,7 +5,9 @@ import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain, type WebContents } from 'electron';
 import type { IPty } from 'node-pty';
 import { translate } from '../i18n';
+import { savedCommandEnvironment } from '../services/commandNetwork';
 import { availableShells, resolveTerminalShell, shellDetectionDeps } from '../services/shells';
+import { terminalShellIntegration } from '../services/terminalShellIntegration';
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
@@ -87,7 +89,10 @@ export function registerTerminalHandlers(): void {
       const preference = getSettingsFile().read().preferences.terminalShell;
       const deps = shellDetectionDeps();
       const shells = preference ? await availableShells(deps) : [];
-      const shell = resolveTerminalShell(preference, shells, deps);
+      const shell = terminalShellIntegration(
+        resolveTerminalShell(preference, shells, deps),
+        deps.platform
+      );
       if (owner.isDestroyed() || state.generation !== generation)
         return { ok: false, error: translate('common.windowClosed') };
       const pty = spawn(shell.path, shell.args, {
@@ -95,7 +100,7 @@ export function registerTerminalHandlers(): void {
         cwd: workspace.repoPath,
         cols: input.cols as number,
         rows: input.rows as number,
-        env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+        env: { ...savedCommandEnvironment(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
       });
       terminals.set(id, { owner, pty });
       // ponytail: output is pushed directly; add acknowledged backpressure for sustained bulk output.

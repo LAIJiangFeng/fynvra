@@ -27,6 +27,8 @@ export interface StoredSession extends Omit<SessionSummary, 'branch'> {
 export interface SessionStore {
   /** 某工作区的会话，最近更新的在前；不含内部字段 */
   list(workspaceId: string): SessionSummary[];
+  /** True/false only when the loaded registry can establish existence; unreadable data is unknown */
+  exists(id: string): boolean | undefined;
   get(id: string): StoredSession | undefined;
   all(): StoredSession[];
   /** 新增或整条替换 */
@@ -61,9 +63,16 @@ export function createSessionStore({
   filePath,
   debounceMs = SESSIONS_WRITE_DEBOUNCE_MS,
 }: SessionStoreOptions): SessionStore {
-  const sessions = new Map<string, StoredSession>(
-    parseSessionsFile(readJson(filePath)).map((session) => [session.id, session])
-  );
+  const raw = readJson(filePath);
+  const parsed = parseSessionsFile(raw);
+  // A partial/corrupt registry must never make orchestration declare workers missing.
+  const entries = asRecord(raw)?.sessions;
+  const complete =
+    asRecord(raw)?.version === SESSIONS_FILE_VERSION &&
+    Array.isArray(entries) &&
+    entries.length === parsed.length;
+  const sessions = new Map<string, StoredSession>(parsed.map((session) => [session.id, session]));
+  const removed = new Set<string>();
   let dirty = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -96,6 +105,7 @@ export function createSessionStore({
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map(toSummary);
     },
+    exists: (id) => (sessions.has(id) ? true : complete || removed.has(id) ? false : undefined),
     get: (id) => sessions.get(id),
     all: () => [...sessions.values()],
     put(session) {
@@ -116,6 +126,7 @@ export function createSessionStore({
       const current = sessions.get(id);
       if (!current) return undefined;
       sessions.delete(id);
+      removed.add(id);
       schedule();
       return current;
     },
@@ -211,8 +222,10 @@ function storedApprovalMode(raw: unknown, roleId: string): ApprovalMode {
 function readJson(filePath: string): unknown {
   try {
     return JSON.parse(readFileSync(filePath, 'utf8'));
-  } catch {
-    return undefined;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { version: SESSIONS_FILE_VERSION, sessions: [] }
+      : undefined;
   }
 }
 

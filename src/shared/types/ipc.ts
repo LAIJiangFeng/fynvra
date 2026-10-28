@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+  SETTINGS_TEST_NETWORK: 'settings:test-network',
+  SETTINGS_CANCEL_NETWORK_TEST: 'settings:cancel-network-test',
   SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
   SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */
@@ -74,7 +76,9 @@ export const IPC_CHANNELS = {
   ORCHESTRATION_SNAPSHOT: 'orchestration:snapshot',
   /** 按 dispatch id 分页读 worker 输出（与 read_worker_output 同源） */
   ORCHESTRATION_READ_WORKER_OUTPUT: 'orchestration:read-worker-output',
-  /** 按 dispatch id 取 worker 分支相对基准提交的改动 */
+  /** 当前会话登记目录的改动；无会话时读工作区主目录 */
+  ORCHESTRATION_CHANGES: 'orchestration:changes',
+  /** 按 dispatch id 取 worker 分支相对基准提交的历史改动 */
   ORCHESTRATION_REVIEW_DIFF: 'orchestration:review-diff',
   /** Main → Renderer：某工作区的编排状态已变更（参数：workspaceId） */
   ORCHESTRATION_CHANGED: 'orchestration:changed',

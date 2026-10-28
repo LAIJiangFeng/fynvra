@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { ExecFn } from '@fynvra/core';
+import { savedCommandEnvironment } from '../commandNetwork';
 
 /** 单条 git 命令的上限：worktree add 会跑 post-checkout hook，不能无限期挂住编排。 */
 export const GIT_TIMEOUT_MS = 120_000;
@@ -21,7 +22,7 @@ export const nodeExec: ExecFn = (cmd, args, cwd) =>
         maxBuffer: MAX_BUFFER,
         timeout: GIT_TIMEOUT_MS,
         windowsHide: true,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        env: { ...savedCommandEnvironment(), GIT_TERMINAL_PROMPT: '0' },
       },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') reject(error);

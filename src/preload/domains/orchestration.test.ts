@@ -16,11 +16,28 @@ describe('window.fynvra.orchestration', () => {
   it('方法映射到 §9.4 通道，只传 id 与 cursor', async () => {
     const api = createOrchestrationApi(ipc);
     expect(Object.keys(api).sort()).toEqual([
+      'changes',
       'onChanged',
       'readWorkerOutput',
       'reviewDiff',
       'snapshot',
     ]);
+
+    await api.changes({ workspaceId: 'ws-1' });
+    expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.ORCHESTRATION_CHANGES, {
+      workspaceId: 'ws-1',
+    });
+    const changesInput = {
+      workspaceId: 'ws-1',
+      sessionId: 'session_1',
+      cwd: '/untrusted',
+      branch: 'bad',
+    };
+    await api.changes(changesInput);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.ORCHESTRATION_CHANGES, {
+      workspaceId: 'ws-1',
+      sessionId: 'session_1',
+    });
 
     await api.snapshot('ws-1');
     expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, 'ws-1');

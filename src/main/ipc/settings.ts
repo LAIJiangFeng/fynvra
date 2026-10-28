@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import { errorMessage } from '@shared/guards';
-import { IPC_CHANNELS } from '@shared/types/ipc';
+import { type NetworkTestResult, parseNetworkProxy } from '@shared/networkProxy';
+import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   type AvailableShellsResult,
   type PickShellResult,
@@ -14,6 +15,8 @@ import {
 } from '@shared/types/settings';
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialogOptions } from 'electron';
 import { translate } from '../i18n';
+import { configureCommandNetwork } from '../services/commandNetwork';
+import { testCommandNetwork } from '../services/networkTest';
 import { allowedOpenWithAppsUpdate } from '../services/openWith';
 import {
   collectWorktreesRootInfo,
@@ -28,6 +31,7 @@ import { getOrchestrationRegistry } from './orchestration';
 let settingsFile: SettingsFile | null = null;
 /** 正在进行的 worktree 占用统计；新的统计请求会取消它。 */
 let usageScan: AbortController | null = null;
+const networkTests = new Map<Electron.WebContents, AbortController>();
 
 /** Main 唯一的 settings.json 句柄；userData 路径在启动早期才确定，所以延迟创建。 */
 export function getSettingsFile(): SettingsFile {
@@ -54,7 +58,38 @@ function saveWorktreesRoot(worktreesRoot: string | undefined): PickWorktreesRoot
 }
 
 export function registerSettingsHandlers(): void {
+  configureCommandNetwork(() => getSettingsFile().read().preferences.networkProxy);
   applyNativeTheme(getSettingsFile().read().preferences.theme);
+
+  ipcMain.handle(
+    IPC_CHANNELS.SETTINGS_TEST_NETWORK,
+    async (event, raw: unknown): Promise<IpcResult<NetworkTestResult>> => {
+      const config = parseNetworkProxy(raw);
+      if (!config) return { ok: false, error: translate('common.invalidArgs') };
+      const owner = event.sender;
+      networkTests.get(owner)?.abort();
+      const controller = new AbortController();
+      networkTests.set(owner, controller);
+      const cancel = () => controller.abort();
+      const navigate = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
+        if (mainFrame && !inPlace) cancel();
+      };
+      owner.once('destroyed', cancel);
+      owner.on('did-start-navigation', navigate);
+      try {
+        return { ok: true, ...(await testCommandNetwork(config, controller.signal)) };
+      } finally {
+        owner.removeListener('destroyed', cancel);
+        owner.removeListener('did-start-navigation', navigate);
+        if (networkTests.get(owner) === controller) networkTests.delete(owner);
+      }
+    }
+  );
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST, (event, raw: unknown): IpcResult => {
+    if (raw !== undefined) return { ok: false, error: translate('common.invalidArgs') };
+    networkTests.get(event.sender)?.abort();
+    return { ok: true };
+  });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, (): PreferencesResult => {
     try {
@@ -135,6 +170,9 @@ export function registerSettingsHandlers(): void {
         preferences: { ...current.preferences, ...patch },
       }));
       if (changed) {
+        if (Object.hasOwn(patch, 'networkProxy')) {
+          for (const test of networkTests.values()) test.abort();
+        }
         applyNativeTheme(settings.preferences.theme);
         sendToAllWindows(IPC_CHANNELS.SETTINGS_CHANGED);
       }
@@ -209,6 +247,7 @@ export function registerSettingsHandlers(): void {
   );
 
   app.on('before-quit', () => {
+    for (const test of networkTests.values()) test.abort();
     getSettingsFile().flush();
   });
 }

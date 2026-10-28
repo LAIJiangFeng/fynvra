@@ -15,9 +15,11 @@ export interface WorkerSessionLauncher {
     thinking?: ThinkingLevel;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+  /** Ordinary instructions return after delivery; only fresh attempts wait for the previous run to end */
   promptSession(
     sessionId: string,
-    text: string
+    text: string,
+    options?: { freshAttempt?: boolean }
   ): Promise<{ ok: true } | { ok: false; error: string }>;
   readTranscript(
     sessionId: string,
@@ -25,5 +27,9 @@ export interface WorkerSessionLauncher {
   ): Promise<
     { ok: true; text: string; total: number; done: boolean } | { ok: false; error: string }
   >;
+  /** Main-only evidence; undefined means present or unknown, never infer failure from idle/timeouts */
+  sessionFailure?(sessionId: string): string | undefined;
+  /** Notify when a session is removed or a run definitively terminates abnormally */
+  onSessionFailure?(listener: () => void): () => void;
   disposeSession(sessionId: string): Promise<void>;
 }

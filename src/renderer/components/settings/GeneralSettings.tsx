@@ -38,6 +38,7 @@ import {
 } from '@/stores/settings';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { NetworkProxySettings } from './NetworkProxySettings';
 import { UpdateSettings } from './UpdateSettings';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -95,6 +96,7 @@ export function GeneralSettings() {
     <div className="grid gap-8">
       <LanguageSection />
       <ShellsSection />
+      <NetworkProxySettings />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>

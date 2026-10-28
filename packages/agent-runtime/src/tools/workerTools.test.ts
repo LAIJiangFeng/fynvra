@@ -116,7 +116,9 @@ describe('report_done', () => {
     expect((await runTool(report, { outcome: 'succeeded', summary: 'done' })).isError).toBe(false);
     const again = await runTool(report, { outcome: 'failed', summary: 'second' });
     expect(again).toMatchObject({ isError: true, stage: 'execute' });
-    expect(again.text).toContain('only be called once');
+    expect(again.text).toContain('once per round');
+    expect(again.text).not.toContain('for this task');
+    expect(again.text.endsWith('.')).toBe(false);
     expect(host.reportDone).toHaveBeenCalledTimes(1);
 
     // reject_work 的反馈开启新一轮，worker 需要重新汇报
@@ -145,8 +147,10 @@ describe('report_done', () => {
           release = () => resolve({ ok: true });
         })
     );
-    const report = toolByName(createWorkerTools(host).tools, 'report_done');
+    const { tools, startRound } = createWorkerTools(host);
+    const report = toolByName(tools, 'report_done');
     const first = runTool(report, { outcome: 'succeeded', summary: 'a' });
+    startRound(); // A lifecycle hook must not reopen an in-flight report.
     const second = await runTool(report, { outcome: 'succeeded', summary: 'b' });
     release();
     expect((await first).isError).toBe(false);

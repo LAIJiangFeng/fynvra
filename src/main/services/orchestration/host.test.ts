@@ -747,7 +747,8 @@ describe('rejectWork', () => {
       to: 'session_w1',
       body: 'Add tests.',
     });
-    const [sessionId, prompt] = launcher.promptSession.mock.calls[0] ?? [];
+    const [sessionId, prompt, options] = launcher.promptSession.mock.calls[0] ?? [];
+    expect(options).toEqual({ freshAttempt: true });
     expect(sessionId).toBe('session_w1');
     expect(prompt).toContain('Add tests.');
     expect(prompt).toContain(active?.id);
@@ -1301,7 +1302,8 @@ describe('普通目录（vcs: none）：原地编排，不调用 git', () => {
       branch: '',
       mode: 'in-place',
     });
-    const [, prompt] = launcher.promptSession.mock.calls[0] ?? [];
+    const [, prompt, options] = launcher.promptSession.mock.calls[0] ?? [];
+    expect(options).toEqual({ freshAttempt: true });
     expect(prompt).toContain('Add tests.');
     expect(prompt).toContain('workspace directory');
     expect(prompt).not.toContain('commit your changes');

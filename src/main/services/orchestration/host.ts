@@ -87,6 +87,9 @@ export interface OrchestrationHostDeps {
   exec: ExecFn;
   /** run_checks 白名单，默认 {@link DEFAULT_CHECK_COMMAND_POLICY}。 */
   checkPolicy?: CheckCommandPolicy;
+  /** 未成功投递的新尝试：不能被工具绑定或恢复逻辑结算 */
+  pendingDispatches?: Set<string>;
+  reconcileWorkers?: () => void;
   /** 时钟（epoch ms），默认 `Date.now`。 */
   now?: () => number;
 }
@@ -208,9 +211,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return found;
   }
 
-  async function promptWorker(sessionId: string, text: string) {
+  async function promptWorker(sessionId: string, text: string, freshAttempt = false) {
     try {
-      return await launcher.promptSession(sessionId, text);
+      return freshAttempt
+        ? await launcher.promptSession(sessionId, text, { freshAttempt: true })
+        : await launcher.promptSession(sessionId, text);
     } catch (error) {
       return fail(errorMessage(error));
     }
@@ -459,6 +464,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   }
 
   async function listWorkers(): Promise<HostResult<ListWorkersOutput>> {
+    deps.reconcileWorkers?.();
     await advanceQueue();
     const run = findRun();
     const tasks = run === undefined ? [] : store.listTasks(run.id);
@@ -485,6 +491,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const seen = new Map<string, Message>();
     for (;;) {
       if (signal?.aborted) return fail('wait_for_workers was aborted');
+      deps.reconcileWorkers?.();
       await advanceQueue();
       const run = findRun();
       if (run === undefined) return { ok: true, timedOut: false, messages: [], pending: 0 };
@@ -679,7 +686,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   }
 
   async function rejectWork(input: RejectWorkInput): Promise<HostResult<RejectWorkOutput>> {
-    const found = resolve(input.dispatchId);
+    const found = resolveCurrent(input.dispatchId);
     if (!found.ok) return found;
     const feedback = input.feedback.trim();
     if (feedback === '') return fail('feedback must not be empty');
@@ -726,19 +733,30 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         body: feedback,
       })
     );
-    // 作为新 prompt 发出：新的 agent run 开始时 report_done 才重新开放
-    const delivered = await promptWorker(
-      next.workerSessionId,
-      feedbackPrompt(feedback, next.id, isInPlace(next))
-    );
-    if (!delivered.ok) {
-      store.messages.delete(instruction.message.id);
-      store.dispatches.delete(next.id);
-      store.tasks.update(task.id, { status: task.status });
-      return fail(`could not deliver the feedback to the worker: ${delivered.error}`);
+    // pi followUp can stay inside the old run. The launcher waits for a real run boundary.
+    deps.pendingDispatches?.add(next.id);
+    try {
+      const delivered = await promptWorker(
+        next.workerSessionId,
+        feedbackPrompt(feedback, next.id, isInPlace(next)),
+        true
+      );
+      if (!delivered.ok) {
+        store.messages.delete(instruction.message.id);
+        // Cancellation/cleanup may have settled this attempt while delivery was pending.
+        const current = store.tasks.get(task.id);
+        if (latestDispatch(task.id)?.id === next.id && current?.status === 'in-progress') {
+          store.dispatches.delete(next.id);
+          store.tasks.update(task.id, { status: task.status });
+        }
+        return fail(`could not deliver the feedback to the worker: ${delivered.error}`);
+      }
+      inbox.ack(instruction.message.id);
+      return { ok: true, messageId: instruction.message.id };
+    } finally {
+      deps.pendingDispatches?.delete(next.id);
+      deps.reconcileWorkers?.();
     }
-    inbox.ack(instruction.message.id);
-    return { ok: true, messageId: instruction.message.id };
   }
 
   /** 显式放弃：进行中的尝试按 failed 结算，已有的汇报保持原样。 */

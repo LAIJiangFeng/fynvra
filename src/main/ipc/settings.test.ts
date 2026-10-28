@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   appListeners: new Map<string, () => void>(),
   send: vi.fn(),
+  testNetwork: vi.fn(),
   showOpenDialog: vi.fn(),
   nativeTheme: { themeSource: 'light', shouldUseDarkColors: false },
   describeShells: vi.fn(async () => ({
@@ -41,6 +43,8 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: mocks.showOpenDialog },
   nativeTheme: mocks.nativeTheme,
 }));
+
+vi.mock('../services/networkTest', () => ({ testCommandNetwork: mocks.testNetwork }));
 
 vi.mock('../services/shells', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -236,6 +240,95 @@ describe('shell settings IPC', () => {
     expect(mocks.showOpenDialog).toHaveBeenLastCalledWith({ properties: ['openFile'] });
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
     invoke(IPC_CHANNELS.SETTINGS_UPDATE, { terminalShell: undefined });
+  });
+});
+
+describe('network settings IPC', () => {
+  const config = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
+  const owner = new EventEmitter();
+  const call = (channel: string, raw?: unknown, sender = owner) =>
+    mocks.handlers.get(channel)?.({ sender }, raw);
+  const test = (raw: unknown = config, sender = owner) =>
+    call(IPC_CHANNELS.SETTINGS_TEST_NETWORK, raw, sender);
+
+  it('saves/resets proxy settings and rejects credentials without persisting them', () => {
+    expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, { networkProxy: config })).toMatchObject({
+      ok: true,
+      preferences: { networkProxy: config },
+    });
+    expect(
+      invoke(IPC_CHANNELS.SETTINGS_UPDATE, {
+        networkProxy: { ...config, url: 'http://user:secret@proxy' },
+      })
+    ).toMatchObject({ ok: false });
+    expect(preferences().networkProxy).toEqual(config);
+    expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, { networkProxy: undefined })).toMatchObject({
+      ok: true,
+    });
+    expect(preferences()).not.toHaveProperty('networkProxy');
+  });
+
+  it('rejects arbitrary targets, paths and invalid drafts before networking', async () => {
+    mocks.testNetwork.mockClear();
+    for (const raw of [undefined, null, { ...config, target: 'https://other' }, { path: 'C:/' }]) {
+      expect(await call(IPC_CHANNELS.SETTINGS_TEST_NETWORK, raw)).toMatchObject({ ok: false });
+    }
+    expect(mocks.testNetwork).not.toHaveBeenCalled();
+    expect(call(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST, { command: 'anything' })).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('tests the exact unsaved draft, cancels only the owner, and replaces concurrent probes', async () => {
+    const pending: { signal: AbortSignal; done: () => void }[] = [];
+    mocks.testNetwork.mockImplementation(
+      (_config, signal) =>
+        new Promise((resolve) => {
+          pending.push({
+            signal,
+            done: () => resolve({ api: { status: 'ok' }, git: { status: 'ok' } }),
+          });
+        })
+    );
+    const first = test();
+    const second = test({ mode: 'environment', gitCompatibility: true });
+    expect(pending[0]?.signal.aborted).toBe(true);
+    expect(mocks.testNetwork.mock.calls.at(-1)?.[0]).toEqual({
+      mode: 'environment',
+      gitCompatibility: true,
+    });
+    call(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST, undefined, new EventEmitter());
+    expect(pending[1]?.signal.aborted).toBe(false);
+    call(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST);
+    expect(pending[1]?.signal.aborted).toBe(true);
+    for (const entry of pending) entry.done();
+    await Promise.all([first, second]);
+    expect(owner.listenerCount('destroyed')).toBe(0);
+  });
+
+  it('aborts on settings changes, navigation and owner destruction', async () => {
+    let signal: AbortSignal | undefined;
+    let done: () => void = () => {};
+    mocks.testNetwork.mockImplementation(
+      (_config, input) =>
+        new Promise((resolve) => {
+          signal = input;
+          done = () => resolve({ api: { status: 'canceled' }, git: { status: 'canceled' } });
+        })
+    );
+    const actions = [
+      () => invoke(IPC_CHANNELS.SETTINGS_UPDATE, { networkProxy: config }),
+      () => owner.emit('did-start-navigation', {}, '', false, true),
+      () => owner.emit('destroyed'),
+    ];
+    for (const action of actions) {
+      const pending = test();
+      action();
+      expect(signal?.aborted).toBe(true);
+      done();
+      await pending;
+    }
+    invoke(IPC_CHANNELS.SETTINGS_UPDATE, { networkProxy: undefined });
   });
 });
 

@@ -74,6 +74,7 @@ function fakeApi(initial: OrchestrationSnapshotView = view()) {
   const output = { text: '', done: false, pageChars: Number.POSITIVE_INFINITY, error: '' };
   const state = { view: initial };
   const api = {
+    changes: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
     snapshot: vi.fn(async (_workspaceId: string) => ({
       ok: true as const,
       ...overIpc(state.view),
