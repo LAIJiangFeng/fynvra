@@ -23,10 +23,8 @@ import {
   addOptimisticMessage,
   applyHistory,
   type ChatProjection,
-  dequeueApproval,
   emptyProjection,
   enqueueApproval,
-  type PendingApproval,
   reduceSessionEvent,
   syncSessionStatuses,
   withdrawOptimisticMessage,
@@ -139,7 +137,7 @@ export interface SessionsState extends ChatProjection {
   openModelPicker(sessionId: string): void;
   closeModelPicker(): void;
   /**
-   * 换会话的审批档位：先在列表里换上（乐观更新），Main 回包后以它的记录为准；
+   * 换会话的操作通知范围：先在列表里换上（乐观更新），Main 回包后以它的记录为准；
    * 失败时换回原来的档位、提示原因并重拉列表。与换模型不同，运行中、等审批时也可以切。
    */
   setApprovalMode(
@@ -216,7 +214,7 @@ function mapSession(
 
 type SessionLists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
 
-/** 两份列表（会话 / 已归档）里都按 id 换掉：归档的会话打开后也能换模型、换审批档位 */
+/** 两份列表（会话 / 已归档）里都按 id 换掉：归档会话也能换模型、换通知范围。 */
 function mapLists(
   lists: SessionLists,
   sessionId: string,
@@ -291,7 +289,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const historyRequests = new Map<string, number>();
   /** 在途的换模型：列表刷新时保留乐观的模型；只认每个会话最近一次请求的回包 */
   const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
-  /** 在途的换审批档位：同上 */
+  /** 在途的通知范围切换：同上 */
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
   /** 每个会话最近一次已发起建议的轮次（含空结果 / 失败）：同一轮不重复请求 */
   const suggestionTried = new Map<string, number>();
@@ -411,9 +409,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         for (const envelope of batch) next = reduceSessionEvent(next, envelope, now());
         return next;
       });
-      // 任何实际到达的会话事件都说明这一轮已经变化（包括 Main 自动继续）：旧建议与在途回包立即作废。
-      // agent_settled 正常结束由下面的 maybeRequestSuggestion 统一处理，避免重复推进代数。
+      // 正文与执行状态变化使旧建议失效；单向通知 / 旧审批不是新回合。
+      // agent_settled 正常结束由下面的 maybeRequestSuggestion 统一处理。
       for (const { sessionId, event } of batch) {
+        if (event.type === 'tool_notice' || event.type === 'approval_request') continue;
         if (event.type === 'agent_settled' && !event.aborted) continue;
         // 服务告警不改变对话轮次，保留当前输入框建议。
         if (event.type === 'warning') continue;
@@ -500,14 +499,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const queue = state.queuedBySession[sessionId] ?? [];
         return { queuedBySession: { ...state.queuedBySession, [sessionId]: [next, ...queue] } };
       });
-    }
-
-    function findApproval(requestId: string): PendingApproval | undefined {
-      for (const queue of Object.values(get().pendingApprovals)) {
-        const found = queue.find((request) => request.id === requestId);
-        if (found) return found;
-      }
-      return undefined;
     }
 
     /**
@@ -818,39 +809,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
       },
 
-      async respondApproval(requestId, decision) {
-        flushEvents();
-        const request = findApproval(requestId);
-        if (
-          !request ||
-          (request.expiresAt > 0 && request.expiresAt <= now()) ||
-          get().approvalSubmissions[requestId]?.pending
-        )
-          return;
-        const { sessionId } = request;
-        // 保留请求直到送达，避免最后一项提交中关闭全局处理窗口，也避免失败后复活已取消的审批。
-        set((state) => ({
-          approvalSubmissions: { ...state.approvalSubmissions, [requestId]: { pending: true } },
-        }));
-        const result = await safely(() => api.respondApproval({ sessionId, requestId, decision }));
-        flushEvents();
-        set((state) => {
-          const submissions = omitKey(state.approvalSubmissions, requestId);
-          if (result.ok) {
-            return {
-              ...dequeueApproval(state, sessionId, requestId),
-              approvalSubmissions: submissions,
-            };
-          }
-          const current = findApproval(requestId);
-          if (!current || (current.expiresAt > 0 && current.expiresAt <= now()))
-            return { approvalSubmissions: submissions };
-          const error = translate('sessions.errors.approvalNotDelivered', { error: result.error });
-          return {
-            approvalSubmissions: { ...submissions, [requestId]: { pending: false, error } },
-            notice: error,
-          };
-        });
+      async respondApproval() {
+        // 旧 UI / 调用方不能恢复审批，也不能向后台发送执行许可。
+        set({ notice: translate('sessions.errors.approvalGone') });
       },
 
       setDraft(sessionId, text) {
@@ -1109,8 +1070,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       receiveApproval(request) {
         if (removedSessions.has(request.sessionId)) return;
         flushEvents();
-        // 等审批属于运行中的状态：旧轮建议不能再出现 / 插入
-        clearSuggestion(request.sessionId);
+        // 只清理旧投影；不把历史审批当作新回合或使灰字建议失效。
         set((state) => enqueueApproval(state, request));
       },
     };

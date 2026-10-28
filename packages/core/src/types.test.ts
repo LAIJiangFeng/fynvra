@@ -11,6 +11,7 @@ describe('session events', () => {
       | 'tool_end'
       | 'message_end'
       | 'agent_settled'
+      | 'tool_notice'
       | 'approval_request'
       | 'usage'
       | 'warning'

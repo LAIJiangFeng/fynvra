@@ -9,7 +9,6 @@ import type {
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type {
-  AgentApprovalRequest,
   AgentCommand,
   AgentMcpServer,
   AgentRoleOption,
@@ -122,9 +121,10 @@ export interface RespondApprovalInput {
   decision: ApprovalDecision;
 }
 
-/** 旁路观察者（桌面通知用）：拿到的与推给 Renderer 的 sessions:event / sessions:approval-request 相同 */
+/** 旁路观察者（桌面通知用）：与 Renderer 共用 sessions:event 的会话级 seq。 */
 export interface SessionObserver {
   event?(envelope: SessionEventEnvelope): void;
+  /** @deprecated 旧观察者形状保留；新版不再发布审批请求。 */
   approval?(request: ApprovalRequest): void;
   /** Main-only scheduling signals; automatic prompts do not emit `prompt`. */
   activity?(sessionId: string, action: 'prompt' | 'abort' | 'idle'): void;
@@ -172,7 +172,7 @@ export interface AgentHostService extends AgentHost {
   /** 启用且有 key 的服务与模型，每个模型带 worker 按 pi 目录给出的思考档位；传 workspaceId 时带上次用过的模型 */
   modelOptions(input: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
   /**
-   * 换会话的审批档位：更新记录（落 sessions.json），会话在 worker 里时发 set-approval-mode。
+   * 换会话的通知范围：沿用旧字段和通道名，更新记录并发 set-approval-mode。
    * 运行中也可以切（即时生效，这是与换模型的区别）；会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
@@ -180,7 +180,7 @@ export interface AgentHostService extends AgentHost {
   refreshBranches(): void;
   /** 会话的 IPC 视图；不存在时 undefined */
   get(sessionId: string): SessionSummary | undefined;
-  /** 订阅推给 Renderer 的会话事件与审批请求；观察者抛异常只记日志，不影响推送。返回取消订阅 */
+  /** 订阅会话事件（含单向工具通知）；观察者出错不影响执行。返回取消订阅。 */
   observe(observer: SessionObserver): () => void;
 }
 
@@ -220,12 +220,6 @@ interface LiveSession {
   suggestedRound: number;
 }
 
-interface PendingApproval {
-  sessionId: string;
-  generation: number;
-  expiresAt: number;
-}
-
 interface PendingSuggestion {
   sessionId: string;
   generation: number;
@@ -257,7 +251,7 @@ const MODEL_OPTIONS_SHOWN = 30;
  * - 会话注册表在 sessions.json，正文在 pi jsonl；会话首次使用时才在 worker 里 spawn（新 generation）；
  * - worker 事件已由 workerClient 收窄，这里再丢弃过期 generation / 重复 seq，改写为会话级 seq 后推给 Renderer；
  * - 编排 / worker 工具的 host-invoke 交给注入的 OrchestrationHost / WorkerHost 工厂执行；
- * - 审批门的 approval-request 记为待审批并推给 Renderer，respondApproval 只回给提出请求的 generation；
+ * - tool_notice 经同一事件序列单向送通知；旧审批事件忽略，不保存待审批或重放动作；
  * - worker 崩溃后 generation+1 重新 spawn 崩溃前的会话，进行中的回合按中止处理。
  */
 export function createAgentHost(deps: AgentHostDeps): AgentHostService {
@@ -271,7 +265,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const resolveCompactionStrategy = deps.resolveCompactionStrategy ?? (() => 'native' as const);
   const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
-  const approvals = new Map<string, PendingApproval>();
   /** 在途的建议请求：requestId → 结算；同时用它限制并发并丢弃旧回包 */
   const suggestions = new Map<string, PendingSuggestion>();
   let suggestionSeq = 0;
@@ -367,7 +360,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   /** IPC 视图：去掉内部字段，带上分支 */
   function summaryOf(stored: StoredSession): SessionSummary {
-    return withBranch(toSummary(stored));
+    const summary = toSummary(stored);
+    if (summary.status === 'waiting-approval') {
+      const state = live.get(stored.id);
+      summary.status = state?.running || (state?.prompting ?? 0) > 0 ? 'running' : 'idle';
+    }
+    return withBranch(summary);
   }
 
   /**
@@ -424,7 +422,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     tellObservers((observer) => observer.event?.(envelope));
   }
 
-  /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求，丢弃建议 */
+  /** 会话不再在 worker 里：中止它进行中的 host 调用，丢弃建议 */
   function detach(sessionId: string, state: LiveSession): void {
     state.spawned = false;
     state.running = false;
@@ -433,9 +431,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     cancelSuggestions(sessionId, false);
     for (const controller of state.calls.values()) controller.abort();
     state.calls.clear();
-    for (const [requestId, pending] of approvals) {
-      if (pending.sessionId === sessionId) approvals.delete(requestId);
-    }
   }
 
   function send(command: AgentCommand): boolean {
@@ -508,7 +503,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return {
         ok: true,
         spec: {
-          // 审批门按会话自己的档位建（创建时取自角色，之后可能被用户切过）
+          // 通知范围取自会话记录（创建时取角色默认值）。
           role: { ...role, approvalMode: stored.approvalMode },
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
@@ -660,12 +655,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     for (const settle of [...describing.values()]) settle(fail(error));
   }
 
-  /** 正在跑一轮、等审批，或有 prompt 在途：这时换模型，spawn / 当前回合用的就对不上记录了 */
+  /** 正在跑一轮或有 prompt 在途：换模型会使当前回合与记录不一致。 */
   function isBusy(stored: StoredSession): boolean {
     const state = live.get(stored.id);
     return (
       stored.status === 'running' ||
-      stored.status === 'waiting-approval' ||
       state?.running === true ||
       (state?.prompting ?? 0) > 0
     );
@@ -709,6 +703,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         // 过期 generation、重复或乱序的 seq 一律丢弃
         if (!state || event.seq <= state.workerSeq) return;
         state.workerSeq = event.seq;
+        // 历史 / 旧版本的审批事件不重建等待，也不能自动允许或重放动作。
+        if (event.event.type === 'approval_request') return;
         const { sessionId } = event.identity;
         if (event.event.type === 'error') state.lastError = event.event.message;
         if (event.event.type === 'agent_settled' && event.event.aborted) {
@@ -724,9 +720,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
             state.lastSettledSeq = state.sessionSeq;
             state.settledRounds += 1;
           }
-          for (const [requestId, pending] of approvals) {
-            if (pending.sessionId === sessionId) approvals.delete(requestId);
-          }
           // 这一轮里 agent 可能切过分支：不等节流，重读一次
           const stored = deps.store.get(sessionId);
           if (stored) rereadBranches([stored.cwd], true);
@@ -736,15 +729,23 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       case 'session-status': {
         const state = currentOf(event.identity);
         if (!state) return;
-        state.running = event.status === 'running' || event.status === 'waiting-approval';
-        if (event.status === 'error') {
+        const status =
+          event.status === 'waiting-approval'
+            ? state.running || state.prompting > 0
+              ? 'running'
+              : deps.store.get(event.identity.sessionId)?.status === 'error'
+                ? 'error'
+                : 'idle'
+            : event.status;
+        state.running = status === 'running';
+        if (status === 'error') {
           interrupted(
             event.identity.sessionId,
             state,
             `Worker attempt interrupted: ${state.lastError ?? 'the agent run ended with an error'}`
           );
         }
-        setStatus(event.identity.sessionId, event.status);
+        setStatus(event.identity.sessionId, status);
         return;
       }
       case 'host-invoke':
@@ -756,9 +757,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ?.abort();
         return;
       case 'approval-request':
-        // 过期 generation 的请求没有人在等，不推给 Renderer
-        if (!currentOf(event.identity)) return;
-        announceApproval(event.identity, event.request);
+        // 兼容旧协议，但不发布可操作请求或回复执行许可。
         return;
       case 'session-error': {
         const state = currentOf(event.identity);
@@ -851,25 +850,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // 结果无法跨进程传递（如带函数）时至少让工具拿到错误，而不是等到超时
       send({ ...command, result: fail(`${method} returned a result that cannot be delivered`) });
     }
-  }
-
-  /** 审批门的请求：记为待审批，推给 Renderer 的审批条（kind / 标题 / 详情 / 到期时间以 worker 为准） */
-  function announceApproval(identity: SessionIdentity, request: AgentApprovalRequest): void {
-    const { sessionId, generation } = identity;
-    const { requestId, kind, title, detail, protectedAction, expiresAt } = request;
-    approvals.set(requestId, { sessionId, generation, expiresAt });
-    const pushed: ApprovalRequest = {
-      id: requestId,
-      sessionId,
-      kind,
-      title: protectedAction
-        ? translate('agent.protectedTitle', { title, action: protectedAction })
-        : title,
-      detail,
-      expiresAt,
-    };
-    deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, pushed);
-    tellObservers((observer) => observer.approval?.(pushed));
   }
 
   function handleCrash(code: number, willRestart: boolean): void {
@@ -977,8 +957,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const stored = deps.store.get(sessionId);
     if (!stored || stored.archivedAt !== undefined) return empty;
     // 状态事件可能比 Renderer 的请求晚到：真正权威的是本轮 settled 的 seq 与运行态；
-    // 错误 / 等审批永远不生成
-    if (stored.status === 'error' || stored.status === 'waiting-approval') return empty;
+    // 出错或仍在运行的会话不生成。
+    if (stored.status === 'error') return empty;
     const state = live.get(sessionId);
     if (!state?.spawned || state.running || state.prompting > 0) return empty;
     if (state.lastSettledSeq !== roundId || state.sessionSeq !== roundId) return empty;
@@ -987,9 +967,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     // 每轮只发起一次，空结果 / 失败也算（避免 Renderer 重渲染时反复请求）
     if (state.suggestedRound === roundId) return empty;
     if (suggestions.size >= MAX_CONCURRENT_SUGGESTIONS) return empty;
-    for (const pending of approvals.values()) {
-      if (pending.sessionId === sessionId) return empty;
-    }
 
     const requestId = `suggest-${++suggestionSeq}`;
     const identity = identityOf(sessionId, state);
@@ -1140,7 +1117,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /**
-   * 换审批档位：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
+   * 换通知范围：记录（sessions.json）是权威。缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），
    * 重建时不会退回旧档位；会话在 worker 里时再发 set-approval-mode，不论是否在跑。
    */
   async function setApprovalMode({
@@ -1424,20 +1401,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         return fail(translate('agent.historyFailed', { error: errorMessage(error) }));
       }
     },
-    async respondApproval({ sessionId, requestId, decision }) {
-      const pending = approvals.get(requestId);
-      if (!pending || pending.sessionId !== sessionId)
-        return fail(translate('agent.approvalNotFound'));
-      approvals.delete(requestId);
-      if (now() > pending.expiresAt) return fail(translate('agent.approvalExpired'));
-      const state = live.get(sessionId);
-      if (!state?.spawned || state.generation !== pending.generation) {
-        return fail(translate('agent.approvalStale'));
-      }
-      const identity = { sessionId, generation: pending.generation };
-      return send({ type: 'respond-approval', identity, requestId, decision })
-        ? { ok: true }
-        : fail(translate('agent.workerUnavailable'));
+    async respondApproval() {
+      // 保留 IPC 形状；旧请求不能在升级后触发动作。
+      return fail(translate('agent.approvalNotFound'));
     },
     setModel,
     modelOptions,

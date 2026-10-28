@@ -1,5 +1,4 @@
 import { sidebarOpenOf } from '@shared/types/settings';
-import { ApprovalAttention } from '@/components/layout/ApprovalAttention';
 import { CloseWindowDialog } from '@/components/layout/CloseWindowDialog';
 import { MainArea } from '@/components/layout/MainArea';
 import { NoticeDialog } from '@/components/layout/NoticeDialog';
@@ -29,7 +28,6 @@ export function App() {
       <div className="flex h-full flex-col">
         <TitleBar />
         <UpdateBanner />
-        <ApprovalAttention />
         <div className="flex min-h-0 flex-1">
           {sidebarOpen && <Sidebar />}
           <MainArea />
