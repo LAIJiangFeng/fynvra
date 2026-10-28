@@ -42,8 +42,8 @@ export function prepareMagicContextHost(): Record<string, string> {
   return {
     MAGIC_CONTEXT_FYNVRA_HOST: '1',
     // Neutralize values inherited from a user terminal environment.
-    MAGIC_CONTEXT_PI_SUBAGENT: '',
-    MAGIC_CONTEXT_TEST_DATA_DIR: '',
+    MAGIC_CONTEXT_PI_SUBAGENT: '0',
+    MAGIC_CONTEXT_TEST_DATA_DIR: ' ',
     MAGIC_CONTEXT_PLUGIN_DIR: pluginDir,
     MAGIC_CONTEXT_CONFIG_FILE: configFile,
     MAGIC_CONTEXT_CONFIG_HOME: configHome,
