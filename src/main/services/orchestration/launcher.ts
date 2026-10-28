@@ -15,11 +15,11 @@ export interface WorkerSessionLauncher {
     thinking?: ThinkingLevel;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
-  /** Ordinary instructions return after delivery; only fresh attempts wait for the previous run to end */
+  /** Ordinary instructions return after delivery; fresh-attempt waits are cancellable until delivery */
   promptSession(
     sessionId: string,
     text: string,
-    options?: { freshAttempt?: boolean }
+    options?: { freshAttempt?: boolean; signal?: AbortSignal }
   ): Promise<{ ok: true } | { ok: false; error: string }>;
   readTranscript(
     sessionId: string,

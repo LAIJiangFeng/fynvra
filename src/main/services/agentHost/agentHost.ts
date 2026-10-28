@@ -284,7 +284,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const observers = new Set<SessionObserver>();
   const failureListeners = new Set<() => void>();
   const roundWaiters = new Set<() => void>();
-  const roundQueue = new Map<string, Promise<Result>>();
+  /** Removable queue entries preserve ordering when a waiting call is cancelled. */
+  const roundQueue = new Map<string, Set<symbol>>();
 
   const wakeRounds = () => {
     for (const wake of [...roundWaiters]) wake();
@@ -996,8 +997,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     sessionId: string,
     text: string,
     images?: ChatImage[],
-    freshRound = false
+    freshRound = false,
+    signal?: AbortSignal
   ): Promise<Result> {
+    if (signal?.aborted) return fail('feedback delivery was aborted');
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
@@ -1009,6 +1012,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     pending.prompting += 1;
     try {
       const spawned = await ensureSpawned(stored);
+      if (signal?.aborted) return fail('feedback delivery was aborted');
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
       if (freshRound && (state.roundEpoch !== epoch || !deps.store.get(sessionId))) {
@@ -1046,32 +1050,42 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /** pi followUp stays in the old run; keep fresh-attempt feedback in Main until it really ends. */
-  function promptWorkerRound(sessionId: string, text: string): Promise<Result> {
+  async function promptWorkerRound(
+    sessionId: string,
+    text: string,
+    signal?: AbortSignal
+  ): Promise<Result> {
+    if (signal?.aborted) return fail('feedback delivery was aborted');
     const state = liveOf(sessionId);
     const epoch = state.roundEpoch;
-    const previous = roundQueue.get(sessionId) ?? Promise.resolve({ ok: true } as const);
-    const next = previous.then(async (): Promise<Result> => {
+    const queue = roundQueue.get(sessionId) ?? new Set<symbol>();
+    const turn = Symbol();
+    queue.add(turn);
+    roundQueue.set(sessionId, queue);
+    try {
       for (;;) {
+        if (signal?.aborted) return fail('feedback delivery was aborted');
         const stored = deps.store.get(sessionId);
         if (!stored) return fail(translate('common.sessionNotFound'));
         if (state.roundEpoch !== epoch)
           return fail('the worker was interrupted before feedback delivery');
-        if (!isBusy(stored)) break;
+        if (queue.values().next().value === turn && !isBusy(stored)) break;
         await new Promise<void>((resolve) => {
           const wake = () => {
             roundWaiters.delete(wake);
+            signal?.removeEventListener('abort', wake);
             resolve();
           };
           roundWaiters.add(wake);
+          signal?.addEventListener('abort', wake, { once: true });
         });
       }
-      return deliverMessage('prompt', sessionId, text, undefined, true);
-    });
-    roundQueue.set(sessionId, next);
-    void next.finally(() => {
-      if (roundQueue.get(sessionId) === next) roundQueue.delete(sessionId);
-    });
-    return next;
+      return await deliverMessage('prompt', sessionId, text, undefined, true, signal);
+    } finally {
+      queue.delete(turn);
+      if (queue.size === 0) roundQueue.delete(sessionId);
+      wakeRounds();
+    }
   }
 
   /**
@@ -1265,7 +1279,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     async promptSession(sessionId, text, options) {
       const result = options?.freshAttempt
-        ? await promptWorkerRound(sessionId, text)
+        ? await promptWorkerRound(sessionId, text, options.signal)
         : await prompt(sessionId, text);
       return result.ok ? { ok: true } : result;
     },

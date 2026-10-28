@@ -160,12 +160,12 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
-- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 显式传 Main launcher 的 `{ freshAttempt: true }`，反馈等待旧 run 真正 idle 后才作为新 prompt 发出；普通 `send_to_worker` 指令仍及时投递并返回，不等待 idle，以便协调者能回答 worker 随后提出的问题；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
+- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 在写入任何新尝试 / 任务 / 指令之前同步检查 worker 是否阻塞于 `ask_coordinator`；若有待答问题，立即报错，要求先 `send_to_worker` 回答、待旧 run 结束后再打回，不能伪造答复或自动停止 worker。检查到新 attempt 插入之间不让出执行。`reject_work` 显式传 Main launcher 的 `{ freshAttempt: true, signal }`，反馈等待旧 run 真正 idle 后才作为新 prompt 发出；取消信号贯穿串行排队、idle 等待与投递，排队 / idle 等待可立即取消并移除 waiter / listener，等待前及 spawn 后发送前再次核验，取消后不得迟到投递。投递前取消 / 失败清理 instruction 与 pendingDispatches，仅回滚自己仍 current 且 in-progress 的新尝试，不覆盖并发结算 / 清理；实际投递后取消不撤销已开始的尝试。普通 `send_to_worker` 指令仍及时投递并返回，不等待 idle，以便协调者能回答 worker 随后提出的问题；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
 - Fast（会话级优先服务）：`SessionModelRef.fastMode` 随会话记录与 last-used 持久化，与 thinking 独立。piSession 在会话自己的
   `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
   不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
   不代表已确认实际服务档位；不增加自动降级重发逻辑。
-- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`tool_notice`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`；旧 `approval_request` 仅解析兼容，不恢复审批），每条带 `seq`。
+- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`tool_notice`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`；旧 `approval_request` 仅解析兼容，不恢复审批），每条带 `seq`。SDK `agent_end` / `compaction_end` 中可恢复的错误先暂存，直到真正 `agent_settled` 才发布尚未恢复的最终错误；中间恢复成功不把 Main / Renderer 锁在错误态，显式 aborted 不误判为同轮模型失败。
 
 ## 6. 主 agent 工作循环（产品核心）
 
@@ -447,8 +447,8 @@ export interface OrchestrationApi {
 export interface WorkerSessionLauncher {
   // worktreeId：in-place 的尝试（工作区没有 git）没有，cwd 就是工作区目录
   createWorkerSession(input: { workspaceId: string; runId: string; dispatchId: string; roleId: string; cwd: string; worktreeId?: string; brief: string }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
-  // Ordinary instructions return after delivery; only freshAttempt waits for a real run boundary
-  promptSession(sessionId: string, text: string, options?: { freshAttempt?: boolean }): Promise<{ ok: true } | { ok: false; error: string }>;
+  // Ordinary instructions return after delivery; freshAttempt waits are cancellable until delivery
+  promptSession(sessionId: string, text: string, options?: { freshAttempt?: boolean; signal?: AbortSignal }): Promise<{ ok: true } | { ok: false; error: string }>;
   // Undefined means present/unknown, not failed; registry loading must have finished
   sessionFailure?(sessionId: string): string | undefined;
   onSessionFailure?(listener: () => void): () => void;
