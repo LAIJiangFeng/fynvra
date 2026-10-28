@@ -301,10 +301,17 @@ async function runMagicSubagent(
 
   try {
     const resolved = runner.getModel();
-    const maxTokens = Math.max(
-      1,
-      Math.min(options.maxOutputTokens ?? 32_000, resolved.model.maxTokens ?? 32_000)
-    );
+    const modelMax =
+      typeof resolved.model.maxTokens === 'number' &&
+      Number.isFinite(resolved.model.maxTokens) &&
+      resolved.model.maxTokens > 0
+        ? resolved.model.maxTokens
+        : 32_000;
+    const requestedMax =
+      typeof options.maxOutputTokens === 'number' && Number.isFinite(options.maxOutputTokens)
+        ? options.maxOutputTokens
+        : 32_000;
+    const maxTokens = Math.max(1, Math.min(requestedMax, modelMax));
     const message: Message = {
       role: 'user',
       content: options.userMessage,
