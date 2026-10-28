@@ -19,7 +19,6 @@ export {
   type ApprovalKind,
   approvalKindOf,
   describeToolCall,
-  modeNotifiesOperation,
   modeRequiresApproval,
   type ToolCallDescription,
 } from './approval/policy';

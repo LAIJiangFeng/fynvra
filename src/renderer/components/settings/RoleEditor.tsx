@@ -57,7 +57,7 @@ import { maskSecrets } from './secretMask';
 
 /** 选项只留名称 */
 const TOOL_POLICIES: readonly ToolPolicy[] = ['all', 'readonly', 'orchestrator'];
-/** 与输入框的操作通知范围同名；沿用旧字段值。 */
+/** 与输入框的审批胶囊同名 */
 const APPROVAL_MODES: readonly ApprovalMode[] = ['supervised', 'auto-edits', 'full'];
 const toItems = <V extends string>(values: readonly V[], label: (value: V) => string) =>
   values.map((value) => ({ value, label: label(value) }));
@@ -275,7 +275,6 @@ export function RoleEditor({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground text-xs">{t('approval.hint')}</p>
         </Field>
       </div>
 

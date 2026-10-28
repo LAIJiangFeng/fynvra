@@ -17,6 +17,20 @@ describe('Transcript', () => {
       args: { command: 'pnpm test' },
     });
     transcript.append({
+      type: 'approval_request',
+      requestId: 'req-1',
+      toolCallId: 'c1',
+      toolName: 'bash',
+      args: { command: 'pnpm test' },
+    });
+    // A historical notice cannot stand in for an approval or execution result.
+    transcript.append({
+      type: 'tool_notice',
+      toolCallId: 'old',
+      toolName: 'bash',
+      kind: 'command',
+    });
+    transcript.append({
       type: 'tool_end',
       toolCallId: 'c1',
       toolName: 'bash',
@@ -32,6 +46,7 @@ describe('Transcript', () => {
         '[user] # Task Fix the build',
         'Running tests.',
         '[tool] bash {"command":"pnpm test"}',
+        '[approval] bash',
         '[tool error] bash: 1 failed at a.test.ts',
         '[error] overloaded',
         '[settled]',

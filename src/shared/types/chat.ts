@@ -7,7 +7,6 @@ import {
 import { asRecord } from '../guards';
 import type { ProviderApi } from './llm';
 
-/** waiting-approval 仅用于读取旧记录；新版按实际 live 状态恢复，不再生成。 */
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
 /**
  * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位与 Fast。
@@ -33,7 +32,7 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;
-  /** 兼容旧字段：操作通知范围，创建时取角色值，可在运行中切换，不改变执行权限。 */
+  /** 审批档位：创建时取角色的值，之后是会话自己的设置（`sessions:set-approval-mode`，运行中也能切） */
   approvalMode: ApprovalMode;
   /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
   branch?: string;
