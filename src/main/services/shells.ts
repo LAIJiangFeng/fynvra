@@ -11,7 +11,7 @@ import type {
   ShellPreference,
 } from '@shared/types/settings';
 
-const WHERE_TIMEOUT_MS = 5_000;
+const DETECTION_TIMEOUT_MS = 5_000;
 const MINGW_DIRS = new Set(['mingw64', 'mingw32', 'clangarm64']);
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +33,8 @@ export function shellDetectionDeps(
     exec: async (file, args) => {
       const { stdout } = await execFileAsync(file, [...args], {
         encoding: 'utf8',
-        timeout: WHERE_TIMEOUT_MS,
+        timeout: DETECTION_TIMEOUT_MS,
+        maxBuffer: 64 * 1024,
         windowsHide: true,
       });
       return stdout;
@@ -62,6 +63,69 @@ async function whereExecutable(name: string, deps: ShellDetectionDeps): Promise<
   } catch {
     return [];
   }
+}
+
+async function readPowerShellJson(
+  file: string,
+  command: string,
+  deps: ShellDetectionDeps
+): Promise<unknown> {
+  try {
+    return JSON.parse(
+      await deps.exec(file, [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ${command}`,
+      ])
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectPowerShell(deps: ShellDetectionDeps): Promise<string | undefined> {
+  const candidates = [
+    ...(await whereExecutable('pwsh.exe', deps)),
+    deps.env.ProgramFiles && win32.join(deps.env.ProgramFiles, 'PowerShell', '7', 'pwsh.exe'),
+  ];
+  const find = (paths: (string | undefined)[]) =>
+    paths.find((path) => path && win32.isAbsolute(path) && deps.existsSync(path));
+  const regular = find(candidates);
+  if (regular) return regular;
+
+  // App execution aliases can launch successfully while statSync fails with EACCES.
+  // Resolve their installation instead of weakening the file check used at every spawn.
+  const fromHomes = (homes: unknown[]) =>
+    find(
+      homes.map((home) =>
+        typeof home === 'string' && win32.isAbsolute(home) && win32.parse(home).root.length > 1
+          ? win32.join(home, 'pwsh.exe')
+          : undefined
+      )
+    );
+  const windowsPowerShell = defaultTerminalShell(deps).path;
+  if (deps.existsSync(windowsPowerShell)) {
+    const homes = await readPowerShellJson(
+      windowsPowerShell,
+      'ConvertTo-Json -Compress -InputObject @(Get-AppxPackage -Name Microsoft.PowerShell ' +
+        '-ErrorAction Stop | Select-Object -ExpandProperty InstallLocation)',
+      deps
+    );
+    const installed = Array.isArray(homes) ? fromHomes(homes) : undefined;
+    if (installed) return installed;
+  }
+
+  const local = deps.env.LOCALAPPDATA;
+  if (!local || !win32.isAbsolute(local) || win32.parse(local).root.length <= 1) return undefined;
+  return fromHomes([
+    await readPowerShellJson(
+      win32.join(local, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
+      'if ($PSVersionTable.PSVersion.Major -ge 7) { ConvertTo-Json -Compress -InputObject $PSHOME }',
+      deps
+    ),
+  ]);
 }
 
 function gitRootOf(gitExe: string): string | undefined {
@@ -137,19 +201,11 @@ export async function availableShells(deps: ShellDetectionDeps): Promise<Availab
     return shells;
   }
   const [pwsh, bash] = await Promise.all([
-    whereExecutable('pwsh.exe', deps),
+    detectPowerShell(deps),
     detectShell({ ...deps, log: () => {} }),
   ]);
   const system32 = win32.join(deps.env.SystemRoot || 'C:\\Windows', 'System32');
-  add(
-    'pwsh',
-    'PowerShell 7',
-    [
-      ...pwsh,
-      deps.env.ProgramFiles && win32.join(deps.env.ProgramFiles, 'PowerShell', '7', 'pwsh.exe'),
-    ],
-    true
-  );
+  add('pwsh', 'PowerShell 7', [pwsh], true);
   add('powershell', 'Windows PowerShell 5.1', [defaultTerminalShell(deps).path], true);
   add('cmd', 'cmd', [deps.env.ComSpec, win32.join(system32, 'cmd.exe')], false);
   add('git-bash', 'Git Bash', [bash], true);
