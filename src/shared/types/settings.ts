@@ -172,6 +172,9 @@ export interface Preferences {
   // --- language ---
   /** 界面语言（Renderer 与 Main 的文案）；没写过时跟随系统（读取用 {@link languageOf}） */
   language?: Language;
+  // --- context ---
+  /** 上下文自动压缩策略；没写过时用 pi 原生自动压缩（读取用 {@link compactionStrategyOf}） */
+  compactionStrategy?: CompactionStrategy;
 }
 
 /**
@@ -222,6 +225,21 @@ export type WorktreesRootInfoResult = IpcResult<{ info: WorktreesRootInfo }>;
 export type PickWorktreesRootResult =
   | { ok: true; preferences: Preferences }
   | { ok: false; code: 'canceled' | 'invalid' | 'failed'; error: string };
+
+/** 上下文自动压缩：沿用 pi 原生策略，或只关掉自动压缩 */
+export const COMPACTION_STRATEGIES = ['native', 'off'] as const;
+export type CompactionStrategy = (typeof COMPACTION_STRATEGIES)[number];
+
+export function isCompactionStrategy(value: unknown): value is CompactionStrategy {
+  return typeof value === 'string' && (COMPACTION_STRATEGIES as readonly string[]).includes(value);
+}
+
+/** 生效的压缩策略：没写过或磁盘上的值不合法时沿用 pi 原生自动压缩 */
+export function compactionStrategyOf(
+  preferences: Pick<Preferences, 'compactionStrategy'>
+): CompactionStrategy {
+  return preferences.compactionStrategy ?? 'native';
+}
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   theme: 'system',
@@ -377,6 +395,7 @@ export function parsePreferences(raw: unknown): Preferences {
   const keybindings = parseKeybindingOverrides(record?.keybindings);
   // --- language ---
   const language = record?.language;
+  const compactionStrategy = record?.compactionStrategy;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
@@ -398,6 +417,8 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(keybindings ? { keybindings } : {}),
     // --- language ---
     ...(isLanguage(language) ? { language } : {}),
+    // --- context ---
+    ...(isCompactionStrategy(compactionStrategy) ? { compactionStrategy } : {}),
   };
 }
 
@@ -500,6 +521,11 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
       case 'language':
         if (!isLanguage(value)) return null;
         patch.language = value;
+        break;
+      // --- context ---
+      case 'compactionStrategy':
+        if (!isCompactionStrategy(value)) return null;
+        patch.compactionStrategy = value;
         break;
       default:
         return null;

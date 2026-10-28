@@ -5,6 +5,7 @@ import {
   type AvailableShells,
   DELETE_ARCHIVED_DAYS,
   isArchiveIdleDays,
+  isCompactionStrategy,
   isDeleteArchivedDays,
   languageOf,
   type Preferences,
@@ -15,7 +16,7 @@ import {
   type WorkspaceWorktreesInfo,
   type WorktreesRootInfo,
 } from '@shared/types/settings';
-import { FolderOpen, FolderTree, RefreshCw, RotateCcw } from 'lucide-react';
+import { FolderOpen, FolderTree, Minimize2, RefreshCw, RotateCcw } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -158,6 +159,7 @@ export function GeneralSettings() {
       </section>
 
       <SessionsSection />
+      <CompactionSection />
       <TimelineSection />
       <UpdateSettings />
     </div>
@@ -519,6 +521,57 @@ function DaysSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// --- context ---
+function CompactionSection() {
+  const compaction = useGeneralPreferencesStore((state) => state.compaction);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const t = useT();
+  const id = useId();
+  const hint = t('settings.general.compactionHint');
+  const items = [
+    { value: 'native', label: t('settings.general.compactionNative') },
+    { value: 'off', label: t('settings.general.compactionOff') },
+  ];
+  return (
+    <section>
+      <ul className="divide-y rounded-lg border">
+        <li className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Minimize2 className="size-4 shrink-0 text-muted-foreground" />
+            <label htmlFor={id} title={hint} className="min-w-0 text-sm">
+              {t('settings.general.compaction')}
+            </label>
+          </div>
+          <Select
+            items={items}
+            value={compaction}
+            onValueChange={(next) => {
+              if (isCompactionStrategy(next)) void update({ compactionStrategy: next });
+            }}
+          >
+            <SelectTrigger
+              id={id}
+              size="sm"
+              className="w-56"
+              title={hint}
+              aria-label={t('settings.general.compaction')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {items.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </li>
+      </ul>
+    </section>
   );
 }
 

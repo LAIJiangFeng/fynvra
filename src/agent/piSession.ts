@@ -72,7 +72,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       agentDir: options.agentDir,
       roles: spec.roles,
       ...(spec.inPlace ? { inPlace: true } : {}),
-      settingsManager: createSessionSettings(spec.shellPath),
+      settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
       ...(spec.networkProxy
         ? {
             commandEnv: (env: NodeJS.ProcessEnv) =>
