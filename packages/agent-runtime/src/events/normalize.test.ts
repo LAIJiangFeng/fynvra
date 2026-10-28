@@ -128,7 +128,7 @@ describe('createEventNormalizer', () => {
     expect(silent.map((event) => event.type)).toEqual(['message_end']);
   });
 
-  it('reports a model error only once retries are exhausted', () => {
+  it('reports a model error only at settlement after retries are exhausted', () => {
     const normalizer = createEventNormalizer();
     const failed = assistant({
       stopReason: 'error',
@@ -136,16 +136,26 @@ describe('createEventNormalizer', () => {
       content: [],
     });
     expect(normalizer.push({ type: 'agent_end', messages: [failed], willRetry: true })).toEqual([]);
-    expect(normalizer.push({ type: 'agent_end', messages: [failed], willRetry: false })).toEqual([
+    expect(normalizer.push({ type: 'agent_end', messages: [failed], willRetry: false })).toEqual(
+      []
+    );
+    expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
       { type: 'error', source: 'model', message: '429 rate limited', seq: 1 },
+      { type: 'agent_settled', aborted: false, seq: 2 },
     ]);
+    normalizer.push({ type: 'agent_start' });
     expect(
       normalizer.push({ type: 'agent_end', messages: [assistant()], willRetry: false })
     ).toEqual([]);
+    expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
+      { type: 'agent_settled', aborted: false, seq: 3 },
+    ]);
   });
 
-  it('reports failed compaction that will not be retried', () => {
+  it('retains compaction failure after an earlier successful response until settlement', () => {
     const normalizer = createEventNormalizer();
+    const completed = assistant();
+    normalizer.push({ type: 'message_end', message: completed });
     expect(
       normalizer.push({
         type: 'compaction_end',
@@ -155,8 +165,104 @@ describe('createEventNormalizer', () => {
         willRetry: false,
         errorMessage: 'summary model unavailable',
       })
-    ).toEqual([
-      { type: 'error', source: 'compaction', message: 'summary model unavailable', seq: 1 },
+    ).toEqual([]);
+    normalizer.push({ type: 'agent_end', messages: [completed], willRetry: false });
+    expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
+      { type: 'error', source: 'compaction', message: 'summary model unavailable', seq: 3 },
+      { type: 'agent_settled', aborted: false, seq: 4 },
+    ]);
+  });
+
+  it.each(['overflow', 'threshold', 'transient'] as const)(
+    'does not report %s errors recovered by a later completed model response',
+    (recovery) => {
+      const normalizer = createEventNormalizer();
+      if (recovery !== 'threshold') {
+        expect(
+          normalizer.push({
+            type: 'agent_end',
+            messages: [assistant({ stopReason: 'error', errorMessage: recovery })],
+            willRetry: recovery === 'transient',
+          })
+        ).toEqual([]);
+      }
+      if (recovery !== 'transient') {
+        expect(
+          normalizer.push({
+            type: 'compaction_end',
+            reason: recovery,
+            result:
+              recovery === 'overflow'
+                ? { summary: 'summary', firstKeptEntryId: 'kept', tokensBefore: 100 }
+                : undefined,
+            aborted: false,
+            willRetry: recovery === 'overflow',
+            errorMessage: recovery === 'threshold' ? 'summary model unavailable' : undefined,
+          })
+        ).toEqual([]);
+      }
+      normalizer.push({ type: 'agent_start' });
+      const completed = assistant();
+      normalizer.push({ type: 'message_start', message: completed });
+      expect(normalizer.push({ type: 'message_end', message: completed })).toHaveLength(2);
+      normalizer.push({ type: 'agent_end', messages: [completed], willRetry: false });
+      expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
+        { type: 'agent_settled', aborted: false, seq: 3 },
+      ]);
+    }
+  );
+
+  it('clears only compaction errors on compaction success, not unresolved model errors', () => {
+    const normalizer = createEventNormalizer();
+    normalizer.push({
+      type: 'agent_end',
+      messages: [assistant({ stopReason: 'error', errorMessage: 'context overflow' })],
+      willRetry: false,
+    });
+    normalizer.push({
+      type: 'compaction_end',
+      reason: 'overflow',
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+      errorMessage: 'summary model unavailable',
+    });
+    normalizer.push({
+      type: 'compaction_end',
+      reason: 'overflow',
+      result: { summary: 'summary', firstKeptEntryId: 'kept', tokensBefore: 100 },
+      aborted: false,
+      willRetry: true,
+    });
+    normalizer.push({ type: 'agent_start' });
+    normalizer.push({ type: 'message_start', message: assistant({ stopReason: 'pending' }) });
+    normalizer.push({ type: 'agent_end', messages: [], willRetry: false });
+    expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
+      { type: 'error', source: 'model', message: 'context overflow', seq: 1 },
+      { type: 'agent_settled', aborted: false, seq: 2 },
+    ]);
+  });
+
+  it('reports a later model failure even after a successful tool response recovered compaction', () => {
+    const normalizer = createEventNormalizer();
+    normalizer.push({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+      errorMessage: 'summary model unavailable',
+    });
+    const toolResponse = assistant({ stopReason: 'toolUse' });
+    const failed = assistant({ stopReason: 'error', errorMessage: 'network failure' });
+    normalizer.push({ type: 'message_end', message: toolResponse });
+    normalizer.push({ type: 'message_end', message: failed });
+    expect(
+      normalizer.push({ type: 'agent_end', messages: [toolResponse, failed], willRetry: false })
+    ).toEqual([]);
+    expect(normalizer.push({ type: 'agent_settled', aborted: false })).toEqual([
+      { type: 'error', source: 'model', message: 'network failure', seq: 5 },
+      { type: 'agent_settled', aborted: false, seq: 6 },
     ]);
   });
 
@@ -165,6 +271,42 @@ describe('createEventNormalizer', () => {
       { type: 'agent_settled', aborted: true, seq: 1 },
     ]);
   });
+
+  it.each([true, false])(
+    'uses settled aborted=%s instead of error text, preserving host errors',
+    (aborted) => {
+      const normalizer = createEventNormalizer();
+      const message = 'This operation was aborted';
+      normalizer.push({
+        type: 'agent_end',
+        messages: [assistant({ stopReason: 'error', errorMessage: message })],
+        willRetry: false,
+      });
+      normalizer.push({
+        type: 'compaction_end',
+        reason: 'overflow',
+        result: undefined,
+        aborted: false,
+        willRetry: false,
+        errorMessage: 'summary model unavailable',
+      });
+      expect(normalizer.emit({ type: 'error', source: 'host', message: 'host fatal' })).toEqual({
+        type: 'error',
+        source: 'host',
+        message: 'host fatal',
+        seq: 1,
+      });
+      expect(normalizer.push({ type: 'agent_settled', aborted })).toEqual(
+        aborted
+          ? [{ type: 'agent_settled', aborted: true, seq: 2 }]
+          : [
+              { type: 'error', source: 'model', message, seq: 2 },
+              { type: 'error', source: 'compaction', message: 'summary model unavailable', seq: 3 },
+              { type: 'agent_settled', aborted: false, seq: 4 },
+            ]
+      );
+    }
+  );
 
   it('drops unknown and unmapped events, counting them by type without using seq', () => {
     const normalizer = createEventNormalizer();
