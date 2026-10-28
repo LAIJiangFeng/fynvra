@@ -610,11 +610,11 @@ describe('旧审批兼容与操作通知', () => {
         pendingApprovals: { [S]: [request, { ...request, id: 'req-2' }] },
         runtimeBySession: { [S]: { ...runtime, status: 'waiting-approval' } },
       };
-      const beforeMessages = messagesOf(state);
+      const beforeMessages = state.messagesBySession;
       state = dequeueApproval(state, S, 'req-1');
       expect(state.pendingApprovals[S]).toEqual([]);
       expect(runtimeOf(state)?.status).toBe(active ? 'running' : 'idle');
-      expect(messagesOf(state)).toBe(beforeMessages);
+      expect(state.messagesBySession).toBe(beforeMessages);
       expect(dequeueApproval(state, S, 'req-2')).toBe(state);
       expect(dequeueApproval(state, S, 'missing')).toBe(state);
     }
