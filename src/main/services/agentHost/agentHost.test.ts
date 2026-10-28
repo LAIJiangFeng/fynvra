@@ -14,12 +14,15 @@ import type {
 } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createOrchestrationRegistry } from '../orchestration/registry';
+import { createFakeExec, createFakeRoles } from '../orchestration/testing';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/branches';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
+import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
 
 class FakeProcess implements WorkerProcess {
@@ -136,6 +139,401 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('worker attempt lifecycle', () => {
+  async function dispatched() {
+    const env = setup();
+    const launcher = env.host.implementsLauncher();
+    const created = await launcher.createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: env.workspace.repoPath,
+      brief: 'First attempt',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const identity = { sessionId: created.sessionId, generation: 1 };
+    return { ...env, launcher, identity };
+  }
+
+  it('production startup wiring recovers a persisted missing attempt before any worker forks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-orphan-startup-'));
+    dirs.push(dir);
+    const workspace = { id: 'ws-old', name: 'Old tasks', repoPath: dir, vcs: 'none' as const };
+    const startedAt = Date.now() - 24 * 60 * 60 * 1000;
+    const task = {
+      id: 'task_old',
+      runId: 'run_old',
+      title: 'Old task',
+      spec: 'Task brief',
+      roleId: 'worker',
+      status: 'in-progress',
+      dependsOn: [],
+    };
+    const dispatch = {
+      id: 'dispatch_old',
+      taskId: task.id,
+      workerSessionId: 'session_removed',
+      worktreeId: '',
+      branch: '',
+      mode: 'in-place',
+      startedAt,
+    };
+    const original = {
+      version: 1,
+      runs: [
+        {
+          id: task.runId,
+          workspaceId: workspace.id,
+          coordinatorSessionId: 'coordinator',
+          objective: 'Old work',
+          createdAt: startedAt,
+        },
+      ],
+      tasks: [task, { ...task, id: 'task_present' }],
+      dispatches: [
+        {
+          ...dispatch,
+          id: 'dispatch_prior',
+          settledAt: startedAt + 1,
+          outcome: 'succeeded',
+          summary: 'Previous attempt report',
+        },
+        { ...dispatch, startedAt: startedAt + 2 },
+        {
+          ...dispatch,
+          id: 'dispatch_present',
+          taskId: 'task_present',
+          workerSessionId: 'session_present',
+        },
+      ],
+      worktrees: [],
+      messages: [],
+    };
+    mkdirSync(join(dir, 'orchestration'));
+    const statePath = join(dir, 'orchestration', `${workspace.id}.json`);
+    writeFileSync(statePath, JSON.stringify(original));
+    const sessionsPath = join(dir, 'sessions.json');
+    const sessionsText = JSON.stringify({
+      version: 1,
+      sessions: [
+        {
+          id: 'session_present',
+          workspaceId: workspace.id,
+          roleId: 'worker',
+          title: 'Restored worker',
+          cwd: dir,
+          status: 'idle',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          approvalMode: 'supervised',
+        },
+      ],
+    });
+    writeFileSync(sessionsPath, sessionsText);
+    const fork = vi.fn(() => {
+      throw new Error('Startup recovery must not fork a worker');
+    });
+    const roles = createFakeRoles();
+    const host = createAgentHost({
+      fork,
+      agentDir: join(dir, 'agent'),
+      store: createSessionStore({ filePath: sessionsPath }),
+      workspaces: { get: (id) => (id === workspace.id ? workspace : undefined) },
+      roles,
+      models: { resolve: async () => ({ ok: false, error: 'No model needed for recovery' }) },
+      broadcast: vi.fn(),
+    });
+    const notifyChanged = vi.fn();
+    const registry = createOrchestrationRegistry({
+      userDataPath: dir,
+      listWorkspaces: () => [workspace],
+      roles,
+      notifyChanged,
+    });
+    // Same ordering as index.ts: create the host (synchronously load sessions), connect, then start.
+    await connectOrchestration(host, registry);
+    const recovered = await registry.readSnapshot(workspace.id);
+    expect(recovered?.tasks.map((entry) => entry.status)).toEqual(['failed', 'in-progress']);
+    expect(recovered?.dispatches[0]).toEqual(original.dispatches[0]);
+    expect(recovered?.dispatches[1]).toMatchObject({
+      outcome: 'failed',
+      summary: expect.stringContaining('missing from the session registry'),
+    });
+    expect(recovered?.dispatches[2]).toEqual(original.dispatches[2]);
+    expect(notifyChanged).toHaveBeenCalledExactlyOnceWith(workspace.id);
+    expect(fork).not.toHaveBeenCalled();
+    expect(readFileSync(sessionsPath, 'utf8')).toBe(sessionsText);
+    await registry.flushAll();
+    const persisted = readFileSync(statePath, 'utf8');
+    expect(JSON.parse(persisted).tasks[0].status).toBe('failed');
+    notifyChanged.mockClear();
+    expect(await registry.serviceFor(workspace.id)?.snapshot()).toEqual(recovered);
+    await registry.flushAll();
+    expect(readFileSync(statePath, 'utf8')).toBe(persisted);
+    expect(notifyChanged).not.toHaveBeenCalled();
+  });
+
+  it('delivers busy instructions, answers later questions and isolates retries through registry wiring', async () => {
+    const env = setup();
+    const registry = createOrchestrationRegistry({
+      userDataPath: env.dir,
+      listWorkspaces: () => [env.workspace],
+      roles: createFakeRoles(),
+      launcher: env.host.implementsLauncher(),
+      notifyChanged: vi.fn(),
+      exec: createFakeExec().exec,
+      runChecks: async () => ({ exitCode: 0, output: '', durationMs: 0 }),
+    });
+    env.host.setWorkerHostFactory((sessionId) => registry.workerHostFor(sessionId));
+    const coordinator = registry.hostFor('coordinator', env.workspace.id);
+    const launched = await coordinator?.dispatchTask({
+      title: 'Task',
+      spec: 'Do it',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!launched?.ok || !launched.dispatch) throw new Error('dispatch failed');
+    const dispatch = launched.dispatch;
+    const identity = { sessionId: dispatch.workerSessionId, generation: 1 };
+    // No question exists yet. A normal instruction must return while this run remains busy,
+    // otherwise a later ask_coordinator would deadlock behind send_to_worker.
+    let instructionReturned = false;
+    const instruction = coordinator?.sendToWorker({
+      dispatchId: dispatch.id,
+      body: 'Check the API shape',
+    });
+    void instruction?.then(() => {
+      instructionReturned = true;
+    });
+    await vi.waitFor(() => expect(instructionReturned).toBe(true));
+    expect(await instruction).toMatchObject({ ok: true, type: 'instruction' });
+    expect(env.sent('prompt')).toHaveLength(2);
+    expect(env.sent('prompt').at(-1)).toMatchObject({
+      text: expect.stringContaining('Check the API shape'),
+    });
+    expect(env.host.get(identity.sessionId)?.status).toBe('running');
+
+    env.worker().emit({
+      type: 'host-invoke',
+      identity,
+      callId: 'later-question',
+      kind: 'worker',
+      method: 'askCoordinator',
+      input: { question: 'Which API should I use?', timeoutMs: 1000 },
+    });
+    expect(
+      await coordinator?.sendToWorker({ dispatchId: dispatch.id, body: 'Use REST' })
+    ).toMatchObject({ ok: true, type: 'reply' });
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({
+      callId: 'later-question',
+      result: { ok: true, answer: 'Use REST' },
+    });
+    expect(env.sent('prompt')).toHaveLength(2); // The answer goes to the inbox, not a new prompt.
+    const report = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: callId },
+      });
+    report('first');
+    await flush();
+    const retry = coordinator?.rejectWork({
+      dispatchId: dispatch.id,
+      feedback: 'Fix review feedback',
+    });
+    await flush();
+    report('late first report');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: false } });
+    expect(env.sent('prompt')).toHaveLength(2);
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    expect(await retry).toMatchObject({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(3);
+    report('retry report');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: true } });
+    const service = registry.serviceFor(env.workspace.id);
+    const snapshot = await service?.snapshot();
+    expect(snapshot?.dispatches.map((entry) => entry.summary)).toEqual(['first', 'retry report']);
+    expect(snapshot?.tasks[0]?.status).toBe('in-review');
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    const retryId = snapshot?.dispatches[1]?.id ?? '';
+    expect(
+      await coordinator?.rejectWork({ dispatchId: retryId, feedback: 'One more check' })
+    ).toMatchObject({ ok: true });
+    await env.host.remove(identity.sessionId);
+    // readSnapshot intentionally does not reconcile: this proves the removal event already did.
+    const removed = await registry.readSnapshot(env.workspace.id);
+    expect(removed?.tasks[0]?.status).toBe('failed');
+    expect(removed?.dispatches.map((entry) => entry.outcome)).toEqual([
+      'succeeded',
+      'succeeded',
+      'failed',
+    ]);
+    expect(removed?.dispatches[2]?.summary).toContain('missing from the session registry');
+    expect(removed?.worktrees).toHaveLength(1);
+    await registry.flushAll();
+  });
+
+  it('waits for an actual idle boundary and pins old host calls while retry feedback is queued', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const first: WorkerHost = {
+      askCoordinator: vi.fn<WorkerHost['askCoordinator']>(async () => ({ ok: true, answer: null })),
+      reportDone: vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true })),
+    };
+    const next: WorkerHost = {
+      ...first,
+      askCoordinator: vi.fn<WorkerHost['askCoordinator']>(async () => ({ ok: true, answer: null })),
+      reportDone: vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true })),
+    };
+    let current = first;
+    env.host.setWorkerHostFactory(() => current);
+    const report = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: env.identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: callId },
+      });
+    const question = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: env.identity,
+        callId,
+        kind: 'worker',
+        method: 'askCoordinator',
+        input: { question: callId, timeoutMs: 60_000 },
+      });
+    report('first');
+    await flush();
+    current = next; // reject_work registered its next dispatch while the old run is finishing.
+    const delivery = env.launcher.promptSession(sessionId, 'Review feedback', {
+      freshAttempt: true,
+    });
+    await flush();
+    env
+      .worker()
+      .emit({ type: 'session-status', identity: env.identity, status: 'waiting-approval' });
+    await flush();
+    expect(env.sent('prompt')).toHaveLength(1);
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    expect(await env.host.steer(sessionId, 'User steering remains immediate')).toEqual({
+      ok: true,
+    });
+    expect(env.sent('steer')).toHaveLength(1);
+    expect(env.sent('prompt')).toHaveLength(1);
+    report('late');
+    question('old question');
+    await flush();
+    expect(first.reportDone).toHaveBeenCalledTimes(2);
+    expect(first.askCoordinator).toHaveBeenCalledWith(
+      'old question',
+      60_000,
+      expect.any(AbortSignal)
+    );
+    expect(next.reportDone).not.toHaveBeenCalled();
+    expect(next.askCoordinator).not.toHaveBeenCalled();
+    env.worker().emit({ type: 'session-status', identity: env.identity, status: 'idle' });
+    expect(await delivery).toEqual({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(2);
+    report('retry');
+    question('new question');
+    await flush();
+    expect(next.reportDone).toHaveBeenCalledWith('succeeded', 'retry', undefined);
+    expect(next.askCoordinator).toHaveBeenCalledWith(
+      'new question',
+      60_000,
+      expect.any(AbortSignal)
+    );
+  });
+
+  it.each(['remove', 'abort', 'dispose'] as const)(
+    'does not revive queued feedback after %s',
+    async (stop) => {
+      const env = await dispatched();
+      const pending = env.launcher.promptSession(env.identity.sessionId, 'Review feedback', {
+        freshAttempt: true,
+      });
+      await flush();
+      if (stop === 'dispose') await env.launcher.disposeSession(env.identity.sessionId);
+      else await env.host[stop](env.identity.sessionId);
+      expect(await pending).toMatchObject({ ok: false });
+      expect(env.sent('prompt')).toHaveLength(1);
+    }
+  );
+
+  it('does not treat restored idle/error or never-spawned sessions as interrupted', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const launcher = env.host.implementsLauncher();
+    expect(launcher.sessionFailure?.(session.id)).toBeUndefined();
+    env.store.update(session.id, { status: 'error' });
+    expect(launcher.sessionFailure?.(session.id)).toBeUndefined();
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(launcher.sessionFailure?.('missing')).toContain('missing from the session registry');
+  });
+
+  it('records only definitive termination, drops stale generations, and notifies on removal', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: false,
+      error: 'Temporary failure',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    env.worker().emit({
+      type: 'session-error',
+      identity: { ...env.identity, generation: 0 },
+      fatal: true,
+      error: 'Stale failure',
+    });
+    expect(changed).not.toHaveBeenCalled();
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: true,
+      error: 'Session could not start',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('Session could not start');
+    expect(changed).toHaveBeenCalledTimes(1);
+    await env.host.remove(sessionId);
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('missing from the session registry');
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a running worker process crash without mistaking automatic respawn for recovery', async () => {
+    const env = await dispatched();
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    env.worker().exit(7);
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toContain('exited (code 7)');
+    expect(changed).toHaveBeenCalledTimes(1);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toContain('exited (code 7)');
+    expect(
+      await env.launcher.promptSession(env.identity.sessionId, 'Explicit retry', {
+        freshAttempt: true,
+      })
+    ).toEqual({
+      ok: true,
+    });
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toBeUndefined();
+  });
+});
 
 describe('automatic coordinator continuation delivery', () => {
   it('sends one prompt only while idle, without treating it as a user continuation', async () => {
@@ -903,7 +1301,11 @@ describe('createAgentHost launcher', () => {
       done: true,
     });
 
-    expect(await launcher.promptSession('session-1', 'Review feedback: add edge cases')).toEqual({
+    expect(
+      await launcher.promptSession('session-1', 'Review feedback: add edge cases', {
+        freshAttempt: true,
+      })
+    ).toEqual({
       ok: true,
     });
     await launcher.disposeSession('session-1');
@@ -994,10 +1396,12 @@ describe('createAgentHost launcher', () => {
     expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '2', result: { ok: true } });
     expect(reportDone).toHaveBeenCalledWith('succeeded', 'done', undefined);
 
-    // 3. 会话空闲后 promptSession 作为新的 prompt 发出（新一轮，reject_work 靠它重新开放 report_done）
+    // 3. Fresh-attempt feedback starts a new run, reopening report_done after reject_work.
     env.worker().emit({ type: 'session-status', identity, status: 'idle' });
     expect(env.host.list('ws-1')[0]?.status).toBe('idle');
-    expect(await launcher.promptSession(created.sessionId, 'Review feedback')).toEqual({
+    expect(
+      await launcher.promptSession(created.sessionId, 'Review feedback', { freshAttempt: true })
+    ).toEqual({
       ok: true,
     });
     expect(env.sent('prompt').at(-1)).toEqual({

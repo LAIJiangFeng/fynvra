@@ -71,6 +71,157 @@ afterEach(() => {
 });
 
 describe('createOrchestrationService', () => {
+  it('recovers a missing worker from persisted state, preserves evidence, and persists only once', async () => {
+    const first = make();
+    const dispatch = await dispatchOn(first);
+    await first.flush();
+    const saved = JSON.parse(readFileSync(statePath, 'utf8'));
+    saved.dispatches[0].summary = 'Partial report';
+    saved.dispatches[0].filesModified = ['src/a.ts'];
+    writeFileSync(statePath, JSON.stringify(saved));
+    const reason =
+      'Worker attempt interrupted: the worker session is missing from the session registry';
+    launcher.sessionFailure = vi.fn(() => reason);
+    notifyChanged.mockClear();
+    const restored = make({ now: () => 1234 });
+    // Loading is not evidence of absence.
+    restored.reconcileWorkers();
+    expect(launcher.sessionFailure).not.toHaveBeenCalled();
+    const after = await restored.snapshot();
+    expect(after.tasks[0]?.status).toBe('failed');
+    expect(after.dispatches[0]).toMatchObject({
+      id: dispatch.id,
+      outcome: 'failed',
+      settledAt: 1234,
+      summary: `Partial report\n\n${reason}`,
+      filesModified: ['src/a.ts'],
+    });
+    expect(after.worktrees).toEqual(saved.worktrees);
+    expect(after.messages).toEqual([
+      expect.objectContaining({
+        dispatchId: dispatch.id,
+        type: 'worker_done',
+        subject: 'failed',
+        body: reason,
+      }),
+    ]);
+    await restored.flush();
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).dispatches).toEqual(after.dispatches);
+    expect(notifyChanged).toHaveBeenCalledTimes(1);
+    notifyChanged.mockClear();
+    expect(await restored.snapshot()).toEqual(after);
+    restored.reconcileWorkers();
+    expect(notifyChanged).not.toHaveBeenCalled();
+    expect(launcher.disposeSession).not.toHaveBeenCalled();
+  });
+
+  it('leaves present/unknown workers alone, including idle and pending coordinator questions', async () => {
+    launcher.sessionFailure = () => undefined;
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    const before = await service.snapshot();
+    expect(await service.snapshot()).toEqual(before);
+    const controller = new AbortController();
+    const asking = service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.askCoordinator('Need a decision', 60000, controller.signal);
+    expect((await service.snapshot()).tasks[0]?.status).toBe('in-progress');
+    expect(await service.hostFor('session_coord').listWorkers()).toMatchObject({
+      ok: true,
+      workers: [{ task: { status: 'in-progress' } }],
+    });
+    controller.abort();
+    await asking;
+    await service.flush();
+  });
+
+  it.each(['in-review', 'completed', 'abandoned', 'failed'] as const)(
+    'preserves %s and its existing report when the session disappears',
+    async (status) => {
+      const first = make();
+      const dispatch = await dispatchOn(first);
+      await first.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Original');
+      await first.flush();
+      const saved = JSON.parse(readFileSync(statePath, 'utf8'));
+      saved.tasks[0].status = status;
+      writeFileSync(statePath, JSON.stringify(saved));
+      launcher.sessionFailure = () => 'Session removed';
+      const restored = await make().snapshot();
+      expect(restored.tasks).toEqual(saved.tasks);
+      expect(restored.dispatches).toEqual(saved.dispatches);
+      expect(restored.messages).toEqual(saved.messages);
+    }
+  );
+
+  it('does not settle an older unsettled row when a newer attempt already reported', async () => {
+    const first = make();
+    const dispatch = await dispatchOn(first);
+    await first.flush();
+    const saved = JSON.parse(readFileSync(statePath, 'utf8'));
+    saved.dispatches.push({
+      ...dispatch,
+      id: 'dispatch_new',
+      outcome: 'succeeded',
+      settledAt: 10,
+      summary: 'New report',
+    });
+    writeFileSync(statePath, JSON.stringify(saved));
+    launcher.sessionFailure = () => 'Session removed';
+    const restored = await make().snapshot();
+    expect(restored.dispatches).toEqual(saved.dispatches);
+    expect(restored.tasks).toEqual(saved.tasks);
+  });
+
+  it('protects retry registration while delivery is pending and rechecks failure after delivery', async () => {
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    const worker = service.workerHostFor(dispatch.workerSessionId);
+    await worker?.reportDone('succeeded', 'First report');
+    let deliver: (result: { ok: true }) => void = () => {};
+    launcher.promptSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        })
+    );
+    launcher.sessionFailure = () => 'Old session unavailable';
+    const retry = service
+      .hostFor('session_coord')
+      .rejectWork({ dispatchId: dispatch.id, feedback: 'Retry' });
+    // Let deferred host lookup reach delivery.
+    await vi.waitFor(() => expect(launcher.promptSession).toHaveBeenCalled());
+    const pending = await service.snapshot();
+    expect(pending.tasks[0]?.status).toBe('in-progress');
+    expect(pending.dispatches[1]?.outcome).toBeUndefined();
+    expect(
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Late')
+    ).toMatchObject({ ok: false });
+    deliver({ ok: true });
+    expect(await retry).toMatchObject({ ok: true });
+    const failed = await service.snapshot();
+    expect(failed.tasks[0]?.status).toBe('failed');
+    expect(failed.dispatches[0]?.summary).toBe('First report');
+    expect(failed.dispatches[1]?.summary).toBe('Old session unavailable');
+    await service.flush();
+  });
+
+  it('list/wait reconcile missing sessions without requiring a panel snapshot', async () => {
+    const service = make();
+    await dispatchOn(service);
+    launcher.sessionFailure = () => 'Session removed';
+    const host = service.hostFor('session_coord');
+    expect(await host.listWorkers()).toMatchObject({
+      ok: true,
+      workers: [{ task: { status: 'failed' } }],
+    });
+    expect(await host.waitForWorkers({ until: 'all', timeoutMs: 0 })).toMatchObject({
+      ok: true,
+      pending: 0,
+      messages: [{ subject: 'failed' }],
+    });
+    await service.flush();
+  });
+
   it('经 Host 的写入落盘到 orchestration/<workspaceId>.json 并通知；新实例从快照恢复', async () => {
     const service = make();
     await dispatchOn(service);
@@ -106,7 +257,7 @@ describe('createOrchestrationService', () => {
     expect(notifyChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('workerHostFor：按 Dispatch.workerSessionId 反查；打回后同一个 WorkerHost 绑定到新尝试', async () => {
+  it('workerHostFor pins an attempt; retry needs a new host and late reports cannot settle it', async () => {
     const service = make();
     await service.ready;
     expect(service.workerHostFor('session_unknown')).toBeNull();
@@ -120,7 +271,10 @@ describe('createOrchestrationService', () => {
     expect(await host.rejectWork({ dispatchId: dispatch.id, feedback: 'Again.' })).toMatchObject({
       ok: true,
     });
-    expect(await worker?.reportDone('succeeded', 'Done again.')).toEqual({ ok: true });
+    expect(await worker?.reportDone('succeeded', 'Late first report')).toMatchObject({ ok: false });
+    expect(
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done again.')
+    ).toEqual({ ok: true });
     const snapshot = await service.snapshot();
     expect(snapshot.dispatches.map((d) => [d.workerSessionId, d.summary])).toEqual([
       ['session_w1', 'Done.'],
@@ -180,16 +334,20 @@ describe('createOrchestrationService', () => {
       messages: [],
       reviews: [{ dispatch: { id: dispatch.id } }],
     });
-    // A follow-up is not a new dispatch. Once rejected, neither old report should wake review.
-    await worker?.reportDone('succeeded', 'Follow-up evidence.');
-    expect(service.coordinatorWork('session_coord').messages).toHaveLength(1);
+    // Duplicate reports cannot create another review message for the same attempt.
+    expect(await worker?.reportDone('succeeded', 'Follow-up evidence.')).toMatchObject({
+      ok: false,
+    });
+    expect(service.coordinatorWork('session_coord').messages).toHaveLength(0);
     const rejected = await host.rejectWork({
       dispatchId: dispatch.id,
       feedback: 'Check once more.',
     });
     expect(rejected.ok).toBe(true);
     expect(service.coordinatorWork('session_coord')).toEqual({ messages: [], reviews: [] });
-    await worker?.reportDone('succeeded', 'Second attempt.');
+    await service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Second attempt.');
     const work = service.coordinatorWork('session_coord');
     expect(work.reviews).toHaveLength(1);
     const retryId = work.reviews[0]?.dispatch.id ?? '';

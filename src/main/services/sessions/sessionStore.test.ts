@@ -176,6 +176,26 @@ describe('parseSessionsFile', () => {
 });
 
 describe('createSessionStore', () => {
+  it('only proves absence after a complete load or an explicit removal', () => {
+    expect(createSessionStore({ filePath }).exists('missing')).toBe(false);
+    writeFileSync(filePath, '{ broken');
+    const unreadable = createSessionStore({ filePath });
+    expect(unreadable.exists('missing')).toBeUndefined();
+    unreadable.put(session());
+    expect(unreadable.exists('session-1')).toBe(true);
+    unreadable.remove('session-1');
+    expect(unreadable.exists('session-1')).toBe(false);
+    unreadable.flush();
+    writeFileSync(
+      filePath,
+      JSON.stringify({ version: 1, sessions: [session(), { id: 'invalid' }] })
+    );
+    const partial = createSessionStore({ filePath });
+    expect(partial.exists('session-1')).toBe(true);
+    expect(partial.exists('invalid')).toBeUndefined();
+    expect(partial.exists('missing')).toBeUndefined();
+  });
+
   it('starts empty without a file and lists sessions of one workspace, newest first', () => {
     const store = createSessionStore({ filePath });
     expect(store.list('ws-1')).toEqual([]);

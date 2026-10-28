@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createFakeLauncher } from '../services/orchestration/testing';
+import { createAgentHost } from '../services/agentHost/agentHost';
+import { createFakeLauncher, createFakeRoles } from '../services/orchestration/testing';
+import { createSessionStore } from '../services/sessions/sessionStore';
 
 const mocks = vi.hoisted(() => ({
   userData: '',
@@ -91,18 +93,35 @@ beforeAll(async () => {
     baseRef: 'main',
     baseCommit: 'abc1234',
   });
+  const orphanRepoPath = join(mocks.userData, 'orphan-repo');
+  mkdirSync(orphanRepoPath);
   writeFileSync(
     join(mocks.userData, 'settings.json'),
     JSON.stringify({
       version: 1,
       preferences: {},
-      workspaces: [{ id: WORKSPACE_ID, name: 'demo', repoPath, defaultBranch: 'main' }],
+      workspaces: [
+        { id: WORKSPACE_ID, name: 'demo', repoPath, defaultBranch: 'main' },
+        { id: 'ws-orphan', name: 'Old tasks', repoPath: orphanRepoPath, vcs: 'none' },
+      ],
     })
   );
   mkdirSync(join(mocks.userData, 'orchestration'));
   writeFileSync(
     join(mocks.userData, 'orchestration', `${WORKSPACE_ID}.json`),
     JSON.stringify(SNAPSHOT)
+  );
+  writeFileSync(
+    join(mocks.userData, 'orchestration', 'ws-orphan.json'),
+    JSON.stringify({
+      ...SNAPSHOT,
+      runs: [{ ...SNAPSHOT.runs[0], workspaceId: 'ws-orphan' }],
+      dispatches: [{ ...SNAPSHOT.dispatches[0], workerSessionId: 'session_removed' }],
+      worktrees: SNAPSHOT.worktrees.map((worktree) => ({
+        ...(worktree as object),
+        workspaceId: 'ws-orphan',
+      })),
+    })
   );
   const { registerOrchestrationHandlers } = await import('./orchestration');
   registerOrchestrationHandlers();
@@ -250,6 +269,79 @@ describe('orchestration IPC', () => {
         sessionId: 'missing',
       })
     ).toEqual({ ok: false, error: 'Session does not belong to this workspace' });
+  });
+
+  it('Tasks refresh exposes persisted missing-worker recovery, with one durable change notification', async () => {
+    const { getOrchestrationRegistry } = await import('./orchestration');
+    const registry = getOrchestrationRegistry();
+    const fork = vi.fn(() => {
+      throw new Error('Recovery must not start a worker');
+    });
+    writeFileSync(
+      join(mocks.userData, 'sessions.json'),
+      JSON.stringify({
+        version: 1,
+        sessions: [
+          {
+            id: 'session_w1',
+            workspaceId: WORKSPACE_ID,
+            roleId: 'worker',
+            title: 'Existing worker',
+            cwd: join(mocks.userData, 'repo'),
+            status: 'idle',
+            createdAt: 1,
+            updatedAt: 1,
+            approvalMode: 'auto-edits',
+          },
+        ],
+      })
+    );
+    const sessionStore = createSessionStore({ filePath: join(mocks.userData, 'sessions.json') });
+    const host = createAgentHost({
+      fork,
+      agentDir: join(mocks.userData, 'agent'),
+      store: sessionStore,
+      roles: createFakeRoles(),
+      workspaces: { get: () => undefined },
+      models: { resolve: async () => ({ ok: false, error: 'Recovery must not resolve a model' }) },
+      broadcast: mocks.send,
+    });
+    // Earlier output queries may have opened this service while the launcher had no evidence.
+    const before = await registry.readSnapshot('ws-orphan');
+    expect(before?.tasks[0]?.status).toBe('in-progress');
+    mocks.send.mockClear();
+    registry.setLauncher(host.implementsLauncher());
+    const recovered = await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, 'ws-orphan');
+    expect(recovered).toMatchObject({
+      ok: true,
+      tasks: [{ status: 'failed' }],
+      dispatches: [
+        {
+          id: DISPATCH_ID,
+          outcome: 'failed',
+          settledAt: expect.any(Number),
+          summary: expect.stringContaining('missing from the session registry'),
+        },
+      ],
+      worktrees: before?.worktrees,
+    });
+    await registry.flushAll();
+    const statePath = join(mocks.userData, 'orchestration', 'ws-orphan.json');
+    const persisted = readFileSync(statePath, 'utf8');
+    expect(JSON.parse(persisted)).toMatchObject({
+      tasks: [{ status: 'failed' }],
+      dispatches: [{ outcome: 'failed' }],
+    });
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith(
+      IPC_CHANNELS.ORCHESTRATION_CHANGED,
+      'ws-orphan'
+    );
+    mocks.send.mockClear();
+    expect(await invoke(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, 'ws-orphan')).toEqual(recovered);
+    await registry.flushAll();
+    expect(readFileSync(statePath, 'utf8')).toBe(persisted);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(fork).not.toHaveBeenCalled();
   });
 
   it('编排状态变更后按 workspaceId 广播 orchestration:changed', async () => {

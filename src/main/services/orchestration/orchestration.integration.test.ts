@@ -402,7 +402,8 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     ).toMatchObject({ ok: true });
     expect(launcher.promptSession).toHaveBeenCalledWith(
       attempt.workerSessionId,
-      expect.stringContaining('Mention the API.')
+      expect.stringContaining('Mention the API.'),
+      { freshAttempt: true }
     );
     expect((await service.snapshot()).tasks[0]?.status).toBe('in-progress');
 
