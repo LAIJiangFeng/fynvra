@@ -1,4 +1,4 @@
-// 首页专属：顶部产品流程演示（任务协作 / 指定模型）。
+// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型）。
 // 两个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
 (() => {
   const root = document.querySelector('[data-demo]');
@@ -16,8 +16,8 @@
     en: 'Polish the homepage: smaller title, a real workflow demo. Give the docs page to another worker.',
   };
   const modelText = {
-    zh: '侧栏太挤了。用 DeepSeek 实现折叠，再让 GPT 审查这次的改动。',
-    en: 'The sidebar feels cramped. Implement collapsing with DeepSeek, then have GPT review the change.',
+    zh: '让实现侧栏折叠的 Worker 用 DeepSeek，审查改动的 Worker 用 GPT。',
+    en: 'Use DeepSeek for the worker implementing sidebar collapse, and GPT for the worker reviewing the diff.',
   };
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
@@ -69,57 +69,34 @@
   }
 
   function renderModelScene(element, phase) {
-    const selected = phase >= 2 ? 'deepseek' : 'gpt';
-    const labels = {
-      gpt: { short: 'GPT-5.2', full: 'OpenAI · GPT-5.2 · high', status: 'OpenAI · GPT-5.2' },
-      deepseek: { short: 'DeepSeek', full: 'DeepSeek · V4.1 · high', status: 'DeepSeek · V4.1' },
-    };
-    const label = labels[selected];
-
-    const pill = element.querySelector('[data-model-pill]');
-    const pillLabel = element.querySelector('[data-model-pill-label]');
-    const status = element.querySelector('[data-model-status]');
-    const head = element.querySelector('[data-model-head]');
-    const short = element.querySelector('[data-model-short]');
-    const picker = element.querySelector('[data-model-picker]');
-    if (pillLabel) pillLabel.textContent = label.full;
-    if (status) status.textContent = label.status;
-    if (head) head.textContent = label.short;
-    if (short) short.textContent = label.short;
-    pill?.classList.toggle('is-spotlight', phase === 0 || phase === 3);
-    if (picker) picker.hidden = !(phase === 1 || phase === 2);
-    for (const row of element.querySelectorAll('[data-model-row]')) {
-      row.classList.toggle('is-selected', row.dataset.modelRow === selected);
-    }
-
     const taskImpl = element.querySelector('[data-task="model-impl"]');
     const taskReview = element.querySelector('[data-task="model-review"]');
     const taskCount = element.querySelector('[data-task-count]');
     const run = element.querySelector('[data-run]');
-    if (taskImpl) taskImpl.dataset.state = phase >= 8 ? 'done' : phase >= 5 ? 'run' : 'todo';
-    if (taskReview) taskReview.dataset.state = phase >= 9 ? 'done' : phase >= 8 ? 'run' : 'todo';
+    if (taskImpl) taskImpl.dataset.state = phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
+    if (taskReview) taskReview.dataset.state = phase >= 7 ? 'done' : phase >= 6 ? 'review' : phase >= 5 ? 'run' : 'todo';
     if (run) {
-      run.dataset.done = phase >= 9 ? '2' : phase >= 8 ? '1' : '0';
-      run.dataset.total = phase >= 6 ? '2' : '1';
+      run.dataset.done = phase >= 7 ? '2' : '0';
+      run.dataset.total = phase >= 4 ? '2' : phase >= 3 ? '1' : '0';
     }
     if (taskCount) {
-      taskCount.textContent = phase >= 6 ? '2' : phase >= 5 ? '1' : '0';
-      taskCount.hidden = phase < 5;
+      taskCount.textContent = phase >= 4 ? '2' : phase >= 3 ? '1' : '0';
+      taskCount.hidden = phase < 3;
     }
 
     const sessionOrchestrator = element.querySelector('[data-session="model-orchestrator"]');
     const sessionImpl = element.querySelector('[data-session="model-impl"]');
     const sessionReview = element.querySelector('[data-session="model-review"]');
-    const orchestratorActive = phase >= 4 && phase < 9;
+    const orchestratorActive = phase >= 2 && phase < 7;
     sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
-    sessionImpl?.classList.toggle('is-idle', phase < 5 || phase >= 8);
-    sessionReview?.classList.toggle('is-idle', phase < 8 || phase >= 9);
+    sessionImpl?.classList.toggle('is-idle', phase < 3 || phase >= 5);
+    sessionReview?.classList.toggle('is-idle', phase < 5 || phase >= 6);
 
     const chatHead = element.querySelector('[data-chat-head]');
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
-    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
+    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 7 ? 'done' : 'idle';
 
-    const showTasks = phase >= 5;
+    const showTasks = phase >= 3;
     const panelFiles = element.querySelector('[data-panel-view="files"]');
     const panelTasks = element.querySelector('[data-panel-view="tasks"]');
     if (panelFiles) panelFiles.hidden = showTasks;
@@ -315,11 +292,11 @@
   });
 
   const model = createScene('model', root.querySelector('[data-scene="model"]'), {
-    durations: [2200, 2000, 1800, 0, 3000, 2400, 2600, 2600, 2800, 0],
-    typePhase: 3,
-    keepTextUntil: 3,
-    emptyUntil: 4,
-    hotPhases: [3],
+    durations: [0, 2200, 2800, 2200, 2800, 2600, 2400, 0],
+    typePhase: 0,
+    keepTextUntil: 1,
+    emptyUntil: 2,
+    hotPhases: [1],
     text: (lang) => modelText[lang],
     render: renderModelScene,
   });
