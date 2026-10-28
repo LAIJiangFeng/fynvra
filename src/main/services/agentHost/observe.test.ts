@@ -12,7 +12,7 @@ import { createSessionStore } from '../sessions/sessionStore';
 import { createAgentHost } from './agentHost';
 import { InMemoryWorker, ScriptedSession } from './testing';
 
-// 桌面通知经 observe 旁路拿到与 Renderer 相同的会话事件，旧审批不再分发。
+// Task 24：桌面通知经 observe 旁路拿到与 Renderer 相同的会话事件与审批请求
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -117,7 +117,7 @@ describe('agent host observers', () => {
     expect(env.host.get('no-such-session')).toBeUndefined();
   });
 
-  it('sees sanitized operation notices with the renderer seq and never pushes an approval', async () => {
+  it('see approval requests exactly as pushed to the approval bar', async () => {
     const asking: OpenSession = async ({ spec, approval }) => {
       if (!approval) throw new Error('no approval channel');
       const gate = createApprovalGate({ mode: spec.role.approvalMode, ...approval });
@@ -129,33 +129,15 @@ describe('agent host observers', () => {
     };
     const env = setup(asking);
     const approvals: ApprovalRequest[] = [];
-    const seen: SessionEventEnvelope[] = [];
-    env.host.observe({
-      approval: (request) => approvals.push(request),
-      event: (event) => seen.push(event),
-    });
+    env.host.observe({ approval: (request) => approvals.push(request) });
 
     const sessionId = await started(env, 'careful', 'Push it');
-    await vi.waitFor(() => expect(seen.at(-1)?.event.type).toBe('agent_settled'));
+    await vi.waitFor(() => expect(approvals).toHaveLength(1));
 
-    expect(approvals).toEqual([]);
-    expect(env.pushed<ApprovalRequest>(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([]);
-    expect(seen).toEqual(env.pushed<SessionEventEnvelope>(IPC_CHANNELS.SESSIONS_EVENT));
-    expect(seen.filter(({ event }) => event.type === 'tool_notice')).toEqual([
-      {
-        sessionId,
-        event: {
-          type: 'tool_notice',
-          toolCallId: 'call-1',
-          toolName: 'bash',
-          kind: 'command',
-          seq: 3,
-        },
-      },
-    ]);
-    expect(
-      await env.host.respondApproval({ sessionId, requestId: 'old', decision: 'deny' })
-    ).toMatchObject({ ok: false });
+    expect(approvals).toEqual(env.pushed<ApprovalRequest>(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST));
+    expect(approvals[0]).toMatchObject({ sessionId, kind: 'command', detail: 'git push' });
+    const requestId = approvals[0]?.id ?? '';
+    await env.host.respondApproval({ sessionId, requestId, decision: 'deny' });
   });
 
   it('stop after unsubscribing; a throwing observer is logged and does not block the others', async () => {

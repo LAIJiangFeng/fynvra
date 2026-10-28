@@ -5,19 +5,19 @@ import type { NotificationPreferences } from '@shared/types/settings';
 import { createCoalescer } from './coalesce';
 import {
   allowedBy,
+  approvalCandidate,
   compactionWarningCandidate,
   createTurnTracker,
   hiddenByView,
   messageCandidate,
   type NotificationCandidate,
   type NotifiedSession,
-  toolNoticeCandidate,
   type ViewState,
 } from './rules';
 
-/** 普通通知启动静默；实时工具操作通知不受限，不重放历史审批。 */
+/** 普通通知启动静默；实时审批与 Magic Context 回退告警不受限。 */
 export const STARTUP_QUIET_MS = 5_000;
-/** 同一会话同类通知合并窗口；只影响提示频率，不影响工具执行。 */
+/** 普通通知同一会话的合并窗口；实时审批不进入合并窗口。 */
 export const COALESCE_MS = 2_000;
 
 /** 交给系统弹出的一条通知 */
@@ -45,7 +45,7 @@ export interface NotifierDeps {
 export interface Notifier {
   /** agent host 推给 Renderer 的会话事件 */
   sessionEvent(envelope: SessionEventEnvelope): void;
-  /** @deprecated 旧审批请求忽略，不产生通知或执行许可。 */
+  /** 审批门的实时请求；不接收历史文本回放。 */
   approvalRequest(request: ApprovalRequest): void;
   /** 收件箱新投递的消息 */
   message(message: Message): void;
@@ -59,13 +59,15 @@ const TRACKED_EVENTS = new Set(['message_end', 'error', 'agent_settled']);
 /**
  * 普通事件 → 桌面通知：启动静默期内丢掉，按开关筛一遍进合并窗口
  * （同一会话 {@link COALESCE_MS} 内只留最后一条）；窗口结束时按当时的设置与窗口状态决定弹不弹。
- * 实时工具操作与 Magic Context 回退告警不受启动静默限制，按会话 seq 去重并独立合并，不等待点击或任何答复。
+ * 实时审批不等启动静默或合并窗口，按 request id 去重；Magic Context 回退告警独立按 seq 去重与合并。
  */
 export function createNotifier(deps: NotifierDeps): Notifier {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((message: string) => console.warn(`[notifications] ${message}`));
   const quietUntil = now() + STARTUP_QUIET_MS;
   const turns = createTurnTracker();
+  // 只存 id 与到期时间；每次审批到达清掉过期记录。
+  const notifiedApprovals = new Map<string, number>();
   // Main 提供跨 generation 单调递增的会话 seq，只保留有界的最近记录。
   const noticedSeq = new Map<string, number>();
   const coalescer = createCoalescer<NotificationCandidate>({ windowMs: COALESCE_MS, emit: show });
@@ -102,13 +104,6 @@ export function createNotifier(deps: NotifierDeps): Notifier {
 
   return {
     sessionEvent({ sessionId, event }) {
-      if (event.type === 'tool_notice') {
-        if (!claimSeq(sessionId, event.seq)) return;
-        const session = deps.session(sessionId);
-        if (!session || !allowedBy(deps.preferences(), 'tool-notice')) return;
-        coalescer.push(`tool:${sessionId}`, toolNoticeCandidate(session, event));
-        return;
-      }
       if (event.type === 'warning' && event.source === 'magic-context') {
         // 独立于工具执行通知；按会话 seq 去重并与自身窗口合并。
         if (!claimSeq(sessionId, event.seq)) return;
@@ -121,14 +116,29 @@ export function createNotifier(deps: NotifierDeps): Notifier {
       const session = deps.session(sessionId);
       if (session) offer(turns.push(session, event));
     },
-    approvalRequest() {
-      // 历史审批不是新的操作通知，不重新展示或等待用户。
+    approvalRequest(request) {
+      const time = now();
+      for (const [id, expiresAt] of notifiedApprovals) {
+        if (expiresAt <= time) notifiedApprovals.delete(id);
+      }
+      if (
+        !Number.isFinite(request.expiresAt) ||
+        request.expiresAt <= time ||
+        notifiedApprovals.has(request.id)
+      ) {
+        return;
+      }
+      const session = deps.session(request.sessionId);
+      if (!session || !allowedBy(deps.preferences(), 'approval')) return;
+      notifiedApprovals.set(request.id, request.expiresAt);
+      show(approvalCandidate(session, request));
     },
     message(message) {
       offer(messageCandidate(message, deps.session));
     },
     clear() {
       coalescer.clear();
+      notifiedApprovals.clear();
       noticedSeq.clear();
     },
   };

@@ -3,7 +3,7 @@
  * @packageDocumentation
  */
 
-/** 兼容旧字段值的操作通知范围：supervised 全部操作，auto-edits 命令与 MCP，full 仅重点动作；均无需人工放行。 */
+/** 审批档位：supervised 审批命令、写入/编辑与 MCP；auto-edits 自动放行编辑；full 放行普通操作。保护命令任何档位都需确认。 */
 export type ApprovalMode = 'supervised' | 'auto-edits' | 'full';
 
 /** 会话可用工具集：`all` pi 默认工具 + worker 工具；`readonly` 只读工具；`orchestrator` 只读 + 编排工具。 */
@@ -15,7 +15,7 @@ export type ToolPolicy = 'all' | 'readonly' | 'orchestrator';
  */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-/** 角色 = 系统提示词 + 技能 + MCP + 模型 / 思考档位 + 工具策略 + 通知范围，每个 agent 会话挂一个。 */
+/** 角色 = 系统提示词 + 技能 + MCP + 模型 / 思考档位 + 工具策略 + 审批档位，每个 agent 会话挂一个。 */
 export interface Role {
   /** slug；内置：`'orchestrator'` | `'worker'`。 */
   id: string;
@@ -37,7 +37,7 @@ export interface Role {
   mcpServerIds: string[];
   /** 工具策略。 */
   tools: ToolPolicy;
-  /** 操作通知范围，保留旧字段名。 */
+  /** 审批档位。 */
   approvalMode: ApprovalMode;
 }
 
@@ -184,7 +184,7 @@ export interface Message {
 /** Magic Context 交给宿主的回退原因；只用于非阻塞提示，不把会话标记为失败。 */
 export type MagicContextFallbackReason = 'startup' | 'runtime' | 'context' | 'budget';
 
-/** 单向工具操作通知；不含原始参数、命令或路径，不代表工具已成功执行。 */
+/** 历史兼容的单向工具操作通知；不含原始参数、命令或路径，不代表执行授权或成功。 */
 export interface ToolOperationNotice {
   toolCallId: string;
   /** 固定内置工具名；MCP 统一为 mcp，避免带出服务器配置。 */
@@ -226,7 +226,7 @@ export type FynvraSessionEventBody =
   | { type: 'agent_settled'; aborted: boolean }
   | ({ type: 'tool_notice' } & ToolOperationNotice)
   | {
-      /** 旧版本兼容：消费端忽略，不能重建人工审批或重放工具。 */
+      /** pi 没有审批事件：由宿主审批门（tool_call 拦截）经 agent-runtime 的 emit() 注入。 */
       type: 'approval_request';
       requestId: string;
       toolCallId: string;
