@@ -125,11 +125,13 @@ export function createMagicContextCompaction(
       }
 
       let bootStatus: string | undefined;
+      let bootReportInstalled = false;
       // The vendored plugin reports its storage boot result through this symbol.
       try {
         (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL] = (status: unknown) => {
           if (typeof status === 'string') bootStatus = status;
         };
+        bootReportInstalled = true;
       } catch {}
       try {
         await module.default(pi);
@@ -143,9 +145,9 @@ export function createMagicContextCompaction(
           delete (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL];
         } catch {}
       }
-      if (bootStatus === undefined) {
+      if (bootReportInstalled && bootStatus === undefined) {
         warnings.push('Magic Context did not report startup; pi native compaction stays active.');
-      } else if (bootStatus !== 'ready') {
+      } else if (bootStatus !== undefined && bootStatus !== 'ready') {
         warnings.push(
           `Magic Context storage did not initialize (${bootStatus}); pi native compaction stays active.`
         );
