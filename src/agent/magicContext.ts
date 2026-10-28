@@ -216,10 +216,21 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
   try {
     const config = JSON.parse(readFileSync(configFile, 'utf8')) as {
       fail_closed_blocking?: unknown;
+      compaction?: { enabled?: unknown };
+      dreamer?: { disable?: unknown };
+      sidekick?: { disable?: unknown };
+      memory?: { enabled?: unknown };
       embedding?: { provider?: unknown };
     };
-    if (config.fail_closed_blocking !== false || config.embedding?.provider !== 'off') {
-      throw new Error('host config does not disable fail-closed blocking/embeddings');
+    if (
+      config.fail_closed_blocking !== false ||
+      config.compaction?.enabled !== true ||
+      config.dreamer?.disable !== true ||
+      config.sidekick?.disable !== true ||
+      config.memory?.enabled !== false ||
+      config.embedding?.provider !== 'off'
+    ) {
+      throw new Error('host config does not match the compression-only policy');
     }
   } catch (error) {
     return {
