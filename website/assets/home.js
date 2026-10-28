@@ -1,150 +1,45 @@
-// 首页专属：顶部产品流程演示。
-// 只操作 data-* 状态；语言跟随 <html data-locale>，不向外暴露内部接口。
+// 首页专属：顶部产品流程演示（任务协作 / 指定模型）。
+// 两个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
 (() => {
   const root = document.querySelector('[data-demo]');
   if (!root) return;
-
   const app = root.querySelector('[data-demo-app]');
-  const timeline = root.querySelector('[data-timeline]');
-  const empty = root.querySelector('[data-empty]');
-  const typed = root.querySelector('[data-typed]');
-  const input = root.querySelector('.fd-composer-input');
-  const send = root.querySelector('[data-send]');
-  const chatHead = root.querySelector('[data-chat-head]');
-  const run = root.querySelector('[data-run]');
-  const taskHome = root.querySelector('[data-task="home"]');
-  const taskDocs = root.querySelector('[data-task="docs"]');
-  const taskCount = root.querySelector('[data-task-count]');
-  const panelFiles = root.querySelector('[data-panel-view="files"]');
-  const panelTasks = root.querySelector('[data-panel-view="tasks"]');
-  const panelTabs = [...root.querySelectorAll('[data-panel-tab]')];
-  const sessionHome = root.querySelector('[data-session="home"]');
-  const sessionDocs = root.querySelector('[data-session="docs"]');
-  const sessionOrchestrator = root.querySelector('[data-session="orchestrator"]');
-  const appear = [...root.querySelectorAll('[data-appear]')];
-  const counters = [...root.querySelectorAll('[data-demo-counter]')];
-  const chapterButtons = [...root.querySelectorAll('[data-chapter]')];
-  const toggleButton = root.querySelector('[data-demo-toggle]');
-  const replayButton = root.querySelector('[data-demo-replay]');
-  const prevButton = root.querySelector('[data-demo-prev]');
-  const nextButton = root.querySelector('[data-demo-next]');
-
-  if (!app || !timeline) return;
+  if (!app) return;
 
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const hoverCapable = window.matchMedia('(hover: hover)');
   const TYPE_INTERVAL = 27;
-  const requestText = {
+  const END_HOLD = 3000;
+
+  const collabText = {
     zh: '优化官网首页：标题收紧一点，把顶部演示改成真实操作流程；文档页交给另一个 Worker。',
     en: 'Polish the homepage: smaller title, a real workflow demo. Give the docs page to another worker.',
   };
-
-  // 每个相位只增加一层信息；同一套界面连续演完，不切换样板。
-  const phases = [
-    { delay: 0 }, // 0 输入（等待时长按文本长度计算）
-    { delay: 2200 }, // 1 可发送
-    { delay: 2200 }, // 2 用户消息 + 主 Agent 回复
-    { delay: 2300 }, // 3 派发首页
-    { delay: 2200 }, // 4 派发文档
-    { delay: 2600 }, // 5 两个 Worker 执行
-    { delay: 2200 }, // 6 首页待验收
-    { delay: 2500 }, // 7 首页检查并合并
-    { delay: 2200 }, // 8 文档待验收
-    { delay: 0 }, // 9 全部完成
-  ];
-  const LAST = phases.length - 1;
-  const chapterOf = [0, 0, 0, 1, 1, 2, 3, 3, 3, 4];
-
-  let phase = 0;
-  let paused = false;
-  let inView = true;
-  let autoTimer = 0;
-  let typeTimer = 0;
-  let typedIndex = 0;
+  const modelText = {
+    zh: '侧栏太挤了。用 DeepSeek 实现折叠，再让 GPT 审查这次的改动。',
+    en: 'The sidebar feels cramped. Implement collapsing with DeepSeek, then have GPT review the change.',
+  };
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
-  const fullText = () => requestText[locale()];
-  const shouldRun = () => !paused && !motion.matches && inView && !document.hidden;
+  const typingDelay = (text) => Math.max(2200, text.length * TYPE_INTERVAL + 700);
 
-  // 英文请求更长：等它完整打完，再留一小段阅读时间进入发送态。
-  const typingDelay = () => Math.max(2200, fullText().length * TYPE_INTERVAL + 700);
+  let inView = true;
+  let appHovered = false;
+  let activeScene = null;
 
-  function clearAuto() {
-    if (!autoTimer) return;
-    window.clearTimeout(autoTimer);
-    autoTimer = 0;
-  }
+  function renderCollabScene(element, phase) {
+    const taskHome = element.querySelector('[data-task="home"]');
+    const taskDocs = element.querySelector('[data-task="docs"]');
+    const taskCount = element.querySelector('[data-task-count]');
+    const run = element.querySelector('[data-run]');
+    const panelFiles = element.querySelector('[data-panel-view="files"]');
+    const panelTasks = element.querySelector('[data-panel-view="tasks"]');
+    const panelTabs = [...element.querySelectorAll('[data-panel-tab]')];
+    const sessionHome = element.querySelector('[data-session="home"]');
+    const sessionDocs = element.querySelector('[data-session="docs"]');
+    const sessionOrchestrator = element.querySelector('[data-session="orchestrator"]');
+    const chatHead = element.querySelector('[data-chat-head]');
 
-  function clearTypewriter() {
-    if (!typeTimer) return;
-    window.clearInterval(typeTimer);
-    typeTimer = 0;
-  }
-
-  function setTyped(text) {
-    if (!typed) return;
-    typed.textContent = text;
-    input?.classList.toggle('has-text', text.length > 0);
-  }
-
-  function tickTypewriter() {
-    if (!shouldRun()) return;
-    const full = fullText();
-    if (typedIndex >= full.length) {
-      setTyped(full);
-      clearTypewriter();
-      return;
-    }
-    typedIndex += 1;
-    setTyped(full.slice(0, typedIndex));
-    if (typedIndex >= full.length) clearTypewriter();
-  }
-
-  function startTypewriter(reset) {
-    if (reset) typedIndex = 0;
-    clearTypewriter();
-    if (motion.matches) {
-      typedIndex = fullText().length;
-      setTyped(fullText());
-      return;
-    }
-    if (reset) setTyped('');
-    // 手动分步时直接给出完整输入，便于停下来阅读。
-    if (reset && paused) {
-      typedIndex = fullText().length;
-      setTyped(fullText());
-      return;
-    }
-    if (!shouldRun()) return;
-    tickTypewriter();
-    if (typedIndex >= fullText().length) return;
-    typeTimer = window.setInterval(tickTypewriter, TYPE_INTERVAL);
-  }
-
-  function scrollTimeline() {
-    window.requestAnimationFrame(() => {
-      timeline.scrollTop = timeline.scrollHeight;
-    });
-  }
-
-  function syncTimerState() {
-    root.dataset.active = String(shouldRun());
-    clearAuto();
-    if (!shouldRun()) {
-      clearTypewriter();
-      return;
-    }
-    if (phase === 0 && !typeTimer && typedIndex < fullText().length) {
-      startTypewriter(false);
-    }
-    if (phase >= LAST) return;
-    const delay = phase === 0 ? typingDelay() : phases[phase].delay;
-    autoTimer = window.setTimeout(() => {
-      autoTimer = 0;
-      applyPhase(phase + 1);
-    }, delay);
-  }
-
-  function renderTasks() {
     const homeState = phase >= 7 ? 'done' : phase === 6 ? 'review' : phase >= 3 ? 'run' : 'todo';
     const docsState = phase >= 9 ? 'done' : phase === 8 ? 'review' : phase >= 4 ? 'run' : 'todo';
     if (taskHome) taskHome.dataset.state = homeState;
@@ -163,110 +58,295 @@
     const orchestratorActive = phase >= 2 && phase < 9;
     sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
-    if (chatHead) {
-      chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
-    }
-  }
+    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
 
-  function renderPanel() {
     const showTasks = phase >= 3;
     if (panelFiles) panelFiles.hidden = showTasks;
     if (panelTasks) panelTasks.hidden = !showTasks;
     for (const tab of panelTabs) {
-      const active = (tab.dataset.panelTab === 'tasks') === showTasks;
-      tab.classList.toggle('is-active', active);
+      tab.classList.toggle('is-active', (tab.dataset.panelTab === 'tasks') === showTasks);
     }
   }
 
-  function renderControls() {
-    root.dataset.paused = String(paused);
-    root.dataset.atEnd = String(phase === LAST);
-    if (toggleButton) {
-      toggleButton.setAttribute('aria-pressed', String(paused));
-      toggleButton.setAttribute('aria-disabled', String(phase === LAST || motion.matches));
-      toggleButton.title = motion.matches
-        ? '系统已启用减少动态效果 / Reduced motion is on'
-        : '';
+  function renderModelScene(element, phase) {
+    const selected = phase >= 2 ? 'deepseek' : 'gpt';
+    const labels = {
+      gpt: { short: 'GPT-5.2', full: 'OpenAI · GPT-5.2 · high', status: 'OpenAI · GPT-5.2' },
+      deepseek: { short: 'DeepSeek', full: 'DeepSeek · V4.1 · high', status: 'DeepSeek · V4.1' },
+    };
+    const label = labels[selected];
+
+    const pill = element.querySelector('[data-model-pill]');
+    const pillLabel = element.querySelector('[data-model-pill-label]');
+    const status = element.querySelector('[data-model-status]');
+    const head = element.querySelector('[data-model-head]');
+    const short = element.querySelector('[data-model-short]');
+    const picker = element.querySelector('[data-model-picker]');
+    if (pillLabel) pillLabel.textContent = label.full;
+    if (status) status.textContent = label.status;
+    if (head) head.textContent = label.short;
+    if (short) short.textContent = label.short;
+    pill?.classList.toggle('is-spotlight', phase === 0 || phase === 3);
+    if (picker) picker.hidden = !(phase === 1 || phase === 2);
+    for (const row of element.querySelectorAll('[data-model-row]')) {
+      row.classList.toggle('is-selected', row.dataset.modelRow === selected);
     }
-    if (prevButton) prevButton.setAttribute('aria-disabled', String(phase === 0));
-    if (nextButton) nextButton.setAttribute('aria-disabled', String(phase === LAST));
-    for (const [index, button] of chapterButtons.entries()) {
-      if (index === chapterOf[phase]) button.setAttribute('aria-current', 'step');
-      else button.removeAttribute('aria-current');
+
+    const taskImpl = element.querySelector('[data-task="model-impl"]');
+    const taskReview = element.querySelector('[data-task="model-review"]');
+    const taskCount = element.querySelector('[data-task-count]');
+    const run = element.querySelector('[data-run]');
+    if (taskImpl) taskImpl.dataset.state = phase >= 8 ? 'done' : phase >= 5 ? 'run' : 'todo';
+    if (taskReview) taskReview.dataset.state = phase >= 9 ? 'done' : phase >= 8 ? 'run' : 'todo';
+    if (run) {
+      run.dataset.done = phase >= 9 ? '2' : phase >= 8 ? '1' : '0';
+      run.dataset.total = phase >= 6 ? '2' : '1';
     }
-    for (const counter of counters) counter.textContent = String(phase + 1);
+    if (taskCount) {
+      taskCount.textContent = phase >= 6 ? '2' : phase >= 5 ? '1' : '0';
+      taskCount.hidden = phase < 5;
+    }
+
+    const sessionOrchestrator = element.querySelector('[data-session="model-orchestrator"]');
+    const sessionImpl = element.querySelector('[data-session="model-impl"]');
+    const sessionReview = element.querySelector('[data-session="model-review"]');
+    const orchestratorActive = phase >= 4 && phase < 9;
+    sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
+    sessionImpl?.classList.toggle('is-idle', phase < 5 || phase >= 8);
+    sessionReview?.classList.toggle('is-idle', phase < 8 || phase >= 9);
+
+    const chatHead = element.querySelector('[data-chat-head]');
+    chatHead?.classList.toggle('is-idle', !orchestratorActive);
+    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
+
+    const showTasks = phase >= 5;
+    const panelFiles = element.querySelector('[data-panel-view="files"]');
+    const panelTasks = element.querySelector('[data-panel-view="tasks"]');
+    if (panelFiles) panelFiles.hidden = showTasks;
+    if (panelTasks) panelTasks.hidden = !showTasks;
+    for (const tab of element.querySelectorAll('[data-panel-tab]')) {
+      tab.classList.toggle('is-active', (tab.dataset.panelTab === 'tasks') === showTasks);
+    }
   }
 
-  function applyPhase(next) {
-    phase = Math.min(LAST, Math.max(0, next));
-    root.dataset.phase = String(phase);
+  function createScene(name, element, config) {
+    const appear = [...element.querySelectorAll('[data-appear]')];
+    const timeline = element.querySelector('[data-timeline]');
+    const empty = element.querySelector('[data-empty]');
+    const typed = element.querySelector('[data-typed]');
+    const input = element.querySelector('.fd-composer-input');
+    const send = element.querySelector('[data-send]');
+    const LAST = config.durations.length - 1;
+    const state = { phase: 0, typedIndex: 0, autoTimer: 0, typeTimer: 0 };
 
-    for (const element of appear) {
-      element.classList.toggle('is-shown', Number(element.dataset.appear) <= phase);
+    function shouldRun() {
+      return activeScene === api && inView && !document.hidden && !motion.matches && !appHovered;
     }
-    if (empty) empty.hidden = phase >= 2;
 
-    if (phase === 0) {
-      startTypewriter(true);
-    } else if (phase === 1) {
+    function clearAuto() {
+      if (!state.autoTimer) return;
+      window.clearTimeout(state.autoTimer);
+      state.autoTimer = 0;
+    }
+
+    function clearTypewriter() {
+      if (!state.typeTimer) return;
+      window.clearInterval(state.typeTimer);
+      state.typeTimer = 0;
+    }
+
+    function setTyped(text) {
+      if (!typed) return;
+      typed.textContent = text;
+      input?.classList.toggle('has-text', text.length > 0);
+    }
+
+    function tickTypewriter() {
+      if (!shouldRun()) return;
+      const full = config.text(locale());
+      if (state.typedIndex >= full.length) {
+        setTyped(full);
+        clearTypewriter();
+        return;
+      }
+      state.typedIndex += 1;
+      setTyped(full.slice(0, state.typedIndex));
+      if (state.typedIndex >= full.length) clearTypewriter();
+    }
+
+    function startTypewriter(reset) {
+      const full = config.text(locale());
       clearTypewriter();
-      typedIndex = fullText().length;
-      setTyped(fullText());
-    } else {
-      clearTypewriter();
-      typedIndex = 0;
-      setTyped('');
+      if (reset) {
+        state.typedIndex = 0;
+        setTyped('');
+      }
+      if (motion.matches) {
+        state.typedIndex = full.length;
+        setTyped(full);
+        return;
+      }
+      if (!shouldRun()) return;
+      if (state.typedIndex >= full.length) {
+        setTyped(full);
+        return;
+      }
+      tickTypewriter();
+      if (state.typedIndex < full.length) {
+        state.typeTimer = window.setInterval(tickTypewriter, TYPE_INTERVAL);
+      }
     }
 
-    send?.classList.toggle('is-hot', phase === 1);
+    function scrollTimeline(toTop) {
+      if (!timeline) return;
+      window.requestAnimationFrame(() => {
+        timeline.scrollTop = toTop ? 0 : timeline.scrollHeight;
+      });
+    }
 
-    renderTasks();
-    renderPanel();
-    renderControls();
-    scrollTimeline();
-    syncTimerState();
+    function sync() {
+      const run = shouldRun();
+      element.dataset.active = String(run);
+      root.dataset.active = String(run);
+      clearAuto();
+      if (!run) {
+        clearTypewriter();
+        return;
+      }
+
+      const full = config.text(locale());
+      if (state.phase === config.typePhase && state.typedIndex < full.length && !state.typeTimer) {
+        startTypewriter(false);
+      }
+
+      const delay =
+        state.phase === config.typePhase
+          ? typingDelay(full)
+          : state.phase === LAST
+            ? END_HOLD
+            : config.durations[state.phase];
+      state.autoTimer = window.setTimeout(() => {
+        state.autoTimer = 0;
+        applyPhase(state.phase === LAST ? 0 : state.phase + 1);
+      }, delay);
+    }
+
+    function applyPhase(next) {
+      clearAuto();
+      clearTypewriter();
+      state.phase = Math.max(0, Math.min(LAST, next));
+      element.dataset.phase = String(state.phase);
+
+      for (const node of appear) {
+        node.classList.toggle('is-shown', Number(node.dataset.appear) <= state.phase);
+      }
+      if (empty) empty.hidden = state.phase >= config.emptyUntil;
+
+      const full = config.text(locale());
+      if (state.phase === config.typePhase) {
+        startTypewriter(true);
+      } else if (state.phase > config.typePhase && state.phase <= config.keepTextUntil) {
+        state.typedIndex = full.length;
+        setTyped(full);
+      } else {
+        state.typedIndex = 0;
+        setTyped('');
+      }
+
+      send?.classList.toggle('is-hot', config.hotPhases.includes(state.phase));
+      config.render(element, state.phase);
+      scrollTimeline(state.phase === 0);
+      sync();
+    }
+
+    function activate() {
+      element.hidden = false;
+      applyPhase(motion.matches ? LAST : 0);
+    }
+
+    function deactivate() {
+      clearAuto();
+      clearTypewriter();
+      element.dataset.active = 'false';
+      root.dataset.active = 'false';
+      element.hidden = true;
+    }
+
+    function localeChanged() {
+      const full = config.text(locale());
+      if (state.phase === config.typePhase) {
+        if (shouldRun()) {
+          startTypewriter(true);
+        } else {
+          state.typedIndex = full.length;
+          setTyped(full);
+        }
+      } else if (state.phase > config.typePhase && state.phase <= config.keepTextUntil) {
+        state.typedIndex = full.length;
+        setTyped(full);
+      }
+      config.render(element, state.phase);
+      scrollTimeline(state.phase === 0);
+      sync();
+    }
+
+    function handleMotion() {
+      if (motion.matches) {
+        applyPhase(LAST);
+      } else if (state.phase === LAST) {
+        applyPhase(0);
+      } else {
+        sync();
+      }
+    }
+
+    const api = { name, activate, deactivate, localeChanged, handleMotion, sync };
+    return api;
   }
 
-  function pauseForManual() {
-    paused = true;
+  const collab = createScene('collab', root.querySelector('[data-scene="collab"]'), {
+    durations: [0, 2200, 2200, 2300, 2200, 2600, 2200, 2500, 2200, 0],
+    typePhase: 0,
+    keepTextUntil: 1,
+    emptyUntil: 2,
+    hotPhases: [1],
+    text: (lang) => collabText[lang],
+    render: renderCollabScene,
+  });
+
+  const model = createScene('model', root.querySelector('[data-scene="model"]'), {
+    durations: [2200, 2000, 1800, 0, 3000, 2400, 2600, 2600, 2800, 0],
+    typePhase: 3,
+    keepTextUntil: 3,
+    emptyUntil: 4,
+    hotPhases: [3],
+    text: (lang) => modelText[lang],
+    render: renderModelScene,
+  });
+
+  const scenes = { collab, model };
+  const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
+
+  function selectScene(name) {
+    const next = scenes[name];
+    if (!next || next === activeScene) return;
+    activeScene?.deactivate();
+    activeScene = next;
+    for (const button of sceneButtons) {
+      button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === name));
+    }
+    next.activate();
   }
 
-  toggleButton?.addEventListener('click', () => {
-    if (phase === LAST || motion.matches) return;
-    paused = !paused;
-    renderControls();
-    syncTimerState();
-  });
-
-  replayButton?.addEventListener('click', () => {
-    paused = false;
-    applyPhase(0);
-  });
-
-  prevButton?.addEventListener('click', () => {
-    if (phase === 0) return;
-    pauseForManual();
-    applyPhase(phase - 1);
-  });
-
-  nextButton?.addEventListener('click', () => {
-    if (phase === LAST) return;
-    pauseForManual();
-    applyPhase(phase + 1);
-  });
-
-  for (const button of chapterButtons) {
-    button.addEventListener('click', () => {
-      pauseForManual();
-      applyPhase(Number(button.dataset.chapter));
-    });
+  for (const button of sceneButtons) {
+    button.addEventListener('click', () => selectScene(button.dataset.sceneBtn));
   }
 
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver(
       (entries) => {
         inView = entries.some((entry) => entry.isIntersecting);
-        syncTimerState();
+        activeScene?.sync();
       },
       { threshold: 0.08 }
     );
@@ -274,38 +354,36 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) scrollTimeline();
-    syncTimerState();
+    if (!document.hidden && hoverCapable.matches) appHovered = app.matches(':hover');
+    activeScene?.sync();
   });
 
-  const handleMotion = () => {
-    if (motion.matches) {
-      paused = false;
-      applyPhase(LAST);
-    } else {
-      renderControls();
-      syncTimerState();
-    }
-  };
-  if (typeof motion.addEventListener === 'function') motion.addEventListener('change', handleMotion);
-  else motion.addListener(handleMotion);
+  app.addEventListener('pointerenter', (event) => {
+    if (event.pointerType !== 'mouse' || !hoverCapable.matches) return;
+    appHovered = true;
+    activeScene?.sync();
+  });
 
-  // 语言切换不重启动画，只重打当前语言的输入文本，并重排这一段的等待时长。
-  new MutationObserver(() => {
-    if (phase === 0) {
-      if (paused) {
-        typedIndex = fullText().length;
-        setTyped(fullText());
-      } else {
-        startTypewriter(true);
-      }
-      syncTimerState();
-    } else if (phase === 1) {
-      setTyped(fullText());
-    }
-    scrollTimeline();
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-locale'] });
+  app.addEventListener('pointerleave', (event) => {
+    if (event.pointerType !== 'mouse') return;
+    appHovered = false;
+    activeScene?.sync();
+  });
+
+  const handleMotionChange = () => activeScene?.handleMotion();
+  if (typeof motion.addEventListener === 'function') motion.addEventListener('change', handleMotionChange);
+  else motion.addListener(handleMotionChange);
+
+  // 语言切换不重启动画：输入阶段重打当前语言，其余阶段沿用已显示的流程状态。
+  new MutationObserver(() => activeScene?.localeChanged()).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-locale'],
+  });
 
   root.dataset.enhanced = 'true';
-  applyPhase(motion.matches ? LAST : 0);
+  activeScene = scenes.collab;
+  for (const button of sceneButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === 'collab'));
+  }
+  activeScene.activate();
 })();

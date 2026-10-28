@@ -142,12 +142,23 @@
             </div>
           </div>
 
-          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo data-phase="0" aria-labelledby="fd-caption">
+          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo aria-labelledby="fd-caption">
             <div class="showcase-caption">
               <span class="showcase-tag"
                 ><i aria-hidden="true"></i><span data-l="zh">产品流程演示</span><span data-l="en">Product walkthrough</span></span
               >
               <span><span data-l="zh">界面示意 · 非截图 · 非联网操作</span><span data-l="en">Interface illustration, not a screenshot or network session</span></span>
+            </div>
+
+            <div class="fd-scene-switch" role="group" aria-label="演示场景 / Demo scene">
+              <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
+                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+                <span data-l="zh">任务协作</span><span data-l="en">Task collaboration</span>
+              </button>
+              <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
+                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
+                <span data-l="zh">指定模型</span><span data-l="en">Choose a model</span>
+              </button>
             </div>
 
             <div class="fd-app" data-demo-app>
@@ -170,6 +181,7 @@
                 </div>
               </div>
 
+              <div class="fd-scene" id="fd-scene-collab" data-scene="collab" data-phase="0">
               <div class="fd-body">
                 <aside class="fd-side">
                   <div class="fd-side-head">
@@ -444,62 +456,308 @@
                   </div>
                 </aside>
               </div>
-            </div>
+              </div>
 
-            <div class="fd-controls" data-demo-controls>
-              <div class="fd-control-main">
-                <button class="fd-ctl" type="button" data-demo-toggle aria-pressed="false">
-                  <span class="fd-pause-label"
-                    ><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14" /></svg
-                    ><span data-l="zh">暂停</span><span data-l="en">Pause</span></span
-                  >
-                  <span class="fd-resume-label"
-                    ><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z" /></svg
-                    ><span data-l="zh">继续</span><span data-l="en">Resume</span></span
-                  >
-                  <span class="fd-end-label"
-                    ><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg
-                    ><span data-l="zh">已结束</span><span data-l="en">Finished</span></span
-                  >
-                </button>
-                <button class="fd-ctl" type="button" data-demo-replay>
-                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2 5.3M4 4v7h7" /></svg>
-                  <span data-l="zh">重播</span><span data-l="en">Replay</span>
-                </button>
-                <span class="fd-control-divider" aria-hidden="true"></span>
-                <button class="fd-ctl fd-icon-ctl" type="button" data-demo-prev aria-label="上一步 / Previous step">
-                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
-                </button>
-                <button class="fd-ctl fd-icon-ctl" type="button" data-demo-next aria-label="下一步 / Next step">
-                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-                </button>
+              <div class="fd-scene" id="fd-scene-model" data-scene="model" data-phase="0" hidden>
+                <div class="fd-body">
+                  <aside class="fd-side">
+                    <div class="fd-side-head">
+                      <span data-l="zh">工作区</span><span data-l="en">Workspaces</span>
+                      <span class="fd-side-actions" aria-hidden="true">
+                        <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-workspace">
+                      <div class="fd-ws-row">
+                        <svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                        <span>fynvra</span><span class="fd-ws-branch">main</span>
+                      </div>
+                      <p class="fd-ws-path">D:\project\fynvra</p>
+
+                      <div class="fd-sessions-head">
+                        <span data-l="zh">会话</span><span data-l="en">Sessions</span>
+                        <span class="fd-side-actions" aria-hidden="true">
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg></span>
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-active" data-session="model-orchestrator">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">侧栏交互优化</span><span data-l="en">Sidebar polish</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                            <span class="fd-model-tag" data-model-short>GPT-5.2</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="model-impl" data-appear="5">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">实现侧栏折叠</span><span data-l="en">Collapse sidebar</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role">Worker</span>
+                            <span class="fd-model-tag">DeepSeek</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="model-review" data-appear="6">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">审查侧栏改动</span><span data-l="en">Review sidebar diff</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role">Reviewer</span>
+                            <span class="fd-model-tag">GPT-5.2</span>
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div class="fd-main">
+                    <div class="fd-editor-tabs" aria-hidden="true">
+                      <span class="fd-editor-tab is-active"><span data-l="zh">对话</span><span data-l="en">Chat</span></span>
+                      <span class="fd-editor-tab">Sidebar.tsx</span>
+                      <span class="fd-editor-tab">sidebar.css</span>
+                      <span class="fd-editor-add"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
+                    </div>
+
+                    <div class="fd-chat-head is-idle" data-chat-head data-state="idle">
+                      <span class="fd-dot is-run"></span>
+                      <span class="fd-chat-title"><span data-l="zh">侧栏交互优化</span><span data-l="en">Sidebar polish</span></span>
+                      <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                      <span class="fd-chip fd-chat-model"><svg class="i" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span data-model-head>GPT-5.2</span></span>
+                      <span class="fd-chat-status">
+                        <span class="fd-st-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span>
+                        <span class="fd-st-idle"><span data-l="zh">空闲</span><span data-l="en">Idle</span></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-timeline" data-timeline>
+                      <div class="fd-stream">
+                        <div class="fd-empty" data-empty hidden>
+                          <svg class="i" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg>
+                          <span data-l="zh">先选当前会话的模型；也可以在需求里为任务单独指定模型。</span>
+                          <span data-l="en">Pick a model for this session, or name per-task models in the request.</span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="4">
+                          <span data-l="zh">侧栏太挤了。用 DeepSeek 实现折叠，再让 GPT 审查这次的改动。</span>
+                          <span data-l="en">The sidebar feels cramped. Implement collapsing with DeepSeek, then have GPT review the change.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="4">
+                          <span class="fd-msg-model">DeepSeek V4.1</span>
+                          <p data-l="zh">当前会话已切到 DeepSeek。实现和审查的模型我在任务里单独指定，不会因为切会话模型改掉其他角色。</p>
+                          <p data-l="en">This session now runs on DeepSeek. I'll name the implementation and review models per task; switching this session does not change other roles.</p>
+                        </div>
+
+                        <div class="fd-tool" data-appear="5">
+                          <svg class="i fd-tool-icon" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                          <span class="fd-tool-label"><span data-l="zh">派发任务</span><span data-l="en">Dispatch task</span></span>
+                          <span class="fd-tool-title"><span data-l="zh">实现侧栏折叠</span><span data-l="en">Implement sidebar collapse</span></span>
+                          <span class="fd-role">Worker</span>
+                          <span class="fd-model-tag">DeepSeek V4.1</span>
+                          <code class="fd-tool-branch">fynvra/sidebar-collapse</code>
+                          <span class="fd-tool-meta"><span>0.3s</span><svg class="i is-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+                        </div>
+
+                        <div class="fd-tool" data-appear="6">
+                          <svg class="i fd-tool-icon" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                          <span class="fd-tool-label"><span data-l="zh">派发任务</span><span data-l="en">Dispatch task</span></span>
+                          <span class="fd-tool-title"><span data-l="zh">审查侧栏改动</span><span data-l="en">Review sidebar diff</span></span>
+                          <span class="fd-role">Reviewer</span>
+                          <span class="fd-model-tag">GPT-5.2</span>
+                          <code class="fd-tool-branch">fynvra/sidebar-review</code>
+                          <span class="fd-tool-meta"><span>0.2s</span><svg class="i is-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="6">
+                          <p data-l="zh">两个任务各自按指定模型启动：DeepSeek 只负责实现，GPT 只负责审查 diff。</p>
+                          <p data-l="en">Each task starts with its named model: DeepSeek implements only, GPT reviews the diff only.</p>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="7">
+                          <p data-l="zh">DeepSeek 正在改 <code>Sidebar.tsx</code>；GPT 已接到审查任务，等实现回报后读取 diff。</p>
+                          <p data-l="en">DeepSeek is editing <code>Sidebar.tsx</code>; GPT has the review task and will read the diff once the implementation reports back.</p>
+                        </div>
+
+                        <div class="fd-tool" data-appear="8">
+                          <svg class="i fd-tool-icon" viewBox="0 0 24 24"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 15 3 3-3 3M20 18h-7" /></svg>
+                          <span class="fd-tool-label"><span data-l="zh">Worker 回报</span><span data-l="en">Worker report</span></span>
+                          <span class="fd-tool-title"><span data-l="zh">侧栏折叠 · 3 个文件</span><span data-l="en">Sidebar collapse · 3 files</span></span>
+                          <span class="fd-role">Worker</span>
+                          <span class="fd-model-tag">DeepSeek V4.1</span>
+                          <code>+62 −18</code>
+                          <span class="fd-tool-meta"><span>4.8s</span><svg class="i is-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="8">
+                          <p data-l="zh">实现已回报：<code>Sidebar.tsx</code>、<code>sidebar.css</code> 和快照检查通过。diff 已交给 GPT。</p>
+                          <p data-l="en">Implementation reported back: <code>Sidebar.tsx</code>, <code>sidebar.css</code>, and the snapshot check passed. The diff is with GPT now.</p>
+                        </div>
+
+                        <div class="fd-tool" data-appear="9">
+                          <svg class="i fd-tool-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m8 12 2.5 2.5L16 9" /></svg>
+                          <span class="fd-tool-label"><span data-l="zh">审查通过</span><span data-l="en">Review passed</span></span>
+                          <span class="fd-tool-title"><span data-l="zh">侧栏折叠 · 0 个阻塞</span><span data-l="en">Sidebar collapse · 0 blockers</span></span>
+                          <span class="fd-role">Reviewer</span>
+                          <span class="fd-model-tag">GPT-5.2</span>
+                          <code>merge --no-ff</code>
+                          <span class="fd-tool-meta"><span>2.1s</span><svg class="i is-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg></span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="9">
+                          <p data-l="zh">DeepSeek 实现、GPT 审查，已合并到 <code>main</code>。当前会话仍是 DeepSeek；这次任务指定的模型没有改动其他角色。</p>
+                          <p data-l="en">DeepSeek implemented, GPT reviewed, merged to <code>main</code>. This session still runs on DeepSeek; the per-task models left other roles untouched.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-composer">
+                      <div class="fd-model-picker" data-model-picker hidden aria-hidden="true">
+                        <div class="fd-model-search">
+                          <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg>
+                          <span data-l="zh">搜索模型</span><span data-l="en">Search models</span>
+                        </div>
+                        <div class="fd-model-list">
+                          <p class="fd-model-group">OpenAI</p>
+                          <div class="fd-model-row is-selected" data-model-row="gpt">
+                            <span class="fd-model-name">GPT-5.2</span><code>gpt-5.2</code><svg class="i fd-model-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+                          </div>
+                          <p class="fd-model-group">Anthropic</p>
+                          <div class="fd-model-row" data-model-row="claude">
+                            <span class="fd-model-name">Claude Sonnet 4.5</span><code>sonnet-4.5</code><svg class="i fd-model-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+                          </div>
+                          <p class="fd-model-group">DeepSeek</p>
+                          <div class="fd-model-row" data-model-row="deepseek">
+                            <span class="fd-model-name">DeepSeek V4.1</span><code>deepseek-v4.1</code><svg class="i fd-model-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+                          </div>
+                        </div>
+                        <p class="fd-model-note">
+                          <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+                          <span data-l="zh">只切换当前会话；任务模型在派发时单独指定。</span>
+                          <span data-l="en">This session only; task models are named per dispatch.</span>
+                        </p>
+                      </div>
+
+                      <div class="fd-composer-box">
+                        <div class="fd-composer-input"><span data-typed></span><span class="fd-caret" aria-hidden="true"></span><span class="fd-placeholder"><span data-l="zh">输入消息，Enter 发送</span><span data-l="en">Message Fynvra…</span></span></div>
+                        <div class="fd-composer-bar">
+                          <span class="fd-composer-tools">
+                            <span class="fd-mini-btn" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M16 5h6M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" /></svg></span>
+                            <span class="fd-chip fd-chip-model" data-model-pill><svg class="i" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span class="fd-chip-label" data-model-pill-label>OpenAI · GPT-5.2 · high</span></span>
+                            <span class="fd-chip fd-chip-approval"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full access</span></span>
+                          </span>
+                          <span class="fd-send" data-send><svg class="i" viewBox="0 0 24 24"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg><span data-l="zh">发送</span><span data-l="en">Send</span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-statusbar" aria-hidden="true">
+                      <span>tokens ↑9.8k ↓2.4k</span><span>$0.03</span>
+                      <span class="fd-status-right">
+                        <span class="is-amber"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full</span></span>
+                        <span><svg class="i" viewBox="0 0 24 24"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                        <span data-model-status>OpenAI · GPT-5.2</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <aside class="fd-panel">
+                    <div class="fd-panel-head">
+                      <div class="fd-panel-tabs">
+                        <span class="fd-panel-tab" data-panel-tab="files">
+                          <svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                          <span data-l="zh">文件</span><span data-l="en">Files</span>
+                        </span>
+                        <span class="fd-panel-tab is-active" data-panel-tab="tasks">
+                          <svg class="i" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg>
+                          <span data-l="zh">任务</span><span data-l="en">Tasks</span>
+                          <span class="fd-panel-count" data-task-count hidden>0</span>
+                        </span>
+                        <span class="fd-panel-tab">
+                          <svg class="i" viewBox="0 0 24 24"><path d="M7 4v12M7 16l-3-3M7 16l3-3M17 20V8M17 8l-3 3M17 8l3 3" /></svg>
+                          <span data-l="zh">改动</span><span data-l="en">Changes</span>
+                        </span>
+                      </div>
+                      <span class="fd-panel-refresh" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 5.3M20 4v7h-7" /></svg></span>
+                    </div>
+
+                    <div class="fd-panel-body" data-panel-view="files" hidden>
+                      <p class="fd-tree-group">src/renderer</p>
+                      <div class="fd-tree-row is-folder"><svg class="i" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg><span class="fd-tree-folder">components</span></div>
+                      <div class="fd-tree-row is-active" style="padding-left: 20px"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">Sidebar.tsx</span></div>
+                      <div class="fd-tree-row" style="padding-left: 20px"><svg class="i" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">sidebar.css</span></div>
+                    </div>
+
+                    <div class="fd-panel-body" data-panel-view="tasks" hidden>
+                      <div class="fd-run" data-run data-done="0" data-total="1">
+                        <div class="fd-run-head">
+                          <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></svg>
+                          <span class="fd-run-title"><span data-l="zh">侧栏折叠与审查</span><span data-l="en">Sidebar collapse &amp; review</span></span>
+                          <span class="fd-run-time"><span data-l="zh">刚刚</span><span data-l="en">now</span></span>
+                        </div>
+                        <div class="fd-progress-row">
+                          <span class="pg pg-0-1"><span data-l="zh">已完成 0 / 1</span><span data-l="en">0 / 1 done</span></span>
+                          <span class="pg pg-0"><span data-l="zh">已完成 0 / 2</span><span data-l="en">0 / 2 done</span></span>
+                          <span class="pg pg-1"><span data-l="zh">已完成 1 / 2</span><span data-l="en">1 / 2 done</span></span>
+                          <span class="pg pg-2"><span data-l="zh">已完成 2 / 2</span><span data-l="en">2 / 2 done</span></span>
+                          <span class="fd-progress"><i></i></span>
+                        </div>
+                      </div>
+
+                      <div class="fd-task" data-task="model-impl" data-state="todo" data-appear="5">
+                        <div class="fd-task-head">
+                          <span class="fd-task-title"><span data-l="zh">实现侧栏折叠</span><span data-l="en">Implement sidebar collapse</span></span>
+                          <span class="fd-role">Worker</span>
+                        </div>
+                        <div class="fd-task-meta">
+                          <svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>
+                          <code>fynvra/sidebar-collapse</code>
+                          <span class="fd-model-tag">DeepSeek V4.1</span>
+                          <span class="fd-status st-todo"><span data-l="zh">待开始</span><span data-l="en">To do</span></span>
+                          <span class="fd-status st-run"><span data-l="zh">进行中</span><span data-l="en">Running</span></span>
+                          <span class="fd-status st-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span>
+                          <span class="fd-status st-done"><span data-l="zh">已完成</span><span data-l="en">Completed</span></span>
+                        </div>
+                      </div>
+
+                      <div class="fd-task" data-task="model-review" data-state="todo" data-appear="6">
+                        <div class="fd-task-head">
+                          <span class="fd-task-title"><span data-l="zh">审查侧栏改动</span><span data-l="en">Review sidebar diff</span></span>
+                          <span class="fd-role">Reviewer</span>
+                        </div>
+                        <div class="fd-task-meta">
+                          <svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>
+                          <code>fynvra/sidebar-review</code>
+                          <span class="fd-model-tag">GPT-5.2</span>
+                          <span class="fd-status st-todo"><span data-l="zh">待开始</span><span data-l="en">To do</span></span>
+                          <span class="fd-status st-run"><span data-l="zh">进行中</span><span data-l="en">Running</span></span>
+                          <span class="fd-status st-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span>
+                          <span class="fd-status st-done"><span data-l="zh">已完成</span><span data-l="en">Completed</span></span>
+                        </div>
+                      </div>
+
+                      <p class="fd-tasks-note" data-appear="6">
+                        <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+                        <span data-l="zh">模型按任务指定，不是从当前会话继承</span>
+                        <span data-l="en">Models are set per task, not inherited from this session</span>
+                      </p>
+                    </div>
+                  </aside>
+                </div>
               </div>
-              <div class="fd-chapters" role="group" aria-label="演示步骤 / Demo steps">
-                <button class="fd-chapter" type="button" data-chapter="0">
-                  <b>01</b><span data-l="zh">输入</span><span data-l="en">Ask</span>
-                </button>
-                <button class="fd-chapter" type="button" data-chapter="3">
-                  <b>02</b><span data-l="zh">派发</span><span data-l="en">Dispatch</span>
-                </button>
-                <button class="fd-chapter" type="button" data-chapter="5">
-                  <b>03</b><span data-l="zh">执行</span><span data-l="en">Build</span>
-                </button>
-                <button class="fd-chapter" type="button" data-chapter="6">
-                  <b>04</b><span data-l="zh">审查</span><span data-l="en">Review</span>
-                </button>
-                <button class="fd-chapter" type="button" data-chapter="9">
-                  <b>05</b><span data-l="zh">完成</span><span data-l="en">Done</span>
-                </button>
-              </div>
-              <p class="fd-step-count">
-                <span data-l="zh">第 <b data-demo-counter>1</b> / 10 步</span>
-                <span data-l="en">Step <b data-demo-counter>1</b> / 10</span>
-              </p>
             </div>
 
             <figcaption class="fd-caption" id="fd-caption">
-              <span data-l="zh">一条需求如何拆成两个独立任务、在各自 worktree 中执行，再回到主 Agent 审查与合并。动画示意的是产品流程，不是真实截图；可暂停、重播或分步查看。</span>
-              <span data-l="en">How one request becomes two independent tasks, each in its own worktree, then comes back to the orchestrator for review and merge. This is a process illustration, not a screenshot; pause, replay, or step through it.</span>
+              <span data-l="zh">任务协作：一条需求拆成两个独立 Worker 任务，在各自 worktree 中执行、审查并合并。指定模型：先切换当前会话模型，再在需求里为任务分别指定模型。两种界面均为流程示意，动画自动循环；模型名称仅作示例，不代表内置配置。</span>
+              <span data-l="en">Task collaboration: one request becomes two independent worker tasks, each in its own worktree, then reviewed and merged. Choose a model: switch the session model first, then name task-specific models in the request. Both views are illustrations and loop automatically; model names are examples, not bundled providers.</span>
             </figcaption>
           </figure>
 
