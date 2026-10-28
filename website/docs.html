@@ -45,7 +45,6 @@
         <nav class="nav-links" id="site-menu">
           <a href="index.html#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a>
           <a href="index.html#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
-          <a href="index.html#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
           <a href="docs.html" aria-current="page"><span data-l="zh">使用文档</span><span data-l="en">Docs</span></a>
         </nav>
         <div class="nav-actions">
@@ -210,6 +209,7 @@
                 <ul class="docs-nav-list">
                   <li><a class="docs-nav-link" href="#shortcuts" data-doc-link="shortcuts"><span data-l="zh">快捷键</span><span data-l="en">Shortcuts</span></a></li>
                   <li><a class="docs-nav-link" href="#data" data-doc-link="data"><span data-l="zh">数据与更新</span><span data-l="en">Data &amp; updates</span></a></li>
+                  <li><a class="docs-nav-link" href="#faq" data-doc-link="faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a></li>
                 </ul>
               </div>
             </section>
@@ -1898,6 +1898,50 @@ pnpm dev</code></pre>
               <div class="docs-lang" data-l="en">
                 <p>Installed Windows builds, and macOS builds signed with a Developer ID, check at startup and every 4 hours. The download installs after you confirm a restart. Unsigned Mac builds are replaced by hand from Releases. Dev mode (<code>pnpm dev</code>) does not check for updates. Linux has no auto-update yet.</p>
                 <p>Settings → General → App updates shows the current version and check state; follow the prompt to restart and install when an update is ready.</p>
+              </div>
+            </div>
+          </article>
+
+          <article
+            class="docs-article prose"
+            id="faq"
+            data-doc-article
+            data-title-zh="常见问题"
+            data-title-en="FAQ"
+            data-group-zh="参考"
+            data-group-en="Reference"
+          >
+            <header class="docs-article-head">
+              <h1><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></h1>
+              <p class="docs-lede">
+                <span data-l="zh">安装和使用前最常被问到的几件事：收费、没有 git 的项目，以及支持的平台。</span>
+                <span data-l="en">The three things asked most before installing: cost, projects without git, and supported platforms.</span>
+              </p>
+            </header>
+
+            <div class="docs-article-body">
+              <h2 id="faq-price"><span data-l="zh">收费吗？</span><span data-l="en">Is it free?</span></h2>
+              <div class="docs-lang" data-l="zh">
+                <p>Fynvra 本身免费开源，使用 Apache-2.0 许可证。模型调用的费用和额度来自你自己的服务商账号。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>Fynvra itself is free and open source under Apache-2.0. Model usage is billed by whichever provider account you connect.</p>
+              </div>
+
+              <h2 id="faq-without-git"><span data-l="zh">没有 git 的项目能用吗？</span><span data-l="en">Can I use it without git?</span></h2>
+              <div class="docs-lang" data-l="zh">
+                <p>能。非 git 目录按原地模式工作：不建 worktree，Worker 直接在目录里修改，审查时列出它汇报的改动文件。并行的 Worker 会共用同一个目录，建议一次只派一个任务。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>Yes. Folders without git run in in-place mode: no worktrees, workers edit the folder directly, and review lists the files they reported. Parallel workers would share the folder, so dispatch one task at a time.</p>
+              </div>
+
+              <h2 id="faq-platforms"><span data-l="zh">支持哪些平台？</span><span data-l="en">Which platforms are supported?</span></h2>
+              <div class="docs-lang" data-l="zh">
+                <p>Windows x64 和 macOS（Intel / Apple Silicon）。Linux 有 AppImage 构建配置，但暂未纳入自动发布与更新。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>Windows x64 and macOS (Intel and Apple Silicon). Linux has an AppImage build config but isn't part of automated releases or updates yet.</p>
               </div>
             </div>
           </article>

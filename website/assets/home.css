@@ -45,7 +45,7 @@
 }
 
 /* 删掉重复模块后收紧纵向留白。
-   .faq .section-head 与 .cta .section-head 的 margin-bottom:0 优先级更高，仍按原样生效。 */
+   .cta .section-head 的 margin-bottom:0 优先级更高，仍按原样生效。 */
 .hero {
   padding-top: clamp(32px, 4vw, 56px);
   padding-bottom: clamp(32px, 3.6vw, 48px);
@@ -57,10 +57,6 @@
 
 .section-head {
   margin-bottom: clamp(24px, 3vw, 36px);
-}
-
-.faq-list details p {
-  max-width: none;
 }
 
 .i {
