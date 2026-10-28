@@ -88,8 +88,8 @@
 
 /* 暗色沿用中性黑白：滑块比轨道略亮一层，不加彩色。 */
 :root[data-theme="dark"] .fd-scene-switch {
-  --fd-scene-pill-bg: #262626;
-  --fd-scene-pill-ring: #3a3a3a;
+  --fd-scene-pill-bg: rgb(255 255 255 / 8%);
+  --fd-scene-pill-ring: rgb(255 255 255 / 12%);
 }
 
 .fd-showcase[data-enhanced="true"] .fd-scene-switch {
