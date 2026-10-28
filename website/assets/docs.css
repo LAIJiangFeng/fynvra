@@ -1311,7 +1311,7 @@ html.docs-ready .docs-article {
 
 :root[data-theme="dark"]
   .docs-sidebar
-  :is(.docs-nav-link, .docs-group-toggle, .docs-foot-link, .docs-nav-close):focus-visible {
+  :is(.docs-nav-link, .docs-nav-sub a, .docs-group-toggle, .docs-foot-link, .docs-nav-close):focus-visible {
   outline-color: rgb(255 255 255 / 55%);
 }
 
