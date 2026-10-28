@@ -256,7 +256,8 @@ export const zhCN = {
     thinking: '思考中…',
     thoughts: '思考过程',
     tokensHint: '累计输入 / 输出 tokens',
-    magicContextFallback: 'Magic Context 未能继续管理此会话的上下文，已改用 pi 原生自动压缩。',
+    magicContextFallback:
+      'Magic Context 未能在当前会话启用或继续管理上下文，已改用 pi 原生自动压缩。',
     costHint: '累计费用',
     branchHint: '当前分支（{cwd}）',
     image: '图片 {index}',

@@ -266,7 +266,7 @@ export const en: MessagesShape<typeof zhCN> = {
     thoughts: 'Thoughts',
     tokensHint: 'Total input / output tokens',
     magicContextFallback:
-      'Magic Context stopped managing this session’s context; pi native auto-compaction is active.',
+      'Magic Context could not run or continue managing this session; pi native auto-compaction is active.',
     costHint: 'Total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
