@@ -4,6 +4,7 @@ import {
   type ApprovalKind,
   approvalKindOf,
   describeToolCall,
+  modeNotifiesOperation,
   modeRequiresApproval,
 } from './policy';
 
@@ -41,7 +42,7 @@ describe('approvalKindOf', () => {
   });
 });
 
-describe('modeRequiresApproval', () => {
+describe('notification scope and legacy approval compatibility', () => {
   const kinds: ApprovalKind[] = ['command', 'file-write', 'file-edit', 'mcp'];
   const table: Record<ApprovalMode, ApprovalKind[]> = {
     supervised: ['command', 'file-write', 'file-edit', 'mcp'],
@@ -51,13 +52,15 @@ describe('modeRequiresApproval', () => {
 
   for (const [mode, gated] of Object.entries(table) as [ApprovalMode, ApprovalKind[]][]) {
     it.each(kinds)(`${mode} × %s`, (kind) => {
-      expect(modeRequiresApproval(mode, kind)).toBe(gated.includes(kind));
+      expect(modeNotifiesOperation(mode, kind)).toBe(gated.includes(kind));
+      expect(modeRequiresApproval(mode, kind)).toBe(false);
     });
   }
 
-  it('treats an unknown mode like supervised (fail-closed)', () => {
+  it('treats an unknown mode like supervised for notices without asking for approval', () => {
     for (const kind of kinds) {
-      expect(modeRequiresApproval('yolo' as ApprovalMode, kind)).toBe(true);
+      expect(modeNotifiesOperation('yolo' as ApprovalMode, kind)).toBe(true);
+      expect(modeRequiresApproval('yolo' as ApprovalMode, kind)).toBe(false);
     }
   });
 });

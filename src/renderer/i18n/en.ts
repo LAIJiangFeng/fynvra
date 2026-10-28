@@ -266,7 +266,7 @@ export const en: MessagesShape<typeof zhCN> = {
     thoughts: 'Thoughts',
     tokensHint: 'Total input / output tokens',
     magicContextFallback:
-      'Magic Context could not run or continue managing this session; pi native auto-compaction is active.',
+      'Magic Context could not run or continue managing this session; pi native auto-compaction is active',
     costHint: 'Total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
@@ -301,7 +301,7 @@ export const en: MessagesShape<typeof zhCN> = {
     loadFailed: 'Failed to load models: {error}',
     fast: 'Fast',
     fastHint:
-      'Request priority processing. May increase cost and usage; the provider must support it.',
+      'Request priority processing. May increase cost and usage; the provider must support it',
   },
   thinking: {
     title: 'Thinking',
@@ -339,7 +339,7 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     cycleHint: 'Shift+Tab to switch notifications; no manual confirmation',
     statusHint: 'Operation notifications (Shift+Tab to switch); no approval wait',
-    hint: 'Every scope runs without manual confirmation. Key commands always notify, subject to notification settings. Tool permissions remain separate.',
+    hint: 'Every scope runs without manual confirmation. Key commands always notify, subject to notification settings. Tool permissions remain separate',
     kinds: {
       command: 'Command',
       'file-edit': 'Edit file',

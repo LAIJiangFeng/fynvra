@@ -15,6 +15,7 @@ import {
   type NotificationCandidate,
   type NotificationKind,
   type NotifiedSession,
+  toolNoticeCandidate,
 } from './rules';
 
 const MAIN: NotifiedSession = { id: 'session-main', workspaceId: 'ws-1', title: '修复登录页' };
@@ -32,6 +33,8 @@ const KINDS: NotificationKind[] = [
   'worker-failed',
   'question',
   'escalation',
+  'tool-notice',
+  'compaction-warning',
   'approval',
 ];
 
@@ -43,27 +46,35 @@ const allowed = (preferences: NotificationPreferences) =>
   KINDS.filter((kind) => allowedBy(preferences, kind));
 
 describe('allowedBy（设置允许弹哪些）', () => {
-  it('默认：主 agent 的完成 / 出错、提问、上报、审批；worker 的完成 / 失败不弹', () => {
+  it('默认允许主 agent 完成、提问、操作与压缩告警，旧审批永不通知', () => {
     expect(allowed(prefs())).toEqual([
       'turn-done',
       'turn-error',
       'question',
       'escalation',
-      'approval',
+      'tool-notice',
+      'compaction-warning',
     ]);
   });
 
   it('关掉「仅主 agent 完成」后 worker 的完成 / 失败也弹', () => {
-    expect(allowed(prefs({ mainAgentOnly: false }))).toEqual(KINDS);
+    expect(allowed(prefs({ mainAgentOnly: false }))).toEqual(
+      KINDS.filter((kind) => kind !== 'approval')
+    );
   });
 
-  it('关掉「提问与审批」只剩完成 / 出错', () => {
-    expect(allowed(prefs({ askAndApproval: false }))).toEqual(['turn-done', 'turn-error']);
+  it('关掉提问与操作通知后保留完成、出错和独立压缩告警', () => {
+    expect(allowed(prefs({ askAndApproval: false }))).toEqual([
+      'turn-done',
+      'turn-error',
+      'compaction-warning',
+    ]);
     expect(allowed(prefs({ askAndApproval: false, mainAgentOnly: false }))).toEqual([
       'turn-done',
       'turn-error',
       'worker-done',
       'worker-failed',
+      'compaction-warning',
     ]);
   });
 
@@ -78,6 +89,18 @@ describe('hiddenByView（聚焦抑制）', () => {
 
   it('窗口聚焦且正看着该会话时不弹', () => {
     expect(hiddenByView(candidate, { focused: true, viewingSessionId: MAIN.id })).toBe(true);
+    expect(
+      hiddenByView(
+        { ...candidate, kind: 'tool-notice' },
+        { focused: true, viewingSessionId: MAIN.id }
+      )
+    ).toBe(false);
+    expect(
+      hiddenByView(
+        { ...candidate, kind: 'compaction-warning' },
+        { focused: true, viewingSessionId: MAIN.id }
+      )
+    ).toBe(true);
   });
 
   it('看着别的会话、没选会话、或窗口没聚焦（最小化、切到别的应用）时照弹', () => {
@@ -227,8 +250,8 @@ describe('createTurnTracker（会话事件 → 通知）', () => {
   });
 });
 
-describe('approvalCandidate（审批请求）', () => {
-  it('标题带「待审批」，正文是工具与命令；任何会话都一样', () => {
+describe('operation notice candidates and legacy approval compatibility', () => {
+  it('uses fixed operation text without command args, and leaves old approvals inert', () => {
     const request: ApprovalRequest = {
       id: 'req-1',
       sessionId: WORKER.id,
@@ -241,8 +264,18 @@ describe('approvalCandidate（审批请求）', () => {
       kind: 'approval',
       sessionId: WORKER.id,
       workspaceId: 'ws-1',
-      title: '补测试 · 待审批',
-      body: 'bash（保护底线：git push）：git push origin main --force-with-lease',
+      title: '补测试',
+      body: '',
+    });
+    expect(allowedBy(prefs({ mainAgentOnly: false }), 'approval')).toBe(false);
+    expect(
+      toolNoticeCandidate(WORKER, { toolCallId: 'call-1', toolName: 'bash', kind: 'command' })
+    ).toEqual({
+      kind: 'tool-notice',
+      sessionId: WORKER.id,
+      workspaceId: 'ws-1',
+      title: '补测试 · 工具操作',
+      body: 'bash · 执行命令，无需确认，继续执行。',
     });
   });
 });

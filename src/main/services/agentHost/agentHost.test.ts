@@ -1485,34 +1485,18 @@ describe('createAgentHost approvals', () => {
     return { ...env, session, identity, respond };
   }
 
-  it('pushes the request with the fields the gate produced and forwards the decision once', async () => {
+  it('ignores legacy request and event payloads without forwarding decisions or replaying tools', async () => {
     const env = await pending();
-    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([
-      [
-        {
-          id: 'req-1',
-          sessionId: env.session.id,
-          kind: 'file-edit',
-          title: 'edit',
-          detail: 'src/a.ts',
-          expiresAt: 900_000,
-        },
-      ],
-    ]);
-    // 时间线事件照常转发（Renderer 据 toolCallId 在工具结束时出队），但不再重复推送
-    expect(env.events(env.session.id)).toEqual([
-      expect.objectContaining({ type: 'approval_request', requestId: 'req-1', toolCallId: 'c1' }),
-    ]);
-
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([]);
+    expect(env.events(env.session.id)).toEqual([]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
     expect(await env.respond('allow', 'other')).toMatchObject({ ok: false });
-    expect(await env.respond('allow')).toEqual({ ok: true });
-    expect(env.sent('respond-approval')).toEqual([
-      { type: 'respond-approval', identity: env.identity, requestId: 'req-1', decision: 'allow' },
-    ]);
+    expect(await env.respond('allow')).toEqual({ ok: false, error: '审批请求不存在或已处理' });
     expect(await env.respond('deny')).toMatchObject({ ok: false });
+    expect(env.sent('respond-approval')).toEqual([]);
   });
 
-  it('marks a protected action in the title of the approval bar', async () => {
+  it('important legacy commands cannot restore the approval bar', async () => {
     const env = await pending({
       toolName: 'bash',
       kind: 'command',
@@ -1520,11 +1504,10 @@ describe('createAgentHost approvals', () => {
       detail: 'git push origin main',
       protectedAction: 'git push',
     });
-    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)[0]?.[0]).toMatchObject({
-      kind: 'command',
-      title: 'bash（保护底线：git push）',
-      detail: 'git push origin main',
-    });
+    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)).toEqual([]);
+    expect(env.events(env.session.id)).toEqual([]);
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
+    expect(env.sent('respond-approval')).toEqual([]);
   });
 
   it('does not push anything for an approval_request event alone', async () => {
@@ -1573,11 +1556,12 @@ describe('createAgentHost approvals', () => {
     ).toMatchObject({ ok: false });
   });
 
-  it('refuses an answer after the expiry the worker enforces', async () => {
+  it('legacy requests remain absent before and after their old expiry', async () => {
     let time = 1_000;
     const env = await pending({ expiresAt: 5_000 }, { now: () => time });
+    expect(await env.respond('allow')).toEqual({ ok: false, error: '审批请求不存在或已处理' });
     time = 5_001;
-    expect(await env.respond('allow')).toEqual({ ok: false, error: '审批请求已过期' });
+    expect(await env.respond('allow')).toEqual({ ok: false, error: '审批请求不存在或已处理' });
     expect(env.sent('respond-approval')).toEqual([]);
   });
 
@@ -2229,7 +2213,8 @@ describe('createAgentHost approval mode', () => {
       { type: 'set-approval-mode', identity, mode: 'supervised' },
       { type: 'set-approval-mode', identity, mode: 'auto-edits' },
     ]);
-    expect(env.host.list('ws-1')[0]?.status).toBe('waiting-approval');
+    // 旧等待状态按当前 live 回合恢复，通知范围仍可切换。
+    expect(env.host.list('ws-1')[0]?.status).toBe('running');
 
     env.worker().exit(1);
     await flush();

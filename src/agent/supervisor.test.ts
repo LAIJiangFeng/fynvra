@@ -479,7 +479,7 @@ describe('SessionSupervisor hosts', () => {
   });
 });
 
-describe('SessionSupervisor approvals', () => {
+describe('SessionSupervisor operation notices and legacy approvals', () => {
   const gateRequest = (patch: Partial<ApprovalGateRequest> = {}): ApprovalGateRequest => ({
     toolCallId: 'call-1',
     toolName: 'bash',
@@ -503,88 +503,92 @@ describe('SessionSupervisor approvals', () => {
     return { ...env, approval };
   }
 
-  it('hands every session an approval channel with the worker timeout', async () => {
+  it('hands every session a notification channel without an approval timer', async () => {
     const { approval } = await running();
-    expect(approval.timeoutMs).toBe(1_000);
+    expect(approval.notify).toBeTypeOf('function');
+    expect(approval.timeoutMs).toBeUndefined();
   });
 
-  it('announces the request to Main, then emits approval_request, and waits for the answer', async () => {
-    const { supervisor, approval, posted, of } = await running();
-    const decision = approval.request(gateRequest(), new AbortController().signal);
-
-    const announced = of('approval-request');
-    expect(announced).toEqual([
-      {
-        type: 'approval-request',
-        identity: id1,
-        request: {
-          requestId: expect.any(String),
-          toolCallId: 'call-1',
-          toolName: 'bash',
-          kind: 'command',
-          title: 'bash',
-          detail: 'rm -rf build',
-          protectedAction: 'rm -rf',
-          expiresAt: 1_700_000_600_000,
-        },
-      },
-    ]);
-    const requestId = announced[0]?.request.requestId ?? '';
-    const event = of('session-event').at(-1);
-    expect(event?.event).toMatchObject({
-      type: 'approval_request',
-      requestId,
+  it('emits ordered notices without announcing approval or waiting for an answer', async () => {
+    const { supervisor, approval, sessions, posted, of } = await running();
+    sessions[0]?.emit({ type: 'text_delta', delta: 'Working' });
+    await approval.notify?.({ toolCallId: 'call-1', toolName: 'bash', kind: 'command' });
+    sessions[0]?.emit({
+      type: 'tool_end',
       toolCallId: 'call-1',
       toolName: 'bash',
-      args: { command: 'rm -rf build' },
-      reason: 'protected action: rm -rf',
+      isError: false,
+      output: 'ok',
+      outputTruncated: false,
     });
-    // Main 先记下待审批（推审批条），时间线事件随后到达
-    expect(posted.indexOf(announced[0] as AgentWorkerEvent)).toBeLessThan(
-      posted.indexOf(event as AgentWorkerEvent)
-    );
-    expect(of('session-status').map((status) => status.status)).toEqual([
-      'running',
-      'waiting-approval',
+    expect(of('approval-request')).toEqual([]);
+    expect(of('session-event').map(({ event }) => [event.seq, event.type])).toEqual([
+      [1, 'text_delta'],
+      [2, 'tool_notice'],
+      [3, 'tool_end'],
     ]);
-
+    expect(of('session-event')[1]).toEqual({
+      type: 'session-event',
+      identity: id1,
+      seq: 2,
+      event: {
+        type: 'tool_notice',
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        kind: 'command',
+        seq: 2,
+      },
+    });
+    expect(of('session-status').map((status) => status.status)).toEqual(['running']);
+    const before = [...posted];
     supervisor.handle({
       type: 'respond-approval',
       identity: { ...id1, generation: 2 },
-      requestId,
+      requestId: 'old',
       decision: 'allow',
     });
-    supervisor.handle({ type: 'respond-approval', identity: id1, requestId, decision: 'allow' });
-    await expect(decision).resolves.toBe('allow');
-    expect(of('session-status').map((status) => status.status)).toEqual([
-      'running',
-      'waiting-approval',
-      'running',
-    ]);
-    expect(of('log').map((log) => log.message)).toEqual([
-      expect.stringContaining(`no pending approval ${requestId}`),
-    ]);
+    supervisor.handle({
+      type: 'respond-approval',
+      identity: id1,
+      requestId: 'old',
+      decision: 'deny',
+    });
+    expect(posted).toEqual(before);
   });
 
-  it('leaves out the reason when no protected action was hit', async () => {
+  it('the compatibility request immediately emits only a sanitized notice', async () => {
     const { approval, of } = await running();
-    void approval.request(
-      gateRequest({ protectedAction: undefined }),
-      new AbortController().signal
-    );
-    expect(of('approval-request')[0]?.request).not.toHaveProperty('protectedAction');
-    expect(of('session-event').at(-1)?.event).not.toHaveProperty('reason');
+    await expect(
+      approval.request(
+        gateRequest({ toolName: 'mcp__private__query', protectedAction: undefined }),
+        new AbortController().signal
+      )
+    ).resolves.toBe('allow');
+    expect(of('approval-request')).toEqual([]);
+    expect(of('session-event').at(-1)?.event).toEqual({
+      type: 'tool_notice',
+      toolCallId: 'call-1',
+      toolName: 'mcp',
+      kind: 'mcp',
+      seq: 1,
+    });
   });
 
-  it('drops the pending request when the gate withdraws it', async () => {
+  it('late withdrawal and answers cannot change a completed notification', async () => {
     const { supervisor, approval, of } = await running();
     const withdraw = new AbortController();
     const decision = approval.request(gateRequest(), withdraw.signal);
+    await expect(decision).resolves.toBe('allow');
     withdraw.abort();
-    await expect(decision).resolves.toBe('deny');
-    const requestId = of('approval-request')[0]?.request.requestId ?? '';
-    supervisor.handle({ type: 'respond-approval', identity: id1, requestId, decision: 'allow' });
-    expect(of('log').at(-1)?.message).toContain(`no pending approval ${requestId}`);
+    supervisor.handle({
+      type: 'respond-approval',
+      identity: id1,
+      requestId: 'old',
+      decision: 'deny',
+    });
+    await expect(decision).resolves.toBe('allow');
+    expect(of('approval-request')).toEqual([]);
+    expect(of('session-event')).toHaveLength(1);
     expect(of('session-status').at(-1)?.status).toBe('running');
   });
 
@@ -596,33 +600,73 @@ describe('SessionSupervisor approvals', () => {
     expect(of('approval-request')).toEqual([]);
   });
 
-  it('denies a pending request when the run is aborted', async () => {
-    const { supervisor, approval } = await running();
-    const decision = approval.request(gateRequest(), new AbortController().signal);
+  it('Stop still aborts the real run after a notice without a pending answer', async () => {
+    const { supervisor, approval, sessions, of } = await running();
+    await expect(approval.request(gateRequest(), new AbortController().signal)).resolves.toBe(
+      'allow'
+    );
     supervisor.handle({ type: 'abort', identity: id1 });
-    await expect(decision).resolves.toBe('deny');
+    await settle();
+    expect(sessions[0]?.aborts).toBe(1);
+    expect(of('session-event').at(-1)?.event).toMatchObject({
+      type: 'agent_settled',
+      aborted: true,
+    });
+    expect(of('approval-request')).toEqual([]);
   });
 
-  it('denies a pending request when the session is disposed', async () => {
-    const { supervisor, approval } = await running();
-    const decision = approval.request(gateRequest(), new AbortController().signal);
+  it('drops late notifications and rejects compatibility requests after disposal', async () => {
+    const { supervisor, approval, sessions, of } = await running();
+    await approval.notify?.({ toolCallId: 'call-1', toolName: 'bash', kind: 'command' });
     supervisor.handle({ type: 'dispose-session', identity: id1 });
-    await expect(decision).resolves.toBe('deny');
+    await settle();
+    const events = [...of('session-event')];
+    await approval.notify?.({ toolCallId: 'late', toolName: 'bash', kind: 'command' });
+    await expect(approval.request(gateRequest(), new AbortController().signal)).resolves.toBe(
+      'deny'
+    );
+    expect(of('session-event')).toEqual(events);
+    expect(sessions[0]?.disposals).toBe(1);
   });
 
-  it('denies a pending request when the turn settles', async () => {
-    const { approval, sessions } = await running();
+  it('settles normally after a notice without waiting or retracting the completed call', async () => {
+    const { approval, sessions, of } = await running();
     const decision = approval.request(gateRequest(), new AbortController().signal);
+    await expect(decision).resolves.toBe('allow');
     sessions[0]?.emit({ type: 'agent_settled', aborted: false });
-    await expect(decision).resolves.toBe('deny');
+    expect(of('session-status').map((status) => status.status)).toEqual(['running', 'idle']);
+    expect(of('session-event').map(({ event }) => event.type)).toEqual([
+      'tool_notice',
+      'agent_settled',
+    ]);
+    await expect(decision).resolves.toBe('allow');
   });
 
-  it('denies an approval that is not answered in time', async () => {
-    const { approval } = await running();
+  it('creates no timeout and ignores notifications from a replaced generation', async () => {
+    const { supervisor, approval, inputs, of } = await running();
     vi.useFakeTimers();
-    const decision = approval.request(gateRequest(), new AbortController().signal);
+    await expect(approval.request(gateRequest(), new AbortController().signal)).resolves.toBe(
+      'allow'
+    );
     await vi.advanceTimersByTimeAsync(1_000);
-    await expect(decision).resolves.toBe('deny');
+    expect(vi.getTimerCount()).toBe(0);
+    supervisor.handle({ type: 'spawn-session', identity: { ...id1, generation: 2 }, spec: spec() });
+    await vi.advanceTimersByTimeAsync(0);
+    const events = [...of('session-event')];
+    await approval.notify?.({ toolCallId: 'stale', toolName: 'bash', kind: 'command' });
+    await expect(approval.request(gateRequest(), new AbortController().signal)).resolves.toBe(
+      'deny'
+    );
+    expect(of('session-event')).toEqual(events);
+    await inputs[1]?.approval?.notify?.({
+      toolCallId: 'current',
+      toolName: 'write',
+      kind: 'file-write',
+    });
+    expect(of('session-event').at(-1)).toMatchObject({
+      identity: { ...id1, generation: 2 },
+      event: { type: 'tool_notice', toolCallId: 'current' },
+    });
   });
 
   it('denies requests for sessions it does not hold', async () => {

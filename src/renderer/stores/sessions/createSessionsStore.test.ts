@@ -1072,7 +1072,7 @@ describe('createSessionsStore · 推送与审批', () => {
     expect(store.getState().activeSessionId).toBeNull();
   });
 
-  it('onApprovalRequest 入队；respondApproval 出队并转发决定', async () => {
+  it('忽略旧 onApprovalRequest，迟到答复不发送、不恢复等待', async () => {
     const { store, api, emitApproval } = await setup();
     const request: ApprovalRequest = {
       id: 'req-1',
@@ -1083,20 +1083,16 @@ describe('createSessionsStore · 推送与审批', () => {
       expiresAt: 0,
     };
     emitApproval(request);
-    expect(store.getState().pendingApprovals.s1).toEqual([request]);
-    expect(selectStatusOf('s1')(store.getState())).toBe('waiting-approval');
+    expect(store.getState().pendingApprovals.s1).toBeUndefined();
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
 
     await store.getState().respondApproval('req-1', 'allowSession');
-    expect(api.respondApproval).toHaveBeenCalledWith({
-      sessionId: 's1',
-      requestId: 'req-1',
-      decision: 'allowSession',
-    });
-    expect(store.getState().pendingApprovals.s1).toEqual([]);
-    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    expect(api.respondApproval).not.toHaveBeenCalled();
+    expect(store.getState().pendingApprovals.s1).toBeUndefined();
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
   });
 
-  it('答复没送达且会话还在等待时重新入队，并提示', async () => {
+  it('旧审批通道失败也不重新入队或显示等待提示', async () => {
     const { store, api, emitApproval } = await setup();
     const request: ApprovalRequest = {
       id: 'req-1',
@@ -1110,8 +1106,10 @@ describe('createSessionsStore · 推送与审批', () => {
     api.respondApproval.mockResolvedValueOnce({ ok: false, error: 'worker 不可用' });
     await store.getState().respondApproval('req-1', 'deny');
 
-    expect(store.getState().pendingApprovals.s1).toEqual([request]);
-    expect(store.getState().notice).toContain('worker 不可用');
+    expect(api.respondApproval).not.toHaveBeenCalled();
+    expect(store.getState().pendingApprovals.s1).toBeUndefined();
+    expect(store.getState().notice).toBe('审批请求不存在或已过期');
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
   });
 
   it('abort 转发给选中的会话', async () => {
@@ -1275,7 +1273,7 @@ describe('createSessionsStore · 模型选择', () => {
     const result = await store.getState().setApprovalMode('s1', 'full');
     expect(result).toEqual({ ok: false, error: '会话不存在' });
     expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('supervised');
-    expect(store.getState().notice).toBe('切换审批档位失败：会话不存在');
+    expect(store.getState().notice).toBe('切换操作通知范围失败：会话不存在');
     expect(api.list).toHaveBeenCalledWith(WS, { includeArchived: true });
 
     api.setApprovalMode.mockRejectedValueOnce(new Error('IPC 断开'));
@@ -1286,7 +1284,7 @@ describe('createSessionsStore · 模型选择', () => {
     expect(store.getState().sessionsByWorkspace[WS]?.[0]?.approvalMode).toBe('supervised');
   });
 
-  it('setApprovalMode 运行中、等审批时也照样切（与换模型不同）', async () => {
+  it('setApprovalMode 运行中照样切，旧审批推送不会恢复 waiting-approval', async () => {
     const { store, api, emitEvent, emitApproval } = await setup();
     await store.getState().selectSession('s1');
     await store.getState().send('long task');
@@ -1302,7 +1300,8 @@ describe('createSessionsStore · 模型选择', () => {
       detail: 'git push',
       expiresAt: 0,
     });
-    expect(selectStatusOf('s1')(store.getState())).toBe('waiting-approval');
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    expect(store.getState().pendingApprovals.s1).toBeUndefined();
     expect(await store.getState().setApprovalMode('s1', 'supervised')).toMatchObject({ ok: true });
     expect(api.setApprovalMode.mock.calls).toEqual([
       [{ sessionId: 's1', mode: 'full' }],
