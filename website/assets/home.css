@@ -71,41 +71,70 @@
 /* 场景切换只在增强后出现；无 JS 时保留默认可读的协作流程。 */
 .fd-scene-switch {
   display: none;
+  --fd-scene-pill-bg: var(--surface);
+  --fd-scene-pill-ring: color-mix(in srgb, var(--ink) 8%, transparent);
+  position: relative;
   width: max-content;
   min-width: 0;
   max-width: 100%;
   align-items: center;
-  gap: 4px;
-  margin: 0 0 10px;
-  padding: 4px;
+  gap: 2px;
+  margin: 0 auto 10px;
+  padding: 3px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: var(--shadow-card);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+/* 暗色沿用中性黑白：滑块比轨道略亮一层，不加彩色。 */
+:root[data-theme="dark"] .fd-scene-switch {
+  --fd-scene-pill-bg: rgb(255 255 255 / 8%);
+  --fd-scene-pill-ring: rgb(255 255 255 / 12%);
 }
 
 .fd-showcase[data-enhanced="true"] .fd-scene-switch {
-  display: inline-flex;
+  display: flex;
+}
+
+/* 选中背景是单个滑块：位置与尺寸由脚本按当前按钮测量，换语言、缩放后重新对齐。 */
+.fd-scene-switch::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--fd-scene-pill-w, 0px);
+  height: var(--fd-scene-pill-h, 0px);
+  border-radius: 999px;
+  background: var(--fd-scene-pill-bg);
+  box-shadow: inset 0 0 0 1px var(--fd-scene-pill-ring);
+  content: "";
+  pointer-events: none;
+  transform: translate(var(--fd-scene-pill-x, 0px), var(--fd-scene-pill-y, 0px));
+}
+
+.fd-scene-switch[data-ready="true"]::before {
+  transition:
+    transform 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    width 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .fd-scene-btn {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  height: 28px;
   padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
   color: var(--ink-2);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s,
-    color 0.2s;
+  transition: color 0.2s;
 }
 
 .fd-scene-btn .i {
@@ -118,15 +147,11 @@
 }
 
 .fd-scene-btn:hover {
-  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
   color: var(--ink);
 }
 
 .fd-scene-btn[aria-pressed="true"] {
-  border-color: var(--line);
-  background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
 }
 
 .fd-scene-btn[aria-pressed="true"] .i {
@@ -1965,6 +1990,7 @@
   .fd-scene-btn {
     flex: 1;
     justify-content: center;
+    height: 26px;
     padding: 0 8px;
     font-size: 11px;
   }
@@ -2120,6 +2146,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .fd-scene-switch[data-ready="true"]::before {
+    transition: none;
+  }
+
   .fd-showcase[data-enhanced="true"] [data-appear].is-shown,
   .fd-dot.is-run,
   .fd-caret,
