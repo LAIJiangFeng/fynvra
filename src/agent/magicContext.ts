@@ -464,7 +464,8 @@ function modelHistorianBudget(
     modelMax < MIN_HISTORIAN_OUTPUT_TOKENS ||
     !Number.isFinite(requestedMax) ||
     requestedMax < MIN_HISTORIAN_OUTPUT_TOKENS
-  ) return;
+  )
+    return;
   const maxTokens = Math.floor(Math.min(requestedMax, modelMax, 32_000, contextWindow * 0.2));
   const framing = Math.max(CONTEXT_SAFETY_TOKENS, Math.ceil(contextWindow * 0.05));
   const inputBytes = Math.floor(

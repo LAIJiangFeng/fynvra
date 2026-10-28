@@ -132,7 +132,8 @@
     function localizedText(node) {
       if (!node) return '';
       const clone = node.cloneNode(true);
-      for (const element of clone.querySelectorAll('button, script, style, noscript')) element.remove();
+      for (const element of clone.querySelectorAll('button, script, style, noscript'))
+        element.remove();
       for (const element of clone.querySelectorAll('[data-l]')) {
         if (element.getAttribute('data-l') !== locale) element.remove();
         else element.replaceWith(...element.childNodes);
@@ -279,8 +280,7 @@
         let matched = true;
         for (const term of terms) {
           const inTitle =
-            item.title.toLowerCase().includes(term) ||
-            item.heading.toLowerCase().includes(term);
+            item.title.toLowerCase().includes(term) || item.heading.toLowerCase().includes(term);
           const inBody = item.haystack.includes(term);
           if (!inTitle && !inBody) {
             matched = false;
@@ -419,12 +419,7 @@
 
     function updatePager(article) {
       const index = articles.indexOf(article);
-      setPagerLink(
-        prevLink,
-        prevTitle,
-        index > 0 ? articles[index - 1] : null,
-        strings().previous
-      );
+      setPagerLink(prevLink, prevTitle, index > 0 ? articles[index - 1] : null, strings().previous);
       setPagerLink(
         nextLink,
         nextTitle,
@@ -491,8 +486,7 @@
 
     function focusArticle(article, anchorId) {
       const target = anchorId ? document.getElementById(anchorId) : null;
-      const focusTarget =
-        target && article.contains(target) ? target : article.querySelector('h1');
+      const focusTarget = target && article.contains(target) ? target : article.querySelector('h1');
       if (!focusTarget) return;
       if (focusTarget.tagName !== 'H1') focusTarget.setAttribute('tabindex', '-1');
       focusTarget.focus({ preventScroll: true });
@@ -559,9 +553,7 @@
       if (scrim) scrim.hidden = !open;
       if (open) {
         main.inert = true;
-        const activeLink = navLinks.find(
-          (link) => link.getAttribute('aria-current') === 'page'
-        );
+        const activeLink = navLinks.find((link) => link.getAttribute('aria-current') === 'page');
         window.requestAnimationFrame(() => {
           if (activeLink) ensureNavLinkVisible(activeLink);
           if (settings.focus !== false) searchInput.focus();

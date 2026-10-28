@@ -351,7 +351,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const state = get();
       if (state.activeSessionId !== sessionId) return;
       const runtime = state.runtimeBySession[sessionId];
-      if (runtime?.settledSeq !== roundId || (runtime.activitySeq ?? runtime.lastSeq) !== roundId) return;
+      if (runtime?.settledSeq !== roundId || (runtime.activitySeq ?? runtime.lastSeq) !== roundId)
+        return;
       // 同一轮已经发起过（含结果为空 / 失败）：保留已有的（若有），不重复请求
       if (suggestionTried.get(sessionId) === roundId) return;
       if (suggestionIgnored.get(sessionId) === roundId) {
@@ -386,7 +387,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const current = get();
         if (current.activeSessionId !== sessionId) return;
         const currentRuntime = current.runtimeBySession[sessionId];
-        if (currentRuntime?.settledSeq !== roundId || (currentRuntime.activitySeq ?? currentRuntime.lastSeq) !== roundId) return;
+        if (
+          currentRuntime?.settledSeq !== roundId ||
+          (currentRuntime.activitySeq ?? currentRuntime.lastSeq) !== roundId
+        )
+          return;
         if (statusOf(current, sessionId) !== 'idle') return;
         if ((current.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
         if ((current.queuedBySession[sessionId]?.length ?? 0) > 0) return;

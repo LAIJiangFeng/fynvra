@@ -58,7 +58,8 @@
     const orchestratorActive = phase >= 2 && phase < 9;
     sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
-    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
+    if (chatHead)
+      chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 9 ? 'done' : 'idle';
 
     const showTasks = phase >= 3;
     if (panelFiles) panelFiles.hidden = showTasks;
@@ -73,8 +74,12 @@
     const taskReview = element.querySelector('[data-task="model-review"]');
     const taskCount = element.querySelector('[data-task-count]');
     const run = element.querySelector('[data-run]');
-    if (taskImpl) taskImpl.dataset.state = phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
-    if (taskReview) taskReview.dataset.state = phase >= 7 ? 'done' : phase >= 6 ? 'review' : phase >= 5 ? 'run' : 'todo';
+    if (taskImpl)
+      taskImpl.dataset.state =
+        phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
+    if (taskReview)
+      taskReview.dataset.state =
+        phase >= 7 ? 'done' : phase >= 6 ? 'review' : phase >= 5 ? 'run' : 'todo';
     if (run) {
       run.dataset.done = phase >= 7 ? '2' : '0';
       run.dataset.total = phase >= 4 ? '2' : phase >= 3 ? '1' : '0';
@@ -94,7 +99,8 @@
 
     const chatHead = element.querySelector('[data-chat-head]');
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
-    if (chatHead) chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 7 ? 'done' : 'idle';
+    if (chatHead)
+      chatHead.dataset.state = orchestratorActive ? 'run' : phase >= 7 ? 'done' : 'idle';
 
     const showTasks = phase >= 3;
     const panelFiles = element.querySelector('[data-panel-view="files"]');
@@ -348,7 +354,8 @@
   });
 
   const handleMotionChange = () => activeScene?.handleMotion();
-  if (typeof motion.addEventListener === 'function') motion.addEventListener('change', handleMotionChange);
+  if (typeof motion.addEventListener === 'function')
+    motion.addEventListener('change', handleMotionChange);
   else motion.addListener(handleMotionChange);
 
   // 语言切换不重启动画：输入阶段重打当前语言，其余阶段沿用已显示的流程状态。

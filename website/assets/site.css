@@ -110,8 +110,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(1100px 620px at 50% -220px, var(--glow-blue), transparent 72%),
-    var(--paper);
+    radial-gradient(1100px 620px at 50% -220px, var(--glow-blue), transparent 72%), var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -911,7 +910,11 @@ kbd {
   height: 44px;
   padding: 0 16px;
   border-bottom: 1px solid var(--app-line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--app-side) 70%, var(--surface)), var(--app-side));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-side) 70%, var(--surface)),
+    var(--app-side)
+  );
 }
 
 .window-brand {
@@ -1393,7 +1396,11 @@ kbd {
 
 .strip {
   border-block: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--paper-2), color-mix(in srgb, var(--paper-2) 55%, var(--paper)));
+  background: linear-gradient(
+    180deg,
+    var(--paper-2),
+    color-mix(in srgb, var(--paper-2) 55%, var(--paper))
+  );
 }
 
 .strip-inner {
@@ -1590,8 +1597,16 @@ kbd {
   --warn: #f0c674;
   border-color: color-mix(in srgb, var(--accent) 24%, #2c322a);
   background:
-    radial-gradient(90% 100% at 100% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 58%),
-    radial-gradient(70% 80% at 0% 100%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 60%),
+    radial-gradient(
+      90% 100% at 100% 0%,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      70% 80% at 0% 100%,
+      color-mix(in srgb, var(--accent-2) 10%, transparent),
+      transparent 60%
+    ),
     #111411;
   color: var(--ink);
   box-shadow: 0 42px 80px -52px rgb(0 0 0 / 70%);
@@ -2447,8 +2462,16 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--accent) 28%, #2b302a);
   border-radius: 28px;
   background:
-    radial-gradient(90% 100% at 100% 0%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 58%),
-    radial-gradient(70% 80% at 0% 100%, color-mix(in srgb, var(--accent-2) 15%, transparent), transparent 62%),
+    radial-gradient(
+      90% 100% at 100% 0%,
+      color-mix(in srgb, var(--accent) 28%, transparent),
+      transparent 58%
+    ),
+    radial-gradient(
+      70% 80% at 0% 100%,
+      color-mix(in srgb, var(--accent-2) 15%, transparent),
+      transparent 62%
+    ),
     #111411;
   box-shadow: 0 50px 100px -60px rgb(0 0 0 / 70%);
   color: #f3f4ee;
@@ -2592,7 +2615,11 @@ kbd {
 .site-footer {
   padding: 72px 0 34px;
   border-top: 1px solid var(--line);
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--paper-2) 48%, transparent));
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--paper-2) 48%, transparent)
+  );
   color: var(--ink-2);
   font-size: 14.5px;
 }

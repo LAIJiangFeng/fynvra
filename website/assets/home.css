@@ -76,6 +76,7 @@
 .fd-scene-switch {
   display: none;
   width: max-content;
+  min-width: 0;
   max-width: 100%;
   align-items: center;
   gap: 4px;

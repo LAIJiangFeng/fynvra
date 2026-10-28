@@ -5,10 +5,17 @@
 
 .docs-app {
   --docs-sidebar: 292px;
+  --docs-viewport-height: 100vh;
   --docs-reading: 900px;
   --docs-gutter: clamp(24px, 4.2vw, 64px);
   --docs-radius: 12px;
   --docs-active: color-mix(in srgb, var(--ink) 10%, var(--surface));
+}
+
+@supports (height: 100dvh) {
+  .docs-app {
+    --docs-viewport-height: 100dvh;
+  }
 }
 
 .docs-app [hidden] {
@@ -75,14 +82,12 @@ html.docs-ready .docs-article {
 
 @media (min-width: 901px) {
   html.docs-ready body.docs-app {
-    height: 100vh;
-    height: 100dvh;
+    height: var(--docs-viewport-height);
     overflow: hidden;
   }
 
   html.docs-ready .docs-shell {
-    height: calc(100vh - var(--nav-h));
-    height: calc(100dvh - var(--nav-h));
+    height: calc(var(--docs-viewport-height) - var(--nav-h));
     min-height: 0;
   }
 
@@ -104,8 +109,7 @@ html.docs-ready .docs-article {
   flex-direction: column;
   align-self: start;
   width: var(--docs-sidebar);
-  height: calc(100vh - var(--nav-h));
-  height: calc(100dvh - var(--nav-h));
+  height: calc(var(--docs-viewport-height) - var(--nav-h));
   min-height: 0;
   border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 44%, var(--paper));
