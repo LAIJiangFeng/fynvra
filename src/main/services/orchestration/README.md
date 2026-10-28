@@ -92,6 +92,18 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   python / pytest / make 开头，其余 shell 元字符一律拒绝；默认另外只放行 git 只读子命令、拒绝 npm publish 之类的发布命令。
   这是护栏不是沙箱（node / npx / make 本身能执行任意代码），可通过 `checkPolicy` 替换。执行时关闭颜色、默认 20 分钟超时。
 
+## 已有遗留记录的恢复入口
+
+- 安装版必须包含该修复并重启 Main/agent worker。仅提交源码、更新 PR 或刷新仍在运行的旧版 Renderer 不会替换 Main 的实现。
+- 启动顺序是 `getAgentHost` 同步读取 `sessions.json` → `connectOrchestration` 接上 launcher → `openAll` 加载各工作区编排快照。
+  服务 ready 后检查已保存的当前 attempt；worker 会话确实不存在时立即结算 failed，不需新派任务或启动旧 worker。
+- Tasks 进入/刷新调用 `orchestration:snapshot` → `service.snapshot()`，再次幂等检查并返回真实失败状态。
+  结算经正常 store 观察层持久化，并由生产 `notifyChanged` 广播 `orchestration:changed`；没有 Renderer 状态过滤。
+- 新版 Main 内可调用 `service.reconcileWorkers()`（加载前无操作）或 `await service.snapshot()`；协调者现有
+  `list_workers` / `wait_for_workers` 同样触发检查。旧版未提供等价的公开结算入口；不要把 `cleanup_worktree abandon:true`
+  当作修复，因为它意味着主动放弃并删除资源，也不要直接修改 live JSON。
+- 会话仍存在且只有 idle/无输出时保持原状，不能仅凭任务年代或接管合并记录自动失败或验收 completed。
+
 ## 测试
 
 - `host.test.ts`：脚本化的 git exec（断言命令序列）+ 假 launcher，覆盖 10 个方法的成功与失败路径。

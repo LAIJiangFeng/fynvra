@@ -22,6 +22,7 @@ import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/bra
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
+import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
 
 class FakeProcess implements WorkerProcess {
@@ -155,6 +156,124 @@ describe('worker attempt lifecycle', () => {
     const identity = { sessionId: created.sessionId, generation: 1 };
     return { ...env, launcher, identity };
   }
+
+  it('production startup wiring recovers a persisted missing attempt before any worker forks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-orphan-startup-'));
+    dirs.push(dir);
+    const workspace = { id: 'ws-old', name: 'Old tasks', repoPath: dir, vcs: 'none' as const };
+    const startedAt = Date.now() - 24 * 60 * 60 * 1000;
+    const task = {
+      id: 'task_old',
+      runId: 'run_old',
+      title: 'Old task',
+      spec: 'Task brief',
+      roleId: 'worker',
+      status: 'in-progress',
+      dependsOn: [],
+    };
+    const dispatch = {
+      id: 'dispatch_old',
+      taskId: task.id,
+      workerSessionId: 'session_removed',
+      worktreeId: '',
+      branch: '',
+      mode: 'in-place',
+      startedAt,
+    };
+    const original = {
+      version: 1,
+      runs: [
+        {
+          id: task.runId,
+          workspaceId: workspace.id,
+          coordinatorSessionId: 'coordinator',
+          objective: 'Old work',
+          createdAt: startedAt,
+        },
+      ],
+      tasks: [task, { ...task, id: 'task_present' }],
+      dispatches: [
+        {
+          ...dispatch,
+          id: 'dispatch_prior',
+          settledAt: startedAt + 1,
+          outcome: 'succeeded',
+          summary: 'Previous attempt report',
+        },
+        { ...dispatch, startedAt: startedAt + 2 },
+        {
+          ...dispatch,
+          id: 'dispatch_present',
+          taskId: 'task_present',
+          workerSessionId: 'session_present',
+        },
+      ],
+      worktrees: [],
+      messages: [],
+    };
+    mkdirSync(join(dir, 'orchestration'));
+    const statePath = join(dir, 'orchestration', `${workspace.id}.json`);
+    writeFileSync(statePath, JSON.stringify(original));
+    const sessionsPath = join(dir, 'sessions.json');
+    const sessionsText = JSON.stringify({
+      version: 1,
+      sessions: [
+        {
+          id: 'session_present',
+          workspaceId: workspace.id,
+          roleId: 'worker',
+          title: 'Restored worker',
+          cwd: dir,
+          status: 'idle',
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          approvalMode: 'supervised',
+        },
+      ],
+    });
+    writeFileSync(sessionsPath, sessionsText);
+    const fork = vi.fn(() => {
+      throw new Error('Startup recovery must not fork a worker');
+    });
+    const roles = createFakeRoles();
+    const host = createAgentHost({
+      fork,
+      agentDir: join(dir, 'agent'),
+      store: createSessionStore({ filePath: sessionsPath }),
+      workspaces: { get: (id) => (id === workspace.id ? workspace : undefined) },
+      roles,
+      models: { resolve: async () => ({ ok: false, error: 'No model needed for recovery' }) },
+      broadcast: vi.fn(),
+    });
+    const notifyChanged = vi.fn();
+    const registry = createOrchestrationRegistry({
+      userDataPath: dir,
+      listWorkspaces: () => [workspace],
+      roles,
+      notifyChanged,
+    });
+    // Same ordering as index.ts: create the host (synchronously load sessions), connect, then start.
+    await connectOrchestration(host, registry);
+    const recovered = await registry.readSnapshot(workspace.id);
+    expect(recovered?.tasks.map((entry) => entry.status)).toEqual(['failed', 'in-progress']);
+    expect(recovered?.dispatches[0]).toEqual(original.dispatches[0]);
+    expect(recovered?.dispatches[1]).toMatchObject({
+      outcome: 'failed',
+      summary: expect.stringContaining('missing from the session registry'),
+    });
+    expect(recovered?.dispatches[2]).toEqual(original.dispatches[2]);
+    expect(notifyChanged).toHaveBeenCalledExactlyOnceWith(workspace.id);
+    expect(fork).not.toHaveBeenCalled();
+    expect(readFileSync(sessionsPath, 'utf8')).toBe(sessionsText);
+    await registry.flushAll();
+    const persisted = readFileSync(statePath, 'utf8');
+    expect(JSON.parse(persisted).tasks[0].status).toBe('failed');
+    notifyChanged.mockClear();
+    expect(await registry.serviceFor(workspace.id)?.snapshot()).toEqual(recovered);
+    await registry.flushAll();
+    expect(readFileSync(statePath, 'utf8')).toBe(persisted);
+    expect(notifyChanged).not.toHaveBeenCalled();
+  });
 
   it('settles a real retry through registry/host wiring and reconciles removal without a snapshot read', async () => {
     const env = setup();
