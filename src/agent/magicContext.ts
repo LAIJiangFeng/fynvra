@@ -143,7 +143,9 @@ export function createMagicContextCompaction(
           delete (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL];
         } catch {}
       }
-      if (bootStatus !== undefined && bootStatus !== 'ready') {
+      if (bootStatus === undefined) {
+        warnings.push('Magic Context did not report startup; pi native compaction stays active.');
+      } else if (bootStatus !== 'ready') {
         warnings.push(
           `Magic Context storage did not initialize (${bootStatus}); pi native compaction stays active.`
         );
