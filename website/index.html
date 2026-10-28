@@ -14,7 +14,7 @@
       name="description"
       content="Fynvra 是开源的本地桌面 AI 编程工作台：主 Agent 拆分需求，派发到独立的 git worktree，再审查、检查并合并。An open-source desktop AI coding workbench with built-in multi-agent orchestration."
     />
-    <meta name="theme-color" content="#f3f1ec" />
+    <meta name="theme-color" content="#f7f6f2" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Fynvra" />
     <meta
@@ -82,24 +82,24 @@
     <main id="main">
       <section class="hero">
         <div class="container">
-          <p class="hero-badge rise" style="--i: 0">
-            <span class="badge-dot" aria-hidden="true"></span
-            ><span data-l="zh">开源 · 本地优先 · 内置多 Agent 编排</span
-            ><span data-l="en">Open source · Local-first · Multi-agent built in</span>
-          </p>
-          <h1 class="hero-title rise" style="--i: 1">
-            <span data-l="zh"
-              >只和一个 Agent 对话，<br />一支团队并行<span class="rotator" aria-hidden="true"
-                ><span>修 Bug。</span><span>写测试。</span><span>做重构。</span><span>补文档。</span></span
-              ><span class="sr-only">修 Bug、写测试、做重构、补文档。</span></span
-            >
-            <span data-l="en"
-              >Talk to one agent.<br />A team <span class="rotator" aria-hidden="true"
-                ><span>fixes bugs.</span><span>writes tests.</span><span>refactors.</span><span>ships docs.</span></span
-              ><span class="sr-only">fixes bugs, writes tests, refactors, and ships docs.</span></span
-            >
-          </h1>
-          <div class="hero-grid">
+          <div class="hero-intro">
+            <p class="hero-badge rise" style="--i: 0">
+              <span class="badge-dot" aria-hidden="true"></span
+              ><span data-l="zh">开源 · 本地优先 · 内置多 Agent 编排</span
+              ><span data-l="en">Open source · Local-first · Multi-agent built in</span>
+            </p>
+            <h1 class="hero-title rise" style="--i: 1">
+              <span data-l="zh"
+                >只和一个 Agent 对话，<br />一支团队并行<span class="rotator" aria-hidden="true"
+                  ><span>修 Bug。</span><span>写测试。</span><span>做重构。</span><span>补文档。</span></span
+                ><span class="sr-only">修 Bug、写测试、做重构、补文档。</span></span
+              >
+              <span data-l="en"
+                >Talk to one agent.<br />A team <span class="rotator" aria-hidden="true"
+                  ><span>fixes bugs.</span><span>writes tests.</span><span>refactors.</span><span>ships docs.</span></span
+                ><span class="sr-only">fixes bugs, writes tests, refactors, and ships docs.</span></span
+              >
+            </h1>
             <div class="hero-copy rise" style="--i: 2">
               <p class="hero-lead" data-l="zh">
                 Fynvra 是开源的桌面 AI 编程工作台。主 Agent 把你的需求拆成任务，为每个任务开一个独立的 git worktree
@@ -125,46 +125,22 @@
                 </a>
               </div>
               <p class="hero-meta">
-                Windows x64 · macOS Intel / Apple Silicon ·
+                <span>Windows x64 · macOS Intel / Apple Silicon</span>
+                <span aria-hidden="true">/</span>
+                <span>Apache-2.0</span>
+                <span aria-hidden="true">/</span>
                 <a href="#start"><span data-l="zh">从源码运行</span><span data-l="en">Run from source</span></a>
               </p>
             </div>
-            <aside class="spec rise" style="--i: 3">
-              <p class="spec-head"><span>FYNVRA</span><span data-l="zh">规格表</span><span data-l="en">SPEC SHEET</span></p>
-              <dl>
-                <div>
-                  <dt><span data-l="zh">运行时</span><span data-l="en">Runtime</span></dt>
-                  <dd>Electron · pi SDK</dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">编排</span><span data-l="en">Agents</span></dt>
-                  <dd><span data-l="zh">1 个主 Agent + N 个 Worker</span><span data-l="en">1 orchestrator + N workers</span></dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">隔离</span><span data-l="en">Isolation</span></dt>
-                  <dd><span data-l="zh">每个任务一个 git worktree</span><span data-l="en">One git worktree per task</span></dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">分支</span><span data-l="en">Branches</span></dt>
-                  <dd>fynvra/&lt;slug&gt; · merge --no-ff</dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">审批</span><span data-l="en">Approvals</span></dt>
-                  <dd><span data-l="zh">3 档 + 保护底线</span><span data-l="en">3 modes + a hard floor</span></dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">协议</span><span data-l="en">Protocols</span></dt>
-                  <dd>Anthropic · OpenAI · Google</dd>
-                </div>
-                <div>
-                  <dt><span data-l="zh">许可</span><span data-l="en">License</span></dt>
-                  <dd>Apache-2.0</dd>
-                </div>
-              </dl>
-            </aside>
           </div>
 
-          <figure class="showcase rise" style="--i: 4">
+          <figure class="showcase rise" style="--i: 3">
+            <div class="showcase-caption">
+              <span class="showcase-tag"
+                ><i aria-hidden="true"></i><span data-l="zh">产品界面</span><span data-l="en">Product preview</span></span
+              >
+              <span data-l="zh">界面示意，非截图</span><span data-l="en">Interface illustration, not a screenshot</span>
+            </div>
             <div class="window" aria-hidden="true">
               <div class="window-bar">
                 <span class="window-brand">
@@ -332,6 +308,46 @@
               <span><b>4</b><span data-l="zh">审批档位与模型</span><span data-l="en">Approval mode and model</span></span>
             </figcaption>
           </figure>
+
+          <div class="spec-strip rise" style="--i: 4">
+            <div class="spec-strip-head">
+              <span class="spec-kicker"
+                ><span data-l="zh">实现细节</span><span data-l="en">Under the hood</span></span
+              >
+              <span class="spec-strip-title" data-l="zh">规格</span>
+              <span class="spec-strip-title" data-l="en">The specs</span>
+            </div>
+            <dl>
+              <div>
+                <dt><span data-l="zh">运行时</span><span data-l="en">Runtime</span></dt>
+                <dd>Electron · pi SDK</dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">编排</span><span data-l="en">Agents</span></dt>
+                <dd><span data-l="zh">1 个主 Agent + N 个 Worker</span><span data-l="en">1 orchestrator + N workers</span></dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">隔离</span><span data-l="en">Isolation</span></dt>
+                <dd><span data-l="zh">每任务独立 worktree</span><span data-l="en">A worktree per task</span></dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">分支</span><span data-l="en">Branches</span></dt>
+                <dd>fynvra/&lt;slug&gt; · merge --no-ff</dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">审批</span><span data-l="en">Approvals</span></dt>
+                <dd><span data-l="zh">3 档 + 保护底线</span><span data-l="en">3 modes + a hard floor</span></dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">协议</span><span data-l="en">Protocols</span></dt>
+                <dd>Anthropic · OpenAI · Google</dd>
+              </div>
+              <div>
+                <dt><span data-l="zh">许可</span><span data-l="en">License</span></dt>
+                <dd>Apache-2.0</dd>
+              </div>
+            </dl>
+          </div>
         </div>
       </section>
 
@@ -378,7 +394,7 @@
           </header>
 
           <div class="stage reveal" data-stage>
-            <div class="stage-nav" role="tablist" aria-label="操作演示">
+            <div class="stage-nav" role="tablist" aria-label="操作演示 / Demo">
               <button type="button" role="tab" id="scene-tab-0" aria-controls="scene-panel-0" aria-selected="true">
                 <span class="stage-num">01</span>
                 <span data-l="zh">挂入目录</span><span data-l="en">Attach a folder</span>
@@ -537,7 +553,7 @@
           </header>
 
           <div class="bento">
-            <article class="card card-wide reveal">
+            <article class="card card-wide card-spotlight reveal">
               <div class="card-copy">
                 <p class="card-tag">Orchestrator</p>
                 <h3><span data-l="zh">主 Agent 只派活，不动手</span><span data-l="en">An orchestrator that delegates</span></h3>
@@ -662,7 +678,7 @@
               </div>
             </article>
 
-            <article class="card reveal">
+            <article class="card card-tint card-tint-warm reveal">
               <p class="card-tag">Providers</p>
               <h3><span data-l="zh">模型自己选，配置可导入</span><span data-l="en">Your models, imported</span></h3>
               <p data-l="zh">支持 Anthropic、OpenAI（Responses 与 Chat Completions）和 Google 协议；Claude Code、Codex、CC Switch 里的配置可直接导入。</p>
@@ -683,7 +699,7 @@
               </div>
             </article>
 
-            <article class="card card-wide reveal">
+            <article class="card card-wide card-showcase reveal">
               <div class="card-copy">
                 <p class="card-tag">Files · Terminal · Diff</p>
                 <h3><span data-l="zh">文件、终端、改动，不用切窗口</span><span data-l="en">Files, terminals, and diffs in one place</span></h3>
@@ -715,7 +731,7 @@
               </div>
             </article>
 
-            <article class="card reveal">
+            <article class="card card-tint card-tint-mint reveal">
               <p class="card-tag">Usage</p>
               <h3><span data-l="zh">花了多少，交付多少</span><span data-l="en">What it cost, what it shipped</span></h3>
               <p data-l="zh">统计 Token、费用、缓存命中率，以及一次验收通过率和打回次数。数据只从本机会话记录里读。</p>
@@ -928,6 +944,11 @@
             </div>
 
             <div class="guards reveal">
+              <p class="guards-title">
+                <span class="spec-kicker"
+                  ><span data-l="zh">运行时护栏</span><span data-l="en">Runtime guardrails</span></span
+                >
+              </p>
               <div class="guard">
                 <span class="guard-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
