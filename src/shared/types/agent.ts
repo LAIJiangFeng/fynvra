@@ -19,6 +19,7 @@ import {
   parseChatImages,
   type SessionStatus,
 } from './chat';
+import { type CompactionStrategy, isCompactionStrategy } from './settings';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -110,6 +111,11 @@ export interface SpawnSessionSpec {
    * 缺省时由 pi 自己找，Windows 上可能取到 PATH 上的 WSL bash.exe
    */
   shellPath?: string;
+  /**
+   * 上下文自动压缩策略：缺省为 pi 原生自动压缩，只有 `off` 会关掉它。
+   * Main 在新会话或应用重启后恢复会话时读取已保存的设置；运行中的会话不热切换
+   */
+  compactionStrategy?: CompactionStrategy;
   /**
    * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
@@ -564,6 +570,13 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
   const { cwd, sessionFile, worker, shellPath, inPlace } = record;
+  const compactionStrategy =
+    record.compactionStrategy === undefined
+      ? undefined
+      : isCompactionStrategy(record.compactionStrategy)
+        ? record.compactionStrategy
+        : null;
+  if (compactionStrategy === null) return null;
   const instructionFile =
     record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
   if (
@@ -597,6 +610,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
         }
       : {}),
     ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
+    ...(compactionStrategy ? { compactionStrategy } : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
   };
 }

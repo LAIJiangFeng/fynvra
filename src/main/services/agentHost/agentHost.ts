@@ -36,6 +36,7 @@ import type {
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
+import type { CompactionStrategy } from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
@@ -85,6 +86,8 @@ export interface AgentHostDeps {
   resolveResources?(role: Role): Promise<RoleResources>;
   /** 会话 bash 工具用的 shell（生产为 createShellPathResolver）；缺省或返回 undefined 时由 pi 自己找 */
   resolveShellPath?(): Promise<string | undefined>;
+  /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 native */
+  resolveCompactionStrategy?(): CompactionStrategy;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   workerOptions?: Pick<
     WorkerClientOptions,
@@ -234,6 +237,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.resolveResources ??
     (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const resolveShellPath = deps.resolveShellPath ?? (async () => undefined);
+  const resolveCompactionStrategy = deps.resolveCompactionStrategy ?? (() => 'native' as const);
   const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
@@ -418,6 +422,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
+      const compactionStrategy = resolveCompactionStrategy();
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
@@ -435,6 +440,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           roles,
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
+          ...(compactionStrategy === 'off' ? { compactionStrategy } : {}),
           ...(inPlace ? { inPlace: true } : {}),
         },
       };

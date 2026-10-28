@@ -11,7 +11,7 @@ import {
   type SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import { sessionPreferencesOf } from '@shared/types/settings';
+import { compactionStrategyOf, sessionPreferencesOf } from '@shared/types/settings';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
@@ -126,6 +126,7 @@ function createAppAgentHost(): AgentHostService {
       mcpServers: getMcpRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
+    resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     broadcast: sendToAllWindows,
   });

@@ -1,6 +1,9 @@
 import { errorMessage } from '@shared/guards';
 import {
+  type CompactionStrategy,
+  compactionStrategyOf,
   type PickWorktreesRootResult,
+  type Preferences,
   type SessionPreferences,
   sessionPreferencesOf,
   type TimelinePreferences,
@@ -141,13 +144,16 @@ void useKeybindingsStore.getState().load();
 window.fynvra.settings.onChanged(() => {
   void useKeybindingsStore.getState().load();
 });
-// --- sessions / timeline ---
-type GeneralPatch = Partial<SessionPreferences & TimelinePreferences>;
+// --- sessions / timeline / context ---
+type GeneralPatch = Partial<
+  SessionPreferences & TimelinePreferences & Pick<Preferences, 'compactionStrategy'>
+>;
 
 export interface GeneralPreferencesState {
   /** 生效值：没写过的取默认值；读到 Main 的值之前也是默认值 */
   sessions: SessionPreferences;
   timeline: TimelinePreferences;
+  compaction: CompactionStrategy;
   /** 最近一次保存失败的原因 */
   error: string | null;
   load(): Promise<void>;
@@ -159,6 +165,7 @@ function resolveGeneral(preferences: GeneralPatch) {
   return {
     sessions: sessionPreferencesOf(preferences),
     timeline: timelinePreferencesOf(preferences),
+    compaction: compactionStrategyOf(preferences),
   };
 }
 
@@ -183,7 +190,14 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
     async update(patch) {
       const request = ++writeRequest;
       readRequest += 1;
-      set((state) => resolveGeneral({ ...state.sessions, ...state.timeline, ...patch }));
+      set((state) =>
+        resolveGeneral({
+          ...state.sessions,
+          ...state.timeline,
+          compactionStrategy: state.compaction,
+          ...patch,
+        })
+      );
       const result = await safely(() => api.update(patch));
       if (!result.ok) {
         set({ error: translate('common.saveFailed', { error: result.error }) });

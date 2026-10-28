@@ -285,6 +285,12 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
 - `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
 
+### 7.8 上下文自动压缩
+
+- 通用设置 `preferences.compactionStrategy` 只有 `native`（默认）与 `off` 两种；`settings:update` 严格校验枚举，旧记录、缺省或磁盘上的非法值按 `native` 读取。`native` 沿用 pi 原生自动压缩及其阈值 / 保留量默认值，只配置这一个开关。
+- Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态。
+- 已有会话不打断、不重建、不热切换策略，worker 崩溃重启也沿用该会话打开时的缓存 spec；更改在新会话或重启应用后生效，不新增热更新通道。关闭只停用自动压缩，不改变模型的上下文上限，也没有手动压缩入口；不读取本机 pi / 扩展配置，不接入第三方 compaction 扩展。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
