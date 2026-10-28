@@ -768,95 +768,98 @@
       <section class="strip" aria-label="Providers">
         <div class="container strip-inner">
           <!--
-            品牌图标取自 Simple Icons（https://simpleicons.org，CC0-1.0），已本地化到 assets/providers/，
-            无运行时远端请求；商标归各厂商所有。
-            滚动轨道第 2、3 份副本只用于无缝循环，已对辅助技术隐藏。
+            品牌图标：Anthropic / OpenAI / Google Gemini / DeepSeek / Qwen 取自 Simple Icons（https://simpleicons.org，CC0-1.0）；
+            xAI 取自 xAI 官方标识（X.AI Corp.，公有领域 PD-textlogo，商标归 xAI），经 Wikimedia Commons 本地化。
+            均无运行时远端请求。滚动轨道第 2、3 份副本只用于无缝循环，已对辅助技术隐藏。
           -->
-          <div class="strip-row">
-            <p class="strip-label"><span data-l="zh">模型服务</span><span data-l="en">Model providers</span></p>
-            <div class="providers-marquee">
-              <div class="providers-track">
-                <ul class="providers-set">
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">Anthropic</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">OpenAI</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">Google Gemini</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">DeepSeek</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">Qwen</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="21" height="21" aria-hidden="true" />
-                    <span class="provider-name">xAI</span>
-                  </li>
-                </ul>
-                <ul class="providers-set" aria-hidden="true">
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Anthropic</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">OpenAI</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Google Gemini</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">DeepSeek</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Qwen</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">xAI</span>
-                  </li>
-                </ul>
-                <ul class="providers-set" aria-hidden="true">
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Anthropic</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">OpenAI</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Google Gemini</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">DeepSeek</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">Qwen</span>
-                  </li>
-                  <li class="provider">
-                    <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="21" height="21" />
-                    <span class="provider-name">xAI</span>
-                  </li>
-                </ul>
+          <div class="providers">
+            <p class="providers-title" id="providers-title"><span data-l="zh">模型服务</span><span data-l="en">Model providers</span></p>
+            <div class="providers-marquee" tabindex="0" role="group" aria-labelledby="providers-title">
+              <div class="providers-viewport">
+                <div class="providers-track">
+                  <ul class="providers-set">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                  <ul class="providers-set" aria-hidden="true">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                  <ul class="providers-set" aria-hidden="true">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
+
           <div class="strip-row">
             <p class="strip-label"><span data-l="zh">配置导入</span><span data-l="en">Import from</span></p>
             <ul class="strip-list strip-list-muted">
