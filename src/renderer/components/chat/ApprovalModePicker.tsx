@@ -1,12 +1,32 @@
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
-import { APPROVAL_MODES, isApprovalMode } from '@fynvra/core';
-import { Bell, Check, ChevronsUpDown } from 'lucide-react';
+import { APPROVAL_MODES, type ApprovalMode, isApprovalMode } from '@fynvra/core';
+import {
+  Check,
+  ChevronsUpDown,
+  type LucideIcon,
+  ShieldCheck,
+  ShieldHalf,
+  ShieldOff,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
+
+const MODE_ICON: Record<ApprovalMode, LucideIcon> = {
+  supervised: ShieldCheck,
+  'auto-edits': ShieldHalf,
+  full: ShieldOff,
+};
+
+/** 档位的配色：越宽松越醒目，完全放行用琥珀色提醒 */
+const MODE_TONE: Record<ApprovalMode, string> = {
+  supervised: '',
+  'auto-edits': 'text-sky-700 dark:text-sky-300',
+  full: 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+};
 
 /** 切换后闪一下（ring）的时长 */
 const FLASH_MS = 700;
@@ -26,8 +46,9 @@ function useFlash(value: unknown): boolean {
 }
 
 /**
- * 输入框中的操作通知范围；沿用旧 approvalMode 字段与 Shift+Tab 快捷键。
- * 所有范围均立即继续执行，只改变哪些工具操作产生通知。
+ * 输入框左下角、模型胶囊旁的审批胶囊：全程审批 / 自动接受编辑 / 完全放行。
+ * 点开是三项单选列表，每项只有名称与档位 id；输入框里 Shift+Tab 循环切换（见 Composer），快捷键只放在悬停提示里。
+ * 运行中也能切，下一次需要审批的工具调用起生效。
  */
 export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
@@ -36,6 +57,7 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
   const flashing = useFlash(mode);
   const t = useT();
   if (!mode) return null;
+  const Icon = MODE_ICON[mode];
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -45,11 +67,14 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
             type="button"
             title={t('approval.cycleHint')}
             data-flash={flashing ? '' : undefined}
-            className="flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[flash]:ring-2 data-[flash]:ring-primary/60 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground"
+            className={cn(
+              'flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs outline-none transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[flash]:ring-2 data-[flash]:ring-primary/60 data-[popup-open]:bg-accent data-[popup-open]:text-accent-foreground',
+              MODE_TONE[mode]
+            )}
           />
         }
       >
-        <Bell aria-hidden className="size-3.5 shrink-0" />
+        <Icon aria-hidden className="size-3.5 shrink-0" />
         <span>{t(`approval.modes.${mode}`)}</span>
         <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-60" />
       </PopoverTrigger>
@@ -65,15 +90,19 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
           className="grid gap-0.5"
         >
           {APPROVAL_MODES.map((option) => {
+            const OptionIcon = MODE_ICON[option];
             return (
               <Radio.Root
                 key={option}
                 value={option}
                 className="flex cursor-default select-none items-center gap-2.5 rounded-sm px-2 py-1.5 outline-none hover:bg-accent focus-visible:bg-accent data-[checked]:bg-accent/60"
               >
-                <Bell aria-hidden className="size-4 shrink-0" />
+                <OptionIcon aria-hidden className="size-4 shrink-0" />
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5 font-medium text-sm">
                   {t(`approval.modes.${option}`)}
+                  <span className="font-mono font-normal text-muted-foreground text-xs">
+                    {option}
+                  </span>
                 </span>
                 <Check
                   aria-hidden
@@ -83,26 +112,29 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
             );
           })}
         </RadioGroup>
-        <p className="px-2 py-2 text-muted-foreground text-xs">{t('approval.hint')}</p>
       </PopoverContent>
     </Popover>
   );
 }
 
-/** 状态栏中的通知范围，与执行权限无关。 */
+/** 状态栏里的审批档位：切换后同样闪一下；屏幕阅读器会读出新的档位 */
 export function ApprovalModeStatus({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
   const flashing = useFlash(mode);
   const t = useT();
   if (!mode) return null;
+  const Icon = MODE_ICON[mode];
   return (
     <span
       title={t('approval.statusHint')}
       aria-live="polite"
       data-flash={flashing ? '' : undefined}
-      className="flex shrink-0 items-center gap-1 rounded-sm px-1 transition-[color,box-shadow] data-[flash]:ring-2 data-[flash]:ring-primary/60"
+      className={cn(
+        'flex shrink-0 items-center gap-1 rounded-sm px-1 transition-[color,box-shadow] data-[flash]:ring-2 data-[flash]:ring-primary/60',
+        mode === 'full' && 'text-amber-700 dark:text-amber-300'
+      )}
     >
-      <Bell aria-hidden className="size-3 shrink-0" />
+      <Icon aria-hidden className="size-3 shrink-0" />
       {t(`approval.modes.${mode}`)}
     </span>
   );
