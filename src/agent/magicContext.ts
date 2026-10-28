@@ -126,9 +126,11 @@ export function createMagicContextCompaction(
 
       let bootStatus: string | undefined;
       // The vendored plugin reports its storage boot result through this symbol.
-      (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL] = (status: unknown) => {
-        if (typeof status === 'string') bootStatus = status;
-      };
+      try {
+        (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL] = (status: unknown) => {
+          if (typeof status === 'string') bootStatus = status;
+        };
+      } catch {}
       try {
         await module.default(pi);
       } catch (error) {
@@ -137,7 +139,9 @@ export function createMagicContextCompaction(
         );
         return;
       } finally {
-        delete (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL];
+        try {
+          delete (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL];
+        } catch {}
       }
       if (bootStatus !== undefined && bootStatus !== 'ready') {
         warnings.push(
