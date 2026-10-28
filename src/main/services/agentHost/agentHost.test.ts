@@ -14,6 +14,8 @@ import type {
 } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createOrchestrationRegistry } from '../orchestration/registry';
+import { createFakeExec, createFakeRoles } from '../orchestration/testing';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/branches';
@@ -136,6 +138,211 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('worker attempt lifecycle', () => {
+  async function dispatched() {
+    const env = setup();
+    const launcher = env.host.implementsLauncher();
+    const created = await launcher.createWorkerSession({
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'worker',
+      cwd: env.workspace.repoPath,
+      brief: 'First attempt',
+    });
+    if (!created.ok) throw new Error(created.error);
+    const identity = { sessionId: created.sessionId, generation: 1 };
+    return { ...env, launcher, identity };
+  }
+
+  it('settles a real retry through registry/host wiring and reconciles removal without a snapshot read', async () => {
+    const env = setup();
+    const registry = createOrchestrationRegistry({
+      userDataPath: env.dir,
+      listWorkspaces: () => [env.workspace],
+      roles: createFakeRoles(),
+      launcher: env.host.implementsLauncher(),
+      notifyChanged: vi.fn(),
+      exec: createFakeExec().exec,
+      runChecks: async () => ({ exitCode: 0, output: '', durationMs: 0 }),
+    });
+    env.host.setWorkerHostFactory((sessionId) => registry.workerHostFor(sessionId));
+    const coordinator = registry.hostFor('coordinator', env.workspace.id);
+    const launched = await coordinator?.dispatchTask({
+      title: 'Task',
+      spec: 'Do it',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!launched?.ok || !launched.dispatch) throw new Error('dispatch failed');
+    const dispatch = launched.dispatch;
+    const identity = { sessionId: dispatch.workerSessionId, generation: 1 };
+    const report = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: callId },
+      });
+    report('first');
+    await flush();
+    const retry = coordinator?.rejectWork({
+      dispatchId: dispatch.id,
+      feedback: 'Fix review feedback',
+    });
+    await flush();
+    report('late first report');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: false } });
+    expect(env.sent('prompt')).toHaveLength(1);
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    expect(await retry).toMatchObject({ ok: true });
+    report('retry report');
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: true } });
+    const service = registry.serviceFor(env.workspace.id);
+    const snapshot = await service?.snapshot();
+    expect(snapshot?.dispatches.map((entry) => entry.summary)).toEqual(['first', 'retry report']);
+    expect(snapshot?.tasks[0]?.status).toBe('in-review');
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    const retryId = snapshot?.dispatches[1]?.id ?? '';
+    expect(
+      await coordinator?.rejectWork({ dispatchId: retryId, feedback: 'One more check' })
+    ).toMatchObject({ ok: true });
+    await env.host.remove(identity.sessionId);
+    // readSnapshot intentionally does not reconcile: this proves the removal event already did.
+    const removed = await registry.readSnapshot(env.workspace.id);
+    expect(removed?.tasks[0]?.status).toBe('failed');
+    expect(removed?.dispatches.map((entry) => entry.outcome)).toEqual([
+      'succeeded',
+      'succeeded',
+      'failed',
+    ]);
+    expect(removed?.dispatches[2]?.summary).toContain('missing from the session registry');
+    expect(removed?.worktrees).toHaveLength(1);
+    await registry.flushAll();
+  });
+
+  it('waits for an actual idle boundary and pins old host calls while retry feedback is queued', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const first: WorkerHost = {
+      askCoordinator: vi.fn<WorkerHost['askCoordinator']>(async () => ({ ok: true, answer: null })),
+      reportDone: vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true })),
+    };
+    const next: WorkerHost = {
+      ...first,
+      reportDone: vi.fn<WorkerHost['reportDone']>(async () => ({ ok: true })),
+    };
+    let current = first;
+    env.host.setWorkerHostFactory(() => current);
+    const report = (callId: string) =>
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: env.identity,
+        callId,
+        kind: 'worker',
+        method: 'reportDone',
+        input: { outcome: 'succeeded', summary: callId },
+      });
+    report('first');
+    await flush();
+    current = next; // reject_work registered its next dispatch while the old run is finishing.
+    const delivery = env.launcher.promptSession(sessionId, 'Review feedback');
+    await flush();
+    env
+      .worker()
+      .emit({ type: 'session-status', identity: env.identity, status: 'waiting-approval' });
+    await flush();
+    expect(env.sent('prompt')).toHaveLength(1);
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    report('late');
+    await flush();
+    expect(first.reportDone).toHaveBeenCalledTimes(2);
+    expect(next.reportDone).not.toHaveBeenCalled();
+    env.worker().emit({ type: 'session-status', identity: env.identity, status: 'idle' });
+    expect(await delivery).toEqual({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(2);
+    report('retry');
+    await flush();
+    expect(next.reportDone).toHaveBeenCalledWith('succeeded', 'retry', undefined);
+  });
+
+  it.each(['remove', 'abort', 'dispose'] as const)(
+    'does not revive queued feedback after %s',
+    async (stop) => {
+      const env = await dispatched();
+      const pending = env.launcher.promptSession(env.identity.sessionId, 'Review feedback');
+      await flush();
+      if (stop === 'dispose') await env.launcher.disposeSession(env.identity.sessionId);
+      else await env.host[stop](env.identity.sessionId);
+      expect(await pending).toMatchObject({ ok: false });
+      expect(env.sent('prompt')).toHaveLength(1);
+    }
+  );
+
+  it('does not treat restored idle/error or never-spawned sessions as interrupted', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const launcher = env.host.implementsLauncher();
+    expect(launcher.sessionFailure?.(session.id)).toBeUndefined();
+    env.store.update(session.id, { status: 'error' });
+    expect(launcher.sessionFailure?.(session.id)).toBeUndefined();
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(launcher.sessionFailure?.('missing')).toContain('missing from the session registry');
+  });
+
+  it('records only definitive termination, drops stale generations, and notifies on removal', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: false,
+      error: 'Temporary failure',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    env.worker().emit({
+      type: 'session-error',
+      identity: { ...env.identity, generation: 0 },
+      fatal: true,
+      error: 'Stale failure',
+    });
+    expect(changed).not.toHaveBeenCalled();
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: true,
+      error: 'Session could not start',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('Session could not start');
+    expect(changed).toHaveBeenCalledTimes(1);
+    await env.host.remove(sessionId);
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('missing from the session registry');
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a running worker process crash without mistaking automatic respawn for recovery', async () => {
+    const env = await dispatched();
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    env.worker().exit(7);
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toContain('exited (code 7)');
+    expect(changed).toHaveBeenCalledTimes(1);
+    await flush();
+    env.worker().emit({ type: 'ready' });
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toContain('exited (code 7)');
+    expect(await env.launcher.promptSession(env.identity.sessionId, 'Explicit retry')).toEqual({
+      ok: true,
+    });
+    expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toBeUndefined();
+  });
+});
 
 describe('automatic coordinator continuation delivery', () => {
   it('sends one prompt only while idle, without treating it as a user continuation', async () => {

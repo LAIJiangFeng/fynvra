@@ -59,7 +59,7 @@ function describeReport(summary: string, files: readonly string[] | undefined): 
  * worker 工具背后的宿主（ARCHITECTURE §9.5），绑定一次尝试（dispatch）：
  * - `askCoordinator`：投 `question` 给 coordinator，等 `replyTo` 指向它的 `reply`；超时 `answer: null`。
  * - `reportDone`：结算 dispatch（succeeded → task `in-review`，failed → `failed`）再投 `worker_done`。
- *   本次尝试已结算、又没有新的尝试时（send_to_worker 之后的追加汇报），只把汇报转给 coordinator。
+ *   每个 attempt 只能成功报告一次；重复或过期报告不转发，也不改写历史。
  */
 export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
   const { store, inbox, runId, dispatchId } = deps;
@@ -126,13 +126,14 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
           body: describeReport(summary, files),
         };
 
+        const current = store.dispatches.list((entry) => entry.taskId === task.id).at(-1);
+        if (current?.id !== dispatch.id) {
+          return fail(`dispatch ${dispatch.id} was superseded by ${current?.id}`);
+        }
         if (isDispatchSettled(dispatch)) {
-          const next = store.activeDispatch(task.id);
-          if (next !== undefined) {
-            return fail(`dispatch ${dispatch.id} was superseded by ${next.id}`);
-          }
-          const posted = inbox.post({ ...message, subject: `${outcome} (follow-up)` });
-          return posted.ok ? { ok: true } : posted;
+          return fail(
+            `report_done was already recorded for attempt ${dispatch.id}; use reject_work for a new attempt`
+          );
         }
         if (task.status !== 'in-progress') {
           return fail(`task ${task.id} is ${task.status}; this attempt can no longer be reported`);

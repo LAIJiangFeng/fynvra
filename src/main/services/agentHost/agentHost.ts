@@ -191,6 +191,12 @@ interface LiveSession {
   transcript: Transcript | null;
   /** 进行中的 host 调用：`<generation>:<callId>` → 中止器 */
   calls: Map<string, AbortController>;
+  /** Bound lazily after initial dispatch registration, retained for the entire run */
+  workerHost: WorkerHost | null;
+  interruption?: string;
+  lastError?: string;
+  /** Invalidates queued orchestration prompts on explicit stop/removal/crash */
+  roundEpoch: number;
 }
 
 interface PendingApproval {
@@ -242,6 +248,28 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
   let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
   const observers = new Set<SessionObserver>();
+  const failureListeners = new Set<() => void>();
+  const roundWaiters = new Set<() => void>();
+  const roundQueue = new Map<string, Promise<Result>>();
+
+  const wakeRounds = () => {
+    for (const wake of [...roundWaiters]) wake();
+  };
+  function announceFailure(sessionId: string): void {
+    for (const listener of failureListeners) {
+      try {
+        listener();
+      } catch (error) {
+        log('warn', `session ${sessionId} failure listener: ${errorMessage(error)}`);
+      }
+    }
+  }
+  function interrupted(sessionId: string, state: LiveSession, reason: string): void {
+    state.interruption = reason;
+    state.roundEpoch += 1;
+    wakeRounds();
+    announceFailure(sessionId);
+  }
 
   const client = createWorkerClient({
     fork: deps.fork,
@@ -267,6 +295,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         activity: 0,
         transcript: null,
         calls: new Map(),
+        workerHost: null,
+        roundEpoch: 0,
       };
       live.set(sessionId, state);
     }
@@ -332,6 +362,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   function setStatus(sessionId: string, status: SessionStatus): void {
+    wakeRounds();
     const stored = deps.store.get(sessionId);
     if (!stored || stored.status === status) return;
     deps.store.update(sessionId, { status, updatedAt: now() });
@@ -590,6 +621,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!state || event.seq <= state.workerSeq) return;
         state.workerSeq = event.seq;
         const { sessionId } = event.identity;
+        if (event.event.type === 'error') state.lastError = event.event.message;
+        if (event.event.type === 'agent_settled' && event.event.aborted) {
+          interrupted(sessionId, state, 'Worker attempt interrupted: the agent run was aborted');
+        }
         deliver(sessionId, state, event.event);
         if (event.event.type === 'agent_settled') {
           for (const [requestId, pending] of approvals) {
@@ -605,6 +640,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const state = currentOf(event.identity);
         if (!state) return;
         state.running = event.status === 'running' || event.status === 'waiting-approval';
+        if (event.status === 'error') {
+          interrupted(
+            event.identity.sessionId,
+            state,
+            `Worker attempt interrupted: ${state.lastError ?? 'the agent run ended with an error'}`
+          );
+        }
         setStatus(event.identity.sessionId, event.status);
         return;
       }
@@ -625,7 +667,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const state = currentOf(event.identity);
         if (!state) return;
         const { sessionId } = event.identity;
-        if (event.fatal) detach(sessionId, state);
+        state.lastError = event.error;
+        if (event.fatal) {
+          detach(sessionId, state);
+          interrupted(sessionId, state, `Worker attempt interrupted: ${event.error}`);
+        }
         deliver(sessionId, state, { type: 'error', source: 'host', message: event.error });
         setStatus(sessionId, 'error');
         return;
@@ -656,7 +702,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ? await invokeOrchestrationHost(host, method, input, controller.signal)
           : fail(NO_ORCHESTRATION_HOST);
       } else {
-        const host = stored.dispatchId !== undefined ? workerHostFor(stored.id) : null;
+        // Never rebind an old run to a retry inserted while report_done is returning.
+        if (stored.dispatchId !== undefined) state.workerHost ??= workerHostFor(stored.id);
+        const host = state.workerHost;
         result = host
           ? await invokeWorkerHost(host, method, input, controller.signal)
           : fail(NO_WORKER_HOST);
@@ -702,6 +750,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       detach(sessionId, state);
       state.respawn = willRestart;
       if (!wasRunning) continue;
+      interrupted(
+        sessionId,
+        state,
+        `Worker attempt interrupted: the agent process exited (code ${code})`
+      );
       deliver(sessionId, state, {
         type: 'error',
         source: 'host',
@@ -772,11 +825,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     type: 'prompt' | 'steer',
     sessionId: string,
     text: string,
-    images?: ChatImage[]
+    images?: ChatImage[],
+    freshRound = false
   ): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
+    const epoch = pending.roundEpoch;
     pending.activity += 1;
     tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
     pending.prompting += 1;
@@ -784,9 +839,22 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const spawned = await ensureSpawned(stored);
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
+      if (freshRound && (state.roundEpoch !== epoch || !deps.store.get(sessionId))) {
+        return fail('the worker was interrupted before feedback delivery');
+      }
+      if (freshRound && (state.running || pending.prompting > 1)) {
+        return fail(
+          'the worker started another run before feedback delivery; retry the instruction'
+        );
+      }
       const identity = identityOf(sessionId, state);
       if (!send({ type, identity, text, ...(images?.length ? { images } : {}) })) {
         return fail(translate('agent.workerUnavailable'));
+      }
+      if (!state.running) {
+        state.workerHost = null;
+        state.interruption = undefined;
+        state.lastError = undefined;
       }
       state.running = true;
       const current = deps.store.get(sessionId) ?? stored;
@@ -801,7 +869,37 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return { ok: true };
     } finally {
       pending.prompting -= 1;
+      wakeRounds();
     }
+  }
+
+  /** pi followUp stays in the old run; keep orchestration prompts in Main until it really ends. */
+  function promptWorkerRound(sessionId: string, text: string): Promise<Result> {
+    const state = liveOf(sessionId);
+    const epoch = state.roundEpoch;
+    const previous = roundQueue.get(sessionId) ?? Promise.resolve({ ok: true } as const);
+    const next = previous.then(async (): Promise<Result> => {
+      for (;;) {
+        const stored = deps.store.get(sessionId);
+        if (!stored) return fail(translate('common.sessionNotFound'));
+        if (state.roundEpoch !== epoch)
+          return fail('the worker was interrupted before feedback delivery');
+        if (!isBusy(stored)) break;
+        await new Promise<void>((resolve) => {
+          const wake = () => {
+            roundWaiters.delete(wake);
+            resolve();
+          };
+          roundWaiters.add(wake);
+        });
+      }
+      return deliverMessage('prompt', sessionId, text, undefined, true);
+    });
+    roundQueue.set(sessionId, next);
+    void next.finally(() => {
+      if (roundQueue.get(sessionId) === next) roundQueue.delete(sessionId);
+    });
+    return next;
   }
 
   /**
@@ -903,7 +1001,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   function disposeLive(sessionId: string): void {
     const state = live.get(sessionId);
-    if (state) state.activity += 1;
+    if (state) {
+      state.activity += 1;
+      state.roundEpoch += 1;
+      wakeRounds();
+    }
     tellObservers((observer) => observer.activity?.(sessionId, 'abort'));
     if (!state?.spawned) return;
     send({ type: 'dispose-session', identity: identityOf(sessionId, state) });
@@ -922,6 +1024,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     live.delete(sessionId);
     // 只删注册表记录；pi jsonl 保留（会话正文的权威源，误删可从文件恢复）
     deps.store.remove(sessionId);
+    wakeRounds();
+    announceFailure(sessionId);
     changed(stored.workspaceId);
     return { ok: true };
   }
@@ -987,7 +1091,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return { ok: true, sessionId: stored.id };
     },
     async promptSession(sessionId, text) {
-      const result = await prompt(sessionId, text);
+      const result = await promptWorkerRound(sessionId, text);
       return result.ok ? { ok: true } : result;
     },
     async readTranscript(sessionId, cursor) {
@@ -996,6 +1100,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const state = liveOf(sessionId);
       const { text, total } = (await ensureTranscript(stored, state)).read(cursor);
       return { ok: true, text, total, done: !state.running };
+    },
+    sessionFailure(sessionId) {
+      if (deps.store.exists(sessionId) === false) {
+        return 'Worker attempt interrupted: the worker session is missing from the session registry';
+      }
+      return live.get(sessionId)?.interruption;
+    },
+    onSessionFailure(listener) {
+      failureListeners.add(listener);
+      return () => failureListeners.delete(listener);
     },
     async disposeSession(sessionId) {
       disposeLive(sessionId);
@@ -1019,13 +1133,26 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     async shutdown(timeoutMs) {
       for (const stored of deps.store.all()) {
         const state = live.get(stored.id);
-        if (state) state.activity += 1;
+        if (state) {
+          state.activity += 1;
+          state.roundEpoch += 1;
+        }
         tellObservers((observer) => observer.activity?.(stored.id, 'abort'));
       }
+      wakeRounds();
       deps.store.flush();
       await client.shutdown(timeoutMs);
       failDescribes(translate('agent.workerUnavailable'));
-      for (const [sessionId, state] of live) detach(sessionId, state);
+      for (const [sessionId, state] of live) {
+        if (state.running) {
+          interrupted(
+            sessionId,
+            state,
+            'Worker attempt interrupted: the application shut down during the run'
+          );
+        }
+        detach(sessionId, state);
+      }
       deps.store.flush();
     },
     list(workspaceId) {
@@ -1076,6 +1203,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
       state.activity += 1;
+      state.roundEpoch += 1;
+      wakeRounds();
       tellObservers((observer) => observer.activity?.(sessionId, 'abort'));
       if (!state.spawned) return { ok: true };
       return send({ type: 'abort', identity: identityOf(sessionId, state) })

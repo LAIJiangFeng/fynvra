@@ -44,6 +44,38 @@ afterEach(() => {
 });
 
 describe('createOrchestrationRegistry', () => {
+  it('does not reconcile while unwired, then checks persisted sessions when the launcher connects', async () => {
+    const first = make({ launcher: createFakeLauncher() });
+    await first.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);
+    await first.flushAll();
+    const restored = make();
+    await restored.openAll();
+    expect((await restored.readSnapshot('ws_1'))?.tasks[0]?.status).toBe('in-progress');
+    const launcher = createFakeLauncher();
+    launcher.sessionFailure = () => 'Worker session removed';
+    restored.setLauncher(launcher);
+    expect((await restored.readSnapshot('ws_1'))?.tasks[0]?.status).toBe('failed');
+    await restored.flushAll();
+  });
+
+  it('usage reads remain read-only; a failure event reconciles already loaded services', async () => {
+    const launcher = createFakeLauncher();
+    let reason: string | undefined;
+    let notify: () => void = () => {};
+    launcher.sessionFailure = () => reason;
+    launcher.onSessionFailure = (listener) => {
+      notify = listener;
+      return () => {};
+    };
+    const registry = make({ launcher });
+    await registry.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);
+    reason = 'Worker process exited';
+    expect((await registry.readSnapshot('ws_1'))?.tasks[0]?.status).toBe('in-progress');
+    notify();
+    expect((await registry.readSnapshot('ws_1'))?.tasks[0]?.status).toBe('failed');
+    await registry.flushAll();
+  });
+
   it('按工作区 id 打开服务（同一个实例）；未知工作区为 undefined / null', () => {
     const registry = make();
     const service = registry.serviceFor('ws_1');

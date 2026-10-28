@@ -329,6 +329,34 @@ describe('createRoleSession end to end with a scripted model', () => {
     expect(worked).not.toContain(IN_PLACE_ORCHESTRATOR_PROMPT);
   });
 
+  it('keeps follow-up feedback in the old run, but reopens the guard for an actual new prompt', async () => {
+    const host = workerHost();
+    const { session } = await open({ role: role({}), workerHost: host });
+    const events: FynvraSessionEvent[] = [];
+    subscribeNormalized(session, (event) => events.push(event));
+    const report = (summary: string) =>
+      fauxAssistantMessage(fauxToolCall('report_done', { outcome: 'succeeded', summary }), {
+        stopReason: 'toolUse',
+      });
+    // Reproduce feedback arriving while report_done is still awaiting its Main result.
+    host.reportDone.mockImplementationOnce(async () => {
+      await session.prompt('Queued review feedback', { streamingBehavior: 'followUp' });
+      return { ok: true };
+    });
+    faux.setResponses([report('first'), report('queued feedback'), fauxAssistantMessage('Stop')]);
+    await session.prompt('Do the task');
+    expect(host.reportDone).toHaveBeenCalledTimes(1);
+    expect(
+      events.filter((event) => event.type === 'tool_end' && event.toolName === 'report_done')
+    ).toEqual([
+      expect.objectContaining({ isError: false }),
+      expect.objectContaining({ isError: true }),
+    ]);
+    faux.setResponses([report('new run')]);
+    await session.prompt('Feedback delivered after idle');
+    expect(host.reportDone.mock.calls.map((call) => call[1])).toEqual(['first', 'new run']);
+  });
+
   it('reopens report_done when a new run starts, e.g. after reject_work feedback', async () => {
     const host = workerHost();
     const { session } = await open({ role: role({}), workerHost: host });

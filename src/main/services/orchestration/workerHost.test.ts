@@ -92,16 +92,15 @@ describe('createWorkerHost · reportDone', () => {
     expect(toCoordinator()[0]).toMatchObject({ subject: 'failed', body: 'Could not reproduce.' });
   });
 
-  it('本次尝试已结算且没有新尝试：只把追加汇报转给 coordinator，不改 dispatch', async () => {
+  it('rejects an already settled attempt without rewriting or forwarding the report', async () => {
     seedTask('in-review');
     const before = seedDispatch('dispatch_1', true);
-    expect(await host().reportDone('succeeded', 'Also updated the docs.')).toEqual({ ok: true });
+    expect(await host().reportDone('succeeded', 'Also updated the docs.')).toMatchObject({
+      ok: false,
+    });
     expect(store.dispatches.get('dispatch_1')).toEqual(before);
     expect(store.tasks.get('task_1')?.status).toBe('in-review');
-    expect(toCoordinator()[0]).toMatchObject({
-      type: 'worker_done',
-      subject: 'succeeded (follow-up)',
-    });
+    expect(toCoordinator()).toEqual([]);
   });
 
   it('旧尝试已被新尝试取代时报错', async () => {
@@ -110,6 +109,27 @@ describe('createWorkerHost · reportDone', () => {
     seedDispatch('dispatch_2');
     const result = await host('dispatch_1').reportDone('succeeded', 'late');
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('dispatch_2') });
+    expect(toCoordinator()).toEqual([]);
+  });
+
+  it('only one concurrent report settles an attempt, even through different host instances', async () => {
+    seedTask();
+    seedDispatch();
+    const results = await Promise.all([
+      host().reportDone('succeeded', 'first'),
+      host().reportDone('failed', 'second'),
+    ]);
+    expect(results.map((result) => result.ok)).toEqual([true, false]);
+    expect(store.dispatches.get('dispatch_1')?.summary).toBe('first');
+    expect(toCoordinator()).toHaveLength(1);
+  });
+
+  it('rejects an old attempt even after the retry is settled', async () => {
+    seedTask('in-review');
+    const old = seedDispatch('dispatch_1', true);
+    const current = seedDispatch('dispatch_2', true);
+    expect(await host(old.id).reportDone('failed', 'late')).toMatchObject({ ok: false });
+    expect(store.dispatches.get(current.id)).toEqual(current);
     expect(toCoordinator()).toEqual([]);
   });
 

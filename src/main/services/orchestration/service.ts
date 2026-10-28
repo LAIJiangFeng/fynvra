@@ -17,6 +17,7 @@ import {
   type Message,
   type OrchestrationStore,
   type RoleStore,
+  settleDispatch,
   type Workspace,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
@@ -82,7 +83,9 @@ export interface OrchestrationService {
   coordinatorOf(runId: string): string | undefined;
   hasDispatch(dispatchId: string): boolean;
   /** 面板用的完整快照（§9.4）。 */
-  snapshot(): Promise<OrchestrationSnapshotView>;
+  snapshot(options?: { reconcile?: boolean }): Promise<OrchestrationSnapshotView>;
+  /** Only conclusive Main/session-registry evidence can settle an orphaned current attempt */
+  reconcileWorkers(): void;
   readWorkerOutput(input: {
     dispatchId: string;
     cursor: number;
@@ -189,6 +192,7 @@ export function createOrchestrationService(
   const inner = new InMemoryOrchestrationStore();
   let loaded = false;
   let flushQueued = false;
+  const pendingDispatches = new Set<string>();
 
   const persist = async (): Promise<void> => {
     const result = await inner.persistTo(statePath, fs);
@@ -242,6 +246,44 @@ export function createOrchestrationService(
     }
   })();
 
+  function reconcileWorkers(): void {
+    if (!loaded || !launcher.sessionFailure) return;
+    // Use insertion order, including settled attempts: an old unsettled row must not win over a retry.
+    const latest = new Map(store.dispatches.list().map((dispatch) => [dispatch.taskId, dispatch]));
+    for (const task of store.tasks.list((entry) => entry.status === 'in-progress')) {
+      const dispatch = latest.get(task.id);
+      if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id)) continue;
+      const run = store.runs.get(task.runId);
+      if (!run) continue;
+      const reason = launcher.sessionFailure(dispatch.workerSessionId);
+      if (!reason) continue;
+      // No awaits between evidence, current-attempt validation and writes.
+      if (
+        store.tasks.get(task.id)?.status !== 'in-progress' ||
+        store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id ||
+        isDispatchSettled(store.dispatches.get(dispatch.id) ?? dispatch)
+      )
+        continue;
+      const settled = settleDispatch(dispatch, 'failed', reason, dispatch.filesModified, now());
+      if (!settled.ok) continue;
+      const { id: _id, ...patch } = settled.dispatch;
+      // Preserve any pre-existing partial report as evidence alongside the interruption reason.
+      if (dispatch.summary) patch.summary = `${dispatch.summary}\n\n${reason}`;
+      if (!store.dispatches.update(dispatch.id, patch).ok) continue;
+      store.tasks.update(task.id, { status: 'failed' });
+      inbox.post({
+        runId: task.runId,
+        dispatchId: dispatch.id,
+        from: 'fynvra',
+        to: run.coordinatorSessionId,
+        type: 'worker_done',
+        subject: 'failed',
+        body: reason,
+      });
+    }
+  }
+  void ready.then(reconcileWorkers);
+
   const hosts = new Map<string, HostLookup>();
   const resolveHost = (coordinatorSessionId: string): HostLookup => {
     const cached = hosts.get(coordinatorSessionId);
@@ -269,6 +311,8 @@ export function createOrchestrationService(
         resolveWorktreesRoot: options.resolveWorktreesRoot,
         exec: options.exec,
         checkPolicy: options.checkPolicy,
+        pendingDispatches,
+        reconcileWorkers,
         now,
       });
       return { ok: true, host };
@@ -281,10 +325,12 @@ export function createOrchestrationService(
     return lookup;
   };
 
-  /** 该会话当前的尝试：进行中的优先，否则最近一次（打回后同一会话会有多次尝试）。 */
+  /** 该会话最近的已投递尝试；旧的未结算记录不能覆盖后来的尝试。 */
   const dispatchOfSession = (sessionId: string): Dispatch | undefined => {
-    const own = store.dispatches.list((dispatch) => dispatch.workerSessionId === sessionId);
-    return own.find((dispatch) => !isDispatchSettled(dispatch)) ?? own.at(-1);
+    const own = store.dispatches.list(
+      (dispatch) => dispatch.workerSessionId === sessionId && !pendingDispatches.has(dispatch.id)
+    );
+    return own.at(-1);
   };
 
   const bindWorker = (sessionId: string): HostResult<{ host: WorkerHost }> => {
@@ -307,25 +353,20 @@ export function createOrchestrationService(
 
     workerHostFor(sessionId) {
       if (!loaded || dispatchOfSession(sessionId) === undefined) return null;
-      // 每次调用重新绑定：reject_work 之后同一个会话换成了新的尝试
-      return {
-        askCoordinator: async (question, timeoutMs, signal) => {
-          const bound = bindWorker(sessionId);
-          return bound.ok ? bound.host.askCoordinator(question, timeoutMs, signal) : bound;
-        },
-        reportDone: async (outcome, summary, filesModified) => {
-          const bound = bindWorker(sessionId);
-          return bound.ok ? bound.host.reportDone(outcome, summary, filesModified) : bound;
-        },
-      };
+      // Fixed to this attempt. AgentHost retains it until the next actual run starts.
+      const bound = bindWorker(sessionId);
+      return bound.ok ? bound.host : null;
     },
 
     coordinatorOf: (runId) => (loaded ? store.runs.get(runId)?.coordinatorSessionId : undefined),
 
     hasDispatch: (dispatchId) => loaded && store.dispatches.get(dispatchId) !== undefined,
 
-    async snapshot() {
+    reconcileWorkers,
+
+    async snapshot({ reconcile = true } = {}) {
       await ready;
+      if (reconcile) reconcileWorkers();
       const { version: _version, ...view } = inner.snapshot();
       return view;
     },

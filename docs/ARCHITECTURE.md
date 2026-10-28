@@ -155,7 +155,7 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
-- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`（每轮只能成功调用一次，同一轮再次调用返回错误；新的 agent run 开始时重新开放，因此 Main 要把 `reject_work` 的 feedback 作为新 prompt 发给 worker，worker 才能再次汇报）。
+- worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 的反馈在 Main 等待旧 run 真正 idle 后才作为新 prompt 发出；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
@@ -402,7 +402,11 @@ export interface OrchestrationApi {
 export interface WorkerSessionLauncher {
   // worktreeId：in-place 的尝试（工作区没有 git）没有，cwd 就是工作区目录
   createWorkerSession(input: { workspaceId: string; runId: string; dispatchId: string; roleId: string; cwd: string; worktreeId?: string; brief: string }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+  // Main queues until a real run boundary, never a streaming follow-up
   promptSession(sessionId: string, text: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  // Undefined means present/unknown, not failed; registry loading must have finished
+  sessionFailure?(sessionId: string): string | undefined;
+  onSessionFailure?(listener: () => void): () => void;
   readTranscript(sessionId: string, cursor: number): Promise<{ ok: true; text: string; total: number; done: boolean } | { ok: false; error: string }>;
   disposeSession(sessionId: string): Promise<void>;
 }
@@ -443,6 +447,7 @@ export interface AgentHost {
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。
+- **失效尝试恢复**：服务加载完成、launcher 接线完成后，只在会话注册表完整读取并证明 worker 会话缺失，或 Main 收到当前 generation 的明确 fatal、运行中进程退出、aborted/最终 error、退出应用中断时，将当前未结算 Dispatch 记为 failed，Task 从 in-progress 改为 failed，投递失败原因并持久化、广播 changed。启动加载中、注册表不可读/部分损坏、尚未 fork、正常 idle、审批与 askCoordinator 等待均不是失败证据；不按超时或无输出判断。每次检查重验当前 attempt，反馈投递中的新 Dispatch 暂不参与绑定或恢复，避免注册/投递竞态。snapshot/list/wait 可触发检查，删除/异常退出事件及时触发；用量 readSnapshot 保持只读。已有报告/历史和 worktree/分支保留，in-review/completed/abandoned 不改，重复检查不复写 outcome。成功汇报仍需协调者验收；接管合并或 Git 祖先关系不能自动将遗留任务标为 completed。
 
 ### 9.6 `src/shared/types/llm.ts`（归属：settings-ui；agent-host 可逐字复制）
 ```ts

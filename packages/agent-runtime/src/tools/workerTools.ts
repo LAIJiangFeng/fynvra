@@ -106,11 +106,11 @@ export function createWorkerTools(
     name: 'report_done',
     label: 'Report done',
     description:
-      'Report the result of your task to your coordinator. Call it exactly once when you finish (or cannot finish), then stop. ' +
-      'Your coordinator only learns the result through this call.',
-    promptSnippet: 'Report your task result to the coordinator, exactly once, then stop',
+      'Report the result of your current attempt to your coordinator, exactly once per attempt, then stop. ' +
+      'Your coordinator only learns the result through this call',
+    promptSnippet: 'Report your current attempt to the coordinator, exactly once, then stop',
     promptGuidelines: [
-      'Call report_done exactly once, after your work is committed and verified (or when you cannot finish), and stop afterwards.',
+      'Call report_done once per attempt, after your work is committed and verified (or when you cannot finish), then stop',
     ],
     parameters: reportSchema,
     executionMode: 'sequential',
@@ -132,8 +132,8 @@ export function createWorkerTools(
           return errorResult(
             'report_done',
             reportState === 'reported'
-              ? 'report_done was already called for this task and can only be called once. Do not call it again; end your turn.'
-              : 'another report_done call is in progress; it can only be called once.'
+              ? 'report_done was already called for this round and can only be called once per round; stop until the coordinator starts a new attempt'
+              : 'another report_done call is in progress; it can only be called once per round'
           );
         }
         reportState = 'reporting';
@@ -145,10 +145,7 @@ export function createWorkerTools(
           );
           if (!result.ok) {
             reportState = 'open';
-            return errorResult(
-              'report_done',
-              `${result.error}. Nothing was reported; you can call report_done again.`
-            );
+            return errorResult('report_done', `${result.error}; this call was not accepted`);
           }
           reportState = 'reported';
         } catch (error) {
@@ -162,7 +159,7 @@ export function createWorkerTools(
               `- outcome: ${outcome}`,
               `- files modified: ${files?.length ?? 0}`,
               '',
-              'Stop here. Do not call report_done again or keep changing files unless you receive new instructions.',
+              'Stop here; do not call report_done again unless the coordinator starts a new attempt',
             ].join('\n')
           ),
           terminate: true,

@@ -15,6 +15,7 @@ export interface WorkerSessionLauncher {
     thinking?: ThinkingLevel;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
+  /** Start a real new run after the previous run is idle; never steer or enqueue a pi follow-up */
   promptSession(
     sessionId: string,
     text: string
@@ -25,5 +26,9 @@ export interface WorkerSessionLauncher {
   ): Promise<
     { ok: true; text: string; total: number; done: boolean } | { ok: false; error: string }
   >;
+  /** Main-only evidence; undefined means present or unknown, never infer failure from idle/timeouts */
+  sessionFailure?(sessionId: string): string | undefined;
+  /** Notify when a session is removed or a run definitively terminates abnormally */
+  onSessionFailure?(listener: () => void): () => void;
   disposeSession(sessionId: string): Promise<void>;
 }

@@ -42,11 +42,13 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   `workerHost` 代理），把 `brief` 作为第一条 prompt 提交，然后**立刻** resolve `{ ok: true, sessionId }`——不要等 worker
   这一轮跑完。Host 在它 resolve 之后同步写入 Dispatch（中间没有 await），worker 的第一次 `report_done` 才能找到它。
   `dispatchId` / `runId` / `worktreeId` 可以记进 `SessionSummary`（§9.2 有 `dispatchId`、`worktreeId` 字段）。
-- **WorkerHost 工厂按调用时机取**：收到 worker 的 host 调用时再 `workerHostFor(sessionId)`（或至少在
-  createWorkerSession resolve 之后）；Dispatch 写入之前它返回 `null`。返回的 WorkerHost 每次调用都会重新绑定到该会话
-  当前的 Dispatch（`reject_work` 之后同一会话换成了新的尝试），所以按会话缓存它没有问题。
-- **`promptSession`**：会话空闲时开始新的一轮（`reject_work` 依赖这一点重新开放 `report_done`），正在运行时按
-  steer / follow-up 投递（`send_to_worker` 的 instruction）。
+- **WorkerHost 工厂按 run 绑定**：收到 worker 的首次 host 调用时才 `workerHostFor(sessionId)`（Dispatch 写入之前返回
+  `null`）。返回的 WorkerHost 固定绑定该次尝试，Main 保留到下一次真实新 run 才重新查找；旧调用不能动态绑定到新尝试。
+- **`promptSession`**：编排指令/打回反馈先在 Main 排队，等旧 run 真正 idle 后才开始新 run（重跑 `before_agent_start`，
+  重新开放本地 `report_done` guard）。pi streaming `followUp` 可以在旧 run 内消费，不能当作新 run；
+  删除、abort、dispose、崩溃会取消尚未投递的反馈。审批/askCoordinator 等待不当作 idle；挂起提问的 reply 仍直接投收件箱。
+- **`sessionFailure` / `onSessionFailure`**：同步读取可信的缺失或明确异常终止证据，并在删除/异常终止时通知注册表。
+  undefined 是正常或未知，不能凭 idle、未 fork、超时、注册表尚未接线或损坏判失败。
 - **`readTranscript(sessionId, cursor)`**：worker 输出的文本投影（例如由它的 `FynvraSessionEvent` 拼出的正文与工具行），
   `cursor` 是字符偏移，返回 `{ text, total, done }`，`done` 表示会话空闲或已释放。Host 会再与 Dispatch 是否结算合并。
   会话释放后最好仍能从 pi jsonl 读到（面板会看已结束 worker 的输出）。
@@ -68,9 +70,14 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
 - **`send_to_worker`**：worker 正阻塞在 `ask_coordinator` → `reply`（并 ack 那条 question）；否则记 `instruction`
   并 `promptSession`，投递失败则撤回消息。已 completed / abandoned 的任务拒绝。
 - **`report_done`**：succeeded → task `in-review`，failed → task `failed`；先结算再投 `worker_done`。
-  尝试已结算且没有新尝试时（`send_to_worker` 之后的追加汇报）只转发一条 `worker_done`（subject 带 `(follow-up)`）。
-- **`reject_work`**：`in-review` 或 `failed` 的任务都可以打回，同一 worktree / 会话上新建 Dispatch，反馈作为新 prompt；
-  投递失败整体回滚。
+  每个 attempt 只报告一次，重复/并发及旧 attempt 的迟到报告拒绝，不转发或改写既有报告。需要再次交付时用 `reject_work` 新建 attempt。
+- **`reject_work`**：只允许当前 attempt 的 `in-review` / `failed` 任务打回，同一 worktree / 会话上新建 Dispatch，
+  反馈等旧 run 完结后作为新 prompt；投递中保护该 Dispatch，不参与恢复或工具绑定，失败回滚时不覆盖并发的显式 abandon。
+- **失效恢复**：状态和会话注册表加载后，snapshot/list/wait、launcher 接线或会话删除/异常终止事件触发 Main 检查。
+  只结算当前未结束且 Task 为 in-progress 的 attempt 为 failed，保留原报告/文件列表/历史及 worktree/分支，
+  记录真实中断理由并投递 `worker_done`，正常持久化及 changed 通知；重复检查不重写 outcome。
+  in-review/completed/abandoned 不动，审批、askCoordinator、idle、尚未 fork 或启动加载期间不误判。
+  用量 `readSnapshot` 不触发恢复。接管任务已合并不自动验收原任务，Git 祖先不是 completed 的证据路径。
 - **`merge_worktree`**：要求当前 dispatch、`in-review`、worktree 干净（含未跟踪文件）；验收通过后记为 `completed`，
   包括已审查的只读 / 空改动任务（Git 无需产生合并提交）。冲突返回 `{ merged: false, conflicts }`（不是错误），task 保持 `in-review`。
 - **`cleanup_worktree { dispatch_id, abandon? }`**：只操作当前 dispatch，默认仅允许 `completed` / `abandoned`；
