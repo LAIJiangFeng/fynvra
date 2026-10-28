@@ -161,7 +161,7 @@ export interface Message {
   `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
   不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
   不代表已确认实际服务档位；不增加自动降级重发逻辑。
-- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`），每条带 `seq`。
+- 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`），每条带 `seq`。
 
 ## 6. 主 agent 工作循环（产品核心）
 
@@ -289,12 +289,12 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 ### 7.8 上下文自动压缩
 
 - 通用设置 `preferences.compactionStrategy` 有 `native`（默认）、`off`、`magic-context` 三种；`settings:update` 严格校验枚举，旧记录、缺省或磁盘上的非法值按 `native` 读取。`native` 沿用 pi 原生自动压缩及其阈值 / 保留量默认值。
-- Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。`native` 不加载任何压缩扩展；`magic-context` 把受控的 Magic Context 内联扩展交给 `createRoleSession`，并保留 pi 原生压缩作为插件未就绪或失败时的回退。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态。
-- Magic Context 固定为 `@cortexkit/pi-magic-context` 0.41.3（MIT），资源在 `packages/agent-runtime/vendor/magic-context/`：只保留扩展入口、storage/core、日志/路径所需分片、TUI 桩与许可证，不包含 OpenCode/OMP TUI、子进程 runner、dreamer/sidekick/memory/embedding/quickjs/transformers 分片。打包经 electron-builder `extraResources` 放到 `resources/magic-context`，开发时从 vendor 目录解析；不扫描外部扩展，不读本机 `~/.pi` / `~/.config/cortexkit`，不迁移或共享终端 Magic 数据库。
+- Main 在每次构建 spawn spec 时读取已保存的设置，经 `SpawnSessionSpec.compactionStrategy` 交给 worker；worker 为每个会话新建内存 `SettingsManager`，仅 `off` 时写入 `compaction.enabled: false`。`native` 不加载任何压缩扩展；`magic-context` 把受控的 Magic Context 内联扩展交给 `createRoleSession`，并保留 pi 原生压缩作为插件未就绪、运行期失效或模型窗口装不下时的回退。主会话、派发的 worker 以及应用重启后恢复的会话使用同一份设置，会话之间不共享设置状态；Magic 的接管状态按会话独立失效，一个会话回退不影响其他会话。
+- Magic Context 固定为 `@cortexkit/pi-magic-context` 0.41.3（MIT），资源在 `packages/agent-runtime/vendor/magic-context/`：只保留扩展入口、storage/core、日志/路径所需分片、TUI 桩与许可证，不包含 OpenCode/OMP TUI、子进程 runner、dreamer/sidekick/memory/embedding/quickjs/transformers 分片。打包时固定从 `resources/magic-context` 解析，开发时固定从 `app.getAppPath()/packages/agent-runtime/vendor/magic-context` 解析；资源缺失就保留 native 并提示，不回退到 `process.cwd()` 或用户工作目录里的副本。不扫描外部扩展，不读本机 `~/.pi` / `~/.config/cortexkit`，不迁移或共享终端 Magic 数据库。
 - 插件数据全部在应用目录：配置 `userData/magic-context/config/cortexkit/magic-context.jsonc`，SQLite `userData/magic-context/storage/context.db`，historian dump `userData/magic-context/artifacts/`，日志 `userData/magic-context/magic-context.log`。生成的配置关闭 dreamer、sidekick、跨会话 memory/auto-search、embedding 与 todowrite，只启用上下文压缩；这些环境变量在一次 worker 生命周期内固定，不按会话 `chdir` 或改 env。
-- Historian 不启动终端 pi 或 Electron 子进程：vendored 插件的 `PiSubagentRunner` 交给 `src/agent/magicContext.ts`，后者按 Pi session id 路由到该会话的模型 getter 与中止信号，用会话自己的 `ModelRuntime`/model 在进程内完成请求。路由表没有“当前会话/当前模型”的进程级全局值；并发会话各有自己的条目与 in-flight 标记。每次 historian 使用请求开始时的当前会话模型，换模型后下一次用新模型；超时 180 秒（本地硬上限 5 分钟），会话 dispose 会中止在途请求。密钥仍只在 Main → worker 的 spawn 路径和会话 `ModelRuntime` 内存中，不写入插件配置、仓库或命令行。
+- Historian 不启动终端 pi 或 Electron 子进程：vendored 插件的 `PiSubagentRunner` 交给 `src/agent/magicContext.ts`，后者按 Pi session id 路由到该会话的模型 getter 与中止信号，用会话自己的 `ModelRuntime`/model 在进程内完成请求。路由表没有“当前会话/当前模型”的进程级全局值；并发会话各有自己的条目与 in-flight 标记。每次 historian 使用请求开始时的当前会话模型，换模型后下一次用新模型；超时 180 秒（本地硬上限 5 分钟），会话 dispose 会中止在途请求。预算与真实模型窗口相连：vendor 用当前上下文上限扣除 historian 系统提示和输出预留得到 chunk，host 再用当前 `ResolvedModel.contextWindow` 校验 `systemPrompt + userMessage + maxTokens`；装不下时明确回退 native，不无界截断 XML 历史。密钥仍只在 Main → worker 的 spawn 路径和会话 `ModelRuntime` 内存中，不写入插件配置、仓库或命令行。
 - Magic 自己处理 tag、drop、historian 结果与 `<session-history>` 注入，并把 compartment 写入自己的 SQLite；pi jsonl 仍是权威源，Magic 只追加自己的 compaction 标记，不删除原始对话，Fynvra 历史投影不依赖 Magic 数据。Magic 的 `ctx_*` 工具只操作它自己的上下文存储，不新增命令执行、工作区文件写入或网络能力；角色原有的 bash/文件/MCP 工具白名单和审批仍由 Fynvra 决定。默认不启用 Dreamer/Sidekick/跨会话 memory/语义 embedding，也不会下载 embedding 模型。
-- 生命周期：插件绑定前先建立该会话的路由；只有完整注册且 `session_start` 标记就绪后，`session_before_compact` 才取消 pi 原生压缩。加载、`node:sqlite` 或存储初始化失败时 `fail_closed_blocking: false`，不注册 fail-closed surface，pi 原生压缩继续，并给会话记一条 warning。运行期 historian 失败由 Magic 的重试/提示处理，不会改写 pi jsonl 的原始消息；已有会话不打断、不热切换策略，更改在新会话或重启应用后生效；没有手动压缩入口。
+- 生命周期：插件绑定前先建立该会话的路由；host 用受控 wrapper 证明 boot 完成，只有 boot ready 且 `session_start` 成功后才把该会话标记为 Magic 接管，`session_before_compact` 才取消 pi 原生压缩。加载、`node:sqlite`、存储初始化、`session_start`、context hook 或 historian 最终失败时，按会话调用 suspend：非 transient/budget 失败立即失效，transient 失败最多 3 次；失效后该会话的 context 变换、`<session-history>` 注入、historian 触发和 marker 写入都停用，`session_before_compact` 放行 native，其他会话不受影响。失败通过非阻塞 `warning` 会话事件（琥珀色、可关闭、只含 source/reason）准确提示已回退原生压缩，不把会话标记为 error、不等待确认，也不携带 prompt / provider 原始错误；`fail_closed_blocking: false` 保证初始化失败不注册 fail-closed surface。运行期不改写 pi jsonl 原始消息；已有会话不打断、不热切换策略，更改在新会话或重启应用后生效；没有手动压缩入口。
 - 尚未做真实长会话的现网压缩验证；historian 是额外的模型请求，按会话当前模型计费，插件自带的状态/命令 UI 在 Fynvra 中不可达。
 
 ### 7.9 输入框回复建议

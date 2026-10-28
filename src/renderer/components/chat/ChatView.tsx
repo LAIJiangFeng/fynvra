@@ -1,4 +1,5 @@
 import { GitBranch, MessagesSquare, X } from 'lucide-react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
@@ -35,6 +36,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         </span>
       </header>
       <ChatNotice />
+      <ChatWarning sessionId={sessionId} />
       <Timeline sessionId={sessionId} />
       <ApprovalBar sessionId={sessionId} />
       <Composer sessionId={sessionId} />
@@ -75,6 +77,36 @@ function ChatNotice() {
         size="icon-xs"
         aria-label={t('sessions.dismissNotice')}
         onClick={dismiss}
+      >
+        <X />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * 非阻塞服务告警：目前用于 Magic Context 把会话交回原生压缩。琥珀色、可关闭，
+ * 不改变会话状态、不等待确认，也不显示 provider 原始错误或 prompt。
+ */
+function ChatWarning({ sessionId }: { sessionId: string }) {
+  const warning = useSessionsStore((state) => state.runtimeBySession[sessionId]?.warning);
+  const [dismissed, setDismissed] = useState(false);
+  const t = useT();
+  if (!warning || dismissed) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex shrink-0 items-center gap-2 border-amber-500/30 border-b bg-amber-500/10 py-1.5 pr-2 pl-4 text-amber-800 text-sm dark:text-amber-200"
+    >
+      <span className="min-w-0 flex-1 truncate" title={t('chat.magicContextFallback')}>
+        {t('chat.magicContextFallback')}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={t('sessions.dismissNotice')}
+        onClick={() => setDismissed(true)}
       >
         <X />
       </Button>

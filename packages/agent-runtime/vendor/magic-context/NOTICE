@@ -12,7 +12,7 @@ Included files (3.26 MB total, 9 files):
   package.json                     upstream manifest (version/license/peer metadata)
   LICENSE                          MIT text
   NOTICE                           this file
-  dist/index.js                    1,429 KB extension entry
+  dist/index.js                    1,434 KB extension entry
   dist/index-s0zw9ddk.js           1,801 KB shared SQLite/schema/context core
   dist/index-147qn1yq.js              15 KB storage, logger, data paths
   dist/index-22jkk6wg.js             1.4 KB module resolution helper
@@ -39,12 +39,21 @@ Local patches (each marked with `Fynvra patch <n>` in the source):
    6. historian response dumps go to MAGIC_CONTEXT_ARTIFACT_DIR.
    7. ensureCortexKitArtifactGitignore does not write into workspaces.
    8. @earendil-works/pi-tui imports (three sites) use the host stub.
-   9. src_default reports its storage boot result to the Fynvra host.
+   9. src_default reports its storage boot result through the host wrapper; the
+      wrapper also exposes boot-ready, so a failed/partial/missing report never
+      marks the session as a Magic owner.
   10. historian/dreamer/sidekick reduce nudges are disabled in the Fynvra host.
   11. session_before_compact only cancels native compaction after that session's
-      runtime finished registering and session_start marked it ready; session_shutdown
-      clears the mark. A partially initialized plugin therefore leaves native
-      compaction in charge.
+      boot-ready runtime finished registering and session_start marked it ready;
+      session_shutdown clears the mark.
+  12. Per-session invalidation: context/session_start/before_agent_start failures
+      and exhausted historian retries mark the session suspended, stop context
+      transforms/history injection/historian triggers/marker writes, and let
+      native compaction proceed. Another session is unaffected. The adapter also
+      forwards a one-shot warning event to the host.
+  13. Historian chunk size is derived from the current session model context
+      window (minus system prompt/output reserve), instead of the fixed historian
+      model placeholder.
 
 Do not edit these files by hand. Re-copy the upstream package and re-apply the
 marked hunks when upgrading the pinned version.

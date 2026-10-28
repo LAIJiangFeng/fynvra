@@ -13,6 +13,7 @@ describe('session events', () => {
       | 'agent_settled'
       | 'approval_request'
       | 'usage'
+      | 'warning'
       | 'error'
     >();
   });

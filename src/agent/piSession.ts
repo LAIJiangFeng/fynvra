@@ -8,7 +8,7 @@ import {
   type ResolvedModel,
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
-import type { Role } from '@fynvra/core';
+import type { MagicContextFallbackReason, Role } from '@fynvra/core';
 import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
@@ -77,9 +77,16 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     // Create the Magic routing entry before bindExtensions: the plugin may
     // recover a deferred historian run during session_start.
     let activeModel = model;
+    let pendingFallback: MagicContextFallbackReason | undefined;
+    let emitFallback: ((reason: MagicContextFallbackReason) => void) | undefined;
     const magic =
       spec.compactionStrategy === 'magic-context'
-        ? createMagicContextCompaction(() => activeModel)
+        ? createMagicContextCompaction(() => activeModel, {
+            onFallback: (reason) => {
+              if (emitFallback) emitFallback(reason);
+              else pendingFallback ??= reason;
+            },
+          })
         : undefined;
     magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
@@ -138,7 +145,21 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
           listener,
           options.onListenerError ? { onListenerError: options.onListenerError } : {}
         );
-        return { unsubscribe: subscription.unsubscribe, emit: subscription.emit };
+        const emitWarning = (reason: MagicContextFallbackReason) =>
+          subscription.emit({ type: 'warning', source: 'magic-context', reason });
+        emitFallback = emitWarning;
+        if (pendingFallback) {
+          const reason = pendingFallback;
+          pendingFallback = undefined;
+          emitWarning(reason);
+        }
+        return {
+          unsubscribe: () => {
+            if (emitFallback === emitWarning) emitFallback = undefined;
+            subscription.unsubscribe();
+          },
+          emit: subscription.emit,
+        };
       },
       prompt: (text, images) =>
         session.prompt(text, {

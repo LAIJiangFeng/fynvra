@@ -746,6 +746,15 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
     if (source !== 'model' && source !== 'compaction' && source !== 'host') return null;
     return isString(message) ? { type: 'error', source, message } : null;
   },
+  warning: ({ source, reason }) => {
+    if (source !== 'magic-context') return null;
+    return reason === 'startup' ||
+      reason === 'runtime' ||
+      reason === 'context' ||
+      reason === 'budget'
+      ? { type: 'warning', source, reason }
+      : null;
+  },
 };
 
 function parseSessionEvent(raw: unknown): FynvraSessionEvent | null {

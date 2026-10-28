@@ -19595,8 +19595,28 @@ function shouldSuppressHistorianAlert(sessionId) {
   lastHistorianAlertBySession.set(sessionId, Date.now());
   return false;
 }
+// Fynvra patch 13: derive the historian chunk from the current model window.
+function fynvraHistorianChunkBudget(contextLimit, maxOutputTokens) {
+  if (typeof contextLimit !== "number" || !Number.isFinite(contextLimit) || contextLimit <= 0)
+    return;
+  const requestedOutput = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? maxOutputTokens : 32000;
+  const outputReserve = Math.max(1024, Math.min(requestedOutput, Math.floor(contextLimit * 0.25)));
+  const systemReserve = estimateTokens(COMPARTMENT_AGENT_SYSTEM_PROMPT) + 2048;
+  const usable = contextLimit - outputReserve - systemReserve;
+  if (usable < 4000)
+    return 0;
+  return Math.max(4000, Math.min(50000, Math.floor(usable * 0.9)));
+}
 async function runPiHistorian(deps) {
-  const {
+  // Fynvra patch 12: never start a historian after boot failure/suspension.
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+    const hostSessionId = deps?.sessionId;
+    if (typeof hostSessionId !== "string" || !fynvraReadySessions().has(hostSessionId) || fynvraSuspendedSessions().has(hostSessionId)) {
+      sessionLog(typeof hostSessionId === "string" ? hostSessionId : "historian", "historian skipped: Magic Context is not the active compaction owner");
+      return;
+    }
+  }
+  let {
     db,
     sessionId,
     directory,
@@ -19628,6 +19648,16 @@ async function runPiHistorian(deps) {
     forceDrainQuota,
     forceKeepLastCompartment
   } = deps;
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+    const budget = fynvraHistorianChunkBudget(currentContextLimit, maxOutputTokens);
+    if (budget === 0) {
+      sessionLog(sessionId, "historian skipped: current model window cannot fit the historian system prompt, input and output");
+      fynvraSuspendSession(sessionId, "budget");
+      return;
+    }
+    if (budget !== undefined)
+      historianChunkTokens = budget;
+  }
   let issueNotified = false;
   const notify = async (message) => {
     issueNotified = true;
@@ -26313,6 +26343,13 @@ function registerPiContextHandler(pi, baseOptions) {
         return;
       }
       sessionIdForError = sessionId;
+      // Fynvra patch 12: only a boot-ready, ready, non-suspended session may transform context.
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+        if (!fynvraBootReady(pi) || !fynvraReadySessions().has(sessionId) || fynvraSuspendedSessions().has(sessionId)) {
+          log(`[magic-context][${sessionId}] context left raw: Magic Context is not active`);
+          return;
+        }
+      }
       const projectDirectory = ctx.cwd;
       rawMessageCount = event.messages.length;
       const fullWireMessageCount = rawMessageCount;
@@ -26916,6 +26953,12 @@ function registerPiContextHandler(pi, baseOptions) {
       }
       return { messages: outputMessages };
     } catch (err) {
+      // Fynvra patch 12: a runtime context failure hands the session back to native compaction immediately.
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && sessionIdForError) {
+        fynvraSuspendSession(sessionIdForError, "context");
+        log(`[magic-context][${sessionIdForError}] context handler failed; native compaction takes over: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
       if (isFailClosedBlockingError(err) && !baseOptions.compactionOff)
         throw err;
       if (!lkgCompactionOff && sessionIdForError && isProviderOverflowFailClosedProven(sessionIdForError)) {
@@ -32050,18 +32093,58 @@ function fynvraReadySessions() {
   }
   return sessions;
 }
+function fynvraSuspendedSessions() {
+  const globals = globalThis;
+  let sessions = globals[Symbol.for("fynvra.magic-context.suspended-sessions")];
+  if (!(sessions instanceof Set)) {
+    sessions = new Set;
+    globals[Symbol.for("fynvra.magic-context.suspended-sessions")] = sessions;
+  }
+  return sessions;
+}
+// Fynvra patch 12: per-session invalidation of Magic Context ownership.
+function fynvraSuspendSession(sessionId, reason = "runtime") {
+  if (typeof sessionId !== "string" || sessionId.length === 0)
+    return;
+  fynvraSuspendedSessions().add(sessionId);
+  try {
+    globalThis[Symbol.for("fynvra.magic-context.suspend-listener")]?.(sessionId, reason);
+  } catch {}
+}
+function fynvraBootReady(pi) {
+  return pi?.[Symbol.for("fynvra.magic-context.boot-ok")] === true;
+}
+function fynvraHostSessionSuspended(ctx) {
+  try {
+    const sessionId = ctx?.sessionManager?.getSessionId?.();
+    return typeof sessionId === "string" && fynvraSuspendedSessions().has(sessionId);
+  } catch {
+    return false;
+  }
+}
+function fynvraHostSessionReady(ctx) {
+  try {
+    const sessionId = ctx?.sessionManager?.getSessionId?.();
+    return typeof sessionId === "string" && fynvraReadySessions().has(sessionId);
+  } catch {
+    return false;
+  }
+}
 function fynvraMarkSessionReady(ctx) {
   try {
     const sessionId = ctx.sessionManager?.getSessionId?.();
-    if (typeof sessionId === "string" && sessionId.length > 0)
+    if (typeof sessionId === "string" && sessionId.length > 0) {
       fynvraReadySessions().add(sessionId);
+    }
   } catch {}
 }
 function fynvraMarkSessionClosed(ctx) {
   try {
     const sessionId = ctx.sessionManager?.getSessionId?.();
-    if (typeof sessionId === "string" && sessionId.length > 0)
+    if (typeof sessionId === "string" && sessionId.length > 0) {
       fynvraReadySessions().delete(sessionId);
+      fynvraSuspendedSessions().delete(sessionId);
+    }
   } catch {}
 }
 async function handlePiSessionBeforeCompact(args) {
@@ -32077,12 +32160,14 @@ async function handlePiSessionBeforeCompact(args) {
   }
   if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
     let ready = false;
+    let suspended = false;
     try {
       const sessionId = args.ctx.sessionManager?.getSessionId?.();
       ready = typeof sessionId === "string" && fynvraReadySessions().has(sessionId);
+      suspended = typeof sessionId === "string" && fynvraSuspendedSessions().has(sessionId);
     } catch {}
-    if (!ready) {
-      info("session_before_compact: native Pi compaction proceeds (Fynvra session runtime is not ready)");
+    if (!ready || suspended) {
+      info("session_before_compact: native Pi compaction proceeds (Fynvra Magic Context is not active)");
       return;
     }
   }
@@ -32673,16 +32758,24 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
   });
   info(compactionOff ? todowriteEnabled ? "registered tools: ctx_search, ctx_memory, ctx_note, ctx_expand, todowrite; registered /todos (ctx_reduce unavailable in compaction-off mode)" : "registered tools: ctx_search, ctx_memory, ctx_note, ctx_expand (ctx_reduce unavailable in compaction-off mode; todowrite disabled)" : todowriteEnabled ? "registered tools: ctx_search, ctx_memory, ctx_note, ctx_expand, todowrite, ctx_reduce; registered /todos" : "registered tools: ctx_search, ctx_memory, ctx_note, ctx_expand, ctx_reduce (todowrite disabled)");
   pi.on("session_start", async (event, ctx) => {
-    projectDepsByDir.delete(ctx.cwd);
-    const current = resolveCurrentProjectDeps(ctx);
-    syncCtxMemoryToolEnabled(pi, current.config.memory.enabled);
-    await handlePiCloneSessionStart(event, ctx, {
-      db,
-      signalPendingMarker: signalPiDeferredCompactionMarkerDrain
-    });
-    // Fynvra patch 11: only a fully registered session may own compaction.
-    if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1")
-      fynvraMarkSessionReady(ctx);
+    try {
+      projectDepsByDir.delete(ctx.cwd);
+      const current = resolveCurrentProjectDeps(ctx);
+      syncCtxMemoryToolEnabled(pi, current.config.memory.enabled);
+      await handlePiCloneSessionStart(event, ctx, {
+        db,
+        signalPendingMarker: signalPiDeferredCompactionMarkerDrain
+      });
+      // Fynvra patch 11: only a fully registered, boot-ready session may own compaction.
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && fynvraBootReady(pi))
+        fynvraMarkSessionReady(ctx);
+    } catch (error) {
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+        const sid = resolveSessionId(ctx);
+        if (sid) fynvraSuspendSession(sid, "context");
+      }
+      warn("session_start failed; Magic Context will not own compaction:", error);
+    }
   });
   const readLastTodoState = (sessionId) => getOrCreateSessionMeta(db, sessionId).lastTodoState;
   if (todowriteEnabled) {
@@ -32882,6 +32975,10 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
     info(bootProjectDeps.dreamerEnabled ? "registered dreamer: DISABLED (no dreamer config)" : "registered dreamer: DISABLED (dreamer.disable=true or no dreamer config)");
   }
   pi.on("before_agent_start", async (event, ctx) => {
+    // Fynvra patch 12: no prompt injection or history block after suspension/boot failure.
+    if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && (!fynvraBootReady(pi) || !fynvraHostSessionReady(ctx) || fynvraHostSessionSuspended(ctx))) {
+      return;
+    }
     await preloadTokenizer();
     try {
       if (ctx.hasUI && shouldShowAnnouncement()) {
@@ -32999,6 +33096,12 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
       return { systemPrompt: result.systemPrompt };
     } catch (error) {
       warn("failed to build magic-context block:", error);
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+        try {
+          const sid = ctx.sessionManager?.getSessionId?.();
+          if (typeof sid === "string" && sid.length > 0) fynvraSuspendSession(sid, "context");
+        } catch {}
+      }
       return;
     }
   });
@@ -33245,5 +33348,6 @@ export {
   resolveDreamerFromConfig,
   resolveHistorianFromConfig,
   resolveSidekickFromConfig,
-  signalPiDeferredCompactionMarkerDrain
+  signalPiDeferredCompactionMarkerDrain,
+  fynvraSuspendSession
 };

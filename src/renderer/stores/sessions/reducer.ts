@@ -12,6 +12,8 @@ import {
   stripImageHints,
 } from '@shared/types/chat';
 
+type SessionWarning = 'magic-context';
+
 /**
  * 时间线消息。乐观回显（本地先上屏、还没等到 user 的 message_end）带 `optimistic`，
  * 只允许出现在数组尾部；回合开始前就失败的回显再加 `failed`。
@@ -43,6 +45,8 @@ export interface SessionRuntime {
   model?: string;
   /** 本轮的错误，新一轮开始时清除；settled 时据此决定 idle 还是 error。 */
   error?: string;
+  /** 非阻塞服务告警（如 Magic Context 已交回原生压缩）；不影响 status / error。 */
+  warning?: SessionWarning;
   /** 最近一次正常结束（非 aborted）的 settled 事件的会话级 seq：回复建议只对这一轮有效 */
   settledSeq?: number;
   /** 运行中工具的本地开始时间（toolCallId → epoch ms），tool_end 缺 durationMs 时据此推算。 */
@@ -231,6 +235,8 @@ function applyEvent(
         ),
         runtime: { ...slice.runtime, status: 'error', error: event.message },
       };
+    case 'warning':
+      return { ...slice, runtime: { ...slice.runtime, warning: event.source } };
     default:
       return slice;
   }

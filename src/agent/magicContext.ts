@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import type { Message } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, InlineExtension } from '@earendil-works/pi-coding-agent';
 import type { ResolvedModel } from '@fynvra/agent-runtime';
+import type { MagicContextFallbackReason } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 
 /**
@@ -25,6 +26,8 @@ import { errorMessage } from '@shared/guards';
 
 const RUNNER_SYMBOL = Symbol.for('fynvra.magic-context.subagent-runner');
 const BOOT_SYMBOL = Symbol.for('fynvra.magic-context.report-boot');
+const BOOT_OK_SYMBOL = Symbol.for('fynvra.magic-context.boot-ok');
+const SUSPEND_SYMBOL = Symbol.for('fynvra.magic-context.suspend-listener');
 
 /** Magic Context's internal agent names that may ask for a historian subagent. */
 const HISTORIAN_AGENTS = new Set([
@@ -38,6 +41,12 @@ const HISTORIAN_AGENTS = new Set([
 const MAX_HISTORIAN_PROMPT_CHARS = 2_000_000;
 /** Hard local cap in addition to the plugin's configured historian timeout. */
 const MAX_HISTORIAN_TIMEOUT_MS = 5 * 60_000;
+/** Consecutive transient failures before handing this session back to native compaction. */
+const TRANSIENT_FAILURE_LIMIT = 3;
+/** Token headroom for message framing / provider overhead. */
+const CONTEXT_SAFETY_TOKENS = 2_048;
+/** Do not start a historian request with less output room than this. */
+const MIN_HISTORIAN_OUTPUT_TOKENS = 1_024;
 
 interface MagicSubagentOptions {
   agent: string;
@@ -68,6 +77,8 @@ interface MagicSubagentResult {
 
 interface MagicContextModule {
   default(pi: ExtensionAPI): void | Promise<void>;
+  /** Added by vendor patch: invalidate this session's Magic takeover. */
+  fynvraSuspendSession?(sessionId: string, reason?: string): void;
 }
 
 interface SessionRunner {
@@ -75,12 +86,17 @@ interface SessionRunner {
   readonly abort: AbortController;
   inFlight: boolean;
   disposed: boolean;
+  suspended: boolean;
+  fallbackNotified: boolean;
+  failureStreak: number;
+  onFallback?: (reason: MagicContextFallbackReason) => void;
 }
 
 const sessionRunners = new Map<string, SessionRunner>();
 
 let pluginModule: Promise<MagicContextModule> | null = null;
 let pluginModuleError: unknown;
+let loadedPluginModule: MagicContextModule | undefined;
 
 export interface MagicContextCompaction {
   /** Inline extension for createRoleSession; a no-op when the host is unavailable. */
@@ -93,17 +109,29 @@ export interface MagicContextCompaction {
   dispose(): void;
 }
 
+export interface MagicContextCompactionOptions {
+  /** Called once when this session must hand context back to native compaction. */
+  onFallback?: (reason: MagicContextFallbackReason) => void;
+}
+
 /**
  * Prepare a Magic Context extension for one session. The plugin is imported
  * lazily once per worker; each session still gets its own extension binding and
  * its own historian routing entry.
  */
 export function createMagicContextCompaction(
-  getModel: () => ResolvedModel
+  getModel: () => ResolvedModel,
+  options: MagicContextCompactionOptions = {}
 ): MagicContextCompaction {
   const warnings: string[] = [];
   let piSessionId: string | undefined;
   let runner: SessionRunner | undefined;
+
+  const notifyFallback = (reason: MagicContextFallbackReason) => {
+    if (!runner || runner.fallbackNotified) return;
+    runner.fallbackNotified = true;
+    runner.onFallback?.(reason);
+  };
 
   const extension: InlineExtension = {
     name: 'fynvra-magic-context',
@@ -112,6 +140,7 @@ export function createMagicContextCompaction(
       const host = prepareHost();
       if (!host.ok) {
         warnings.push(host.warning);
+        notifyFallback('startup');
         return;
       }
       let module: MagicContextModule;
@@ -121,36 +150,44 @@ export function createMagicContextCompaction(
         warnings.push(
           `Magic Context plugin could not be loaded (${errorMessage(error)}); pi native compaction stays active.`
         );
+        notifyFallback('startup');
         return;
       }
 
       let bootStatus: string | undefined;
-      let bootReportInstalled = false;
-      // The vendored plugin reports its storage boot result through this symbol.
+      // A host-owned wrapper, not a mutation of Pi's ExtensionAPI object. The
+      // vendored plugin reads boot status / boot readiness through these
+      // symbols; a non-extensible API or a missing report leaves native
+      // compaction in charge and still produces a visible warning.
+      const pluginApi = new Proxy(pi, {
+        get(target, property) {
+          if (property === BOOT_SYMBOL) {
+            return (status: unknown) => {
+              if (typeof status === 'string') bootStatus = status;
+            };
+          }
+          if (property === BOOT_OK_SYMBOL) return bootStatus === 'ready';
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       try {
-        (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL] = (status: unknown) => {
-          if (typeof status === 'string') bootStatus = status;
-        };
-        bootReportInstalled = true;
-      } catch {}
-      try {
-        await module.default(pi);
+        await module.default(pluginApi);
       } catch (error) {
         warnings.push(
           `Magic Context failed to start (${errorMessage(error)}); pi native compaction stays active.`
         );
+        notifyFallback('startup');
         return;
-      } finally {
-        try {
-          delete (pi as unknown as Record<symbol, unknown>)[BOOT_SYMBOL];
-        } catch {}
       }
-      if (bootReportInstalled && bootStatus === undefined) {
+      if (bootStatus === undefined) {
         warnings.push('Magic Context did not report startup; pi native compaction stays active.');
-      } else if (bootStatus !== undefined && bootStatus !== 'ready') {
+        notifyFallback('startup');
+      } else if (bootStatus !== 'ready') {
         warnings.push(
           `Magic Context storage did not initialize (${bootStatus}); pi native compaction stays active.`
         );
+        notifyFallback('startup');
       }
     },
   };
@@ -166,6 +203,10 @@ export function createMagicContextCompaction(
           abort: new AbortController(),
           inFlight: false,
           disposed: false,
+          suspended: false,
+          fallbackNotified: false,
+          failureStreak: 0,
+          ...(options.onFallback ? { onFallback: options.onFallback } : {}),
         };
         sessionRunners.set(id, runner);
       }
@@ -254,7 +295,9 @@ async function loadPlugin(pluginDir: string): Promise<MagicContextModule> {
       // keep native compaction on an older/incompatible runtime.
       await import('node:sqlite');
       const entry = pathToFileURL(join(pluginDir, 'dist', 'index.js')).href;
-      return (await import(entry)) as MagicContextModule;
+      const module = (await import(entry)) as MagicContextModule;
+      loadedPluginModule = module;
+      return module;
     })().catch((error) => {
       pluginModuleError = error;
       throw error;
@@ -270,12 +313,114 @@ async function loadPlugin(pluginDir: string): Promise<MagicContextModule> {
 function installRunner(): void {
   const globals = globalThis as typeof globalThis & {
     [RUNNER_SYMBOL]?: (options: MagicSubagentOptions) => Promise<MagicSubagentResult>;
+    [SUSPEND_SYMBOL]?: (sessionId: string, reason?: string) => void;
   };
-  if (globals[RUNNER_SYMBOL]) return;
-  globals[RUNNER_SYMBOL] = runMagicSubagent;
+  if (!globals[RUNNER_SYMBOL]) globals[RUNNER_SYMBOL] = runMagicSubagent;
+  globals[SUSPEND_SYMBOL] = handleVendorSuspend;
 }
 
 installRunner();
+
+function handleVendorSuspend(sessionId: string, reason?: string): void {
+  const runner = sessionRunners.get(sessionId);
+  if (!runner) return;
+  runner.suspended = true;
+  if (runner.fallbackNotified) return;
+  runner.fallbackNotified = true;
+  runner.onFallback?.(normalizeFallbackReason(reason));
+}
+
+function normalizeFallbackReason(reason: unknown): MagicContextFallbackReason {
+  return reason === 'startup' || reason === 'budget' || reason === 'context' ? reason : 'runtime';
+}
+
+/** Invalidate this session's Magic ownership; other sessions keep their entries. */
+function suspendSession(sessionId: string, reason: MagicContextFallbackReason): void {
+  const runner = sessionRunners.get(sessionId);
+  if (runner) runner.suspended = true;
+  try {
+    loadedPluginModule?.fynvraSuspendSession?.(sessionId, reason);
+  } catch {}
+  // The vendored module normally calls the global listener above; this local
+  // fallback keeps the warning/fallback correct if an older vendor lacks it.
+  if (runner && !runner.fallbackNotified) {
+    runner.fallbackNotified = true;
+    runner.onFallback?.(reason);
+  }
+}
+
+function noteHistorianFailure(
+  runner: SessionRunner,
+  sessionId: string,
+  result: MagicSubagentResult
+): void {
+  if (result.reason === 'abort' || result.reason === 'spawn_failed') return;
+  if (result.reason === 'budget') {
+    suspendSession(sessionId, 'budget');
+    return;
+  }
+  if (result.reason === 'invalid_prompt' || result.transient === false) {
+    suspendSession(sessionId, 'runtime');
+    return;
+  }
+  runner.failureStreak += 1;
+  if (runner.failureStreak >= TRANSIENT_FAILURE_LIMIT) suspendSession(sessionId, 'runtime');
+}
+
+function isTransientModelError(message: string): boolean {
+  return /(?:429|rate limit|timeout|timed out|overloaded|\b50[0234]\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed)/i.test(
+    message
+  );
+}
+
+/** Conservative token estimate: CJK ~1 token/char, other text ~3 chars/token. */
+function estimatePromptTokens(text: string): number {
+  if (typeof text !== 'string' || text.length === 0) return 0;
+  let cjk = 0;
+  let other = 0;
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (
+      (code >= 0x2e80 && code <= 0x9fff) ||
+      (code >= 0xac00 && code <= 0xd7af) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0x3040 && code <= 0x30ff) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      cjk += 1;
+    } else {
+      other += 1;
+    }
+  }
+  return cjk + Math.ceil(other / 3);
+}
+
+function historianTokenBudget(
+  resolved: ResolvedModel,
+  systemPrompt: string,
+  userMessage: string,
+  requestedMax: number
+): { ok: true; maxTokens: number } | { ok: false } {
+  const contextWindow =
+    typeof resolved.model.contextWindow === 'number' &&
+    Number.isFinite(resolved.model.contextWindow) &&
+    resolved.model.contextWindow > 0
+      ? resolved.model.contextWindow
+      : 128_000;
+  const modelMax =
+    typeof resolved.model.maxTokens === 'number' &&
+    Number.isFinite(resolved.model.maxTokens) &&
+    resolved.model.maxTokens > 0
+      ? resolved.model.maxTokens
+      : 32_000;
+  const promptTokens = estimatePromptTokens(systemPrompt) + estimatePromptTokens(userMessage);
+  const available = contextWindow - promptTokens - CONTEXT_SAFETY_TOKENS;
+  if (available < MIN_HISTORIAN_OUTPUT_TOKENS) return { ok: false };
+  return {
+    ok: true,
+    maxTokens: Math.max(MIN_HISTORIAN_OUTPUT_TOKENS, Math.min(requestedMax, modelMax, available)),
+  };
+}
 
 async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSubagentResult> {
   const startedAt = Date.now();
@@ -295,6 +440,13 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       `Fynvra does not run Magic Context "${options.agent}" subagents out of process.`
     );
   }
+  if (runner.suspended) {
+    return fail(
+      startedAt,
+      'spawn_failed',
+      'Magic Context handed this session back to native compaction.'
+    );
+  }
   if (runner.inFlight) {
     return fail(
       startedAt,
@@ -302,14 +454,21 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       'a Magic Context historian run is already active for this session.'
     );
   }
+  const finish = (result: MagicSubagentResult): MagicSubagentResult => {
+    if (result.ok) runner.failureStreak = 0;
+    else noteHistorianFailure(runner, sessionId, result);
+    return result;
+  };
   if (typeof options.userMessage !== 'string' || options.userMessage.length === 0) {
-    return fail(startedAt, 'invalid_prompt', 'historian prompt is empty.');
+    return finish(fail(startedAt, 'invalid_prompt', 'historian prompt is empty.'));
   }
   if (options.userMessage.length > MAX_HISTORIAN_PROMPT_CHARS) {
-    return fail(
-      startedAt,
-      'invalid_prompt',
-      `historian prompt is too large (${options.userMessage.length} characters).`
+    return finish(
+      fail(
+        startedAt,
+        'budget',
+        `historian prompt is too large (${options.userMessage.length} characters).`
+      )
     );
   }
 
@@ -326,17 +485,25 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
 
   try {
     const resolved = runner.getModel();
-    const modelMax =
-      typeof resolved.model.maxTokens === 'number' &&
-      Number.isFinite(resolved.model.maxTokens) &&
-      resolved.model.maxTokens > 0
-        ? resolved.model.maxTokens
-        : 32_000;
     const requestedMax =
       typeof options.maxOutputTokens === 'number' && Number.isFinite(options.maxOutputTokens)
         ? options.maxOutputTokens
         : 32_000;
-    const maxTokens = Math.max(1, Math.min(requestedMax, modelMax));
+    const budget = historianTokenBudget(
+      resolved,
+      options.systemPrompt,
+      options.userMessage,
+      requestedMax
+    );
+    if (!budget.ok) {
+      return finish(
+        fail(
+          startedAt,
+          'budget',
+          'historian prompt and output do not fit the current model context window.'
+        )
+      );
+    }
     const message: Message = {
       role: 'user',
       content: options.userMessage,
@@ -349,7 +516,7 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
         messages: [message],
       },
       {
-        maxTokens,
+        maxTokens: budget.maxTokens,
         maxRetries: 0,
         signal,
         ...(typeof options.temperature === 'number' && Number.isFinite(options.temperature)
@@ -358,17 +525,19 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       }
     );
     if (answer.stopReason === 'length') {
-      return fail(startedAt, 'model_failed', 'historian output hit the model output limit.');
-    }
-    if (answer.stopReason === 'error') {
-      return fail(
-        startedAt,
-        'model_failed',
-        answer.errorMessage ?? 'historian model request failed.'
+      return finish(
+        fail(startedAt, 'model_failed', 'historian output hit the model output limit.')
       );
     }
+    if (answer.stopReason === 'error') {
+      const error = answer.errorMessage ?? 'historian model request failed.';
+      return finish({
+        ...fail(startedAt, 'model_failed', error),
+        transient: isTransientModelError(error),
+      });
+    }
     if (answer.stopReason === 'aborted') {
-      return fail(startedAt, 'abort', 'historian request was aborted.');
+      return finish(fail(startedAt, 'abort', 'historian request was aborted.'));
     }
     const assistantText = answer.content
       .filter((block) => block.type === 'text')
@@ -376,7 +545,7 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       .join('')
       .trim();
     if (!assistantText) {
-      return fail(startedAt, 'model_failed', 'historian returned no assistant text.');
+      return finish(fail(startedAt, 'model_failed', 'historian returned no assistant text.'));
     }
     options.onProgress?.({
       type: 'terminal',
@@ -385,30 +554,31 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       textLength: assistantText.length,
       hasToolCall: false,
     });
-    return {
+    return finish({
       ok: true,
       assistantText,
       durationMs: Date.now() - startedAt,
       toolCallCount: 0,
-    };
+    });
   } catch (error) {
     if (runner.abort.signal.aborted || options.signal?.aborted) {
-      return fail(startedAt, 'abort', 'historian request was aborted.');
+      return finish(fail(startedAt, 'abort', 'historian request was aborted.'));
     }
     if (timeout.aborted) {
-      return {
+      return finish({
         ...fail(
           startedAt,
           'timeout',
           `historian request timed out after ${Math.round(timeoutMs / 1000)}s.`
         ),
         transient: true,
-      };
+      });
     }
-    return {
-      ...fail(startedAt, 'model_failed', errorMessage(error).slice(0, 1_000)),
-      transient: true,
-    };
+    const message = errorMessage(error).slice(0, 1_000);
+    return finish({
+      ...fail(startedAt, 'model_failed', message),
+      transient: isTransientModelError(message),
+    });
   } finally {
     runner.inFlight = false;
   }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 
@@ -55,18 +55,11 @@ export function prepareMagicContextHost(): Record<string, string> {
   };
 }
 
-/** Packaged: extraResources/magic-context. Dev: the vendored source tree. */
+/** Packaged: extraResources/magic-context. Dev: the fixed app-owned vendor tree. */
 function resolvePluginDir(): string {
-  const candidates = [
-    join(process.resourcesPath, 'magic-context'),
-    join(app.getAppPath(), 'packages', 'agent-runtime', 'vendor', 'magic-context'),
-    join(process.cwd(), 'packages', 'agent-runtime', 'vendor', 'magic-context'),
-  ];
-  return (
-    candidates.find((candidate) => existsSync(join(candidate, 'dist', 'index.js'))) ??
-    candidates[1] ??
-    ''
-  );
+  return app.isPackaged
+    ? join(process.resourcesPath, 'magic-context')
+    : join(app.getAppPath(), 'packages', 'agent-runtime', 'vendor', 'magic-context');
 }
 
 const HOST_CONFIG = {
