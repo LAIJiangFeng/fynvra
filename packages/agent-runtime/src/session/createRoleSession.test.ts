@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import {
   type FauxProviderHandle,
   fauxAssistantMessage,
@@ -477,6 +479,112 @@ describe('createRoleSession resources', () => {
   });
 });
 
+describe('command environment injection through real pi tools', () => {
+  const shellTools = process.platform === 'win32' ? ['bash', 'powershell'] : ['bash'];
+
+  // Production Main always chooses a local Windows shell instead of pi's PATH/WSL fallback.
+  async function localBashFixture(): Promise<{ shellPath: string; powershell: boolean }> {
+    if (process.platform !== 'win32') return { shellPath: '/bin/bash', powershell: false };
+    const { stdout } = await promisify(execFile)('git', ['--exec-path'], {
+      windowsHide: true,
+      timeout: 5000,
+    });
+    const gitBash = path.resolve(stdout.trim(), '..', '..', '..', 'bin', 'bash.exe');
+    if (existsSync(gitBash)) return { shellPath: gitBash, powershell: false };
+    return {
+      shellPath: path.join(
+        process.env.SystemRoot ?? 'C:\\Windows',
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe'
+      ),
+      powershell: true,
+    };
+  }
+
+  it.each(shellTools)(
+    'injects %s subprocess env after session metadata, preserving default tool selection',
+    async (name) => {
+      const fixture = await localBashFixture();
+      const powershell = name === 'powershell' || fixture.powershell;
+      const script = path.join(workdir, "shell environment 'probe.cjs");
+      await writeFile(
+        script,
+        'console.log(JSON.stringify({ proxy: process.env.HTTP_PROXY, session: process.env.PI_SESSION_ID, provider: process.env.PI_PROVIDER, model: process.env.PI_MODEL }));'
+      );
+      const quote = (value: string) =>
+        powershell
+          ? `'${value.replace(/'/g, "''")}'`
+          : `'${value.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`;
+      const command = `${powershell ? '& ' : ''}${quote(process.execPath)} ${quote(script)}`;
+      const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+        ...env,
+        HTTP_PROXY: 'http://127.0.0.1:7890',
+      }));
+      const { session } = await open({
+        role: role({ approvalMode: 'full' }),
+        commandEnv: transform,
+        settingsManager: SettingsManager.inMemory({
+          shellPath: fixture.shellPath,
+          retry: { enabled: false },
+          compaction: { enabled: false },
+        }),
+      });
+      expect(session.getActiveToolNames().sort()).toEqual(['bash', 'edit', 'read', 'write']);
+      session.setActiveToolsByName(['read', 'bash', 'powershell', 'edit', 'write']);
+      const events: FynvraSessionEvent[] = [];
+      const subscription = subscribeNormalized(session, (event) => events.push(event));
+      faux.setResponses([
+        fauxAssistantMessage(fauxToolCall(name, { command }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage('done'),
+      ]);
+      await session.prompt('Inspect the test environment.');
+      subscription.unsubscribe();
+      expect(transform).toHaveBeenCalledTimes(1);
+      const inherited = transform.mock.calls[0]?.[0];
+      expect(inherited?.PI_SESSION_ID).toBe(session.sessionManager.getSessionId());
+      expect(inherited?.PI_PROVIDER).toBe('fynvra-faux');
+      expect(inherited?.PI_MODEL).toBe('faux-reasoner');
+      expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+        isError: false,
+        output: expect.stringContaining(
+          JSON.stringify({
+            proxy: 'http://127.0.0.1:7890',
+            session: session.sessionManager.getSessionId(),
+            provider: 'fynvra-faux',
+            model: 'faux-reasoner',
+          })
+        ),
+      });
+    }
+  );
+  it.each(['readonly', 'orchestrator'] as const)(
+    'keeps %s permissions and injects git_readonly env',
+    async (tools) => {
+      const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+        ...env,
+        HTTP_PROXY: 'http://127.0.0.1:7890',
+      }));
+      const { session } = await open({
+        role: role({ tools }),
+        host: tools === 'orchestrator' ? orchestrationHost() : null,
+        commandEnv: transform,
+      });
+      expect(session.getActiveToolNames()).not.toContain('bash');
+      expect(session.getActiveToolNames()).not.toContain('powershell');
+      faux.setResponses([
+        fauxAssistantMessage(fauxToolCall('git_readonly', { args: ['status', '--short'] }), {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage('done'),
+      ]);
+      await session.prompt('Read status.');
+      expect(transform).toHaveBeenCalledTimes(1);
+    }
+  );
+});
+
 describe('createRoleSession approval gate', () => {
   /** 审批通道：按顺序给出决定（缺省 allow），记下每次请求 */
   function approver(...decisions: ApprovalDecision[]) {
@@ -579,7 +687,15 @@ describe('createRoleSession approval gate', () => {
 
   it('asks about protected commands in full mode and blocks them when denied', async () => {
     const approval = approver('deny');
-    const { session } = await open({ role: role({ approvalMode: 'full' }), approval });
+    const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+      ...env,
+      HTTP_PROXY: 'http://127.0.0.1:7890',
+    }));
+    const { session } = await open({
+      role: role({ approvalMode: 'full' }),
+      approval,
+      commandEnv: transform,
+    });
     const contexts = script(
       { name: 'write', args: { path: 'full.txt', content: 'full' } },
       { name: 'bash', args: { command: 'git push origin main' } }
@@ -592,6 +708,7 @@ describe('createRoleSession approval gate', () => {
       expect.objectContaining({ kind: 'command', protectedAction: 'git push' }),
     ]);
     expect(lastToolResult(contexts[2]).text).toContain('protected action (git push)');
+    expect(transform).not.toHaveBeenCalled();
   });
 
   it('remembers allowSession for the same kind and tool', async () => {

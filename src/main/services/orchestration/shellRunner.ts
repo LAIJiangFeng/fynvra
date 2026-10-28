@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { errorMessage } from '@shared/guards';
+import { savedCommandEnvironment } from '../commandNetwork';
 import type { RunChecksFn } from './host';
 
 /** 检查命令的默认时限。 */
@@ -13,7 +14,7 @@ export interface ShellRunnerOptions {
 }
 
 /** 结束整个进程树：shell 起的子进程（pnpm → node → vitest…）不能留下来占着 worktree。 */
-function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess): void {
   const pid = child.pid;
   if (pid === undefined) return;
   if (process.platform === 'win32') {
@@ -69,7 +70,7 @@ export function createShellRunner(options: ShellRunnerOptions = {}): RunChecksFn
           windowsHide: true,
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+          env: { ...savedCommandEnvironment(), NO_COLOR: '1', FORCE_COLOR: '0' },
         });
       } catch (error) {
         resolve({ exitCode: -1, output: errorMessage(error), durationMs: 0 });

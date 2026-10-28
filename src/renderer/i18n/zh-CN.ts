@@ -576,6 +576,41 @@ export const zhCN = {
       keybindings: '快捷键',
       usage: '用量',
     },
+    network: {
+      title: 'Git 与命令代理',
+      environment: '使用现有环境',
+      manual: '手动代理',
+      address: 'HTTP / HTTPS 代理地址',
+      scope:
+        '仅覆盖 Git、Agent shell 命令（含 gh）与新终端。模型 API、MCP、应用更新保持各自路由。“现有环境”指继承的进程环境变量，不保证使用 Windows 系统代理',
+      manualHint:
+        '仅支持无认证的 HTTP/HTTPS 代理，同一地址用于 HTTP 和 HTTPS。手动模式清除继承的 ALL_PROXY，并清空 NO_PROXY 绕过规则。命令自身的显式网络配置仍可能覆盖此设置',
+      compatibility: 'Git 兼容模式',
+      compatibilityHint: '使用 HTTP/1.1 与 Git protocol v0，不降低 TLS 验证',
+      effective:
+        '保存后，应用新发起的 Git 操作和命令使用此设置；Agent 命令在会话下次启动或恢复时生效，终端在下次新建时生效。已有会话和终端不会自动重启',
+      invalid: '请输入合法 HTTP/HTTPS 代理地址与端口，不支持账号密码、路径、查询参数或片段',
+      test: '测试连接',
+      testHint:
+        '测试当前草稿，不自动保存：分别检测 GitHub API HTTPS 与公开 Fynvra 仓库的 HEAD。不会验证 push 权限，也不保证所有服务均可访问',
+      testing: '正在测试连接…',
+      saved: '已保存，新会话与新终端将使用此设置',
+      api: 'GitHub API HTTPS',
+      git: 'Git 远程 HEAD',
+      status: {
+        ok: '可达',
+        failed: '失败，请检查代理、DNS、TLS 或远程服务',
+        timeout: '连接超时',
+        canceled: '已取消',
+        unavailable: '缺少 Git 或 Node 代理支持',
+      },
+      error: {
+        load: '读取代理设置失败',
+        save: '保存代理设置失败',
+        test: '连接检测失败，请重试',
+        invalid: '代理地址无效，仅支持无认证的 HTTP/HTTPS 地址',
+      },
+    },
     general: {
       agentShell: 'Windows 本地命令壳',
       agentShellHint: '只影响 Windows 本机 agent 命令工具，下次开会话生效',

@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
+  SETTINGS_TEST_NETWORK: 'settings:test-network',
+  SETTINGS_CANCEL_NETWORK_TEST: 'settings:cancel-network-test',
   SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
   SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */

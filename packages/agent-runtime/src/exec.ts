@@ -10,6 +10,7 @@ export interface ExecResult {
 export interface ExecOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 /** 注入式命令执行（不经 shell）。实现不得 reject：失败以非 0 `code` 返回。 */
@@ -35,6 +36,7 @@ export const nodeExec: ExecFn = (cmd, args, cwd, options = {}) =>
         maxBuffer: MAX_BUFFER,
         timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         windowsHide: true,
+        ...(options.env ? { env: options.env } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       },
       (error, stdout, stderr) => {

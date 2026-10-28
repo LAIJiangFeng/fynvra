@@ -1,3 +1,4 @@
+import type { NetworkProxy, NetworkTestResult } from '@shared/networkProxy';
 import type { IpcResult, WindowCloseAction } from '@shared/types/ipc';
 import type {
   AvailableShellsResult,
@@ -25,6 +26,9 @@ export interface SettingsApi {
   get(): Promise<PreferencesResult>;
   /** 合并更新界面偏好；Main 逐字段校验后防抖写入 settings.json */
   update(patch: Partial<Preferences>): Promise<PreferencesResult>;
+  /** Test this draft, without saving it; destinations are fixed by Main. */
+  testNetwork(draft: NetworkProxy): Promise<IpcResult<NetworkTestResult>>;
+  cancelNetworkTest(): Promise<IpcResult>;
   availableShells(): Promise<AvailableShellsResult>;
   pickShell(target: ShellTarget): Promise<PickShellResult>;
   /** 无参：Main 弹目录选择框、校验后写入 worktree 根目录；`{ reset: true }`：恢复默认。不传路径 */

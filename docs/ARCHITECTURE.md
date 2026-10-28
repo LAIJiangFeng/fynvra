@@ -274,6 +274,13 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 用量 IPC 注入 session / workspace / orchestration getters；编排 registry 的 readSnapshot 读取已打开服务的当前快照，或只读解析持久化 JSON，绝不因用量查询打开服务、修复或重命名文件。页面为响应式双栏总览、SVG 趋势、角色 / 缓存卡片和排名，活动仅为紧凑小时条。
 - 改动层限于 shared 用量类型、Main 服务 / handler 与两个只读访问出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
 
+### 7.7 Git 与命令网络代理
+
+- 通用设置 `preferences.networkProxy` 仅包含模式（默认沿用进程环境）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
+- 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
+- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
+- `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。

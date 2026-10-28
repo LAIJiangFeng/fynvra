@@ -9,6 +9,7 @@ import {
   subscribeNormalized,
 } from '@fynvra/agent-runtime';
 import type { Role } from '@fynvra/core';
+import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import type { ChatImage } from '@shared/types/chat';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
@@ -71,6 +72,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       roles: spec.roles,
       ...(spec.inPlace ? { inPlace: true } : {}),
       settingsManager: createSessionSettings(spec.shellPath),
+      ...(spec.networkProxy
+        ? {
+            commandEnv: (env: NodeJS.ProcessEnv) =>
+              commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
+          }
+        : {}),
     });
     const { session } = created;
     dropEmptyUserText(session);

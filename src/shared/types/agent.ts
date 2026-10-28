@@ -9,6 +9,7 @@ import {
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
+import { type NetworkProxy, parseNetworkProxy } from '../networkProxy';
 import {
   type ApprovalDecision,
   type ApprovalKind,
@@ -84,6 +85,8 @@ export interface AgentRoleOption {
 
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
 export interface SpawnSessionSpec {
+  /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
+  networkProxy?: NetworkProxy;
   role: Role;
   /** 会话工作目录：工作区仓库根或 worktree（Main 由记录推导） */
   cwd: string;
@@ -543,6 +546,9 @@ function parseRoleOption(raw: unknown): AgentRoleOption | null {
 function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
+  const networkProxy =
+    record.networkProxy === undefined ? undefined : parseNetworkProxy(record.networkProxy);
+  if (networkProxy === null) return null;
   const role = parseRole(record.role);
   const model = parseModelSpec(record.model);
   const skills = parseStringList(record.skills);
@@ -564,6 +570,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   }
   if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
   return {
+    ...(networkProxy ? { networkProxy } : {}),
     role: role.role,
     cwd,
     sessionFile,

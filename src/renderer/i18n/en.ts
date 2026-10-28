@@ -592,6 +592,42 @@ export const en: MessagesShape<typeof zhCN> = {
       keybindings: 'Shortcuts',
       usage: 'Usage',
     },
+    network: {
+      title: 'Git and command proxy',
+      environment: 'Use existing environment',
+      manual: 'Manual proxy',
+      address: 'HTTP / HTTPS proxy address',
+      scope:
+        'Applies to Git, agent shell commands (including gh), and new terminals. Model APIs, MCP and app updates keep their own routing. Existing environment means inherited process variables, not the Windows system proxy',
+      manualHint:
+        'Only HTTP/HTTPS proxies without authentication are supported. One address is supplied for both HTTP and HTTPS. Manual mode clears inherited ALL_PROXY and NO_PROXY bypass rules. A command’s own explicit network settings may still override this',
+      compatibility: 'Git compatibility mode',
+      compatibilityHint: 'Use HTTP/1.1 and Git protocol v0. TLS verification is not weakened',
+      effective:
+        'After saving, new Git operations and commands run by the app use these settings. Agent commands use them when a session next starts or resumes, and terminals when newly opened. Existing sessions and terminals are not automatically restarted',
+      invalid:
+        'Enter an HTTP/HTTPS proxy URL without credentials, a path, query or fragment, and with a valid port',
+      test: 'Test connection',
+      testHint:
+        'Tests the current draft without saving: GitHub API HTTPS and the public Fynvra repository HEAD. No push permission check. Some services may still fail',
+      testing: 'Testing connection…',
+      saved: 'Saved. New sessions and terminals will use these settings',
+      api: 'GitHub API HTTPS',
+      git: 'Git remote HEAD',
+      status: {
+        ok: 'Reachable',
+        failed: 'Failed — check proxy, DNS, TLS or remote availability',
+        timeout: 'Timed out',
+        canceled: 'Canceled',
+        unavailable: 'Required Git or Node proxy support is unavailable',
+      },
+      error: {
+        load: 'Could not load proxy settings',
+        save: 'Could not save proxy settings',
+        test: 'Connection test failed. Please retry',
+        invalid: 'Invalid proxy address. Only HTTP/HTTPS without authentication is supported',
+      },
+    },
     general: {
       agentShell: 'Windows agent command shell',
       agentShellHint:

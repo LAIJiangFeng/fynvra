@@ -1,0 +1,201 @@
+import { EventEmitter } from 'node:events';
+import { DEFAULT_NETWORK_PROXY } from '@shared/networkProxy';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  agent: vi.fn(),
+  spawn: vi.fn(),
+  destroy: vi.fn(),
+}));
+vi.mock('node:https', () => ({
+  Agent: class {
+    constructor(options: unknown) {
+      mocks.agent(options);
+    }
+    destroy = mocks.destroy;
+  },
+  get: mocks.get,
+}));
+vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
+
+import { testCommandNetwork } from './networkTest';
+
+function childResult(output = 'abcdef1234\tHEAD\n', error = false) {
+  const stdout = Object.assign(new EventEmitter(), {
+    setEncoding() {
+      return this;
+    },
+  });
+  const child = Object.assign(new EventEmitter(), { stdout });
+  queueMicrotask(() => {
+    if (error) child.emit('error', { code: 'ENOENT', message: 'secret' });
+    else {
+      stdout.emit('data', output);
+      child.emit('close', 0);
+    }
+  });
+  return child;
+}
+
+const nodeVersion = process.versions.node;
+beforeAll(() =>
+  Object.defineProperty(process.versions, 'node', { value: '24.5.0', configurable: true })
+);
+afterAll(() =>
+  Object.defineProperty(process.versions, 'node', { value: nodeVersion, configurable: true })
+);
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.get.mockImplementation((_url, _options, callback) => {
+    callback({ statusCode: 200, destroy: vi.fn() });
+    return new EventEmitter();
+  });
+  mocks.spawn.mockImplementation(() => childResult());
+});
+
+describe('fixed network probe transports', () => {
+  it('uses a private proxy agent with TLS and a noninteractive readonly Git argv', async () => {
+    const result = await testCommandNetwork(
+      { mode: 'manual', url: 'https://proxy.example:7890', gitCompatibility: true },
+      new AbortController().signal,
+      { env: { NO_PROXY: '*' } }
+    );
+    expect(result).toEqual({ api: { status: 'ok', httpStatus: 200 }, git: { status: 'ok' } });
+    expect(mocks.agent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rejectUnauthorized: true,
+        proxyEnv: expect.objectContaining({
+          HTTPS_PROXY: 'https://proxy.example:7890',
+          NO_PROXY: '',
+        }),
+      })
+    );
+    expect(mocks.get.mock.calls[0]?.[0]).toBe('https://api.github.com/');
+    expect(mocks.get.mock.calls[0]?.[1]).toMatchObject({ rejectUnauthorized: true });
+    const [cmd, args, options] = mocks.spawn.mock.calls[0] ?? [];
+    expect(cmd).toBe('git');
+    expect(args).toEqual([
+      '-c',
+      'credential.helper=',
+      '-c',
+      'core.askPass=',
+      '-c',
+      'credential.interactive=false',
+      '-c',
+      'http.sslVerify=true',
+      '-c',
+      'http.https://github.com/LAIJiangFeng/fynvra.git.sslVerify=true',
+      '-c',
+      'http.https://github.com/LAIJiangFeng/fynvra.git/.sslVerify=true',
+      'ls-remote',
+      '--exit-code',
+      'https://github.com/LAIJiangFeng/fynvra.git',
+      'HEAD',
+    ]);
+    expect(options.shell).toBeUndefined();
+    expect(options.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      GIT_CONFIG_COUNT: '3',
+    });
+    expect(mocks.destroy).toHaveBeenCalled();
+  });
+  it.each(['GIT_SSL_NO_VERIFY', 'git_ssl_no_verify', 'Git_Ssl_No_Verify'])(
+    'removes diagnostic-only TLS bypass %s, including value 0, while preserving CA settings',
+    async (key) => {
+      const env = {
+        [key]: '0',
+        GIT_PROXY_SSL_NO_VERIFY: '1',
+        GIT_SSL_CAINFO: '/fixture/origin-ca.pem',
+        GIT_SSL_CAPATH: '/fixture/ca',
+        GIT_PROXY_SSL_CAINFO: '/fixture/proxy-ca.pem',
+        NODE_EXTRA_CA_CERTS: '/fixture/node-ca.pem',
+        HTTPS_PROXY: 'https://proxy.example:7890',
+        KEEP: 'retained',
+      };
+      const before = { ...env };
+      await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, { env });
+      const childEnv = mocks.spawn.mock.calls[0]?.[2].env;
+      expect(
+        Object.keys(childEnv).some((name) => /^GIT_(?:PROXY_)?SSL_NO_VERIFY$/i.test(name))
+      ).toBe(false);
+      expect(childEnv).toMatchObject({
+        GIT_SSL_CAINFO: env.GIT_SSL_CAINFO,
+        GIT_SSL_CAPATH: env.GIT_SSL_CAPATH,
+        GIT_PROXY_SSL_CAINFO: env.GIT_PROXY_SSL_CAINFO,
+        NODE_EXTRA_CA_CERTS: env.NODE_EXTRA_CA_CERTS,
+        HTTPS_PROXY: env.HTTPS_PROXY,
+        KEEP: 'retained',
+      });
+      expect(env).toEqual(before);
+    }
+  );
+  it.each(['NODE_TLS_REJECT_UNAUTHORIZED', 'Node_Tls_Reject_Unauthorized'])(
+    'fails the API diagnostic before an HTTPS proxy handshake when %s is 0',
+    async (key) => {
+      const env = { [key]: '0', HTTPS_PROXY: 'https://proxy.example:7890' };
+      const result = await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, {
+        env,
+      });
+      expect(result.api.status).toBe('failed');
+      expect(mocks.agent).not.toHaveBeenCalled();
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(env[key]).toBe('0');
+    }
+  );
+  it('also checks the actual Node process TLS default without changing it', async () => {
+    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '0');
+    try {
+      const result = await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, {
+        env: {},
+      });
+      expect(result.api.status).toBe('failed');
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe('0');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it('never returns process stderr or proxy errors; missing Git is distinct', async () => {
+    mocks.get.mockImplementation(() => {
+      throw new Error('https://secret@proxy');
+    });
+    mocks.spawn.mockImplementation(() => childResult('', true));
+    expect(
+      await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, { env: {} })
+    ).toEqual({ api: { status: 'failed' }, git: { status: 'unavailable' } });
+  });
+  it('cancels the owned Git process tree', async () => {
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      const stdout = Object.assign(new EventEmitter(), {
+        setEncoding() {
+          return this;
+        },
+      });
+      const child = Object.assign(new EventEmitter(), { pid: 123456789, stdout, kill: vi.fn() });
+      mocks.spawn.mockImplementation((cmd) => (cmd === 'git' ? child : new EventEmitter()));
+      const controller = new AbortController();
+      const pending = testCommandNetwork(DEFAULT_NETWORK_PROXY, controller.signal, { env: {} });
+      controller.abort();
+      expect((await pending).git.status).toBe('canceled');
+      if (process.platform === 'win32')
+        expect(mocks.spawn).toHaveBeenCalledWith(
+          'taskkill',
+          ['/pid', '123456789', '/T', '/F'],
+          expect.anything()
+        );
+      else expect(kill).toHaveBeenCalledWith(-123456789, 'SIGKILL');
+    } finally {
+      kill.mockRestore();
+    }
+  });
+  it('does not misreport an empty Git result as success', async () => {
+    mocks.spawn.mockImplementation(() => childResult(''));
+    const result = await testCommandNetwork(DEFAULT_NETWORK_PROXY, new AbortController().signal, {
+      env: {},
+    });
+    expect(result.git.status).toBe('failed');
+  });
+});

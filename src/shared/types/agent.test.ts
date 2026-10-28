@@ -62,6 +62,18 @@ const withModel = (patch: Record<string, unknown>) =>
   withSpec({ model: { ...spec.model, ...patch } });
 
 describe('parseAgentCommand', () => {
+  it('accepts only a restricted command network snapshot', () => {
+    const networkProxy = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
+    expect(parseAgentCommand(withSpec({ networkProxy }))).toEqual(withSpec({ networkProxy }));
+    for (const invalid of [
+      null,
+      { ...networkProxy, env: { SECRET: 'x' } },
+      { ...networkProxy, url: 'http://user:secret@proxy' },
+      { mode: 'automatic' },
+    ]) {
+      expect(parseAgentCommand(withSpec({ networkProxy: invalid }))).toBeNull();
+    }
+  });
   it('preserves resolved instruction text and rejects malformed instruction specs', () => {
     const instructionFile = { name: 'CLAUDE.md', content: 'Use these instructions.' };
     expect(parseAgentCommand(withSpec({ instructionFile }))).toEqual(withSpec({ instructionFile }));

@@ -1,8 +1,12 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
+  type BashSpawnHook,
   createAgentSession,
+  createBashToolDefinition,
+  createPowerShellToolDefinition,
   DefaultResourceLoader,
+  defineTool,
   type ExtensionError,
   type InlineExtension,
   type ModelRuntime,
@@ -12,7 +16,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Role, ThinkingLevel } from '@fynvra/core';
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
-import type { ExecFn } from '../exec';
+import { type ExecFn, nodeExec } from '../exec';
 import type { OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
 import { bindSessionExtensions, emitSessionShutdown } from '../pi/lifecycle';
@@ -69,6 +73,8 @@ export interface CreateRoleSessionOptions {
   inPlace?: boolean;
   /** 默认 `SettingsManager.inMemory`：不读用户的 ~/.pi 与项目 .pi 设置 */
   settingsManager?: SettingsManager;
+  /** Transform only command subprocess environments, after pi injects session metadata. */
+  commandEnv?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv;
   /** git_readonly 的命令执行器，默认 child_process.execFile */
   exec?: ExecFn;
   /** 扩展（MCP 等）在事件处理中抛出的错误 */
@@ -108,7 +114,8 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   const workerToolset = options.workerHost
     ? createWorkerTools(options.workerHost, options.workerTools)
     : undefined;
-  const { customTools, noTools } = selectTools(options, workerToolset);
+  const settingsManager = options.settingsManager ?? createDefaultSettings();
+  const { customTools, noTools } = selectTools(options, workerToolset, settingsManager);
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
   const promptAppend = buildRolePromptAppend(role, {
@@ -130,7 +137,6 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...(workerToolset ? [beforeRunExtension('fynvra-worker-round', workerToolset.startRound)] : []),
   ];
 
-  const settingsManager = options.settingsManager ?? createDefaultSettings();
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -185,9 +191,19 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
 
 function selectTools(
   options: CreateRoleSessionOptions,
-  workerToolset: WorkerToolset | undefined
+  workerToolset: WorkerToolset | undefined,
+  settings: SettingsManager
 ): { customTools: ToolDefinition[]; noTools?: 'builtin' } {
-  const { role, cwd, exec } = options;
+  const { role, cwd, commandEnv } = options;
+  const exec =
+    options.exec ??
+    (commandEnv
+      ? (((cmd, args, dir, config) =>
+          nodeExec(cmd, args, dir, {
+            ...config,
+            env: commandEnv(process.env),
+          })) satisfies ExecFn)
+      : undefined);
   const workerTools = workerToolset?.tools ?? [];
   switch (role.tools) {
     case 'orchestrator': {
@@ -211,8 +227,28 @@ function selectTools(
         noTools: 'builtin',
         customTools: [...createReadonlyTools(cwd, exec ? { exec } : {}), ...workerTools],
       };
-    case 'all':
-      return { customTools: workerTools };
+    case 'all': {
+      if (!commandEnv) return { customTools: workerTools };
+      const spawnHook: BashSpawnHook = (ctx) => ({ ...ctx, env: commandEnv(ctx.env) });
+      // Override implementations, not selection: defaultActive=false preserves pi's defaultTools.
+      return {
+        customTools: [
+          defineTool({
+            ...createBashToolDefinition(cwd, {
+              shellPath: settings.getShellPath(),
+              commandPrefix: settings.getShellCommandPrefix(),
+              spawnHook,
+            }),
+            defaultActive: false,
+          }),
+          defineTool({
+            ...createPowerShellToolDefinition(cwd, { spawnHook }),
+            defaultActive: false,
+          }),
+          ...workerTools,
+        ],
+      };
+    }
     default:
       throw new Error(`role "${role.id}" has an unknown tool policy: ${String(role.tools)}`);
   }
