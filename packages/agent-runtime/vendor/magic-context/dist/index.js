@@ -1,3 +1,5 @@
+import { assertFynvraOperation, fynvraOperationActive, fynvraRunSessionCleanup } from "./fynvra-host.js";
+export { fynvraBindSession, fynvraRunSessionOperation } from "./fynvra-host.js";
 import {
   hasShareabilitySensitiveText,
   setHarness,
@@ -12681,6 +12683,9 @@ function createCtxStatusSender(pi, ctx, signal) {
   };
 }
 function sendCtxStatusMessage(pi, content, details, ctx, signal) {
+  // Desktop fallback is the host's fixed, nonblocking warning event. Terminal
+  // status entries must not persist provider errors into the Pi transcript.
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return;
   if (signal?.aborted)
     return;
   const data = {
@@ -13706,7 +13711,7 @@ function schedulePiTransformDecisionResolve(args) {
   const token = addScheduledWriteToken(args.sessionId);
   setTimeout(() => {
     try {
-      if (!hasScheduledWriteToken(args.sessionId, token))
+      if (!fynvraOperationActive() || !hasScheduledWriteToken(args.sessionId, token))
         return;
       writeTransformDecisionBestEffort(dbPath, {
         ...pending,
@@ -19595,17 +19600,9 @@ function shouldSuppressHistorianAlert(sessionId) {
   lastHistorianAlertBySession.set(sessionId, Date.now());
   return false;
 }
-// Fynvra patch 13: derive the historian chunk from the current model window.
-function fynvraHistorianChunkBudget(contextLimit, maxOutputTokens) {
-  if (typeof contextLimit !== "number" || !Number.isFinite(contextLimit) || contextLimit <= 0)
-    return;
-  const requestedOutput = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? maxOutputTokens : 32000;
-  const outputReserve = Math.max(1024, Math.min(requestedOutput, Math.floor(contextLimit * 0.25)));
-  const systemReserve = estimateTokens(COMPARTMENT_AGENT_SYSTEM_PROMPT) + 2048;
-  const usable = contextLimit - outputReserve - systemReserve;
-  if (usable < 4000)
-    return 0;
-  return Math.max(4000, Math.min(50000, Math.floor(usable * 0.9)));
+// Fynvra gets budgets from the routed current model, never a placeholder model.
+function fynvraHistorianBudget(sessionId, systemPrompt, maxOutputTokens) {
+  return globalThis[Symbol.for("fynvra.magic-context.historian-budget")]?.(sessionId, systemPrompt, maxOutputTokens);
 }
 async function runPiHistorian(deps) {
   // Fynvra patch 12: never start a historian after boot failure/suspension.
@@ -19648,15 +19645,17 @@ async function runPiHistorian(deps) {
     forceDrainQuota,
     forceKeepLastCompartment
   } = deps;
-  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
-    const budget = fynvraHistorianChunkBudget(currentContextLimit, maxOutputTokens);
-    if (budget === 0) {
-      sessionLog(sessionId, "historian skipped: current model window cannot fit the historian system prompt, input and output");
+  const hosted = process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1";
+  const historianSystemPrompt = withContentLanguageDirective(COMPARTMENT_AGENT_SYSTEM_PROMPT, deps.language, { preserveUserQuotes: true });
+  const hostBudget = hosted ? fynvraHistorianBudget(sessionId, historianSystemPrompt, maxOutputTokens) : undefined;
+  if (hosted) {
+    assertFynvraOperation();
+    if (!hostBudget) {
       fynvraSuspendSession(sessionId, "budget");
       return;
     }
-    if (budget !== undefined)
-      historianChunkTokens = budget;
+    historianChunkTokens = Math.min(150000, Math.floor(hostBudget.inputBytes * 0.65));
+    maxOutputTokens = hostBudget.maxTokens;
   }
   let issueNotified = false;
   const notify = async (message) => {
@@ -19688,6 +19687,7 @@ async function runPiHistorian(deps) {
     rollbackProtectedTailDrainReservation(db, drainReservation);
     drainReservation = null;
   };
+  deps.onCancellationCleanup?.(rollbackDrainReservation);
   try {
     await withRawMessageProvider(sessionId, provider, async () => {
       const priorCompartments = getCompartments(db, sessionId);
@@ -19697,6 +19697,7 @@ async function runPiHistorian(deps) {
         {
           const failCount = incrementHistorianFailure(db, sessionId, existingValidationError);
           await notify(buildHistorianFailureNotice(failCount, existingValidationError));
+          if (hosted && fynvraOperationActive()) fynvraSuspendSession(sessionId);
         }
         return;
       }
@@ -19760,9 +19761,14 @@ async function runPiHistorian(deps) {
         return;
       }
       drainReservation = reserve.reservation;
-      const chunk = readSessionChunk(sessionId, historianChunkTokens, offset, eligibleEndOrdinal);
-      const forceKeepLastCompartmentForChunk = forceKeepLastCompartment === true && !chunk.hasMore;
+      let chunk = readSessionChunk(sessionId, historianChunkTokens, offset, eligibleEndOrdinal, hosted);
+      let forceKeepLastCompartmentForChunk = forceKeepLastCompartment === true && !chunk.hasMore;
       if (!chunk.text || chunk.messageCount === 0) {
+        if (hosted) {
+          // An indivisible first block cannot fit; never truncate XML/text.
+          fynvraSuspendSession(sessionId, "budget");
+          return;
+        }
         sessionLog(sessionId, `historian no-op: chunk empty after filtering (messageCount=${chunk.messageCount}, textLen=${chunk.text?.length ?? 0}) range=${offset}-${protectedTailStart - 1}`);
         if (boundarySnapshot.usagePercentage < 80) {
           if (!isWrapupInProgress(db, sessionId))
@@ -19784,6 +19790,7 @@ async function runPiHistorian(deps) {
           await notify(buildHistorianFailureNotice(failCount, chunkCoverageError));
         }
         rollbackDrainReservation();
+        if (hosted && fynvraOperationActive()) fynvraSuspendSession(sessionId);
         return;
       }
       const projectPath = resolveProjectIdentityForSession(directory, allowHomeProject);
@@ -19802,19 +19809,34 @@ async function runPiHistorian(deps) {
         chunkStart: chunk.startIndex,
         sessionCompartments: priorCompartments
       });
-      const chunkText = truncateHistorianInputIfNeeded(chunk.text, historianChunkTokens);
+      const chunkText = hosted ? chunk.text : truncateHistorianInputIfNeeded(chunk.text, historianChunkTokens);
       if (chunkText !== chunk.text) {
         sessionLog(sessionId, `historian pre-flight: truncated formatted input for ${chunk.startIndex}-${chunk.endIndex} to fit ${historianChunkTokens} tokens`);
       }
-      const prompt = buildCompartmentAgentPrompt({
+      const makePrompt = (text) => buildCompartmentAgentPrompt({
         seedExamples: references.seedExamples,
         sessionReferences: references.sessionReferences,
         projectMemory,
         inputSource: `Messages ${chunk.startIndex}-${chunk.endIndex}:
 
-${chunkText}`,
+${text}`,
         memoryEnabled: memoryEnabled !== false
       });
+      let prompt = makePrompt(chunkText);
+      if (hostBudget) {
+        // Re-read whole blocks with the actual reference/prompt overhead. No
+        // character slicing can turn a partial source into validated success.
+        for (let attempt = 0; Buffer.byteLength(prompt, "utf8") > hostBudget.inputBytes && attempt < 3; attempt++) {
+          historianChunkTokens -= Buffer.byteLength(prompt, "utf8") - hostBudget.inputBytes + 1024;
+          chunk = readSessionChunk(sessionId, Math.max(0, historianChunkTokens), offset, eligibleEndOrdinal, true);
+          prompt = makePrompt(chunk.text);
+        }
+        if (!chunk.messageCount || Buffer.byteLength(prompt, "utf8") > hostBudget.inputBytes || validateChunkCoverage(chunk)) {
+          fynvraSuspendSession(sessionId, "budget");
+          return;
+        }
+        forceKeepLastCompartmentForChunk = forceKeepLastCompartment === true && !chunk.hasMore;
+      }
       const maxExistingSequence = priorCompartments.reduce((max, c) => c.sequence > max ? c.sequence : max, -1);
       const sequenceOffset = priorCompartments.length === 0 ? 0 : maxExistingSequence + 1;
       sessionLog(sessionId, `historian: invoking subagent (model=${historianModel}, chunk=${chunk.startIndex}-${chunk.endIndex}, ${chunk.messageCount} msgs, ~${chunk.tokenEstimate} tokens)`);
@@ -19853,7 +19875,6 @@ ${chunkText}`,
         };
       };
       retainDrainReservationForRetryThrottle = true;
-      const historianSystemPrompt = withContentLanguageDirective(COMPARTMENT_AGENT_SYSTEM_PROMPT, deps.language, { preserveUserQuotes: true });
       const historianEditorSystemPrompt = withContentLanguageDirective(HISTORIAN_EDITOR_SYSTEM_PROMPT, deps.language, { preserveUserQuotes: true });
       const firstResult = await runHistorianSubagentWithTransientRetries({
         runner,
@@ -19876,7 +19897,9 @@ ${chunkText}`,
           accountingSubagent: "historian"
         }
       });
+      assertFynvraOperation();
       let validatedPass = await validateHistorianResult(firstResult, sessionId, chunk, priorCompartments, sequenceOffset);
+      assertFynvraOperation();
       let validatedDraftText = firstResult.ok ? firstResult.assistantText : null;
       if (validatedPass.kind === "validation-failed") {
         sessionLog(sessionId, `historian: first pass validation failed, retrying with repair prompt: ${validatedPass.error}`);
@@ -19902,12 +19925,14 @@ ${chunkText}`,
             accountingSubagent: "historian"
           }
         });
+        assertFynvraOperation();
         validatedPass = await validateHistorianResult(repairResult, sessionId, chunk, priorCompartments, sequenceOffset);
+        assertFynvraOperation();
         if (validatedPass.kind === "ok" && repairResult.ok) {
           validatedDraftText = repairResult.assistantText;
         }
       }
-      const fallbackChain = buildHistorianFallbackChain(historianModel, thinkingLevel, fallbackModels, fallbackModelId);
+      const fallbackChain = hosted ? [] : buildHistorianFallbackChain(historianModel, thinkingLevel, fallbackModels, fallbackModelId);
       if (validatedPass.kind !== "ok" && !(validatedPass.kind === "spawn-failed" && validatedPass.reason === "abort") && fallbackChain.length > 0) {
         for (let i = 0;i < fallbackChain.length; i += 1) {
           const candidate = fallbackChain[i];
@@ -19947,12 +19972,14 @@ ${chunkText}`,
         }
       }
       if (validatedPass.kind !== "ok") {
+        if (validatedPass.kind === "spawn-failed" && validatedPass.reason === "abort") return;
         const errorMsg = validatedPass.kind === "validation-failed" ? validatedPass.error : validatedPass.kind === "spawn-failed" ? `subagent run failed (${validatedPass.reason}): ${validatedPass.error}` : "historian returned no usable text";
         sessionLog(sessionId, `historian failure: ${errorMsg}`);
         {
           const failCount = incrementHistorianFailure(db, sessionId, errorMsg);
           await notify(buildHistorianFailureNotice(failCount, errorMsg));
         }
+        if (hosted && fynvraOperationActive()) fynvraSuspendSession(sessionId);
         return;
       }
       retainDrainReservationForRetryThrottle = false;
@@ -19981,7 +20008,9 @@ ${chunkText}`,
               accountingSubagent: "historian_editor"
             }
           });
+          assertFynvraOperation();
           const editorPass = await validateHistorianResult(editorResult, sessionId, chunk, priorCompartments, sequenceOffset);
+          assertFynvraOperation();
           if (editorPass.kind === "ok") {
             sessionLog(sessionId, `historian two-pass: editor accepted, replacing draft`);
             validatedPass = editorPass;
@@ -20009,9 +20038,12 @@ ${chunkText}`,
           await notify(buildHistorianFailureNotice(failCount, errorMsg));
         }
         rollbackDrainReservation();
+        if (hosted && fynvraOperationActive()) fynvraSuspendSession(sessionId);
         return;
       }
-      const markerSummary = buildPiCompactionSummary(newCompartments);
+      const markerSummary = hosted
+        ? `<session-history>\n${renderDecayedCompartments({ compartments: [...priorCompartments, ...newCompartments], historyBudgetTokens: Math.min(16000, Math.floor(hostBudget.inputBytes * 0.15)) })}\n</session-history>`
+        : buildPiCompactionSummary(newCompartments);
       const lastNewEndMessageId = newCompartments[newCompartments.length - 1]?.endMessageId;
       let firstKeptEntryId = null;
       if (readBranchEntries) {
@@ -20045,6 +20077,7 @@ ${chunkText}`,
         rollbackDrainReservation();
         return;
       }
+      assertFynvraOperation();
       let published = false;
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -20092,8 +20125,10 @@ ${chunkText}`,
           } catch {}
         }
       }
+      assertFynvraOperation();
       onPublished?.();
       completedSuccessfully = true;
+      if (hosted) globalThis[Symbol.for("fynvra.magic-context.published")]?.(sessionId);
       sessionLog(sessionId, `historian: published ${newCompartments.length} compartment(s), ${validatedPass.facts?.length ?? 0} fact(s) covering messages ${chunk.startIndex}-${lastNewEnd}`);
       if (!firstKeptEntryId && notifyIssue) {
         try {
@@ -20104,6 +20139,7 @@ ${chunkText}`,
           });
         }
       }
+      assertFynvraOperation();
       onNoteTrigger(db, sessionId, "historian_complete");
       if (userMemoriesEnabled === true && !skipUnanchoredPromotion && validatedPass.userObservations?.length) {
         try {
@@ -20198,11 +20234,18 @@ ${chunkText}`,
     const desc = describeError(error);
     telemetry.failureReason = `exception: ${desc.brief}`;
     sessionLog(sessionId, `historian failure: source=exception ${desc.brief}${desc.stackHead ? ` stackHead="${desc.stackHead}"` : ""}`);
+    if (hosted) {
+      if (fynvraOperationActive()) fynvraSuspendSession(sessionId);
+      return;
+    }
     if (!issueNotified) {
       const failCount = incrementHistorianFailure(db, sessionId, desc.brief);
       await notify(buildHistorianFailureNotice(failCount, desc.brief));
     }
   } finally {
+    // Suspended/closed/cancelled operations must not persist even telemetry or
+    // cleanup state. A fresh session clears stale in-progress/lease state.
+    if (!fynvraOperationActive()) return;
     if (!completedSuccessfully) {
       if (!retainDrainReservationForRetryThrottle) {
         rollbackDrainReservation();
@@ -20298,6 +20341,7 @@ function findFirstKeptEntryId(entries, lastCompactedOrdinal) {
 
 // src/compaction-marker-manager-pi.ts
 function applyDeferredPiCompactionMarker(deps, sessionId, pending) {
+  assertFynvraOperation();
   try {
     const matches = getCompartmentsByEndMessageId(deps.db, sessionId, pending.endMessageId);
     if (matches.length === 0 || matches.length > 1) {
@@ -26650,6 +26694,7 @@ function registerPiContextHandler(pi, baseOptions) {
             sessionLog(sessionId, "EMERGENCY: historian wait completed (or timed out)");
           } catch {}
         }
+        assertFynvraOperation();
         if (emergencyRecoveryArmed && realUsagePercentageBeforeEmergencyBump < forceMaterializationPercentage && !inFlightHistorian.has(sessionId) && !hasEligiblePiCompartmentHistory(options.db, sessionId)) {
           try {
             clearEmergencyRecovery(options.db, sessionId);
@@ -26719,6 +26764,7 @@ function registerPiContextHandler(pi, baseOptions) {
         isSubagent: sessionMeta.isSubagent,
         compactionOff: options.compactionOff === true
       });
+      assertFynvraOperation();
       logTransformTiming(sessionId, "runPipeline", tRunPipeline);
       const postPipelineStart = performance.now();
       const tTransformDecision = performance.now();
@@ -26802,6 +26848,7 @@ function registerPiContextHandler(pi, baseOptions) {
           sessionLog(sessionId, `auto-search failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      assertFynvraOperation();
       logTransformTiming(sessionId, "autoSearch", tAutoSearch);
       const tTodoCapture = performance.now();
       try {
@@ -26955,7 +27002,7 @@ function registerPiContextHandler(pi, baseOptions) {
     } catch (err) {
       // Fynvra patch 12: a runtime context failure hands the session back to native compaction immediately.
       if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && sessionIdForError) {
-        fynvraSuspendSession(sessionIdForError, "context");
+        if (fynvraOperationActive()) fynvraSuspendSession(sessionIdForError, "context");
         log(`[magic-context][${sessionIdForError}] context handler failed; native compaction takes over: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
@@ -26994,6 +27041,7 @@ function registerPiContextHandler(pi, baseOptions) {
   log("[magic-context][pi] registered context handler (tagging + drops + nudges)");
 }
 var inFlightHistorian = new Map;
+var fynvraHistorianCleanups = new Map;
 async function awaitInFlightHistorians(sessionId) {
   const runs = sessionId ? [inFlightHistorian.get(sessionId)].filter((run) => run !== undefined) : [...inFlightHistorian.values()];
   if (runs.length === 0)
@@ -27092,6 +27140,7 @@ function sendPiIgnoredNotification(ctx, message) {
   sessionLog("pi", message);
 }
 function spawnPiHistorianRun(args) {
+  assertFynvraOperation();
   const {
     pi,
     ctx,
@@ -27118,6 +27167,17 @@ function spawnPiHistorianRun(args) {
       return;
     }
     const renewal = startPiCompartmentLeaseRenewal(db, sessionId, holderId);
+    let rollbackReservation;
+    const cancel = () => {
+      clearInterval(renewal);
+      try {
+        rollbackReservation?.();
+        updateSessionMeta(db, sessionId, { compartmentInProgress: false });
+      } finally {
+        releaseCompartmentLeaseBestEffort(db, sessionId, holderId, sessionLog);
+      }
+    };
+    fynvraHistorianCleanups.set(sessionId, cancel);
     try {
       await runPiHistorian({
         db,
@@ -27135,6 +27195,7 @@ function spawnPiHistorianRun(args) {
         refreshBoundarySnapshot,
         currentContextLimit,
         historianTimeoutMs: historian.timeoutMs,
+        signal: ctx.signal,
         temperature: historian.temperature,
         maxOutputTokens: historian.maxOutputTokens,
         twoPass: historian.twoPass,
@@ -27145,6 +27206,7 @@ function spawnPiHistorianRun(args) {
         userMemoriesEnabled: historian.userMemoriesEnabled,
         language: historian.language,
         compartmentLeaseHolderId: holderId,
+        onCancellationCleanup: (cleanup) => { rollbackReservation = cleanup; },
         notifyIssue: (text) => {
           if (!isContextHandlerSessionActive(sessionId)) {
             sessionLog(sessionId, "historian failure notice skipped after session context cleared");
@@ -27157,6 +27219,7 @@ function spawnPiHistorianRun(args) {
           });
         },
         onPublished: () => {
+          assertFynvraOperation();
           const sessionStillActive = isContextHandlerSessionActive(sessionId);
           try {
             clearEmergencyRecovery(db, sessionId);
@@ -27173,16 +27236,18 @@ function spawnPiHistorianRun(args) {
         }
       });
     } finally {
+      if (fynvraHistorianCleanups.get(sessionId) === cancel) fynvraHistorianCleanups.delete(sessionId);
       clearInterval(renewal);
-      releaseCompartmentLeaseBestEffort(db, sessionId, holderId, sessionLog);
+      if (fynvraOperationActive()) releaseCompartmentLeaseBestEffort(db, sessionId, holderId, sessionLog);
     }
   })().catch((error) => {
+    if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && fynvraOperationActive()) fynvraSuspendSession(sessionId);
     sessionLog(sessionId, `pi historian run failed: ${error instanceof Error ? error.message : String(error)}`);
   }).finally(() => {
     try {
-      inFlightHistorian.delete(sessionId);
+      if (inFlightHistorian.get(sessionId) === runPromise) inFlightHistorian.delete(sessionId);
       unregister();
-      if (isContextHandlerSessionActive(sessionId)) {
+      if (fynvraOperationActive() && isContextHandlerSessionActive(sessionId)) {
         historian.onStatusChange?.(ctx, sessionId);
       }
     } catch (error) {
@@ -27211,6 +27276,7 @@ function resolvePiReadBranchEntries(ctx) {
   };
 }
 function maybeFireHistorian(args) {
+  assertFynvraOperation();
   const { ctx, sessionId, db, historian, isFirstContextPassForSession } = args;
   if (inFlightHistorian.has(sessionId)) {
     sessionLog(sessionId, "historian trigger eval: in-flight, skipping");
@@ -32102,14 +32168,31 @@ function fynvraSuspendedSessions() {
   }
   return sessions;
 }
+function fynvraInterruptSession(sessionId) {
+  const cleanup = fynvraHistorianCleanups.get(sessionId);
+  fynvraHistorianCleanups.delete(sessionId);
+  if (cleanup) {
+    try { fynvraRunSessionCleanup(cleanup); } catch {}
+  }
+  try { clearContextHandlerSession(sessionId); } catch {}
+}
 // Fynvra patch 12: per-session invalidation of Magic Context ownership.
 function fynvraSuspendSession(sessionId, reason = "runtime") {
   if (typeof sessionId !== "string" || sessionId.length === 0)
     return;
+  fynvraInterruptSession(sessionId);
+  fynvraReadySessions().delete(sessionId);
   fynvraSuspendedSessions().add(sessionId);
   try {
     globalThis[Symbol.for("fynvra.magic-context.suspend-listener")]?.(sessionId, reason);
   } catch {}
+}
+function fynvraCloseSession(sessionId) {
+  fynvraReadySessions().delete(sessionId);
+  fynvraSuspendedSessions().delete(sessionId);
+  clearPiSystemPromptSession(sessionId);
+  clearSessionTracking(sessionId);
+  clearContextHandlerSession(sessionId);
 }
 function fynvraBootReady(pi) {
   return pi?.[Symbol.for("fynvra.magic-context.boot-ok")] === true;
@@ -32134,6 +32217,7 @@ function fynvraMarkSessionReady(ctx) {
   try {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId === "string" && sessionId.length > 0) {
+      assertFynvraOperation();
       fynvraReadySessions().add(sessionId);
     }
   } catch {}
@@ -32148,6 +32232,7 @@ function fynvraMarkSessionClosed(ctx) {
   } catch {}
 }
 async function handlePiSessionBeforeCompact(args) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && (!fynvraOperationActive() || !fynvraHostSessionReady(args.ctx) || fynvraHostSessionSuspended(args.ctx))) return;
   try {
     const sessionId = args.ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId === "string" && sessionId.length > 0) {
@@ -32463,7 +32548,7 @@ async function src_default(pi) {
   let openFailureCause = null;
   const openStorage = async () => {
     try {
-      return await openDatabaseAsync();
+      return await openDatabaseAsync(dbPath);
     } catch (error) {
       openFailureCause = error instanceof Error ? error.message : String(error);
       return null;
@@ -32507,6 +32592,7 @@ async function src_default(pi) {
         warn(`Magic Context (${PI_HARNESS_KIND}) storage unavailable at ${dbPath}: ${formatFailClosedBlockingMessage(registration.reason)}. ` + "fail_closed_blocking=false — degrading silently (hooks not registered).");
         return {
           adoptRecovered: async (recoveredDb) => {
+            if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return false;
             try {
               await registration.onRecovered(recoveredDb);
               info("storage boot settled after its deadline; full Magic Context runtime installed");
@@ -32532,7 +32618,7 @@ async function src_default(pi) {
 }
 async function startPiMagicContextRuntime(pi, database, dbPath) {
   const db = database;
-  if (claimPiStartupMaintenance()) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST !== "1" && claimPiStartupMaintenance()) {
     scheduleAfterBootQuiet(() => {
       runDeferredV22Backfill(db).catch((err) => {
         warn(`[v22-backfill] background runner failed: ${err}`);
@@ -32745,7 +32831,10 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
     db,
     ensureProjectRegistered: ensureProjectRegisteredFromPiDirectory,
     allowDreamerActions: false,
-    memoryToolEnabled: true,
+    memoryToolEnabled: config.memory.enabled,
+    memoryEnabled: config.memory.enabled,
+    embeddingEnabled: false,
+    gitCommitsEnabled: false,
     protectedTags: config.protected_tags ?? 20,
     resolveProtectedTags: (ctx) => resolveCurrentProjectDeps(ctx).config.protected_tags ?? 20,
     resolveProjectIdentity: (ctx) => resolveCurrentProjectDeps(ctx).projectIdentity,
@@ -32767,12 +32856,23 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
         signalPendingMarker: signalPiDeferredCompactionMarkerDrain
       });
       // Fynvra patch 11: only a fully registered, boot-ready session may own compaction.
-      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && fynvraBootReady(pi))
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && fynvraBootReady(pi)) {
+        assertFynvraOperation();
+        const sid = resolveSessionId(ctx);
+        if (!current.historianConfig || typeof globalThis[Symbol.for("fynvra.magic-context.subagent-runner")] !== "function") {
+          fynvraSuspendSession(sid, "startup");
+          return;
+        }
+        if (!fynvraHistorianBudget(sid, COMPARTMENT_AGENT_SYSTEM_PROMPT, current.historianConfig.maxOutputTokens)) {
+          fynvraSuspendSession(sid, "budget");
+          return;
+        }
         fynvraMarkSessionReady(ctx);
+      }
     } catch (error) {
       if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
         const sid = resolveSessionId(ctx);
-        if (sid) fynvraSuspendSession(sid, "context");
+        if (sid && fynvraOperationActive()) fynvraSuspendSession(sid, "startup");
       }
       warn("session_start failed; Magic Context will not own compaction:", error);
     }
@@ -32980,6 +33080,7 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
       return;
     }
     await preloadTokenizer();
+    assertFynvraOperation();
     try {
       if (ctx.hasUI && shouldShowAnnouncement()) {
         const featureText = ANNOUNCEMENT_FEATURES.map((line) => `  • ${line}`).join(`
@@ -33099,7 +33200,7 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
       if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
         try {
           const sid = ctx.sessionManager?.getSessionId?.();
-          if (typeof sid === "string" && sid.length > 0) fynvraSuspendSession(sid, "context");
+          if (typeof sid === "string" && sid.length > 0 && fynvraOperationActive()) fynvraSuspendSession(sid, "context");
         } catch {}
       }
       return;
@@ -33187,7 +33288,7 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
   pi.on("message_end", async (event, ctx) => {
     try {
       const msg = event.message;
-      if (!compactionOff && msg !== null && typeof msg === "object") {
+      if (process.env.MAGIC_CONTEXT_FYNVRA_HOST !== "1" && !compactionOff && msg !== null && typeof msg === "object") {
         stripTagPrefixFromAssistantMessage(msg);
       }
     } catch (err) {
@@ -33306,9 +33407,13 @@ async function startPiMagicContextRuntime(pi, database, dbPath) {
       const sm = ctx.sessionManager;
       const sessionId = typeof sm?.getSessionId === "function" ? sm.getSessionId() : undefined;
       if (typeof sessionId === "string" && sessionId.length > 0) {
-        clearPiSystemPromptSession(sessionId);
         promptSurfaceGuidanceEpochs.clear(sessionId);
-        clearContextHandlerSession(sessionId);
+        // The host already cleared shared state synchronously in dispose.
+        // Never let an old shutdown clear a replacement binding after await.
+        if (process.env.MAGIC_CONTEXT_FYNVRA_HOST !== "1") {
+          clearPiSystemPromptSession(sessionId);
+          clearContextHandlerSession(sessionId);
+        }
       }
     } catch {}
   });
@@ -33349,5 +33454,7 @@ export {
   resolveHistorianFromConfig,
   resolveSidekickFromConfig,
   signalPiDeferredCompactionMarkerDrain,
-  fynvraSuspendSession
+  fynvraSuspendSession,
+  fynvraInterruptSession,
+  fynvraCloseSession
 };

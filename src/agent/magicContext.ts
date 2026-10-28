@@ -28,6 +28,8 @@ const RUNNER_SYMBOL = Symbol.for('fynvra.magic-context.subagent-runner');
 const BOOT_SYMBOL = Symbol.for('fynvra.magic-context.report-boot');
 const BOOT_OK_SYMBOL = Symbol.for('fynvra.magic-context.boot-ok');
 const SUSPEND_SYMBOL = Symbol.for('fynvra.magic-context.suspend-listener');
+const BUDGET_SYMBOL = Symbol.for('fynvra.magic-context.historian-budget');
+const PUBLISHED_SYMBOL = Symbol.for('fynvra.magic-context.published');
 
 /** Magic Context's internal agent names that may ask for a historian subagent. */
 const HISTORIAN_AGENTS = new Set([
@@ -37,7 +39,7 @@ const HISTORIAN_AGENTS = new Set([
   'historian-editor',
 ]);
 
-/** Safety cap; the plugin already truncates a chunk to its historian token budget. */
+/** Allocation guard; history is split at complete block boundaries, never sliced. */
 const MAX_HISTORIAN_PROMPT_CHARS = 2_000_000;
 /** Hard local cap in addition to the plugin's configured historian timeout. */
 const MAX_HISTORIAN_TIMEOUT_MS = 5 * 60_000;
@@ -75,15 +77,32 @@ interface MagicSubagentResult {
   transient?: boolean;
 }
 
+interface MagicOperation {
+  signal: AbortSignal;
+  isCurrent(): boolean;
+  onFailure(reason: MagicContextFallbackReason): void;
+}
+
 interface MagicContextModule {
   default(pi: ExtensionAPI): void | Promise<void>;
   /** Added by vendor patch: invalidate this session's Magic takeover. */
-  fynvraSuspendSession?(sessionId: string, reason?: string): void;
+  fynvraSuspendSession(sessionId: string, reason?: string): void;
+  fynvraInterruptSession(sessionId: string): void;
+  fynvraCloseSession(sessionId: string): void;
+  fynvraBindSession(
+    pi: ExtensionAPI,
+    sessionId: string,
+    capture: () => MagicOperation
+  ): ExtensionAPI;
+  fynvraRunSessionOperation(
+    capture: () => MagicOperation,
+    operation: () => void | Promise<void>
+  ): Promise<void>;
 }
 
 interface SessionRunner {
   getModel(): ResolvedModel;
-  readonly abort: AbortController;
+  abort: AbortController;
   inFlight: boolean;
   disposed: boolean;
   suspended: boolean;
@@ -105,6 +124,8 @@ export interface MagicContextCompaction {
   readonly warnings: string[];
   /** Register the Pi session id before the extension is bound. */
   attach(piSessionId: string): void;
+  /** Stop/model changes invalidate current operations without treating cancellation as failure. */
+  interrupt(): void;
   /** Abort an in-flight historian and drop the routing entry. */
   dispose(): void;
 }
@@ -128,9 +149,8 @@ export function createMagicContextCompaction(
   let runner: SessionRunner | undefined;
 
   const notifyFallback = (reason: MagicContextFallbackReason) => {
-    if (!runner || runner.fallbackNotified) return;
-    runner.fallbackNotified = true;
-    runner.onFallback?.(reason);
+    if (!runner || runner.fallbackNotified || runner.disposed) return;
+    if (piSessionId) suspendSession(piSessionId, reason);
   };
 
   const extension: InlineExtension = {
@@ -159,20 +179,36 @@ export function createMagicContextCompaction(
       // vendored plugin reads boot status / boot readiness through these
       // symbols; a non-extensible API or a missing report leaves native
       // compaction in charge and still produces a visible warning.
-      const pluginApi = new Proxy(pi, {
-        get(target, property) {
+      const pluginApi = new Proxy({} as ExtensionAPI, {
+        get(_target, property) {
           if (property === BOOT_SYMBOL) {
             return (status: unknown) => {
               if (typeof status === 'string') bootStatus = status;
             };
           }
           if (property === BOOT_OK_SYMBOL) return bootStatus === 'ready';
-          const value = Reflect.get(target, property, target);
-          return typeof value === 'function' ? value.bind(target) : value;
+          const value = Reflect.get(pi, property, pi);
+          return typeof value === 'function' ? value.bind(pi) : value;
         },
       });
       try {
-        await module.default(pluginApi);
+        const attached = runner;
+        const id = piSessionId;
+        if (!attached || !id || attached.disposed) return;
+        const capture = (): MagicOperation => {
+          const controller = attached.abort;
+          return {
+            signal: controller.signal,
+            isCurrent: () =>
+              sessionRunners.get(id) === attached &&
+              !attached.disposed &&
+              !attached.suspended &&
+              !controller.signal.aborted,
+            onFailure: (reason) => suspendSession(id, reason),
+          };
+        };
+        const guardedApi = module.fynvraBindSession(pluginApi, id, capture);
+        await module.fynvraRunSessionOperation(capture, () => module.default(guardedApi));
       } catch (error) {
         warnings.push(
           `Magic Context failed to start (${errorMessage(error)}); pi native compaction stays active.`
@@ -211,11 +247,21 @@ export function createMagicContextCompaction(
         sessionRunners.set(id, runner);
       }
     },
+    interrupt() {
+      if (!runner || runner.disposed || runner.suspended) return;
+      if (piSessionId) loadedPluginModule?.fynvraInterruptSession(piSessionId);
+      runner.abort.abort();
+      runner.abort = new AbortController();
+    },
     dispose() {
       if (runner) {
+        if (piSessionId && sessionRunners.get(piSessionId) === runner) {
+          loadedPluginModule?.fynvraInterruptSession(piSessionId);
+        }
         runner.disposed = true;
         runner.abort.abort();
         if (piSessionId && sessionRunners.get(piSessionId) === runner) {
+          loadedPluginModule?.fynvraCloseSession(piSessionId);
           sessionRunners.delete(piSessionId);
         }
         runner = undefined;
@@ -239,7 +285,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
   const pluginDir = process.env.MAGIC_CONTEXT_PLUGIN_DIR?.trim() ?? '';
   const storageDir = process.env.MAGIC_CONTEXT_STORAGE_DIR?.trim() ?? '';
   const configFile = process.env.MAGIC_CONTEXT_CONFIG_FILE?.trim() ?? '';
-  if (!pluginDir || !existsSync(join(pluginDir, 'dist', 'index.js'))) {
+  if (!pluginDir || !isAbsolute(pluginDir) || !existsSync(join(pluginDir, 'dist', 'index.js'))) {
     return {
       ok: false,
       warning: `Magic Context plugin files are missing at ${pluginDir || '(unset)'}; pi native compaction stays active.`,
@@ -252,7 +298,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
         'Magic Context storage directory is missing or not absolute; pi native compaction stays active.',
     };
   }
-  if (!configFile || !existsSync(configFile)) {
+  if (!configFile || !isAbsolute(configFile) || !existsSync(configFile)) {
     return {
       ok: false,
       warning: 'Magic Context host config is missing; pi native compaction stays active.',
@@ -296,6 +342,16 @@ async function loadPlugin(pluginDir: string): Promise<MagicContextModule> {
       await import('node:sqlite');
       const entry = pathToFileURL(join(pluginDir, 'dist', 'index.js')).href;
       const module = (await import(entry)) as MagicContextModule;
+      if (
+        typeof module.default !== 'function' ||
+        typeof module.fynvraBindSession !== 'function' ||
+        typeof module.fynvraSuspendSession !== 'function' ||
+        typeof module.fynvraInterruptSession !== 'function' ||
+        typeof module.fynvraRunSessionOperation !== 'function' ||
+        typeof module.fynvraCloseSession !== 'function'
+      ) {
+        throw new Error('vendored Magic Context host contract is incomplete');
+      }
       loadedPluginModule = module;
       return module;
     })().catch((error) => {
@@ -314,17 +370,25 @@ function installRunner(): void {
   const globals = globalThis as typeof globalThis & {
     [RUNNER_SYMBOL]?: (options: MagicSubagentOptions) => Promise<MagicSubagentResult>;
     [SUSPEND_SYMBOL]?: (sessionId: string, reason?: string) => void;
+    [BUDGET_SYMBOL]?: typeof getHistorianBudget;
+    [PUBLISHED_SYMBOL]?: (sessionId: string) => void;
   };
-  if (!globals[RUNNER_SYMBOL]) globals[RUNNER_SYMBOL] = runMagicSubagent;
+  globals[RUNNER_SYMBOL] = runMagicSubagent;
   globals[SUSPEND_SYMBOL] = handleVendorSuspend;
+  globals[BUDGET_SYMBOL] = getHistorianBudget;
+  globals[PUBLISHED_SYMBOL] = (sessionId) => {
+    const runner = sessionRunners.get(sessionId);
+    if (runner && !runner.disposed && !runner.suspended) runner.failureStreak = 0;
+  };
 }
 
 installRunner();
 
 function handleVendorSuspend(sessionId: string, reason?: string): void {
   const runner = sessionRunners.get(sessionId);
-  if (!runner) return;
+  if (!runner || runner.disposed) return;
   runner.suspended = true;
+  runner.abort.abort();
   if (runner.fallbackNotified) return;
   runner.fallbackNotified = true;
   runner.onFallback?.(normalizeFallbackReason(reason));
@@ -337,16 +401,12 @@ function normalizeFallbackReason(reason: unknown): MagicContextFallbackReason {
 /** Invalidate this session's Magic ownership; other sessions keep their entries. */
 function suspendSession(sessionId: string, reason: MagicContextFallbackReason): void {
   const runner = sessionRunners.get(sessionId);
-  if (runner) runner.suspended = true;
+  if (!runner || runner.disposed) return;
   try {
-    loadedPluginModule?.fynvraSuspendSession?.(sessionId, reason);
+    loadedPluginModule?.fynvraSuspendSession(sessionId, reason);
   } catch {}
-  // The vendored module normally calls the global listener above; this local
-  // fallback keeps the warning/fallback correct if an older vendor lacks it.
-  if (runner && !runner.fallbackNotified) {
-    runner.fallbackNotified = true;
-    runner.onFallback?.(reason);
-  }
+  // Also covers failures before the vendor module is available.
+  handleVendorSuspend(sessionId, reason);
 }
 
 function noteHistorianFailure(
@@ -373,26 +433,45 @@ function isTransientModelError(message: string): boolean {
   );
 }
 
-/** Conservative token estimate: CJK ~1 token/char, other text ~3 chars/token. */
+/** UTF-8 bytes conservatively bound text tokens for the supported byte/subword
+ * tokenizers. Provider framing is separately reserved; this is not a universal
+ * guarantee for arbitrary provider-side templates or inaccurate model metadata.
+ */
 function estimatePromptTokens(text: string): number {
-  if (typeof text !== 'string' || text.length === 0) return 0;
-  let cjk = 0;
-  let other = 0;
-  for (const character of text) {
-    const code = character.codePointAt(0) ?? 0;
-    if (
-      (code >= 0x2e80 && code <= 0x9fff) ||
-      (code >= 0xac00 && code <= 0xd7af) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0x3040 && code <= 0x30ff) ||
-      (code >= 0xff00 && code <= 0xffef)
-    ) {
-      cjk += 1;
-    } else {
-      other += 1;
-    }
-  }
-  return cjk + Math.ceil(other / 3);
+  return Buffer.byteLength(text, 'utf8');
+}
+
+function getHistorianBudget(
+  sessionId: string,
+  systemPrompt: string,
+  requestedMax = 32_000
+): { inputBytes: number; maxTokens: number } | undefined {
+  const runner = sessionRunners.get(sessionId);
+  if (!runner || runner.disposed || runner.suspended || typeof systemPrompt !== 'string') return;
+  return modelHistorianBudget(runner.getModel(), systemPrompt, requestedMax);
+}
+
+function modelHistorianBudget(
+  resolved: ResolvedModel,
+  systemPrompt: string,
+  requestedMax: number
+): { inputBytes: number; maxTokens: number } | undefined {
+  const { contextWindow, maxTokens: modelMax } = resolved.model;
+  if (
+    !Number.isFinite(contextWindow) ||
+    !Number.isFinite(modelMax) ||
+    contextWindow <= 0 ||
+    modelMax < MIN_HISTORIAN_OUTPUT_TOKENS ||
+    !Number.isFinite(requestedMax) ||
+    requestedMax < MIN_HISTORIAN_OUTPUT_TOKENS
+  ) return;
+  const maxTokens = Math.floor(Math.min(requestedMax, modelMax, 32_000, contextWindow * 0.2));
+  const framing = Math.max(CONTEXT_SAFETY_TOKENS, Math.ceil(contextWindow * 0.05));
+  const inputBytes = Math.floor(
+    contextWindow - estimatePromptTokens(systemPrompt) - framing - maxTokens
+  );
+  if (maxTokens < MIN_HISTORIAN_OUTPUT_TOKENS || inputBytes < 1_024) return;
+  return { inputBytes, maxTokens };
 }
 
 function historianTokenBudget(
@@ -401,25 +480,10 @@ function historianTokenBudget(
   userMessage: string,
   requestedMax: number
 ): { ok: true; maxTokens: number } | { ok: false } {
-  const contextWindow =
-    typeof resolved.model.contextWindow === 'number' &&
-    Number.isFinite(resolved.model.contextWindow) &&
-    resolved.model.contextWindow > 0
-      ? resolved.model.contextWindow
-      : 128_000;
-  const modelMax =
-    typeof resolved.model.maxTokens === 'number' &&
-    Number.isFinite(resolved.model.maxTokens) &&
-    resolved.model.maxTokens > 0
-      ? resolved.model.maxTokens
-      : 32_000;
-  const promptTokens = estimatePromptTokens(systemPrompt) + estimatePromptTokens(userMessage);
-  const available = contextWindow - promptTokens - CONTEXT_SAFETY_TOKENS;
-  if (available < MIN_HISTORIAN_OUTPUT_TOKENS) return { ok: false };
-  return {
-    ok: true,
-    maxTokens: Math.max(MIN_HISTORIAN_OUTPUT_TOKENS, Math.min(requestedMax, modelMax, available)),
-  };
+  const budget = modelHistorianBudget(resolved, systemPrompt, requestedMax);
+  return budget && estimatePromptTokens(userMessage) <= budget.inputBytes
+    ? { ok: true, maxTokens: budget.maxTokens }
+    : { ok: false };
 }
 
 async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSubagentResult> {
@@ -455,11 +519,16 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
     );
   }
   const finish = (result: MagicSubagentResult): MagicSubagentResult => {
-    if (result.ok) runner.failureStreak = 0;
-    else noteHistorianFailure(runner, sessionId, result);
+    // A transport success is only a draft. The vendor resets this counter
+    // after validation AND the publication transaction have succeeded.
+    if (!result.ok) noteHistorianFailure(runner, sessionId, result);
     return result;
   };
-  if (typeof options.userMessage !== 'string' || options.userMessage.length === 0) {
+  if (
+    typeof options.systemPrompt !== 'string' ||
+    typeof options.userMessage !== 'string' ||
+    options.userMessage.length === 0
+  ) {
     return finish(fail(startedAt, 'invalid_prompt', 'historian prompt is empty.'));
   }
   if (options.userMessage.length > MAX_HISTORIAN_PROMPT_CHARS) {
@@ -476,12 +545,27 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
   const requestedTimeout =
     typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
       ? options.timeoutMs
-      : MAX_HISTORIAN_TIMEOUT_MS;
+      : 180_000;
   const timeoutMs = Math.max(30_000, Math.min(requestedTimeout, MAX_HISTORIAN_TIMEOUT_MS));
   const timeout = AbortSignal.timeout(timeoutMs);
-  const signals = [runner.abort.signal, timeout];
+  const operationAbort = runner.abort;
+  const signals = [operationAbort.signal, timeout];
   if (options.signal) signals.push(options.signal);
   const signal = AbortSignal.any(signals);
+  const cancellation = (): MagicSubagentResult | undefined => {
+    if (
+      operationAbort.signal.aborted ||
+      options.signal?.aborted ||
+      runner.disposed ||
+      runner.suspended
+    ) {
+      return fail(startedAt, 'abort', 'historian request was cancelled by its session.');
+    }
+    if (timeout.aborted) {
+      return { ...fail(startedAt, 'timeout', 'historian deadline expired.'), transient: true };
+    }
+    return undefined;
+  };
 
   try {
     const resolved = runner.getModel();
@@ -509,21 +593,26 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       content: options.userMessage,
       timestamp: Date.now(),
     };
-    const answer = await resolved.runtime.completeSimple(
-      resolved.model,
-      {
-        systemPrompt: options.systemPrompt,
-        messages: [message],
-      },
-      {
-        maxTokens: budget.maxTokens,
-        maxRetries: 0,
-        signal,
-        ...(typeof options.temperature === 'number' && Number.isFinite(options.temperature)
-          ? { temperature: options.temperature }
-          : {}),
-      }
+    const answer = await withAbort(
+      resolved.runtime.completeSimple(
+        resolved.model,
+        {
+          systemPrompt: options.systemPrompt,
+          messages: [message],
+        },
+        {
+          maxTokens: budget.maxTokens,
+          maxRetries: 0,
+          signal,
+          ...(typeof options.temperature === 'number' && Number.isFinite(options.temperature)
+            ? { temperature: options.temperature }
+            : {}),
+        }
+      ),
+      signal
     );
+    const cancelled = cancellation();
+    if (cancelled) return finish(cancelled);
     if (answer.stopReason === 'length') {
       return finish(
         fail(startedAt, 'model_failed', 'historian output hit the model output limit.')
@@ -537,7 +626,17 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       });
     }
     if (answer.stopReason === 'aborted') {
-      return finish(fail(startedAt, 'abort', 'historian request was aborted.'));
+      // An SDK abort without any caller cancellation is a failed request.
+      return finish({
+        ...fail(startedAt, 'model_failed', 'historian request unexpectedly aborted.'),
+        transient: true,
+      });
+    }
+    if (answer.stopReason !== 'stop') {
+      return finish({
+        ...fail(startedAt, 'model_failed', 'historian did not finish a text response.'),
+        transient: false,
+      });
     }
     const assistantText = answer.content
       .filter((block) => block.type === 'text')
@@ -561,19 +660,8 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       toolCallCount: 0,
     });
   } catch (error) {
-    if (runner.abort.signal.aborted || options.signal?.aborted) {
-      return finish(fail(startedAt, 'abort', 'historian request was aborted.'));
-    }
-    if (timeout.aborted) {
-      return finish({
-        ...fail(
-          startedAt,
-          'timeout',
-          `historian request timed out after ${Math.round(timeoutMs / 1000)}s.`
-        ),
-        transient: true,
-      });
-    }
+    const cancelled = cancellation();
+    if (cancelled) return finish(cancelled);
     const message = errorMessage(error).slice(0, 1_000);
     return finish({
       ...fail(startedAt, 'model_failed', message),
@@ -582,6 +670,19 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
   } finally {
     runner.inFlight = false;
   }
+}
+
+/** Enforce the deadline even if a provider neglects to settle after abort. */
+function withAbort<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason);
+    };
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 
 function fail(startedAt: number, reason: string, error: string): MagicSubagentResult {

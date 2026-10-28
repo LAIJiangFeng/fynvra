@@ -1,5 +1,4 @@
 import { GitBranch, MessagesSquare, X } from 'lucide-react';
-import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
@@ -89,10 +88,13 @@ function ChatNotice() {
  * 不改变会话状态、不等待确认，也不显示 provider 原始错误或 prompt。
  */
 function ChatWarning({ sessionId }: { sessionId: string }) {
-  const warning = useSessionsStore((state) => state.runtimeBySession[sessionId]?.warning);
-  const [dismissed, setDismissed] = useState(false);
+  const visible = useSessionsStore((state) => {
+    const runtime = state.runtimeBySession[sessionId];
+    return runtime?.warning && runtime.warningSeq !== runtime.dismissedWarningSeq;
+  });
+  const dismiss = useSessionsStore((state) => state.dismissWarning);
   const t = useT();
-  if (!warning || dismissed) return null;
+  if (!visible) return null;
   return (
     <div
       role="status"
@@ -106,7 +108,7 @@ function ChatWarning({ sessionId }: { sessionId: string }) {
         variant="ghost"
         size="icon-xs"
         aria-label={t('sessions.dismissNotice')}
-        onClick={() => setDismissed(true)}
+        onClick={() => dismiss(sessionId)}
       >
         <X />
       </Button>

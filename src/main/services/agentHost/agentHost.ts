@@ -198,6 +198,8 @@ interface LiveSession {
   workerSeq: number;
   /** 推给 Renderer 的会话级 seq：跨 generation 单调递增，Renderer 的「过期 seq 丢弃」在重启后依然成立 */
   sessionSeq: number;
+  /** Warnings preserve suggestion validity but still participate in ordered delivery. */
+  activitySeq: number;
   running: boolean;
   /** 还在途的 prompt（spawn / 发出之前）：这期间不能换模型，否则 spawn 用的还是旧模型 */
   prompting: number;
@@ -322,6 +324,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         spec: null,
         workerSeq: 0,
         sessionSeq: 0,
+        activitySeq: 0,
         running: false,
         prompting: 0,
         activity: 0,
@@ -414,6 +417,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   function deliver(sessionId: string, state: LiveSession, event: FynvraSessionEventBody): void {
     state.transcript?.append(event);
     state.sessionSeq += 1;
+    if (event.type !== 'warning') state.activitySeq = state.sessionSeq;
     const envelope: SessionEventEnvelope = {
       sessionId,
       event: { ...event, seq: state.sessionSeq } as FynvraSessionEvent,
@@ -796,7 +800,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           stored.status !== 'error' &&
           state !== undefined &&
           state.lastSettledSeq === event.roundId &&
-          state.sessionSeq === event.roundId &&
+          state.activitySeq === event.roundId &&
           state.settledRounds === event.round &&
           !state.running;
         settleSuggestion(event.requestId, {
@@ -961,7 +965,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (stored.status === 'error') return empty;
     const state = live.get(sessionId);
     if (!state?.spawned || state.running || state.prompting > 0) return empty;
-    if (state.lastSettledSeq !== roundId || state.sessionSeq !== roundId) return empty;
+    if (state.lastSettledSeq !== roundId || state.activitySeq !== roundId) return empty;
     const round = state.settledRounds;
     if (round <= 0) return empty;
     // 每轮只发起一次，空结果 / 失败也算（避免 Renderer 重渲染时反复请求）

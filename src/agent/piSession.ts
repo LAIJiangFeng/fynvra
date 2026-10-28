@@ -99,7 +99,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         sessionManager,
         host,
         workerHost,
-        // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
+        // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
         ...(approval
           ? {
               approval: {
@@ -172,6 +172,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
+        magic?.interrupt();
         await session.setModel(resolved.model);
         if (resolved.thinking) session.setThinkingLevel(resolved.thinking);
         // Fast 与模型 / 档位独立：下一次请求起按新切换的值；不支持的协议在请求时也不会带字段
@@ -183,16 +184,18 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         if (!gate) throw new Error('this session has no approval gate to switch');
         gate.setMode(mode);
       },
-      abort: () => session.abort(),
+      abort: () => {
+        magic?.interrupt();
+        return session.abort();
+      },
       isIdle: () => session.isIdle,
       suggestReply: ({ signal }) => suggestReply(session, activeModel, signal),
       dispose: async () => {
-        try {
-          if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
-          await created.dispose();
-        } finally {
-          magic?.dispose();
-        }
+        // Invalidate before waiting for Pi: background historian/ctx work must
+        // not publish while session_shutdown is draining.
+        magic?.dispose();
+        if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
+        await created.dispose();
       },
     };
   };

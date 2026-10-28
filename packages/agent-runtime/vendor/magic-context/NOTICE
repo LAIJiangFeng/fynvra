@@ -8,7 +8,7 @@ ships the standard MIT text with a generic copyright-holder line rather than
 inventing a year or name. If the upstream repository license becomes available,
 replace LICENSE with that file verbatim.
 
-Included files (3.26 MB total, 9 files):
+Included files (approximately 3.3 MB total, 10 files):
   package.json                     upstream manifest (version/license/peer metadata)
   LICENSE                          MIT text
   NOTICE                           this file
@@ -17,7 +17,8 @@ Included files (3.26 MB total, 9 files):
   dist/index-147qn1yq.js              15 KB storage, logger, data paths
   dist/index-22jkk6wg.js             1.4 KB module resolution helper
   dist/index-b3eqj1g6.js             1.6 KB notification helper
-  dist/fynvra-pi-tui-stub.js         1.3 KB Fynvra host stub
+  dist/fynvra-pi-tui-stub.js         Fynvra host stub
+  dist/fynvra-host.js               Fynvra async lifecycle / SDK facade bridge
 
 Why this cannot be reduced to only the compaction functions: `index.js` statically
 imports the shared core (`index-s0zw9ddk.js`) for the SQLite schema, config
@@ -30,7 +31,8 @@ historian-calibration-extension.js and OMP/OpenCode TUI helpers. Fynvra disables
 embedding/dreamer/sidekick/smart-notes and runs the historian in-process, so those
 modules are never imported.
 
-Local patches (each marked with `Fynvra patch <n>` in the source):
+Local patches (initial patches are numbered in the source; hosted guards also
+use fynvra-prefixed helpers and MAGIC_CONTEXT_FYNVRA_HOST checks):
    1. PiSubagentRunner.run delegates to the Fynvra in-process runner.
    2. loadPiConfig uses MAGIC_CONTEXT_CONFIG_ROOT instead of the session cwd.
    3. loadPiConfigDetailed uses MAGIC_CONTEXT_CONFIG_ROOT.
@@ -51,9 +53,29 @@ Local patches (each marked with `Fynvra patch <n>` in the source):
       transforms/history injection/historian triggers/marker writes, and let
       native compaction proceed. Another session is unaffected. The adapter also
       forwards a one-shot warning event to the host.
-  13. Historian chunk size is derived from the current session model context
-      window (minus system prompt/output reserve), instead of the fixed historian
-      model placeholder.
+  13. Historian budgets come from the routed current model, using conservative
+      UTF-8 byte estimates for text plus framing/output reserves. Whole formatted
+      blocks are selected and the complete prompt is checked before sending.
+      No XML slicing; unsupported/tiny windows fall back. Upstream scheduler and
+      history-decay estimates remain heuristic, not universal token guarantees.
+  14. Only validated, committed historian publication reports success to the host.
+      Final validation/no-progress/storage failures suspend the session; transient
+      requests have bounded retries. Stop/dispose/model changes invalidate the
+      operation. SQLite calls, context copies, deferred writes and marker calls
+      check the captured async lifetime. Cancellation synchronously releases only
+      bookkeeping leases/reservations; no late publication or transcript rewrite.
+      Native markers include a cumulative upstream-rendered history snapshot.
+  15. SDK facades use empty targets to respect Proxy invariants and bind methods
+      to their real receivers. Terminal commands/shortcuts/status persistence are
+      not registered; missing/late boot cannot acquire ownership. Host routes,
+      readiness and suspension are cleared on disposal without clearing another
+      session or a replacement binding.
+  16. Host config loads only the fixed generated JSON file, without terminal or
+      workspace discovery, substitution, or recovery to unsafe defaults. Private
+      DBs never migrate terminal data; tokenizer/cache/overlay/wake-plane discovery
+      and unrelated startup backfills are disabled. Optional memory/embedding/git
+      search flags are explicit. Schema fencing stays pinned to this vendor version.
 
-Do not edit these files by hand. Re-copy the upstream package and re-apply the
-marked hunks when upgrading the pinned version.
+When upgrading, re-copy the pinned upstream files and re-apply these hosted
+changes, including fynvra-host.js. The compaction, validation, tag/drop, SQLite
+schema and session-history implementation remain upstream Magic Context.

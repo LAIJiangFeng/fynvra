@@ -1,3 +1,4 @@
+import { assertFynvraOperation, fynvraStorageCall } from "./fynvra-host.js";
 import {
   sanitizeDiagnosticText,
   getHarness,
@@ -9079,6 +9080,7 @@ function warnTokenizerFallback(error) {
   console.warn("[magic-context] ai-tokenizer is unavailable; using approximate character-based token counts for this process. Token budgets, persisted per-message counts, and protected-tail/compartment boundaries may be less accurate until restart:", reason);
 }
 async function preloadTokenizer() {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return false;
   if (tokenizer)
     return true;
   if (tokenizerLoadAttempted)
@@ -9105,6 +9107,7 @@ async function preloadTokenizer() {
   return tokenizerLoadPromise;
 }
 function getTokenizer() {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return undefined;
   if (tokenizer || tokenizerLoadAttempted)
     return tokenizer;
   tokenizerLoadAttempted = true;
@@ -9948,13 +9951,20 @@ function buildNodeSqliteDatabaseClass(DatabaseSync) {
         translated.readOnly = options.readonly;
         delete translated.readonly;
       }
+      assertFynvraOperation();
       super(typeof filename === "string" ? filename : ":memory:", translated);
     }
+    exec(sql) {
+      // Rollback remains legal after invalidation so a failed synchronous
+      // transaction cannot leave the shared database locked.
+      if (/^\s*ROLLBACK\b/i.test(sql)) return super.exec(sql);
+      return fynvraStorageCall(() => super.exec(sql));
+    }
     prepare(sql) {
-      const stmt = super.prepare(sql);
+      const stmt = fynvraStorageCall(() => super.prepare(sql));
       for (const method of ["run", "get", "all"]) {
         const original = stmt[method].bind(stmt);
-        stmt[method] = (...args) => args.length === 1 && Array.isArray(args[0]) ? original(...args[0]) : original(...args);
+        stmt[method] = (...args) => fynvraStorageCall(() => args.length === 1 && Array.isArray(args[0]) ? original(...args[0]) : original(...args));
       }
       return stmt;
     }
@@ -13482,6 +13492,7 @@ function getDatabasePath(db) {
   return pathByDatabase.get(db) ?? null;
 }
 function migrateLegacyStorageIfNeeded(targetDbPath, targetDbDir) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return;
   if (existsSync5(targetDbPath))
     return;
   const legacyDir = getLegacyOpenCodeMagicContextStorageDir();
@@ -13533,6 +13544,7 @@ function formatSchemaFenceBootLog(persistedVersion, supportedVersion) {
   return `[magic-context] upstream migration lane at boot: database=v${persistedVersion}, supported_fence=v${supportedVersion}`;
 }
 function getRuntimeLatestSupportedVersion(options) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return LATEST_SUPPORTED_VERSION;
   if (options?.latestSupportedVersion !== undefined) {
     return options.latestSupportedVersion;
   }
@@ -13778,7 +13790,9 @@ function enforceMigrationOnOpenGuard(db, dbPath, dbDir, latestSupportedVersion) 
     return true;
   }
   const discovery = inspectRpcServerDiscovery(dbDir);
-  const piDiscovery = inspectLivePiProcesses();
+  const piDiscovery = process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1"
+    ? { state: "absent", processIds: [] }
+    : inspectLivePiProcesses();
   const piPids = migrationBlockingPiPids(dbPath, discovery, piDiscovery.processIds);
   const serverProcesses = discovery.serverProcesses ?? (discovery.state === "live" ? discovery.serverPids.map((pid) => ({ kind: "process", pid })) : []);
   const blockingProcesses = [...serverProcesses, ...piPids.map(createPiBlockingProcess)];
@@ -16722,6 +16736,7 @@ function getOpenCodeDbPath2() {
   return join5(getDataDir(), "opencode", "opencode.db");
 }
 function openCodeDbExists() {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return false;
   return existsSync6(getOpenCodeDbPath2());
 }
 var cachedReadOnlyDb = null;
@@ -16738,6 +16753,7 @@ function closeCachedReadOnlyDb() {
   }
 }
 function getReadOnlySessionDb() {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") throw new Error("Fynvra requires a session-owned history provider");
   const dbPath = getOpenCodeDbPath2();
   if (cachedReadOnlyDb?.path === dbPath) {
     return cachedReadOnlyDb.db;
@@ -18486,7 +18502,7 @@ function getLegacyProtectedTailStartOrdinal(sessionId) {
   }
   return userOrdinals[userOrdinals.length - PROTECTED_TAIL_USER_TURNS];
 }
-function readSessionChunk(sessionId, tokenBudget, offset = 1, eligibleEndOrdinal) {
+function readSessionChunk(sessionId, tokenBudget, offset = 1, eligibleEndOrdinal, byteBudget = false) {
   const messages = readRawSessionMessages(sessionId);
   const totalMessageCount = getCachedAbsoluteMessageCount(sessionId) ?? messages.length;
   const startOrdinal = Math.max(1, offset);
@@ -18513,8 +18529,8 @@ function readSessionChunk(sessionId, tokenBudget, offset = 1, eligibleEndOrdinal
     if (!currentBlock)
       return true;
     const blockText = formatBlock(currentBlock);
-    const blockTokens = estimateBlockTokens(blockText);
-    if (totalTokens + blockTokens > tokenBudget && totalTokens > 0) {
+    const blockTokens = byteBudget ? Buffer.byteLength(blockText, "utf8") + 2 : estimateBlockTokens(blockText);
+    if (totalTokens + blockTokens > tokenBudget && (byteBudget || totalTokens > 0)) {
       return false;
     }
     if (currentBlock.role === "A" && currentBlock.commitHashes.length > 0 && lastFlushedRole !== "A") {
@@ -21809,6 +21825,7 @@ function reloadWindowOverlay(path) {
   loadedOverlay = undefined;
 }
 function getWindowOverlay() {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return undefined;
   const path = configuredOverlayPath ?? defaultWindowOverlayPath();
   if (loadedOverlayPath === path && loadedOverlay !== undefined) {
     return loadedOverlay ?? undefined;
@@ -30925,7 +30942,29 @@ function parsePiConfig(rawConfig, recoveredTopLevelKeys = []) {
   warnings.push("Config recovery failed, using all defaults.");
   return { config: defaults, warnings };
 }
+function loadFynvraConfig() {
+  // This file is generated by Main. Never discover project/terminal configs,
+  // substitute variables, or recover a corrupt file to optional-feature defaults.
+  const path = process.env.MAGIC_CONTEXT_CONFIG_FILE?.trim();
+  if (!path || !isAbsolute(path)) throw new Error("Fynvra Magic Context config is unavailable");
+  const raw = JSON.parse(readFileSync2(path, "utf8"));
+  if (raw.enabled !== true || raw.compaction?.enabled !== true || raw.fail_closed_blocking !== false ||
+      raw.dreamer?.disable !== true || raw.sidekick?.disable !== true || raw.memory?.enabled !== false ||
+      raw.embedding?.provider !== "off" || raw.todowrite?.enabled !== false) {
+    throw new Error("Fynvra Magic Context config violates the compression-only policy");
+  }
+  const { config, warnings } = parsePiConfig(raw);
+  if (warnings.length) throw new Error("Fynvra Magic Context config schema is incompatible");
+  setOutputReserveConfig(config.output_reserve);
+  setWindowOverlayPath(config.models?.window_overlay_path);
+  return {
+    config, registrationPromptSurface: config.prompt_surface, warnings: [], loadedFromPaths: [path],
+    loadOutcome: "ok", sources: { userConfig: "ok", projectConfig: "ok" },
+    substitutionFailures: [], recoveredTopLevelKeys: []
+  };
+}
 function loadPiConfig(opts = {}) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return loadFynvraConfig();
   // Fynvra patch 2: config is app-owned, not project-owned; do not read a workspace's .cortexkit config.
   const configRoot = process.env.MAGIC_CONTEXT_CONFIG_ROOT?.trim();
   const cwd = configRoot && isAbsolute(configRoot) ? configRoot : opts.cwd ?? process.cwd();
@@ -31056,6 +31095,7 @@ function combinedOutcome(args) {
   return "ok";
 }
 function loadPiConfigDetailed(opts = {}) {
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return loadFynvraConfig();
   // Fynvra patch 3: same app-owned config root as loadPiConfig.
   const configRoot = process.env.MAGIC_CONTEXT_CONFIG_ROOT?.trim();
   const cwd = configRoot && isAbsolute(configRoot) ? configRoot : opts.cwd ?? process.cwd();
@@ -40430,6 +40470,8 @@ async function probeStatus() {
   }
 }
 async function wakePlaneStatus() {
+  // Compression-only host never probes terminal CortexKit services/config.
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return "absent";
   const cached = cachedStatus;
   if (cached && now() < cached.expiresAt)
     return cached.status;
