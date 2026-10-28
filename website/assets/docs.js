@@ -432,12 +432,6 @@
       document.title = `${articleTitle(article)} — ${strings().docsTitle}`;
     }
 
-    function updateArticleKicker(article) {
-      if (!article) return;
-      const kicker = article.querySelector('[data-docs-kicker]');
-      if (kicker) kicker.textContent = articleGroup(article);
-    }
-
     function resolveHash() {
       const raw = window.location.hash.slice(1);
       if (!raw) return { article: articles[0], anchor: null, key: '' };
@@ -510,7 +504,6 @@
       updateBreadcrumb(article);
       updatePager(article);
       updateDocumentTitle(article);
-      updateArticleKicker(article);
 
       window.requestAnimationFrame(() => {
         if (info.anchor) {
@@ -574,7 +567,6 @@
       updateBreadcrumb(activeArticle);
       updatePager(activeArticle);
       updateDocumentTitle(activeArticle);
-      updateArticleKicker(activeArticle);
       if (!searchPanel.hidden && searchQuery.trim()) renderSearchResults();
     }
 
@@ -591,7 +583,6 @@
     for (const article of articles) {
       const heading = article.querySelector('h1');
       if (heading) heading.tabIndex = -1;
-      updateArticleKicker(article);
     }
     for (const toggle of groupToggles) {
       if (toggle.getAttribute('aria-expanded') !== 'true') setGroupOpen(toggle, false);
