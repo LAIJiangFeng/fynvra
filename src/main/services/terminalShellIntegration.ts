@@ -15,7 +15,7 @@ const powershellBootstrap = String.raw`& {
     # Native ForwardChar accepts an inline suggestion at the end, otherwise moves right.
     PSReadLine\Set-PSReadLineKeyHandler -Key RightArrow -Function ForwardChar -ErrorAction Stop
   } catch {
-    Write-Host 'Fynvra: History suggestions unavailable. Upgrade PSReadLine to 2.2+ or select PowerShell 7 with PSReadLine 2.2+ in Settings. Tab completion is unchanged.' -ForegroundColor DarkYellow
+    Write-Host 'Fynvra: History suggestions unavailable. Upgrade PSReadLine to 2.2+ or select PowerShell 7 in General settings, then open a new terminal. Tab completion is unchanged.' -ForegroundColor DarkYellow
   }
 }`;
 

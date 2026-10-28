@@ -177,6 +177,7 @@ for (const { file, available } of hosts) {
       `
       );
       expect(output).toContain('Upgrade PSReadLine to 2.2+');
+      expect(output).toContain('select PowerShell 7 in General settings, then open a new terminal');
       expect(output).toContain('Tab completion is unchanged.');
       expect(output).toContain('terminal still usable');
     }, 30_000);
