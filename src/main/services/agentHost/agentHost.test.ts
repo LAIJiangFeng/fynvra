@@ -275,7 +275,7 @@ describe('worker attempt lifecycle', () => {
     expect(notifyChanged).not.toHaveBeenCalled();
   });
 
-  it('settles a real retry through registry/host wiring and reconciles removal without a snapshot read', async () => {
+  it('delivers busy instructions, answers later questions and isolates retries through registry wiring', async () => {
     const env = setup();
     const registry = createOrchestrationRegistry({
       userDataPath: env.dir,
@@ -297,6 +297,41 @@ describe('worker attempt lifecycle', () => {
     if (!launched?.ok || !launched.dispatch) throw new Error('dispatch failed');
     const dispatch = launched.dispatch;
     const identity = { sessionId: dispatch.workerSessionId, generation: 1 };
+    // No question exists yet. A normal instruction must return while this run remains busy,
+    // otherwise a later ask_coordinator would deadlock behind send_to_worker.
+    let instructionReturned = false;
+    const instruction = coordinator?.sendToWorker({
+      dispatchId: dispatch.id,
+      body: 'Check the API shape',
+    });
+    void instruction?.then(() => {
+      instructionReturned = true;
+    });
+    await vi.waitFor(() => expect(instructionReturned).toBe(true));
+    expect(await instruction).toMatchObject({ ok: true, type: 'instruction' });
+    expect(env.sent('prompt')).toHaveLength(2);
+    expect(env.sent('prompt').at(-1)).toMatchObject({
+      text: expect.stringContaining('Check the API shape'),
+    });
+    expect(env.host.get(identity.sessionId)?.status).toBe('running');
+
+    env.worker().emit({
+      type: 'host-invoke',
+      identity,
+      callId: 'later-question',
+      kind: 'worker',
+      method: 'askCoordinator',
+      input: { question: 'Which API should I use?', timeoutMs: 1000 },
+    });
+    expect(
+      await coordinator?.sendToWorker({ dispatchId: dispatch.id, body: 'Use REST' })
+    ).toMatchObject({ ok: true, type: 'reply' });
+    await flush();
+    expect(env.sent('host-result').at(-1)).toMatchObject({
+      callId: 'later-question',
+      result: { ok: true, answer: 'Use REST' },
+    });
+    expect(env.sent('prompt')).toHaveLength(2); // The answer goes to the inbox, not a new prompt.
     const report = (callId: string) =>
       env.worker().emit({
         type: 'host-invoke',
@@ -316,9 +351,10 @@ describe('worker attempt lifecycle', () => {
     report('late first report');
     await flush();
     expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: false } });
-    expect(env.sent('prompt')).toHaveLength(1);
+    expect(env.sent('prompt')).toHaveLength(2);
     env.worker().emit({ type: 'session-status', identity, status: 'idle' });
     expect(await retry).toMatchObject({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(3);
     report('retry report');
     await flush();
     expect(env.sent('host-result').at(-1)).toMatchObject({ result: { ok: true } });
@@ -380,7 +416,9 @@ describe('worker attempt lifecycle', () => {
     report('first');
     await flush();
     current = next; // reject_work registered its next dispatch while the old run is finishing.
-    const delivery = env.launcher.promptSession(sessionId, 'Review feedback');
+    const delivery = env.launcher.promptSession(sessionId, 'Review feedback', {
+      freshAttempt: true,
+    });
     await flush();
     env
       .worker()
@@ -422,7 +460,9 @@ describe('worker attempt lifecycle', () => {
     'does not revive queued feedback after %s',
     async (stop) => {
       const env = await dispatched();
-      const pending = env.launcher.promptSession(env.identity.sessionId, 'Review feedback');
+      const pending = env.launcher.promptSession(env.identity.sessionId, 'Review feedback', {
+        freshAttempt: true,
+      });
       await flush();
       if (stop === 'dispose') await env.launcher.disposeSession(env.identity.sessionId);
       else await env.host[stop](env.identity.sessionId);
@@ -484,7 +524,11 @@ describe('worker attempt lifecycle', () => {
     await flush();
     env.worker().emit({ type: 'ready' });
     expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toContain('exited (code 7)');
-    expect(await env.launcher.promptSession(env.identity.sessionId, 'Explicit retry')).toEqual({
+    expect(
+      await env.launcher.promptSession(env.identity.sessionId, 'Explicit retry', {
+        freshAttempt: true,
+      })
+    ).toEqual({
       ok: true,
     });
     expect(env.launcher.sessionFailure?.(env.identity.sessionId)).toBeUndefined();
@@ -1257,7 +1301,11 @@ describe('createAgentHost launcher', () => {
       done: true,
     });
 
-    expect(await launcher.promptSession('session-1', 'Review feedback: add edge cases')).toEqual({
+    expect(
+      await launcher.promptSession('session-1', 'Review feedback: add edge cases', {
+        freshAttempt: true,
+      })
+    ).toEqual({
       ok: true,
     });
     await launcher.disposeSession('session-1');
@@ -1348,10 +1396,12 @@ describe('createAgentHost launcher', () => {
     expect(env.sent('host-result').at(-1)).toMatchObject({ callId: '2', result: { ok: true } });
     expect(reportDone).toHaveBeenCalledWith('succeeded', 'done', undefined);
 
-    // 3. 会话空闲后 promptSession 作为新的 prompt 发出（新一轮，reject_work 靠它重新开放 report_done）
+    // 3. Fresh-attempt feedback starts a new run, reopening report_done after reject_work.
     env.worker().emit({ type: 'session-status', identity, status: 'idle' });
     expect(env.host.list('ws-1')[0]?.status).toBe('idle');
-    expect(await launcher.promptSession(created.sessionId, 'Review feedback')).toEqual({
+    expect(
+      await launcher.promptSession(created.sessionId, 'Review feedback', { freshAttempt: true })
+    ).toEqual({
       ok: true,
     });
     expect(env.sent('prompt').at(-1)).toEqual({

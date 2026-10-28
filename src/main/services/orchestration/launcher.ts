@@ -15,10 +15,11 @@ export interface WorkerSessionLauncher {
     thinking?: ThinkingLevel;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
-  /** Start a real new run after the previous run is idle; never steer or enqueue a pi follow-up */
+  /** Ordinary instructions return after delivery; only fresh attempts wait for the previous run to end */
   promptSession(
     sessionId: string,
-    text: string
+    text: string,
+    options?: { freshAttempt?: boolean }
   ): Promise<{ ok: true } | { ok: false; error: string }>;
   readTranscript(
     sessionId: string,

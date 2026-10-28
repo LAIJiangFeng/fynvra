@@ -45,8 +45,10 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
 - **WorkerHost 工厂按 run 绑定**：收到 worker 的首次 host 调用时才 `workerHostFor(sessionId)`（Dispatch 写入之前返回
   `null`）。返回的 WorkerHost 固定绑定该次尝试，Main 保留到下一次真实新 run 才重新查找；旧调用不能动态绑定到新尝试。
   两个 worker 方法共用当前 attempt 校验：被替代的旧轮不能新发提问；已经挂起的问题仍按原 question/replyTo 收到答复。
-- **`promptSession`**：编排指令/打回反馈先在 Main 排队，等旧 run 真正 idle 后才开始新 run（重跑 `before_agent_start`，
-  重新开放本地 `report_done` guard）。pi streaming `followUp` 可以在旧 run 内消费，不能当作新 run；
+- **`promptSession`**：默认将同 attempt 的普通指令及时交给当前 run（忙时用 pi followUp），投递后立即返回；
+  不能等 idle，否则 worker 随后提问时协调者会卡在 send_to_worker，无法答复。
+  仅 `reject_work` 显式传 `{ freshAttempt: true }`，将新 attempt 反馈留在 Main 等旧 run 真正 idle 后才开始新 run
+  （重跑 `before_agent_start`，重新开放本地 `report_done` guard）。pi streaming `followUp` 可以在旧 run 内消费，不能当作新 run；
   `agent_settled` 发出前 pi 已清掉 run-active，恰在该回调中提交的新 prompt 由 SDK deferred-settled 队列启动新 run，不被 terminate 丢弃；
   删除、abort、dispose、崩溃会取消尚未投递的反馈。审批/askCoordinator 等待不当作 idle；挂起提问的 reply 仍直接投收件箱。
 - **`sessionFailure` / `onSessionFailure`**：同步读取可信的缺失或明确异常终止证据，并在删除/异常终止时通知注册表。
@@ -70,7 +72,7 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
 - **`wait_for_workers`**：question / escalation 立即返回；`'any'` 收到 worker_done 返回；没有运行中的 dispatch 时
   立即返回；返回时 ack 期间收到的消息；超时 `timedOut: true`；中止时返回错误且不 ack。
 - **`send_to_worker`**：worker 正阻塞在 `ask_coordinator` → `reply`（并 ack 那条 question）；否则记 `instruction`
-  并 `promptSession`，投递失败则撤回消息。已 completed / abandoned 的任务拒绝。
+  并以默认模式 `promptSession` 及时投递并返回，不等待 worker idle；投递失败则撤回消息。已 completed / abandoned 的任务拒绝。
 - **`report_done`**：succeeded → task `in-review`，failed → task `failed`；先结算再投 `worker_done`。
   每个 attempt 只报告一次，重复/并发及旧 attempt 的迟到报告拒绝，不转发或改写既有报告。需要再次交付时用 `reject_work` 新建 attempt。
 - **`reject_work`**：只允许当前 attempt 的 `in-review` / `failed` 任务打回，同一 worktree / 会话上新建 Dispatch，

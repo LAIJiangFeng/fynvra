@@ -195,7 +195,7 @@ interface LiveSession {
   workerHost: WorkerHost | null;
   interruption?: string;
   lastError?: string;
-  /** Invalidates queued orchestration prompts on explicit stop/removal/crash */
+  /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
 }
 
@@ -873,7 +873,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
-  /** pi followUp stays in the old run; keep orchestration prompts in Main until it really ends. */
+  /** pi followUp stays in the old run; keep fresh-attempt feedback in Main until it really ends. */
   function promptWorkerRound(sessionId: string, text: string): Promise<Result> {
     const state = liveOf(sessionId);
     const epoch = state.roundEpoch;
@@ -1090,8 +1090,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       return { ok: true, sessionId: stored.id };
     },
-    async promptSession(sessionId, text) {
-      const result = await promptWorkerRound(sessionId, text);
+    async promptSession(sessionId, text, options) {
+      const result = options?.freshAttempt
+        ? await promptWorkerRound(sessionId, text)
+        : await prompt(sessionId, text);
       return result.ok ? { ok: true } : result;
     },
     async readTranscript(sessionId, cursor) {

@@ -93,7 +93,7 @@ export function createOrchestrationRegistry(
   // 服务拿到的是转发到「当前」launcher 的代理，setLauncher 之前打开的服务也会用上新的
   const delegate: WorkerSessionLauncher = {
     createWorkerSession: (input) => launcher.createWorkerSession(input),
-    promptSession: (sessionId, text) => launcher.promptSession(sessionId, text),
+    promptSession: (sessionId, text, options) => launcher.promptSession(sessionId, text, options),
     readTranscript: (sessionId, cursor) => launcher.readTranscript(sessionId, cursor),
     sessionFailure: (sessionId) => launcher.sessionFailure?.(sessionId),
     disposeSession: (sessionId) => launcher.disposeSession(sessionId),

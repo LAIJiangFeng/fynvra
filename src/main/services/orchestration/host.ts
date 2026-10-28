@@ -211,9 +211,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return found;
   }
 
-  async function promptWorker(sessionId: string, text: string) {
+  async function promptWorker(sessionId: string, text: string, freshAttempt = false) {
     try {
-      return await launcher.promptSession(sessionId, text);
+      return freshAttempt
+        ? await launcher.promptSession(sessionId, text, { freshAttempt: true })
+        : await launcher.promptSession(sessionId, text);
     } catch (error) {
       return fail(errorMessage(error));
     }
@@ -736,7 +738,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     try {
       const delivered = await promptWorker(
         next.workerSessionId,
-        feedbackPrompt(feedback, next.id, isInPlace(next))
+        feedbackPrompt(feedback, next.id, isInPlace(next)),
+        true
       );
       if (!delivered.ok) {
         store.messages.delete(instruction.message.id);
