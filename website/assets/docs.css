@@ -1272,3 +1272,49 @@ html.docs-ready .docs-article {
     animation-duration: 0.001ms !important;
   }
 }
+
+/* 暗色：目录选中、搜索命中与提示框改为中性底，颜色只留在文字和左边线 */
+
+:root[data-theme="dark"] .docs-app {
+  --docs-active: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+:root[data-theme="dark"] .docs-nav-link[aria-current="page"]:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+:root[data-theme="dark"] .docs-nav-sub a[aria-current="location"] {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+:root[data-theme="dark"] .docs-result mark {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+:root[data-theme="dark"] .docs-area-card,
+:root[data-theme="dark"] .docs-article.prose a.docs-next-card,
+:root[data-theme="dark"] .docs-pager-link {
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
+}
+
+:root[data-theme="dark"] .docs-article.prose a.docs-next-card:hover,
+:root[data-theme="dark"] .docs-pager-link:hover {
+  border-color: rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 4%);
+}
+
+:root[data-theme="dark"] .docs-article .callout {
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
+}
+
+:root[data-theme="dark"] .docs-article .callout-warn {
+  border-color: rgb(255 255 255 / 8%);
+  border-left-color: var(--warn);
+  background: rgb(255 255 255 / 2%);
+}
+
+html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
+  background: rgb(0 0 0 / 55%);
+}
