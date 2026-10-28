@@ -177,7 +177,7 @@ describe('host-invoke round trip through the protocol', () => {
   });
 });
 
-describe('operation notification round trip through the protocol', () => {
+describe('approval round trip through the protocol', () => {
   const careful: Role = {
     id: 'careful',
     name: 'Careful',
@@ -187,9 +187,12 @@ describe('operation notification round trip through the protocol', () => {
     approvalMode: 'supervised',
   };
 
-  /** 模拟工具执行，通过真实通知门与 supervisor 接线；afterCommand 可暂停工具脚本。 */
+  /**
+   * 代替 pi 的会话：每次 prompt 依次「调用」这些 bash 命令。工具开始后先过真实的审批门
+   * （按角色档位，经 supervisor 的审批通道），放行才「执行」，拦截时把拒绝文本当作工具结果。
+   */
   const bashSession =
-    (commands: string[], afterCommand?: (call: number) => Promise<void>): OpenSession =>
+    (...commands: string[]): OpenSession =>
     async ({ spec, approval }) => {
       if (!approval) throw new Error('the supervisor gave the session no approval channel');
       const gate = createApprovalGate({ mode: spec.role.approvalMode, ...approval });
@@ -208,7 +211,6 @@ describe('operation notification round trip through the protocol', () => {
             output: verdict ? verdict.reason : command.replace(/^echo /, ''),
             outputTruncated: false,
           });
-          await afterCommand?.(calls);
         }
       });
       // 换档位切的就是这个审批门（生产里 piSession 经 onGate 拿到 createRoleSession 建的那个）
@@ -223,53 +225,73 @@ describe('operation notification round trip through the protocol', () => {
     return created.session.id;
   }
 
-  it('notifies before a supervised tool finishes without waiting for an answer', async () => {
-    const env = setup(bashSession(['echo hi']), [careful]);
+  const waitForApprovals = (env: ReturnType<typeof setup>, count: number) =>
+    vi.waitFor(() => {
+      expect(env.approvals()).toHaveLength(count);
+    });
+
+  it('asks before a supervised session runs bash and lets the tool run once allowed', async () => {
+    const env = setup(bashSession('echo hi'), [careful]);
     const sessionId = await started(env, 'careful', 'Say hi');
+
+    await waitForApprovals(env, 1);
+    const [request] = env.approvals();
+    expect(request).toEqual({
+      id: expect.any(String),
+      sessionId,
+      kind: 'command',
+      title: 'bash',
+      detail: 'echo hi',
+      expiresAt: expect.any(Number),
+    });
+    await vi.waitFor(() => expect(env.host.list('ws-1')[0]?.status).toBe('waiting-approval'));
+    expect(env.events(sessionId).map((event) => event.type)).toEqual([
+      'message_end',
+      'tool_start',
+      'approval_request',
+    ]);
+    expect(env.events(sessionId)[2]).toMatchObject({
+      requestId: request?.id,
+      toolCallId: 'call-1',
+    });
+
+    expect(
+      await env.host.respondApproval({ sessionId, requestId: request?.id ?? '', decision: 'allow' })
+    ).toEqual({ ok: true });
     await env.settled(sessionId);
 
-    expect(env.approvals()).toEqual([]);
-    expect(env.events(sessionId)).toEqual([
-      { type: 'message_end', role: 'user', text: 'Say hi', seq: 1 },
-      {
-        type: 'tool_start',
-        toolCallId: 'call-1',
-        toolName: 'bash',
-        args: { command: 'echo hi' },
-        seq: 2,
-      },
-      { type: 'tool_notice', toolCallId: 'call-1', toolName: 'bash', kind: 'command', seq: 3 },
-      {
+    expect(env.events(sessionId).slice(3)).toEqual([
+      expect.objectContaining({
         type: 'tool_end',
         toolCallId: 'call-1',
-        toolName: 'bash',
         isError: false,
         output: 'hi',
-        outputTruncated: false,
-        seq: 4,
-      },
-      { type: 'agent_settled', aborted: false, seq: 5 },
+      }),
+      expect.objectContaining({ type: 'agent_settled', aborted: false }),
     ]);
     await vi.waitFor(() => expect(env.host.list('ws-1')[0]?.status).toBe('idle'));
   });
 
-  it('rejects late legacy decisions without changing or replaying a completed tool', async () => {
-    const env = setup(bashSession(['echo hi']), [careful]);
+  it('hands the refusal to the session as the tool result when denied', async () => {
+    const env = setup(bashSession('echo hi'), [careful]);
     const sessionId = await started(env, 'careful', 'Say hi');
+    await waitForApprovals(env, 1);
+
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'deny',
+    });
     await env.settled(sessionId);
-    const completed = [...env.events(sessionId)];
-    expect(
-      await env.host.respondApproval({ sessionId, requestId: 'old', decision: 'deny' })
-    ).toMatchObject({ ok: false });
-    expect(env.events(sessionId)).toEqual(completed);
-    expect(env.events(sessionId).filter((event) => event.type === 'tool_end')).toEqual([
-      expect.objectContaining({ isError: false, output: 'hi' }),
-    ]);
-    expect(env.approvals()).toEqual([]);
+
+    expect(env.events(sessionId).find((event) => event.type === 'tool_end')).toMatchObject({
+      isError: true,
+      output: expect.stringContaining('The user denied the command `echo hi`'),
+    });
   });
 
-  it('notifies for every auto-edits worker command including important commands', async () => {
-    const env = setup(bashSession(['echo one', 'echo two', 'git push']));
+  it('asks a dispatched worker (auto-edits) once when the user allows the session', async () => {
+    const env = setup(bashSession('echo one', 'echo two', 'git push'));
     const created = await env.host.implementsLauncher().createWorkerSession({
       workspaceId: 'ws-1',
       runId: 'run_1',
@@ -281,64 +303,70 @@ describe('operation notification round trip through the protocol', () => {
     });
     if (!created.ok) throw new Error(created.error);
 
+    await waitForApprovals(env, 1);
+    await env.host.respondApproval({
+      sessionId: created.sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'allowSession',
+    });
+    // echo two 不再询问；git push 是保护底线，照样要人确认
+    await waitForApprovals(env, 2);
+    expect(env.approvals()[1]).toMatchObject({
+      kind: 'command',
+      title: 'bash（保护底线：git push）',
+      detail: 'git push',
+    });
+    await env.host.respondApproval({
+      sessionId: created.sessionId,
+      requestId: env.approvals()[1]?.id ?? '',
+      decision: 'deny',
+    });
     await env.settled(created.sessionId);
-    expect(env.approvals()).toEqual([]);
-    expect(
-      env
-        .events(created.sessionId)
-        .filter((event) => event.type === 'tool_notice')
-        .map((event) => event.toolCallId)
-    ).toEqual(['call-1', 'call-2', 'call-3']);
 
     const ends = env.events(created.sessionId).filter((event) => event.type === 'tool_end');
     expect(ends.map((event) => event.type === 'tool_end' && [event.isError, event.output])).toEqual(
       [
         [false, 'one'],
         [false, 'two'],
-        [false, 'git push'],
+        [true, expect.stringContaining('protected action (git push)')],
       ]
     );
   });
 
-  it('switches a running session to full: only important later commands notify', async () => {
-    let firstExecuted = false;
-    let resume: () => void = () => {};
-    const paused = new Promise<void>((resolve) => {
-      resume = resolve;
-    });
-    const env = setup(
-      bashSession(['echo one', 'echo two', 'git push'], async (call) => {
-        if (call !== 1) return;
-        firstExecuted = true;
-        await paused;
-      }),
-      [careful]
-    );
+  it('switches a running supervised session to full: the next bash runs at once, git push still asks', async () => {
+    const env = setup(bashSession('echo one', 'echo two', 'git push'), [careful]);
     const sessionId = await started(env, 'careful', 'Run them');
-    await vi.waitFor(() => expect(firstExecuted).toBe(true));
+    await waitForApprovals(env, 1);
     expect(env.host.list('ws-1')[0]?.approvalMode).toBe('supervised');
-    expect(env.host.list('ws-1')[0]?.status).toBe('running');
 
+    // 第一条还在等审批时切到 full：这一条仍以答复为准，之后的普通命令不再询问
     expect(await env.host.setApprovalMode({ sessionId, mode: 'full' })).toMatchObject({
       ok: true,
-      session: { approvalMode: 'full', status: 'running' },
+      session: { approvalMode: 'full', status: 'waiting-approval' },
     });
-    resume();
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[0]?.id ?? '',
+      decision: 'allow',
+    });
+    await waitForApprovals(env, 2);
+    expect(env.approvals()[1]).toMatchObject({
+      title: 'bash（保护底线：git push）',
+      detail: 'git push',
+    });
+    await env.host.respondApproval({
+      sessionId,
+      requestId: env.approvals()[1]?.id ?? '',
+      decision: 'deny',
+    });
     await env.settled(sessionId);
-    expect(env.approvals()).toEqual([]);
-    expect(
-      env
-        .events(sessionId)
-        .filter((event) => event.type === 'tool_notice')
-        .map((event) => event.toolCallId)
-    ).toEqual(['call-1', 'call-3']);
 
     const ends = env.events(sessionId).filter((event) => event.type === 'tool_end');
     expect(ends.map((event) => event.type === 'tool_end' && [event.isError, event.output])).toEqual(
       [
         [false, 'one'],
         [false, 'two'],
-        [false, 'git push'],
+        [true, expect.stringContaining('protected action (git push)')],
       ]
     );
   });

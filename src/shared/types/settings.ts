@@ -565,9 +565,9 @@ export function parseWorktreesRootInfoInput(raw: unknown): { usage: boolean } | 
 export interface NotificationPreferences {
   /** 总开关 */
   enabled: boolean;
-  /** 完成 / 失败只弹主 agent 的：worker 的完成、失败不弹，提问与操作通知照弹 */
+  /** 完成 / 失败只弹主 agent 的：worker 的完成、失败不弹，提问与审批照弹 */
   mainAgentOnly: boolean;
-  /** 兼容旧字段名：worker 提问、上报，以及任何会话的单向工具操作通知 */
+  /** worker 提问、上报，以及任何会话的审批请求 */
   askAndApproval: boolean;
   /** 系统默认提示音 */
   sound: boolean;

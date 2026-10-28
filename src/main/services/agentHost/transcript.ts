@@ -66,8 +66,10 @@ export class Transcript {
         this.#line(toolEnd(event.toolName, event.isError, event.output));
         return;
       case 'approval_request':
+        this.#line(`[approval] ${event.toolName}`);
+        return;
       case 'tool_notice':
-        // 通知不是正文、执行结果或需回答的问题，不重建历史审批。
+        // 历史通知不是执行结果或审批授权。
         return;
       case 'error':
         this.#line(`[error] ${event.message}`);

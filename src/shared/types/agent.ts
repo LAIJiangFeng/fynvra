@@ -135,10 +135,10 @@ export type HostCallResult =
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
-/** @deprecated 旧协议常量；新工具执行路径没有人工等待期限。 */
+/** 待审批请求有效期：worker 超时按 deny，Main 据此校验 expiresAt。 */
 export const APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
-/** 旧协议兼容形状；Main 丢弃旧审批请求，不能重新生成可操作审批。 */
+/** 审批门挂起的工具调用；Main 不加载 agent-runtime，展示内容由 worker 分类生成。 */
 export interface AgentApprovalRequest {
   requestId: string;
   toolCallId: string;
@@ -147,7 +147,7 @@ export interface AgentApprovalRequest {
   title: string;
   /** 命令全文 / 文件路径 / 参数预览 */
   detail: string;
-  /** 旧版重点动作标签，新版不再要求人工确认。 */
+  /** 命中的保护底线（如 git push）：任何档位都要人确认。 */
   protectedAction?: string;
   /** epoch ms：worker 到期按 deny 结束 */
   expiresAt: number;
@@ -181,7 +181,10 @@ export type AgentCommand =
    * 下一次 prompt 起生效，pi 的会话历史保留
    */
   | { type: 'set-model'; identity: SessionIdentity; model: ResolvedModelSpec }
-  /** 换工具操作通知范围：保留旧通道名，运行中也可生效，不改变执行权限。 */
+  /**
+   * 换会话审批档位：worker 调 gate.setMode，下一次工具调用起按新档位，运行中也可切换。
+   * allowSession 记忆保留；从 full 切回更严档位清空，不自动答复已有请求。
+   */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
   /**
    * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
@@ -219,7 +222,10 @@ export type AgentWorkerEvent =
     }
   /** 调用方已放弃（工具被中止或等待超时），Main 应中止对应的 host 调用 */
   | { type: 'host-cancel'; identity: SessionIdentity; callId: string }
-  /** @deprecated 旧协议兼容；Main 忽略，不推送审批或答复执行许可。 */
+  /**
+   * 审批门在等人确认：Main 登记并推 sessions:approval-request。
+   * 随后同一 requestId 的 approval_request 会话事件关联工具调用。
+   */
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }

@@ -37,7 +37,7 @@ function currentView(): ViewState {
 }
 
 /**
- * 桌面通知：接上 agent host 的会话事件（含单向工具通知）与各工作区收件箱的消息，
+ * 桌面通知（Task 24）：接上 agent host 的会话事件 / 审批请求与各工作区收件箱的消息，
  * 并注册 `notifications:*`。弹出规则见 services/notifications。
  */
 export function registerNotificationHandlers(
@@ -51,6 +51,7 @@ export function registerNotificationHandlers(
   });
   sources.host().observe({
     event: (envelope) => notifier.sessionEvent(envelope),
+    approval: (request) => notifier.approvalRequest(request),
   });
   sources.registry().onMessage((_workspaceId, message) => notifier.message(message));
 
