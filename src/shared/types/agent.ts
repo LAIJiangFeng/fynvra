@@ -113,7 +113,8 @@ export interface SpawnSessionSpec {
    */
   shellPath?: string;
   /**
-   * 上下文自动压缩策略：缺省为 pi 原生自动压缩，只有 `off` 会关掉它。
+   * 上下文自动压缩策略：缺省为 pi 原生自动压缩。`off` 关掉自动压缩；`magic-context`
+   * 加载内置的 Magic Context 插件（原生压缩在插件就绪前/失败时仍作为回退）。
    * Main 在新会话或应用重启后恢复会话时读取已保存的设置；运行中的会话不热切换
    */
   compactionStrategy?: CompactionStrategy;

@@ -520,7 +520,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           roles,
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
-          ...(compactionStrategy === 'off' ? { compactionStrategy } : {}),
+          ...(compactionStrategy !== 'native' ? { compactionStrategy } : {}),
           ...(inPlace ? { inPlace: true } : {}),
         },
       };

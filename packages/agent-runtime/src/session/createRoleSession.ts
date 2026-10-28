@@ -73,6 +73,13 @@ export interface CreateRoleSessionOptions {
   inPlace?: boolean;
   /** 默认 `SettingsManager.inMemory`：不读用户的 ~/.pi 与项目 .pi 设置 */
   settingsManager?: SettingsManager;
+  /**
+   * Host-provided inline extensions (currently the vendored Magic Context
+   * plugin). Loaded after the built-in role/approval/MCP extensions. Only
+   * Fynvra code may pass entries here; never discover them from settings or
+   * the filesystem.
+   */
+  extensions?: readonly InlineExtension[];
   /** Transform only command subprocess environments, after pi injects session metadata. */
   commandEnv?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv;
   /** git_readonly 的命令执行器，默认 child_process.execFile */
@@ -135,6 +142,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...mcp.extensions,
     ...(promptAppend ? [appendSystemPromptExtension('fynvra-role-prompt', promptAppend)] : []),
     ...(workerToolset ? [beforeRunExtension('fynvra-worker-round', workerToolset.startRound)] : []),
+    ...(options.extensions ?? []),
   ];
 
   const resourceLoader = new DefaultResourceLoader({

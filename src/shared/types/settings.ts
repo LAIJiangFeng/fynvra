@@ -226,8 +226,8 @@ export type PickWorktreesRootResult =
   | { ok: true; preferences: Preferences }
   | { ok: false; code: 'canceled' | 'invalid' | 'failed'; error: string };
 
-/** 上下文自动压缩：沿用 pi 原生策略，或只关掉自动压缩 */
-export const COMPACTION_STRATEGIES = ['native', 'off'] as const;
+/** 上下文自动压缩：pi 原生、关闭，或使用内置的 Magic Context 插件 */
+export const COMPACTION_STRATEGIES = ['native', 'off', 'magic-context'] as const;
 export type CompactionStrategy = (typeof COMPACTION_STRATEGIES)[number];
 
 export function isCompactionStrategy(value: unknown): value is CompactionStrategy {

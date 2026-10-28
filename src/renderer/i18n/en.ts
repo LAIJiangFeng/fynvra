@@ -673,8 +673,10 @@ export const en: MessagesShape<typeof zhCN> = {
       sessions: 'Sessions',
       compaction: 'Context compaction',
       compactionNative: 'pi native auto-compaction (default)',
+      compactionMagic: 'Magic Context (plugin)',
       compactionOff: 'Turn off auto-compaction',
-      compactionHint: 'Applies to new sessions or after restarting the app',
+      compactionHint:
+        'Applies to new sessions or after restarting the app; Magic Context uses the current session model in the background, which may add model requests',
       off: 'Off',
       never: 'Never',
       days: '{days} {days|day|days}',

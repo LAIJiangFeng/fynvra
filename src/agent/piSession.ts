@@ -13,6 +13,7 @@ import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import { type ChatImage, normalizeReplySuggestion } from '@shared/types/chat';
+import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import type { OpenSession } from './supervisor';
 
@@ -73,50 +74,64 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       dirname(spec.sessionFile),
       spec.cwd
     );
+    // Create the Magic routing entry before bindExtensions: the plugin may
+    // recover a deferred historian run during session_start.
+    let activeModel = model;
+    const magic =
+      spec.compactionStrategy === 'magic-context'
+        ? createMagicContextCompaction(() => activeModel)
+        : undefined;
+    magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
-    const created = await createRoleSession({
-      role: roleWithShellPrompt(spec.role, spec.shellPath),
-      cwd: spec.cwd,
-      model,
-      sessionManager,
-      host,
-      workerHost,
-      // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
-      ...(approval
-        ? {
-            approval: {
-              ...approval,
-              onGate: (built: ApprovalGate) => {
-                gate = built;
-                approval.onGate?.(built);
+    let created: Awaited<ReturnType<typeof createRoleSession>>;
+    try {
+      created = await createRoleSession({
+        role: roleWithShellPrompt(spec.role, spec.shellPath),
+        cwd: spec.cwd,
+        model,
+        sessionManager,
+        host,
+        workerHost,
+        // 没有审批通道时 createRoleSession 自己 fail-closed，也就没有可以切换的审批门
+        ...(approval
+          ? {
+              approval: {
+                ...approval,
+                onGate: (built: ApprovalGate) => {
+                  gate = built;
+                  approval.onGate?.(built);
+                },
               },
-            },
-          }
-        : {}),
-      resourcePaths: {
-        skills: spec.skills,
-        mcpServers: spec.mcpServers.map(toMcpServerConfig),
-        ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
-      },
-      agentDir: options.agentDir,
-      roles: spec.roles,
-      ...(spec.inPlace ? { inPlace: true } : {}),
-      settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
-      ...(spec.networkProxy
-        ? {
-            commandEnv: (env: NodeJS.ProcessEnv) =>
-              commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
-          }
-        : {}),
-    });
+            }
+          : {}),
+        resourcePaths: {
+          skills: spec.skills,
+          mcpServers: spec.mcpServers.map(toMcpServerConfig),
+          ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
+        },
+        agentDir: options.agentDir,
+        roles: spec.roles,
+        ...(spec.inPlace ? { inPlace: true } : {}),
+        ...(magic ? { extensions: [magic.extension] } : {}),
+        settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
+        ...(spec.networkProxy
+          ? {
+              commandEnv: (env: NodeJS.ProcessEnv) =>
+                commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
+            }
+          : {}),
+      });
+    } catch (error) {
+      magic?.dispose();
+      throw error;
+    }
     const { session } = created;
     dropEmptyUserText(session);
     const setFastMode = installFastMode(session, spec.model.fastMode === true);
     // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
-    let activeModel = model;
     options.onModelSelected?.(identity.sessionId, model);
     return {
-      warnings: created.warnings,
+      warnings: [...created.warnings, ...(magic?.warnings ?? [])],
       subscribe: (listener) => {
         const subscription = subscribeNormalized(
           session,
@@ -151,8 +166,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       isIdle: () => session.isIdle,
       suggestReply: ({ signal }) => suggestReply(session, activeModel, signal),
       dispose: async () => {
-        if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
-        await created.dispose();
+        try {
+          if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
+          await created.dispose();
+        } finally {
+          magic?.dispose();
+        }
       },
     };
   };
