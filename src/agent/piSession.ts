@@ -23,7 +23,10 @@ const ABORT_BEFORE_DISPOSE_MS = 5_000;
 const SUGGESTION_MAX_MESSAGES = 8;
 const SUGGESTION_MAX_TOTAL_CHARS = 8_000;
 const SUGGESTION_MAX_MESSAGE_CHARS = 2_000;
-/** 小输出上限 + 不推理：辅助请求不占用主对话的思考与费用 */
+/**
+ * 辅助请求的显式小输出上限。不传 reasoning：Anthropic 的非思考分支不会再加 2048 思考预算，
+ * OpenAI 等其他适配器也按各自的非思考 / 模型默认路径处理；辅助请求仍会产生正常 token 费用
+ */
 const SUGGESTION_MAX_TOKENS = 256;
 const SUGGESTION_INSTRUCTION =
   '[suggestion task] Write only the human user’s most likely next message now, or output an empty response.';
@@ -217,7 +220,7 @@ async function suggestReply(
         { role: 'user', content: SUGGESTION_INSTRUCTION, timestamp: 0 },
       ],
     },
-    { maxTokens: SUGGESTION_MAX_TOKENS, reasoning: 'low', signal }
+    { maxTokens: SUGGESTION_MAX_TOKENS, maxRetries: 0, signal }
   );
   if (answer.stopReason !== 'stop') return '';
   const text = answer.content

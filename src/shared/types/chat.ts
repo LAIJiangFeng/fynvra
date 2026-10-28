@@ -112,8 +112,9 @@ export interface ReplySuggestion {
 }
 
 /**
- * 把模型输出收敛成一条可展示的建议：取第一行非空文本，去掉列表符号、包住整句的引号、
- * 代码围栏与 Markdown 强调符，压成一行并按 {@link MAX_REPLY_SUGGESTION_CHARS} 截断。
+ * 把模型输出收敛成一条可展示的建议：取第一行非空文本，去掉明确的列表 / 标题前缀、
+ * 整句外围的引号或成对 Markdown 包裹，压成一行并按 {@link MAX_REPLY_SUGGESTION_CHARS} 截断。
+ * 只清理可识别的外围标记，不全局删除 `_`、`*`、`#` 等字符，避免把 `src/foo_bar.ts` 或 `*.ts` 改坏。
  * 空串表示「没有明确建议」。Main 与 worker 都过一遍，不依赖某一端单独清洗。
  */
 export function normalizeReplySuggestion(raw: string): string {
@@ -126,8 +127,14 @@ export function normalizeReplySuggestion(raw: string): string {
     .replace(/^(?:suggestion|reply|建议|回复)\s*[:：]\s*/i, '')
     .replace(/^#{1,6}\s+/, '')
     .replace(/^(?:[-*•>]|\d+[.)])\s+/, '')
-    .replace(/^[`"'“”‘’]+|[`"'“”‘’]+$/g, '')
-    .replace(/[*_`]+/g, '')
+    .trim();
+  // 只去整句外围的成对引号；内部内容（包括文件名、标识符）保持原样
+  text = text.replace(/^(["'“”‘’])([\s\S]*)\1$/, '$2');
+  // 只去整句外围的成对粗体 / 斜体星号；中间或标识符里的 * 不碰
+  text = text.replace(/^(\*\*|\*)([\s\S]+)\1$/, '$2');
+  // 成对反引号只在包住整句时当作 Markdown 外壳去掉；句中的命令 / 标识符不动
+  text = text
+    .replace(/^`([^`\n]+)`$/, '$1')
     .replace(/\s+/g, ' ')
     .trim();
   if (!text) return '';
