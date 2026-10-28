@@ -134,18 +134,20 @@
           </div>
 
           <figure class="showcase fd-showcase rise" style="--i: 3" data-demo aria-label="界面演示 / Interface demo">
-            <fieldset class="fd-scene-switch" aria-label="演示场景 / Demo scene">
-              <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
-                <span class="fd-scene-label-long"><span data-l="zh">任务协作</span><span data-l="en">Task collaboration</span></span>
-                <span class="fd-scene-label-short"><span data-l="zh">协作</span><span data-l="en">Tasks</span></span>
-              </button>
-              <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
-                <span class="fd-scene-label-long"><span data-l="zh">指定 Worker 模型</span><span data-l="en">Assign worker models</span></span>
-                <span class="fd-scene-label-short"><span data-l="zh">Worker 模型</span><span data-l="en">Worker models</span></span>
-              </button>
-            </fieldset>
+            <div class="fd-scene-switch-row">
+              <fieldset class="fd-scene-switch" aria-label="演示场景 / Demo scene">
+                <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">任务协作</span><span data-l="en">Task collaboration</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">协作</span><span data-l="en">Tasks</span></span>
+                </button>
+                <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">指定 Worker 模型</span><span data-l="en">Assign worker models</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">Worker 模型</span><span data-l="en">Worker models</span></span>
+                </button>
+              </fieldset>
+            </div>
 
             <div class="fd-app" data-demo-app>
               <div class="fd-titlebar">
