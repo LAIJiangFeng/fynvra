@@ -185,10 +185,7 @@ export function NewSessionButton({
           {found && fastAvailable && (
             <div className="flex items-center gap-2">
               <Zap aria-hidden className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-sm">{t('model.fast')}</p>
-                <p className="text-muted-foreground text-xs">{t('model.fastHint')}</p>
-              </div>
+              <span className="min-w-0 flex-1 font-medium text-sm">{t('model.fast')}</span>
               <Switch
                 aria-label={t('model.fast')}
                 checked={model?.fastMode === true}
