@@ -257,7 +257,7 @@ export const zhCN = {
     thoughts: '思考过程',
     tokensHint: '累计输入 / 输出 tokens',
     magicContextFallback:
-      'Magic Context 未能在当前会话启用或继续管理上下文，已改用 pi 原生自动压缩。',
+      'Magic Context 未能在当前会话启用或继续管理上下文，已改用 pi 原生自动压缩',
     costHint: '累计费用',
     branchHint: '当前分支（{cwd}）',
     image: '图片 {index}',
@@ -322,7 +322,7 @@ export const zhCN = {
     modes: { supervised: '全部操作通知', 'auto-edits': '命令与 MCP 通知', full: '仅重点操作通知' },
     cycleHint: 'Shift+Tab 切换通知范围；任务无需人工确认',
     statusHint: '操作通知范围（Shift+Tab 切换）；不等待人工审批',
-    hint: '所有范围均无需人工确认；重点命令始终通知。通知仍遵从通知设置，工具权限保持独立。',
+    hint: '所有范围均无需人工确认；重点命令始终通知。通知仍遵从通知设置，工具权限保持独立',
     kinds: {
       command: '执行命令',
       'file-edit': '编辑文件',

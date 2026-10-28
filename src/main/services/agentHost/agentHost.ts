@@ -662,11 +662,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 正在跑一轮或有 prompt 在途：换模型会使当前回合与记录不一致。 */
   function isBusy(stored: StoredSession): boolean {
     const state = live.get(stored.id);
-    return (
-      stored.status === 'running' ||
-      state?.running === true ||
-      (state?.prompting ?? 0) > 0
-    );
+    return stored.status === 'running' || state?.running === true || (state?.prompting ?? 0) > 0;
   }
 
   async function loadTranscript(stored: StoredSession): Promise<Transcript> {

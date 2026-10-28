@@ -130,9 +130,10 @@ export function reduceSessionEvent<S extends ChatProjection>(
     runtime: {
       ...before.runtime,
       lastSeq: event.seq,
-      activitySeq: event.type === 'warning'
-        ? before.runtime.activitySeq ?? before.runtime.lastSeq
-        : event.seq,
+      activitySeq:
+        event.type === 'warning'
+          ? (before.runtime.activitySeq ?? before.runtime.lastSeq)
+          : event.seq,
     },
   };
   return commit(state, sessionId, before, applyEvent(current, sessionId, event, now));
@@ -239,7 +240,10 @@ function applyEvent(
         runtime: { ...slice.runtime, status: 'error', error: event.message },
       };
     case 'warning':
-      return { ...slice, runtime: { ...slice.runtime, warning: event.source, warningSeq: event.seq } };
+      return {
+        ...slice,
+        runtime: { ...slice.runtime, warning: event.source, warningSeq: event.seq },
+      };
     default:
       return slice;
   }

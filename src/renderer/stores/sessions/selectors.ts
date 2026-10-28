@@ -106,7 +106,10 @@ export const selectReplySuggestionOf =
     if (!suggestion) return undefined;
     const runtime = state.runtimeBySession[sessionId];
     if (runtime?.status !== 'idle') return undefined;
-    if (runtime.settledSeq !== suggestion.roundId || (runtime.activitySeq ?? runtime.lastSeq) !== suggestion.roundId) {
+    if (
+      runtime.settledSeq !== suggestion.roundId ||
+      (runtime.activitySeq ?? runtime.lastSeq) !== suggestion.roundId
+    ) {
       return undefined;
     }
     return suggestion;

@@ -188,7 +188,7 @@ describe('notifications IPC', () => {
     }
   });
 
-  it('pops session notifications unless the focused window is showing that session', async () => {
+  it('suppresses focused turn notifications but shows operation notices without restoring old approvals', async () => {
     await register();
     vi.advanceTimersByTime(STARTUP_QUIET_MS);
     mocks.focused = mocks.window;
@@ -201,7 +201,6 @@ describe('notifications IPC', () => {
       { title: '写文档', body: '文档写好了', silent: false },
     ]);
 
-    mocks.focused = null;
     observer.approval?.({
       id: 'req-1',
       sessionId: MAIN.id,
@@ -210,6 +209,17 @@ describe('notifications IPC', () => {
       detail: 'git push',
       expiresAt: Date.now() + 60_000,
     } satisfies ApprovalRequest);
+    expect(mocks.notifications).toHaveLength(1);
+    observer.event?.({
+      sessionId: MAIN.id,
+      event: {
+        type: 'tool_notice',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        kind: 'command',
+        seq: ++seq,
+      },
+    });
     onMessage('ws-1', {
       id: 'msg_1',
       runId: 'run_1',
@@ -221,9 +231,12 @@ describe('notifications IPC', () => {
     });
     vi.advanceTimersByTime(COALESCE_MS);
     expect(mocks.notifications.slice(1).map((notification) => notification.options.title)).toEqual([
-      '修复登录页 · 待审批',
+      '修复登录页 · 工具操作',
       '写文档 · 上报',
     ]);
+    expect(mocks.notifications[1]?.options.body).toBe('bash · 执行命令，无需确认，继续执行。');
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+    expect(mocks.window.restore).not.toHaveBeenCalled();
   });
 
   it('clicking a notification restores and focuses the window, then asks the renderer to open the session', async () => {

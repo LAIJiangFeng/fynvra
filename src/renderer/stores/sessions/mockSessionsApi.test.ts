@@ -1,4 +1,4 @@
-import type { ChatImage } from '@shared/types/chat';
+import type { ChatImage, SessionEventEnvelope } from '@shared/types/chat';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../../i18n';
 import { createMockSessionsApi } from '../../lib/api/sessions';
@@ -35,30 +35,35 @@ async function advanceUntil(condition: () => boolean) {
 }
 
 describe('mock SessionsApi + store', () => {
-  it('发送 → 流式回复与工具调用 → 审批放行 → settled；history 回放与实时投影一致', async () => {
-    const { store, sessionId } = await setup('worker');
+  it('发送 → 操作通知与工具调用 → settled，无需答复；history 回放与实时投影一致', async () => {
+    const { api, store, sessionId } = await setup('worker');
     const state = () => store.getState();
+    const events: SessionEventEnvelope[] = [];
+    api.onEvent((event) => events.push(event));
+    const statuses: string[] = [];
+    store.subscribe(() => statuses.push(selectStatusOf(sessionId)(state())));
 
     expect(await state().send('帮我跑一下测试')).toBe(true);
-    await advanceUntil(() => selectApprovalsOf(sessionId)(state()).length > 0);
-
-    const [approval] = selectApprovalsOf(sessionId)(state());
-    expect(approval).toMatchObject({ kind: 'command', detail: 'pnpm test' });
-    expect(approval?.toolCallId).toBeTruthy();
-    expect(selectStatusOf(sessionId)(state())).toBe('waiting-approval');
-    const beforeApproval = selectMessagesOf(sessionId)(state());
-    expect(beforeApproval[0]).toMatchObject({ role: 'user', text: '帮我跑一下测试' });
-    expect(beforeApproval[0]?.optimistic).toBeUndefined();
-    expect(beforeApproval[1]?.thinking).toContain('帮我跑一下测试');
-    expect(beforeApproval[1]?.toolCalls.map((call) => [call.name, call.status])).toEqual([
-      ['ls', 'done'],
-      ['read', 'done'],
-    ]);
-
-    await state().respondApproval(approval?.id ?? '', 'allow');
     await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
+    expect(statuses).not.toContain('waiting-approval');
+    expect(selectApprovalsOf(sessionId)(state())).toEqual([]);
+    expect(
+      events.filter(({ event }) => event.type === 'tool_notice').map(({ event }) => event)
+    ).toEqual([
+      {
+        type: 'tool_notice',
+        toolCallId: expect.any(String),
+        toolName: 'bash',
+        kind: 'command',
+        seq: expect.any(Number),
+      },
+    ]);
+    expect(events.some(({ event }) => event.type === 'approval_request')).toBe(false);
 
     const live = selectMessagesOf(sessionId)(state());
+    expect(live[0]).toMatchObject({ role: 'user', text: '帮我跑一下测试' });
+    expect(live[0]?.optimistic).toBeUndefined();
+    expect(live[1]?.thinking).toContain('帮我跑一下测试');
     expect(live.map((message) => message.role)).toEqual([
       'user',
       'assistant',
@@ -107,7 +112,7 @@ describe('mock SessionsApi + store', () => {
     ]);
   });
 
-  it('orchestrator 切到全程审批后：拒绝审批，命令记为失败，继续演示 dispatch_task / wait_for_workers', async () => {
+  it('orchestrator 切到全部通知后仍直接执行；迟到拒绝不能改写工具结果', async () => {
     const { store, api, sessionId } = await setup('orchestrator');
     const state = () => store.getState();
     expect(await api.setApprovalMode({ sessionId, mode: 'supervised' })).toMatchObject({
@@ -116,16 +121,18 @@ describe('mock SessionsApi + store', () => {
     });
 
     await state().send('拆一下任务');
-    await advanceUntil(() => selectApprovalsOf(sessionId)(state()).length > 0);
-    const [approval] = selectApprovalsOf(sessionId)(state());
-    await state().respondApproval(approval?.id ?? '', 'deny');
     await advanceUntil(() => selectStatusOf(sessionId)(state()) === 'idle');
+    expect(selectApprovalsOf(sessionId)(state())).toEqual([]);
+    expect(await api.respondApproval({ sessionId, requestId: 'old', decision: 'deny' })).toEqual({
+      ok: false,
+      error: translate('sessions.errors.approvalGone'),
+    });
 
     const calls = selectMessagesOf(sessionId)(state()).flatMap((message) => message.toolCalls);
     expect(calls.map((call) => [call.name, call.status])).toEqual([
       ['ls', 'done'],
       ['read', 'done'],
-      ['bash', 'error'],
+      ['bash', 'done'],
       ['dispatch_task', 'done'],
       ['wait_for_workers', 'done'],
     ]);

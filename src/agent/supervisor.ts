@@ -1,10 +1,10 @@
-import { approvalKindOf } from '@fynvra/agent-runtime';
 import type {
   ApprovalGateRequest,
   ApprovalPolicyHooks,
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
+import { approvalKindOf } from '@fynvra/agent-runtime';
 import type {
   ApprovalMode,
   FynvraSessionEvent,
@@ -12,16 +12,16 @@ import type {
   ToolOperationNotice,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
-import {
-  type AgentCommand,
-  type AgentWorkerEvent,
-  type HostKind,
-  type LogLevel,
-  type ModelQuery,
-  type ModelsDescribedResult,
-  type ResolvedModelSpec,
-  type SessionIdentity,
-  type SpawnSessionSpec,
+import type {
+  AgentCommand,
+  AgentWorkerEvent,
+  HostKind,
+  LogLevel,
+  ModelQuery,
+  ModelsDescribedResult,
+  ResolvedModelSpec,
+  SessionIdentity,
+  SpawnSessionSpec,
 } from '@shared/types/agent';
 import {
   type ApprovalDecision,
