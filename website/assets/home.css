@@ -74,9 +74,14 @@
   stroke-linejoin: round;
 }
 
-.nav-download .i {
-  width: 15px;
-  height: 15px;
+.btn .i-download {
+  width: 21px;
+  height: 21px;
+}
+
+.nav-download .i-download {
+  width: 18px;
+  height: 18px;
 }
 
 /* ── 顶部连续操作演示 ───────────────────────────────────────── */
