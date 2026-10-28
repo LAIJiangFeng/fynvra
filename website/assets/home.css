@@ -2180,6 +2180,12 @@
   background: var(--surface);
 }
 
+:root[data-theme="dark"] .fd-composer-box,
+:root[data-theme="dark"] .fd-run,
+:root[data-theme="dark"] .fd-task {
+  background: var(--fd-chrome);
+}
+
 :root[data-theme="dark"] .cap-card:hover {
   box-shadow: 0 24px 48px -40px rgb(0 0 0 / 65%);
 }

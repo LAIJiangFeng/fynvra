@@ -4238,6 +4238,19 @@ kbd {
   color: var(--ink);
 }
 
+:root[data-theme="dark"] .cta .btn-primary {
+  background: #f5f5f5;
+  color: #0a0a0a;
+}
+
+:root[data-theme="dark"] .cta .btn-primary:hover {
+  background: #ffffff;
+}
+
+:root[data-theme="dark"] .cta .btn-ghost {
+  color: var(--ink);
+}
+
 :root[data-theme="dark"] .cta .section-lead {
   color: var(--ink-2);
 }
