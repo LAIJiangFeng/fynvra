@@ -26,7 +26,14 @@ export interface EventNormalizer {
   stats(): NormalizerStats;
 }
 
+interface PendingErrors {
+  model?: string;
+  compaction?: string;
+}
+
 export function createEventNormalizer(): EventNormalizer {
+  // SDK 1.4 的 agent_end 只结束一次尝试；候选跨原生重试保留，到 agent_settled 才结算。
+  const pendingErrors: PendingErrors = {};
   let seq = 0;
   let emitted = 0;
   let dropped = 0;
@@ -42,7 +49,7 @@ export function createEventNormalizer(): EventNormalizer {
     push(event) {
       let bodies: FynvraSessionEventBody[] | undefined;
       try {
-        bodies = mapEvent(event);
+        bodies = mapEvent(event, pendingErrors);
       } catch {
         // 事件形状与 pi 类型不符（升级复检点）：当作未映射处理，绝不打断 pi 的事件分发
         bodies = undefined;
@@ -97,7 +104,10 @@ export function subscribeNormalized(
   };
 }
 
-function mapEvent(event: AgentSessionEvent): FynvraSessionEventBody[] | undefined {
+function mapEvent(
+  event: AgentSessionEvent,
+  pendingErrors: PendingErrors
+): FynvraSessionEventBody[] | undefined {
   switch (event.type) {
     case 'message_update': {
       const update = event.assistantMessageEvent;
@@ -131,23 +141,62 @@ function mapEvent(event: AgentSessionEvent): FynvraSessionEventBody[] | undefine
         },
       ];
     }
-    case 'message_end':
-      return mapMessageEnd(event.message);
-    case 'agent_end': {
-      // 会自动重试的失败不算错误；只报告最终失败
-      if (event.willRetry) return undefined;
-      const last = lastAssistant(event.messages);
-      if (last?.stopReason !== 'error') return undefined;
-      return [
-        { type: 'error', source: 'model', message: last.errorMessage || 'model request failed' },
-      ];
+    case 'message_end': {
+      const message = event.message;
+      if (
+        message.role === 'assistant' &&
+        (message.stopReason === 'stop' ||
+          message.stopReason === 'toolUse' ||
+          message.stopReason === 'length' ||
+          message.stopReason === 'deferred')
+      ) {
+        // 只清除这次成功响应之前的错误；后续工具轮/压缩仍可能失败。
+        pendingErrors.model = undefined;
+        pendingErrors.compaction = undefined;
+      }
+      return mapMessageEnd(message);
     }
-    case 'compaction_end':
-      return event.errorMessage && !event.willRetry && !event.aborted
-        ? [{ type: 'error', source: 'compaction', message: event.errorMessage }]
-        : undefined;
-    case 'agent_settled':
-      return [{ type: 'agent_settled', aborted: event.aborted }];
+    case 'agent_end': {
+      // willRetry 只涵盖 transient 重试，不涵盖之后的 overflow 压缩恢复。
+      const last = lastAssistant(event.messages);
+      if (last?.stopReason === 'error') {
+        pendingErrors.model = last.errorMessage || 'model request failed';
+      }
+      return undefined;
+    }
+    case 'compaction_end': {
+      if (event.aborted) return undefined;
+      if (event.reason === 'manual') {
+        // 手动压缩是独立操作，SDK 不会为它发 agent_settled。
+        return event.errorMessage && !event.willRetry
+          ? [{ type: 'error', source: 'compaction', message: event.errorMessage }]
+          : undefined;
+      }
+      if (event.errorMessage) {
+        pendingErrors.compaction = event.errorMessage;
+      } else if (event.result) {
+        // 压缩成功不代表模型请求成功，原模型错误要等后续响应才能解除。
+        pendingErrors.compaction = undefined;
+      }
+      return undefined;
+    }
+    case 'agent_settled': {
+      // SDK 1.4 settled 不含 messages；取消以真实边界为准，不猜测错误文案。
+      const events: FynvraSessionEventBody[] = [];
+      if (!event.aborted) {
+        if (pendingErrors.model) {
+          events.push({ type: 'error', source: 'model', message: pendingErrors.model });
+        }
+        if (pendingErrors.compaction) {
+          events.push({ type: 'error', source: 'compaction', message: pendingErrors.compaction });
+        }
+      }
+      // 在返回前清空，避免重复结算或污染下一轮；宿主 emit 不经过候选缓存。
+      pendingErrors.model = undefined;
+      pendingErrors.compaction = undefined;
+      events.push({ type: 'agent_settled', aborted: event.aborted });
+      return events;
+    }
     default:
       return undefined;
   }
