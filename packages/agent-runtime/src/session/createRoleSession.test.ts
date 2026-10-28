@@ -477,6 +477,74 @@ describe('createRoleSession resources', () => {
   });
 });
 
+describe('command environment injection through real pi tools', () => {
+  const shellTools = process.platform === 'win32' ? ['bash', 'powershell'] : ['bash'];
+  it.each(shellTools)(
+    'injects %s subprocess env after session metadata, preserving default tool selection',
+    async (name) => {
+      const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+        ...env,
+        HTTP_PROXY: 'http://127.0.0.1:7890',
+      }));
+      const { session } = await open({
+        role: role({ approvalMode: 'full' }),
+        commandEnv: transform,
+      });
+      expect(session.getActiveToolNames().sort()).toEqual(['bash', 'edit', 'read', 'write']);
+      session.setActiveToolsByName(['read', 'bash', 'powershell', 'edit', 'write']);
+      const events: FynvraSessionEvent[] = [];
+      const subscription = subscribeNormalized(session, (event) => events.push(event));
+      faux.setResponses([
+        fauxAssistantMessage(
+          fauxToolCall(name, {
+            command:
+              'node -p "process.env.HTTP_PROXY + String.fromCharCode(124) + process.env.PI_SESSION_ID"',
+          }),
+          { stopReason: 'toolUse' }
+        ),
+        fauxAssistantMessage('done'),
+      ]);
+      await session.prompt('Inspect the test environment.');
+      subscription.unsubscribe();
+      expect(transform).toHaveBeenCalledTimes(1);
+      const inherited = transform.mock.calls[0]?.[0];
+      expect(inherited?.PI_SESSION_ID).toBe(session.sessionManager.getSessionId());
+      expect(inherited?.PI_PROVIDER).toBe('fynvra-faux');
+      expect(inherited?.PI_MODEL).toBe('faux-reasoner');
+      expect(events.find((event) => event.type === 'tool_end')).toMatchObject({
+        isError: false,
+        output: expect.stringContaining(
+          `http://127.0.0.1:7890|${session.sessionManager.getSessionId()}`
+        ),
+      });
+    }
+  );
+  it.each(['readonly', 'orchestrator'] as const)(
+    'keeps %s permissions and injects git_readonly env',
+    async (tools) => {
+      const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+        ...env,
+        HTTP_PROXY: 'http://127.0.0.1:7890',
+      }));
+      const { session } = await open({
+        role: role({ tools }),
+        host: tools === 'orchestrator' ? orchestrationHost() : null,
+        commandEnv: transform,
+      });
+      expect(session.getActiveToolNames()).not.toContain('bash');
+      expect(session.getActiveToolNames()).not.toContain('powershell');
+      faux.setResponses([
+        fauxAssistantMessage(fauxToolCall('git_readonly', { args: ['status', '--short'] }), {
+          stopReason: 'toolUse',
+        }),
+        fauxAssistantMessage('done'),
+      ]);
+      await session.prompt('Read status.');
+      expect(transform).toHaveBeenCalledTimes(1);
+    }
+  );
+});
+
 describe('createRoleSession approval gate', () => {
   /** 审批通道：按顺序给出决定（缺省 allow），记下每次请求 */
   function approver(...decisions: ApprovalDecision[]) {
@@ -579,7 +647,15 @@ describe('createRoleSession approval gate', () => {
 
   it('asks about protected commands in full mode and blocks them when denied', async () => {
     const approval = approver('deny');
-    const { session } = await open({ role: role({ approvalMode: 'full' }), approval });
+    const transform = vi.fn((env: NodeJS.ProcessEnv) => ({
+      ...env,
+      HTTP_PROXY: 'http://127.0.0.1:7890',
+    }));
+    const { session } = await open({
+      role: role({ approvalMode: 'full' }),
+      approval,
+      commandEnv: transform,
+    });
     const contexts = script(
       { name: 'write', args: { path: 'full.txt', content: 'full' } },
       { name: 'bash', args: { command: 'git push origin main' } }
@@ -592,6 +668,7 @@ describe('createRoleSession approval gate', () => {
       expect.objectContaining({ kind: 'command', protectedAction: 'git push' }),
     ]);
     expect(lastToolResult(contexts[2]).text).toContain('protected action (git push)');
+    expect(transform).not.toHaveBeenCalled();
   });
 
   it('remembers allowSession for the same kind and tool', async () => {

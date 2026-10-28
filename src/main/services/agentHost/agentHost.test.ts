@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import { BUILTIN_ROLES, getBuiltinRole, JsonFileRoleStore, type Role } from '@fynvra/core';
-import type { AgentApprovalRequest, AgentCommand, ModelQuery } from '@shared/types/agent';
+import type {
+  AgentApprovalRequest,
+  AgentCommand,
+  ModelQuery,
+  SpawnSessionSpec,
+} from '@shared/types/agent';
 import type {
   ApprovalDecision,
   ChatImage,
@@ -907,6 +912,28 @@ describe('createAgentHost sessions', () => {
     expect(env.sent('dispose-session')).toHaveLength(0);
   });
 
+  it('snapshots command proxy settings for new/restored sessions without restarting live sessions', async () => {
+    let networkProxy: SpawnSessionSpec['networkProxy'] = {
+      mode: 'manual',
+      url: 'http://127.0.0.1:7890',
+      gitCompatibility: true,
+    };
+    const env = setup({ resolveNetworkProxy: () => networkProxy });
+    const first = await createSession(env);
+    await env.host.prompt(first.id, 'first');
+    expect(env.sent('spawn-session')[0]).toMatchObject({ spec: { networkProxy } });
+    networkProxy = { mode: 'environment', gitCompatibility: false };
+    await env.host.prompt(first.id, 'continue');
+    expect(env.sent('spawn-session')).toHaveLength(1);
+    const second = await createSession(env);
+    await env.host.prompt(second.id, 'new');
+    expect(env.sent('spawn-session')[1]).toMatchObject({ spec: { networkProxy } });
+    expect(env.sent('dispose-session')).toHaveLength(0);
+    await env.host.implementsLauncher().disposeSession(first.id);
+    await env.host.prompt(first.id, 'resume');
+    expect(env.sent('spawn-session').at(-1)).toMatchObject({ spec: { networkProxy } });
+  });
+
   it('spawns with the shell path the resolver gives, and leaves it out when there is none', async () => {
     const resolveShellPath = vi.fn(async () => 'D:\\Software\\Git\\bin\\bash.exe');
     const env = setup({ resolveShellPath });
@@ -1196,7 +1223,8 @@ describe('createAgentHost host calls', () => {
 
 describe('createAgentHost crash recovery', () => {
   it('interrupts running sessions and re-spawns them with generation + 1 before other commands', async () => {
-    const env = setup();
+    let networkProxy: SpawnSessionSpec['networkProxy'];
+    const env = setup({ resolveNetworkProxy: () => networkProxy });
     const running = await createSession(env);
     const idle = await createSession(env, 'tester');
     await env.host.prompt(running.id, 'long task');
@@ -1207,6 +1235,7 @@ describe('createAgentHost crash recovery', () => {
       status: 'idle',
     });
 
+    networkProxy = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
     env.worker().exit(1);
     expect(env.events(running.id)).toEqual([
       { type: 'error', source: 'host', message: expect.stringContaining('意外退出'), seq: 1 },
@@ -1227,6 +1256,9 @@ describe('createAgentHost crash recovery', () => {
       ['spawn-session', { sessionId: idle.id, generation: 2 }],
     ]);
 
+    for (const spawn of env.sent('spawn-session')) {
+      expect(spawn).toMatchObject({ spec: { networkProxy } });
+    }
     // 新进程的事件从 seq 1 开始，Renderer 看到的会话级 seq 继续递增
     env.worker().emit({
       type: 'session-event',

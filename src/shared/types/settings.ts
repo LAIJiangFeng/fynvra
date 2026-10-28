@@ -6,6 +6,7 @@ import {
   parseKeybindingOverrides,
   parseKeybindingPatch,
 } from '../keybindings';
+import { type NetworkProxy, parseNetworkProxy } from '../networkProxy';
 import type { SessionModelRef } from './chat';
 import type { IpcResult } from './ipc';
 import { parseWorkspace, parseWorkspaceId, type Workspace } from './workspace';
@@ -117,6 +118,8 @@ export function parseOpenWithApps(raw: unknown): OpenWithApp[] {
 
 /** Renderer 可读写的界面偏好，经 `settings:update` 合并落盘。 */
 export interface Preferences {
+  /** Git/command subprocesses only; absent means preserve the inherited environment. */
+  networkProxy?: NetworkProxy;
   /** User-picked applications for the workspace menu; Main verifies new executable paths. */
   openWithApps?: OpenWithApp[];
   theme: ThemeMode;
@@ -353,6 +356,7 @@ function parseLastModels(raw: unknown): Record<string, SessionModelRef> | undefi
 /** 宽松收窄：逐字段取合法值，缺失或非法的字段用默认值。 */
 export function parsePreferences(raw: unknown): Preferences {
   const record = asRecord(raw);
+  const networkProxy = parseNetworkProxy(record?.networkProxy);
   const theme = record?.theme;
   const sidePanelOpen = record?.sidePanelOpen;
   const sidebarOpen = record?.sidebarOpen;
@@ -368,6 +372,7 @@ export function parsePreferences(raw: unknown): Preferences {
   // --- language ---
   const language = record?.language;
   return {
+    ...(networkProxy ? { networkProxy } : {}),
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
@@ -422,6 +427,12 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
   for (const key of Object.keys(record)) {
     const value = record[key];
     switch (key) {
+      case 'networkProxy': {
+        const proxy = value === undefined ? undefined : parseNetworkProxy(value);
+        if (proxy === null) return null;
+        patch.networkProxy = proxy;
+        break;
+      }
       case 'openWithApps': {
         const apps = parseOpenWithApps(value);
         if (!Array.isArray(value) || apps.length !== value.length) return null;

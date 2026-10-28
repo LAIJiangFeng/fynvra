@@ -84,11 +84,23 @@ describe('createPiSessionFactory', () => {
       spec: {
         ...spec,
         inPlace: true,
+        networkProxy: { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true },
         instructionFile: { name: 'CLAUDE.md', content: 'Selected text' },
       },
       host: null,
       workerHost: null,
     });
+    expect(mocks.createRoleSession.mock.calls[0]?.[0]).not.toHaveProperty('commandEnv');
+    const incoming = { PI_SESSION_ID: 'keep-session', NO_PROXY: '*', PATH: 'keep-path' };
+    const env = mocks.createRoleSession.mock.calls[1]?.[0].commandEnv(incoming);
+    expect(env).toMatchObject({
+      PI_SESSION_ID: 'keep-session',
+      PATH: 'keep-path',
+      NO_PROXY: '',
+      HTTP_PROXY: 'http://127.0.0.1:7890',
+      GIT_CONFIG_COUNT: '3',
+    });
+    expect(incoming).toEqual({ PI_SESSION_ID: 'keep-session', NO_PROXY: '*', PATH: 'keep-path' });
     expect(mocks.createRoleSession.mock.calls[1]?.[0]).toMatchObject({
       inPlace: true,
       resourcePaths: { instructionFile: { name: 'CLAUDE.md', content: 'Selected text' } },

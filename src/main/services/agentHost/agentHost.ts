@@ -85,6 +85,7 @@ export interface AgentHostDeps {
   resolveResources?(role: Role): Promise<RoleResources>;
   /** 会话 bash 工具用的 shell（生产为 createShellPathResolver）；缺省或返回 undefined 时由 pi 自己找 */
   resolveShellPath?(): Promise<string | undefined>;
+  resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   workerOptions?: Pick<
     WorkerClientOptions,
     'readyTimeoutMs' | 'maxRestarts' | 'restartWindowMs' | 'restartDelayMs'
@@ -416,6 +417,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       const shellPath = await resolveShellPath();
+      const networkProxy = deps.resolveNetworkProxy?.();
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
@@ -431,6 +433,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           mcpServers: resources.mcpServers,
           worker: stored.dispatchId !== undefined,
           roles,
+          ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
           ...(inPlace ? { inPlace: true } : {}),
         },
@@ -772,7 +775,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     for (const [sessionId, state] of live) {
       if (!state.respawn) continue;
       state.respawn = false;
-      if (state.spec && deps.store.get(sessionId)) spawnWith(sessionId, state, state.spec);
+      if (state.spec && deps.store.get(sessionId)) {
+        spawnWith(sessionId, state, {
+          ...state.spec,
+          networkProxy: deps.resolveNetworkProxy?.(),
+        });
+      }
     }
   }
 

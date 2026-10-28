@@ -47,6 +47,14 @@ describe('preload bridge', () => {
     expect(members).not.toContain('send');
   });
 
+  it('network diagnostics expose only a draft and parameterless cancellation', async () => {
+    const draft = { mode: 'manual' as const, url: 'http://127.0.0.1:7890', gitCompatibility: true };
+    await api.settings.testNetwork(draft);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_TEST_NETWORK, draft);
+    await api.settings.cancelNetworkTest();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST);
+  });
+
   it('用量出口只传范围并映射到 summary 通道', async () => {
     await api.usage.summary({ range: '7d' });
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.USAGE_SUMMARY, { range: '7d' });

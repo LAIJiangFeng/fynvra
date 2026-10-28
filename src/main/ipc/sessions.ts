@@ -126,6 +126,7 @@ function createAppAgentHost(): AgentHostService {
       mcpServers: getMcpRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
+    resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     broadcast: sendToAllWindows,
   });
 }
