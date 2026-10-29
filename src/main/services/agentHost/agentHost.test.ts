@@ -61,23 +61,19 @@ describe('context runtime snapshots and recovery', () => {
     const command = env.sent('retry-compaction')[0];
     if (command?.type !== 'retry-compaction') throw new Error('missing recovery command');
     env.worker().emit({ type: 'session-status', identity: command.identity, status: 'idle' });
-    env
-      .worker()
-      .emit({
-        type: 'compaction-recovery-result',
-        identity: command.identity,
-        requestId: 'stale',
-        result: { ok: true },
-      });
+    env.worker().emit({
+      type: 'compaction-recovery-result',
+      identity: command.identity,
+      requestId: 'stale',
+      result: { ok: true },
+    });
     expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
-    env
-      .worker()
-      .emit({
-        type: 'compaction-recovery-result',
-        identity: command.identity,
-        requestId: command.requestId,
-        result: { ok: false, error: 'No compaction recovery is required.' },
-      });
+    env.worker().emit({
+      type: 'compaction-recovery-result',
+      identity: command.identity,
+      requestId: command.requestId,
+      result: { ok: false, error: 'No compaction recovery is required.' },
+    });
     expect(env.host.get(session.id)?.status).toBe('error');
     expect(env.events(session.id).at(-1)).toMatchObject({
       type: 'error',
@@ -293,6 +289,95 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('explicit abandoned-worker error cleanup', () => {
+  function launcher(env: ReturnType<typeof setup>): {
+    disposeSession(sessionId: string, options?: { clearError?: boolean }): Promise<void>;
+  } {
+    return env.host.implementsLauncher();
+  }
+
+  it.each([false, true])(
+    'clears error only on explicit cleanup, preserves jsonl/dispatch and drops late events (loaded: %s)',
+    async (loaded) => {
+      const env = setup();
+      const session = await createSession(env);
+      env.store.update(session.id, { dispatchId: 'failed-dispatch' });
+      const identity = { sessionId: session.id, generation: 1 };
+      if (loaded) {
+        await env.host.prompt(session.id, 'failed task');
+        env.worker().emit({ type: 'session-status', identity, status: 'error' });
+      } else env.store.update(session.id, { status: 'error' });
+      const failure = env.host.implementsLauncher().sessionFailure?.(session.id);
+      if (loaded) expect(failure).toContain('Worker attempt interrupted');
+      const file = sessionFilePath(join(env.dir, 'agent'), session.id);
+      mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
+      const jsonl = `${JSON.stringify({ type: 'custom', customType: 'fynvra-context-recovery', data: { blocked: true, resume: true, pending: [{ text: 'held original input' }] } })}\n`;
+      writeFileSync(file, jsonl);
+      const changedBefore = env.pushed(IPC_CHANNELS.SESSIONS_CHANGED).length;
+      const eventsBefore = env.events(session.id).length;
+      await launcher(env).disposeSession(session.id, { clearError: true });
+      expect(env.host.get(session.id)?.status).toBe('idle');
+      expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toHaveLength(changedBefore + 1);
+      expect(env.store.get(session.id)?.dispatchId).toBe('failed-dispatch');
+      expect(env.host.implementsLauncher().sessionFailure?.(session.id)).toBe(failure);
+      expect(readFileSync(file, 'utf8')).toBe(jsonl);
+      env.worker().emit({ type: 'session-status', identity, status: 'error' });
+      env.worker().emit({ type: 'session-status', identity, status: 'running' });
+      expect(env.host.get(session.id)?.status).toBe('idle');
+      expect(env.events(session.id)).toHaveLength(eventsBefore); // No fake successful settled event.
+    }
+  );
+
+  it.each([undefined, { clearError: false }])(
+    'preserves error on ordinary unload (%j)',
+    async (options) => {
+      const env = setup();
+      const session = await createSession(env);
+      await env.host.prompt(session.id, 'failed task');
+      env.worker().emit({
+        type: 'session-status',
+        identity: { sessionId: session.id, generation: 1 },
+        status: 'error',
+      });
+      await launcher(env).disposeSession(session.id, options);
+      expect(env.host.get(session.id)?.status).toBe('error');
+    }
+  );
+
+  it('invalidates an old prompt waiting to spawn instead of resurrecting a cleaned-up session', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    env.store.update(session.id, { status: 'error' });
+    const prompt = env.host.prompt(session.id, 'old queued input');
+    await launcher(env).disposeSession(session.id, { clearError: true });
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    expect(await prompt).toMatchObject({ ok: false });
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.sent('prompt')).toHaveLength(0);
+    expect(env.host.get(session.id)?.status).toBe('idle');
+  });
+
+  it('removes the discarded session from pending worker crash respawns', async () => {
+    vi.useFakeTimers();
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'failed task');
+    env.worker().exit(1);
+    expect(env.host.get(session.id)?.status).toBe('error');
+    await launcher(env).disposeSession(session.id, { clearError: true });
+    await vi.advanceTimersByTimeAsync(0);
+    env.worker().emit({ type: 'ready' });
+    expect(env.processes).toHaveLength(2);
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.host.get(session.id)?.status).toBe('idle');
+  });
+});
 
 describe('worker attempt lifecycle', () => {
   async function dispatched() {

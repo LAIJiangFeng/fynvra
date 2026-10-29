@@ -233,6 +233,8 @@ interface LiveSession {
   lastError?: string;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
+  /** Invalidates requests waiting to spawn when abandoned-worker cleanup explicitly clears error. */
+  cleanupEpoch?: number;
   /** 最近一次正常结束（非 aborted）的 agent_settled 的会话级 seq；新一轮开始 / 换模型时清 0 */
   lastSettledSeq: number;
   /** 当前 generation 里正常结束的回合数：与 worker 同步计数，用于双重核对轮次 */
@@ -742,7 +744,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!built.ok) return built;
     await ensureTranscript(stored, state);
     if (!deps.store.get(stored.id)) return fail(translate('common.sessionNotFound'));
-    if (!wanted()) return fail('Compaction recovery was cancelled.');
+    if (!wanted()) return fail('The session operation was cancelled.');
     if (state.spawned) return { ok: true };
     return spawnWith(stored.id, state, built.spec)
       ? { ok: true }
@@ -1145,11 +1147,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     // 用户开始新一轮（或插话）：旧轮的建议立即作废，worker 里的在途请求也中止
     invalidateSuggestion(sessionId, pending);
     const epoch = pending.roundEpoch;
+    const cleanupEpoch = pending.cleanupEpoch;
+    const stillWanted = () => pending.cleanupEpoch === cleanupEpoch;
     pending.activity += 1;
     tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
     pending.prompting += 1;
     try {
-      const spawned = await ensureSpawned(stored);
+      const spawned = await ensureSpawned(stored, stillWanted);
+      if (!stillWanted()) return fail('The session was cleaned up before message delivery.');
       if (signal?.aborted) return fail('feedback delivery was aborted');
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
@@ -1442,8 +1447,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       failureListeners.add(listener);
       return () => failureListeners.delete(listener);
     },
-    async disposeSession(sessionId) {
+    async disposeSession(sessionId, options?: { clearError?: boolean }) {
       disposeLive(sessionId);
+      if (options?.clearError !== true) return;
+      const state = live.get(sessionId);
+      if (state) {
+        state.cleanupEpoch = (state.cleanupEpoch ?? 0) + 1;
+        state.respawn = false;
+        // disposeLive may return early for an already unloaded worker. Still invalidate any
+        // pending recovery/host calls and reject late events from the discarded generation.
+        detach(sessionId, state);
+      }
+      if (deps.store.get(sessionId)?.status === 'error') setStatus(sessionId, 'idle');
     },
   };
 
