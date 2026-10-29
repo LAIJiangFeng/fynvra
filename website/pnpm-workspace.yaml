@@ -1,0 +1,3 @@
+# A separate workspace: installing the website must not install Electron.
+packages:
+  - '.'
