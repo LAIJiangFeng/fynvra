@@ -76,7 +76,7 @@
     const homeState = docsMode
       ? phase >= 7
         ? 'done'
-        : phase >= 6
+        : phase >= 5
           ? 'review'
           : phase >= 3
             ? 'run'

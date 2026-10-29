@@ -1457,7 +1457,7 @@ Review and merge both when they finish. If one of those models is not configured
                               <p data-l="zh"><strong>问题</strong></p>
                               <p data-l="en"><strong>Issues</strong></p>
                               <ul class="fd-role-bullets">
-                                <li><span data-l="zh"><code>SettingsSidebar.tsx</code> 的折叠按钮只监听了 click，键盘按 Enter/Space 无法触发折叠。</span><span data-l="en">The collapse button in <code>SettingsSidebar.tsx</code> only listens for click, so Enter/Space cannot toggle it from the keyboard.</span></li>
+                                <li><span data-l="zh"><code>SettingsSidebar.tsx</code> 用不可聚焦的 <code>div</code> 模拟折叠按钮，只有 click 处理，无法通过键盘激活。</span><span data-l="en">The collapse control in <code>SettingsSidebar.tsx</code> is a non-focusable <code>div</code> with only a click handler, so it cannot be activated from the keyboard.</span></li>
                                 <li><span data-l="zh"><code>Settings.tsx</code> 读取本地折叠状态时没有默认值，旧配置会读到 undefined。</span><span data-l="en"><code>Settings.tsx</code> reads the local collapse state without a fallback; older configs get undefined.</span></li>
                                 <li><span data-l="zh"><code>settings.css</code> 把图标栏宽度写死为 56px，窄屏展开时内容会和图标重叠。</span><span data-l="en"><code>settings.css</code> hard-codes a 56px icon rail, so content overlaps when expanded on narrow screens.</span></li>
                               </ul>
