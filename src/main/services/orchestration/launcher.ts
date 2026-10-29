@@ -33,5 +33,6 @@ export interface WorkerSessionLauncher {
   sessionFailure?(sessionId: string): string | undefined;
   /** Notify when a session is removed or a run definitively terminates abnormally */
   onSessionFailure?(listener: () => void): () => void;
-  disposeSession(sessionId: string): Promise<void>;
+  /** 仅显式放弃清理时用 clearError 清除会话错误状态；普通 dispose 默认保留。 */
+  disposeSession(sessionId: string, options?: { clearError?: boolean }): Promise<void>;
 }
