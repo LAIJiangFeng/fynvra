@@ -1,81 +1,309 @@
-/* Content additions only. Starlight owns the page layout, navigation, search,
-   typography, theme, and language controls. */
+/* Reading styles from the original Fynvra docs. Framework-generated heading
+   wrappers keep their anchor links; .not-content isolates the interactive demos. */
+.sl-markdown-content {
+  color: var(--fynvra-ink-2);
+  font-size: 1rem;
+  line-height: 1.78;
+  overflow-wrap: break-word;
+}
+
 .sl-markdown-content span[id]:empty {
   display: block;
-  scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem);
+  scroll-margin-top: calc(var(--sl-nav-height) + 24px);
+}
+
+.sl-markdown-content p:not(:where(.not-content *)) {
+  text-wrap: pretty;
+}
+
+.sl-markdown-content > p:first-of-type {
+  max-width: 62ch;
+  margin-top: 0;
+  font-size: 1.04rem;
+  line-height: 1.72;
+}
+
+.sl-markdown-content :is(h2, .level-h2):not(:where(.not-content *)) {
+  margin-block: 44px 14px;
+  color: var(--fynvra-ink);
+  font-size: var(--sl-text-h2);
+  font-stretch: 104%;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+  --sl-line-height-headings: 1.35;
+}
+
+.sl-markdown-content h2:lang(zh) {
+  letter-spacing: 0;
+}
+
+.sl-markdown-content :is(h3, .level-h3):not(:where(.not-content *)) {
+  margin-block: 30px 8px;
+  color: var(--fynvra-ink);
+  font-size: var(--sl-text-h3);
+  font-weight: 660;
+  line-height: 1.5;
+  --sl-line-height-headings: 1.5;
+}
+
+.sl-markdown-content .sl-heading-wrapper > :is(h2, h3) {
+  margin: 0;
+}
+
+.sl-markdown-content strong:not(:where(.not-content *)) {
+  color: var(--fynvra-ink);
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration-color: color-mix(in srgb, var(--fynvra-accent) 42%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  transition: text-decoration-color 0.15s;
+}
+
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  text-decoration-color: var(--fynvra-accent);
+}
+
+.sl-markdown-content :is(ul, ol):not([class], :where(.not-content *)) {
+  margin-block: 14px 0;
+  padding-inline-start: 1.3em;
+}
+
+.sl-markdown-content li + li:not(:where(.not-content *)) {
+  margin-top: 6px;
+}
+
+.sl-markdown-content li > :last-child:not(:where(.not-content *)) {
+  margin-bottom: 0;
+}
+
+.sl-markdown-content li:not(:where(.not-content *))::marker {
+  color: var(--fynvra-ink-3);
+}
+
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
+  padding: 0.12em 0.4em;
+  border: 1px solid var(--fynvra-line);
+  border-radius: 5px;
+  background: var(--fynvra-paper-2);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
 }
 
 .sl-markdown-content kbd {
-  padding: 0.1em 0.35em;
-  border: 1px solid var(--sl-color-gray-4);
-  border-radius: 0.25rem;
-  background: var(--sl-color-bg-inline-code);
-  color: var(--sl-color-text);
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.1em 0.45em;
+  border: 1px solid var(--fynvra-line-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--fynvra-surface);
+  color: var(--fynvra-ink);
   font-family: var(--__sl-font-mono);
-  font-size: 0.85em;
+  font-size: 0.8em;
+  line-height: 1.5;
+  text-align: center;
   white-space: nowrap;
+}
+
+.sl-markdown-content .expressive-code {
+  margin-block: 18px;
+}
+
+.sl-markdown-content .expressive-code pre {
+  background: var(--fynvra-code-bg);
+  border-color: rgb(255 255 255 / 10%);
+}
+
+.sl-markdown-content .expressive-code .frame > .header {
+  border-color: rgb(255 255 255 / 8%);
+  background: color-mix(in srgb, var(--fynvra-code-bg) 98%, white);
+  color: var(--fynvra-code-dim);
+  font-family: var(--__sl-font-mono);
+  font-size: 11px;
+}
+
+.sl-markdown-content table {
+  width: 100%;
+  max-width: 100%;
+  margin-block: 18px;
+  border: 1px solid var(--fynvra-line);
+  border-radius: 10px;
+  background: var(--fynvra-surface);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.sl-markdown-content :is(th, td) {
+  padding: 10px 14px;
+  border-bottom-color: var(--fynvra-line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.sl-markdown-content thead th {
+  background: var(--fynvra-surface-2);
+  color: var(--fynvra-ink-3);
+  font-family: var(--__sl-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sl-markdown-content :is(tbody th, td:first-child) {
+  color: var(--fynvra-ink);
+}
+
+.sl-markdown-content tbody tr:hover {
+  background: var(--fynvra-hover);
+}
+
+.sl-markdown-content tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.sl-markdown-content blockquote {
+  margin-block: 16px;
+  padding-inline-start: 13px;
+  border-inline-start: 2px solid var(--fynvra-line-2);
+  color: var(--fynvra-ink-3);
+  font-size: 0.94rem;
+  line-height: 1.7;
 }
 
 .sl-markdown-content :is(.docs-area-grid, .docs-next-grid) {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+  margin-top: 18px;
 }
 
 .sl-markdown-content :is(.docs-area-card, .docs-next-card) {
   min-width: 0;
   margin: 0;
-  padding: 1rem;
-  border: 1px solid var(--sl-color-hairline-light);
-  border-radius: 0.65rem;
-  background: var(--sl-color-bg-sidebar);
+  padding: 15px;
+  border: 1px solid var(--fynvra-card-line);
+  border-radius: 10px;
+  background: var(--fynvra-card);
 }
 
-.sl-markdown-content .docs-area-card h3 {
-  font-size: var(--sl-text-lg);
+.sl-markdown-content .docs-area-card :is(h3, .level-h3) {
+  margin: 6px 0 7px;
+  font-size: 1rem;
 }
 
-.sl-markdown-content .docs-area-card > :first-child {
-  color: var(--sl-color-gray-2);
-  font-size: var(--sl-text-sm);
+.sl-markdown-content .docs-area-card .sl-heading-wrapper > h3 {
+  margin: 0;
+}
+
+.sl-markdown-content .docs-area-card > :first-child,
+.sl-markdown-content .docs-area-card > :first-child strong {
+  margin: 0;
+  color: var(--fynvra-ink-3);
+  font-family: var(--__sl-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sl-markdown-content .docs-area-card > p:last-child {
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+.sl-markdown-content .docs-next-grid {
+  gap: 10px;
+}
+
+.sl-markdown-content .docs-next-card {
+  position: relative;
+  padding: 14px 15px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.sl-markdown-content .docs-next-card:is(:hover, :focus-within) {
+  border-color: var(--fynvra-card-line-hover);
+  background: var(--fynvra-card-hover);
+}
+
+.sl-markdown-content .docs-next-card p:first-child {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.sl-markdown-content .docs-next-card a {
+  color: var(--fynvra-ink);
+  text-decoration: none;
+}
+
+/* Extend the existing MDX link's hit area without changing article markup. */
+.sl-markdown-content .docs-next-card a::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  content: "";
 }
 
 .sl-markdown-content .docs-next-card p + p {
-  margin-top: 0.5rem;
-  font-size: var(--sl-text-sm);
+  margin-top: 4px;
+  color: var(--fynvra-ink-3);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .sl-markdown-content .docs-callout {
-  padding: 1rem 1.125rem;
-  border: 1px solid var(--sl-color-hairline-light);
-  border-inline-start: 3px solid var(--sl-color-accent);
-  border-radius: 0.5rem;
-  background: var(--sl-color-bg-sidebar);
+  margin-block: 22px;
+  padding: 15px 18px;
+  border: 1px solid var(--fynvra-card-line);
+  border-radius: 10px;
+  background: var(--fynvra-card);
+  font-size: 0.95rem;
+  line-height: 1.7;
 }
 
-.sl-markdown-content .docs-callout-warn {
-  border-inline-start-color: var(--sl-color-orange);
+:root[data-theme="light"] .sl-markdown-content .docs-callout {
+  background: var(--fynvra-surface-2);
 }
 
 .sl-markdown-content .docs-callout > :first-child {
-  margin-top: 0;
+  margin: 0 0 4px;
+  color: var(--fynvra-ink);
+  font-family: var(--__sl-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 .sl-markdown-content .docs-callout p + p {
-  margin-top: 0.5rem;
+  margin-top: 4px;
 }
 
-.sl-markdown-content table {
-  max-width: 100%;
-  font-size: var(--sl-text-sm);
+.sl-markdown-content .docs-callout-warn {
+  border-inline-start-color: var(--fynvra-warn);
+}
+
+:root[data-theme="light"] .sl-markdown-content .docs-callout-warn {
+  border-color: color-mix(in srgb, var(--fynvra-warn) 26%, var(--fynvra-line));
+  background: color-mix(in srgb, var(--fynvra-warn) 5%, var(--fynvra-surface));
+}
+
+.sl-markdown-content .docs-callout-warn > :first-child strong {
+  color: var(--fynvra-warn);
 }
 
 /* Plain code nodes retain exact newlines for the shared demo controller. */
 .sl-markdown-content .docs-prompt {
   overflow: hidden;
-  border: 1px solid var(--sl-color-hairline-light);
-  border-radius: 0.65rem;
-  background: var(--sl-color-bg-sidebar);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: var(--fynvra-code-bg);
+  color: var(--fynvra-code-ink);
 }
 
 .docs-prompt-bar {
@@ -84,24 +312,27 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--sl-color-hairline-light);
+  min-height: 34px;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 2%);
 }
 
 .docs-prompt-label {
-  color: var(--sl-color-gray-2);
+  color: var(--fynvra-code-dim);
   font-family: var(--__sl-font-mono);
-  font-size: var(--sl-text-xs);
+  font-size: 11px;
 }
 
 .docs-prompt-copy {
   margin: 0;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--sl-color-gray-4);
-  border-radius: 0.25rem;
-  background: var(--sl-color-bg);
-  color: var(--sl-color-text);
-  font-size: var(--sl-text-xs);
+  padding: 4px 11px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 6%);
+  color: var(--fynvra-code-ink);
+  font-family: var(--__sl-font-mono);
+  font-size: 11.5px;
   cursor: pointer;
 }
 
@@ -110,11 +341,12 @@
 }
 
 .docs-prompt-copy:hover {
-  border-color: var(--sl-color-accent);
+  border-color: rgb(255 255 255 / 26%);
+  background: rgb(255 255 255 / 10%);
 }
 
 .docs-prompt-copy:focus-visible {
-  outline: 2px solid var(--sl-color-accent);
+  outline: 2px solid rgb(255 255 255 / 55%);
   outline-offset: 2px;
 }
 
@@ -125,7 +357,7 @@
 
 .sl-markdown-content .docs-prompt-status {
   margin: 0;
-  color: var(--sl-color-text);
+  color: var(--fynvra-code-ink);
   font-size: var(--sl-text-sm);
 }
 
@@ -135,11 +367,12 @@
 
 .sl-markdown-content .docs-prompt pre {
   margin: 0;
-  padding: 1rem;
+  padding: 14px 16px;
   border: 0;
   background: transparent;
-  font-size: var(--sl-text-sm);
-  line-height: 1.7;
+  color: inherit;
+  font-size: 12.75px;
+  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -153,10 +386,11 @@
 .docs-demo {
   --line: var(--sl-color-hairline-light);
   --line-2: var(--sl-color-gray-4);
-  --surface: var(--sl-color-bg-sidebar);
+  --surface: var(--fynvra-surface);
   --ink: var(--sl-color-white);
   --ink-2: var(--sl-color-text);
   --accent: var(--sl-color-accent);
+  --accent-text: var(--sl-color-text-accent);
   --font-mono: var(--__sl-font-mono);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   margin: 1.5rem 0 2rem;
@@ -278,5 +512,33 @@
 
   .docs-demo .fd-panel-body {
     max-height: 190px;
+  }
+}
+
+@media screen and (min-width: 50rem) {
+  /* The reading pane supplies its own 24px scroll padding below the fixed header. */
+  .sl-markdown-content span[id]:empty {
+    scroll-margin-top: 0;
+  }
+}
+
+@media (max-width: 49.999rem) {
+  .sl-markdown-content .docs-area-grid,
+  .sl-markdown-content .docs-next-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 40rem) {
+  .sl-markdown-content {
+    font-size: 0.99rem;
+  }
+
+  .sl-markdown-content :is(h2, .level-h2) {
+    margin-block-start: 38px;
+  }
+
+  .sl-markdown-content .sl-heading-wrapper > h2 {
+    margin: 0;
   }
 }
