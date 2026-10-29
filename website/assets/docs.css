@@ -366,7 +366,7 @@ html.docs-ready .docs-article {
 }
 
 .docs-group + .docs-group {
-  margin-top: 14px;
+  margin-top: 11px;
 }
 
 .docs-group-toggle {
@@ -380,13 +380,10 @@ html.docs-ready .docs-article {
   border-radius: 8px;
   background: transparent;
   color: var(--ink-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.07em;
   line-height: 1.4;
   text-align: left;
-  text-transform: uppercase;
   cursor: pointer;
   transition:
     color 0.15s,
@@ -424,11 +421,11 @@ html.docs-ready .docs-article {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 10px;
+  min-height: 40px;
+  padding: 8px 10px;
   border-radius: 9px;
   color: var(--ink-2);
-  font-size: 15.5px;
+  font-size: 15px;
   line-height: 1.4;
   text-decoration: none;
   transition:
@@ -461,41 +458,6 @@ html.docs-ready .docs-article {
 .docs-backtop a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-
-.docs-nav-sub {
-  display: grid;
-  gap: 1px;
-  margin: 2px 0 10px;
-  padding: 0 0 0 22px;
-  list-style: none;
-}
-
-.docs-nav-sub a {
-  display: block;
-  padding: 8px 10px 8px 12px;
-  border-left: 1px solid var(--line);
-  border-radius: 0 8px 8px 0;
-  color: var(--ink-3);
-  font-size: 14px;
-  line-height: 1.45;
-  text-decoration: none;
-  transition:
-    color 0.15s,
-    background-color 0.15s,
-    border-color 0.15s;
-}
-
-.docs-nav-sub a:hover {
-  background: color-mix(in srgb, var(--ink) 4%, transparent);
-  color: var(--ink);
-}
-
-.docs-nav-sub a[aria-current="location"] {
-  border-left-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  color: var(--accent-text);
-  font-weight: 600;
 }
 
 /* 左栏底部 */
@@ -1303,12 +1265,6 @@ html.docs-ready .docs-article {
   color: var(--ink);
 }
 
-:root[data-theme="dark"] .docs-nav-sub a[aria-current="location"] {
-  border-left-color: rgb(255 255 255 / 40%);
-  background: rgb(255 255 255 / 6%);
-  color: var(--ink);
-}
-
 :root[data-theme="dark"] .docs-search:focus-within {
   border-color: rgb(255 255 255 / 26%);
   box-shadow: 0 0 0 3px rgb(255 255 255 / 7%);
@@ -1316,7 +1272,7 @@ html.docs-ready .docs-article {
 
 :root[data-theme="dark"]
   .docs-sidebar
-  :is(.docs-nav-link, .docs-nav-sub a, .docs-group-toggle, .docs-foot-link, .docs-nav-close):focus-visible {
+  :is(.docs-nav-link, .docs-group-toggle, .docs-foot-link, .docs-nav-close):focus-visible {
   outline-color: rgb(255 255 255 / 55%);
 }
 
