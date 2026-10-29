@@ -21,9 +21,16 @@ import {
 } from '@/stores/sessions/timeline';
 import { useGeneralPreferencesStore } from '@/stores/settings';
 import { MessageItem } from './MessageItem';
+import {
+  createRunningSilence,
+  type RunningActivity,
+  runningActivityOf,
+  sameRunningActivity,
+} from './runningSilence';
 
 interface TimelineContext {
   status: SessionStatus;
+  showWorking: boolean;
   error: string | undefined;
 }
 
@@ -33,22 +40,25 @@ const COMPONENTS: Components<TimelineRow, TimelineContext> = {
   Footer: ({ context }) => <TimelineFooter {...context} />,
 };
 
-function TimelineFooter({ status, error }: TimelineContext) {
+function TimelineFooter({ status, showWorking, error }: TimelineContext) {
   const t = useT();
   return (
     <div className="mx-auto max-w-3xl px-6 pb-6">
-      {(status === 'running' || status === 'waiting-approval') && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center gap-2 py-2 text-muted-foreground text-xs"
-        >
-          {status === 'running' && (
-            <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
-          )}
-          {t(status === 'running' ? 'chat.working' : 'sessions.status.waiting-approval')}
-        </div>
-      )}
+      {/* 固定提示行高度，静默提示的显隐不移动正文或改变历史阅读位置。 */}
+      <div className="h-8">
+        {((status === 'running' && showWorking) || status === 'waiting-approval') && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 py-2 text-muted-foreground text-xs"
+          >
+            {status === 'running' && (
+              <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+            )}
+            {t(status === 'running' ? 'chat.working' : 'sessions.status.waiting-approval')}
+          </div>
+        )}
+      </div>
       {error && (
         <div
           role="alert"
@@ -95,7 +105,30 @@ export function Timeline({ sessionId }: { sessionId: string }) {
 
   const last = messages.at(-1);
   const busy = isBusy(status);
-  const context = useMemo(() => ({ status, error }), [status, error]);
+  const [silentActivity, setSilentActivity] = useState<RunningActivity>();
+  useLayoutEffect(() => {
+    const silence = createRunningSilence(() => {
+      const state = useSessionsStore.getState();
+      return runningActivityOf(
+        sessionId,
+        selectStatusOf(sessionId)(state),
+        selectMessagesOf(sessionId)(state)
+      );
+    }, setSilentActivity);
+    // 直接观察投影，结束/停止/审批即取消，不等 React 下一次渲染才清理。
+    const unsubscribe = useSessionsStore.subscribe(silence.update);
+    silence.update();
+    return () => {
+      unsubscribe();
+      silence.dispose();
+    };
+  }, [sessionId]);
+  // 切会话或正文恢复的这一帧，也不能沿用上一次静默的显示状态。
+  const showWorking =
+    status === 'running' &&
+    silentActivity !== undefined &&
+    sameRunningActivity(silentActivity, runningActivityOf(sessionId, status, messages));
+  const context = useMemo(() => ({ status, showWorking, error }), [status, showWorking, error]);
   // 最后一条提问之后的行是正在跑的这一轮：文件修改卡片按设置自动展开
   const liveFrom = useMemo(() => rows.findLastIndex((row) => row.kind === 'user'), [rows]);
 
