@@ -31,6 +31,61 @@ import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
 
 describe('context runtime snapshots and recovery', () => {
+  it('ACKs unloaded recovery before resource loading, and Stop prevents a late spawn', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    expect(await env.host.prompt(session.id, 'must remain unsent')).toMatchObject({ ok: false });
+    expect(await env.host.abort(session.id)).toEqual({ ok: true });
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    await flush();
+    await flush();
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.sent('retry-compaction')).toHaveLength(0);
+    expect(env.host.get(session.id)).toMatchObject({ status: 'idle' });
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+  });
+
+  it('holds the recovery mutex until the matching worker result, even across intermediate idle status', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    await vi.waitFor(() => expect(env.sent('retry-compaction')).toHaveLength(1));
+    const command = env.sent('retry-compaction')[0];
+    if (command?.type !== 'retry-compaction') throw new Error('missing recovery command');
+    env.worker().emit({ type: 'session-status', identity: command.identity, status: 'idle' });
+    env
+      .worker()
+      .emit({
+        type: 'compaction-recovery-result',
+        identity: command.identity,
+        requestId: 'stale',
+        result: { ok: true },
+      });
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    env
+      .worker()
+      .emit({
+        type: 'compaction-recovery-result',
+        identity: command.identity,
+        requestId: command.requestId,
+        result: { ok: false, error: 'No compaction recovery is required.' },
+      });
+    expect(env.host.get(session.id)?.status).toBe('error');
+    expect(env.events(session.id).at(-1)).toMatchObject({
+      type: 'error',
+      source: 'compaction',
+      message: 'No compaction recovery is required.',
+    });
+    expect(env.sent('prompt')).toHaveLength(0);
+  });
   it('keeps grey reply suggestions valid across context metadata events', async () => {
     const env = setup();
     const session = await createSession(env);

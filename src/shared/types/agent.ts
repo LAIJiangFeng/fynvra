@@ -168,7 +168,7 @@ export type AgentCommand =
    * 带图片时 text 可以是空串，不带图片时 text 不能为空
    */
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: ChatImage[] }
-  | { type: 'retry-compaction'; identity: SessionIdentity }
+  | { type: 'retry-compaction'; identity: SessionIdentity; requestId: string }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -215,6 +215,12 @@ export type AgentWorkerEvent =
   /** `seq` 按 identity 从 1 递增，与 `event.seq` 相同 */
   | { type: 'session-event'; identity: SessionIdentity; seq: number; event: FynvraSessionEvent }
   | { type: 'session-status'; identity: SessionIdentity; status: SessionStatus }
+  | {
+      type: 'compaction-recovery-result';
+      identity: SessionIdentity;
+      requestId: string;
+      result: { ok: true } | { ok: false; error: string };
+    }
   | {
       type: 'host-invoke';
       identity: SessionIdentity;
@@ -330,7 +336,9 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       return images ? { type: 'steer', identity, text, images } : null;
     }
     case 'retry-compaction':
-      return { type: 'retry-compaction', identity };
+      return isNonEmptyString(record.requestId)
+        ? { type: 'retry-compaction', identity, requestId: record.requestId }
+        : null;
     case 'abort':
       return { type: 'abort', identity };
     case 'dispose-session':
@@ -375,6 +383,17 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       const event = parseSessionEvent(record.event);
       if (!isPositiveInteger(seq) || !event || event.seq !== seq) return null;
       return { type: 'session-event', identity, seq, event };
+    }
+    case 'compaction-recovery-result': {
+      const result = parseHostCallResult(record.result);
+      return isNonEmptyString(record.requestId) && result
+        ? {
+            type: 'compaction-recovery-result',
+            identity,
+            requestId: record.requestId,
+            result: result.ok ? { ok: true } : { ok: false, error: result.error },
+          }
+        : null;
     }
     case 'session-status':
       return isSessionStatus(record.status)
