@@ -132,6 +132,8 @@
       const clone = node.cloneNode(true);
       for (const element of clone.querySelectorAll('button, script, style, noscript'))
         element.remove();
+      // 动态演示只是示意界面，不把里面的虚拟对话、文件树纳入全文搜索。
+      for (const element of clone.querySelectorAll('[data-demo]')) element.remove();
       for (const element of clone.querySelectorAll('[data-l]')) {
         if (element.getAttribute('data-l') !== locale) element.remove();
         else element.replaceWith(...element.childNodes);
@@ -483,6 +485,8 @@
       updateBreadcrumb(article);
       updatePager(article);
       updateDocumentTitle(article);
+      // 正文用 hidden 切换：通知内嵌演示立刻重算可见性，离屏不留计时器。
+      document.dispatchEvent(new CustomEvent('fynvra:demos-visibility'));
 
       window.requestAnimationFrame(() => {
         if (info.anchor) {

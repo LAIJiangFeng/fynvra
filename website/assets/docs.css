@@ -1323,3 +1323,122 @@ html.docs-ready .docs-article {
 html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
   background: rgb(0 0 0 / 55%);
 }
+
+/* ── 快速开始：三个示例下内嵌的动态界面演示 ─────────────────────
+   演示组件样式在 demo.css（首页共用），这里只收紧阅读列里的容器排版：
+   阅读列约 780px，宽屏下也要按容器宽度而不是 viewport 适配。 */
+
+.docs-demo {
+  margin: 22px 0 30px;
+  container-type: inline-size;
+}
+
+.docs-demo .fd-app {
+  border-radius: 12px;
+}
+
+/* 文档里演示窗口压到约 440px 高：标题栏之外留给对话和任务区。 */
+.docs-demo .fd-body {
+  grid-template-columns: minmax(0, 16%) minmax(0, 1fr) minmax(0, 26%);
+  grid-template-rows: minmax(0, 1fr);
+  height: 440px;
+}
+
+.docs-demo .fd-side {
+  flex-direction: column;
+}
+
+.docs-demo .fd-main {
+  grid-column: auto;
+  grid-row: auto;
+  height: auto;
+}
+
+.docs-demo .fd-panel {
+  grid-column: auto;
+  grid-row: auto;
+  border-top: 0;
+  border-left: 1px solid var(--fd-line);
+}
+
+.docs-demo .fd-panel-body {
+  min-height: 0;
+  max-height: none;
+}
+
+/* 正文的段落/列表间距不进入演示内部（首页没有这些 prose 规则）。 */
+.docs-article.prose .docs-demo p + p {
+  margin-top: 5px;
+}
+
+.docs-article.prose .docs-demo li + li {
+  margin-top: 0;
+}
+
+.docs-demo-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.docs-demo-replay {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.docs-demo-replay:hover {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.docs-demo-replay:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 中等宽度的容器：收起左栏，保留对话与任务/角色区。 */
+@container (max-width: 680px) {
+  .docs-demo .fd-body {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 190px);
+  }
+
+  .docs-demo .fd-side {
+    display: none;
+  }
+}
+
+/* 手机：对话在上，任务区在下，输入框始终完整可见。 */
+@container (max-width: 520px) {
+  .docs-demo .fd-body {
+    display: flex;
+    height: auto;
+    flex-direction: column;
+  }
+
+  .docs-demo .fd-main {
+    height: 400px;
+  }
+
+  .docs-demo .fd-panel {
+    border-top: 1px solid var(--fd-line);
+    border-left: 0;
+  }
+
+  .docs-demo .fd-panel-body {
+    max-height: 190px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docs-demo-replay {
+    transition: none;
+  }
+}
