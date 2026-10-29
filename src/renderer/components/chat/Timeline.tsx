@@ -1,5 +1,5 @@
 import type { SessionStatus } from '@shared/types/chat';
-import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Components, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import {
   isBusy,
   selectLoadingHistoryOf,
   selectMessagesOf,
+  selectRecoveryBlockedOf,
   selectStatusOf,
   type TimelineMessage,
   useSessionsStore,
@@ -20,6 +21,7 @@ import {
   type TimelineRow,
 } from '@/stores/sessions/timeline';
 import { useGeneralPreferencesStore } from '@/stores/settings';
+import { GenerationProgress } from './GenerationProgress';
 import { MessageItem } from './MessageItem';
 import {
   createRunningSilence,
@@ -29,6 +31,7 @@ import {
 } from './runningSilence';
 
 interface TimelineContext {
+  sessionId: string;
   status: SessionStatus;
   showWorking: boolean;
   error: string | undefined;
@@ -37,40 +40,8 @@ interface TimelineContext {
 // 组件表放在模块级：每次渲染传新对象会让 Virtuoso 重新挂载页眉页脚
 const COMPONENTS: Components<TimelineRow, TimelineContext> = {
   Header: () => <div className="h-4" />,
-  Footer: ({ context }) => <TimelineFooter {...context} />,
+  Footer: ({ context }) => (context ? <GenerationProgress {...context} /> : null),
 };
-
-function TimelineFooter({ status, showWorking, error }: TimelineContext) {
-  const t = useT();
-  return (
-    <div className="mx-auto max-w-3xl px-6 pb-6">
-      {/* 固定提示行高度，静默提示的显隐不移动正文或改变历史阅读位置。 */}
-      <div className="h-8">
-        {((status === 'running' && showWorking) || status === 'waiting-approval') && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex items-center gap-2 py-2 text-muted-foreground text-xs"
-          >
-            {status === 'running' && (
-              <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
-            )}
-            {t(status === 'running' ? 'chat.working' : 'sessions.status.waiting-approval')}
-          </div>
-        )}
-      </div>
-      {error && (
-        <div
-          role="alert"
-          className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
-        >
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /**
  * 会话时间线：虚拟列表；贴底时跟随流式输出，用户往上滚就停止跟随。
@@ -81,6 +52,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const status = useSessionsStore(selectStatusOf(sessionId));
   const error = useSessionsStore((state) => state.runtimeBySession[sessionId]?.error);
   const loading = useSessionsStore(selectLoadingHistoryOf(sessionId));
+  const recoveryBlocked = useSessionsStore(selectRecoveryBlockedOf(sessionId));
   const compactReadonlyTools = useGeneralPreferencesStore(
     (state) => state.timeline.compactReadonlyTools
   );
@@ -128,7 +100,10 @@ export function Timeline({ sessionId }: { sessionId: string }) {
     status === 'running' &&
     silentActivity !== undefined &&
     sameRunningActivity(silentActivity, runningActivityOf(sessionId, status, messages));
-  const context = useMemo(() => ({ status, showWorking, error }), [status, showWorking, error]);
+  const context = useMemo(
+    () => ({ sessionId, status, showWorking, error }),
+    [sessionId, status, showWorking, error]
+  );
   // 最后一条提问之后的行是正在跑的这一轮：文件修改卡片按设置自动展开
   const liveFrom = useMemo(() => rows.findLastIndex((row) => row.kind === 'user'), [rows]);
 
@@ -187,7 +162,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
     virtuoso.current?.autoscrollToBottom();
   }, [sentId]);
 
-  if (rows.length === 0 && !busy && !error) {
+  if (rows.length === 0 && !busy && !error && !recoveryBlocked) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground text-sm">
         {loading ? (

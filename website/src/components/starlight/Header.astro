@@ -1,0 +1,27 @@
+---
+import Search from '@astrojs/starlight/components/Search.astro';
+import LanguageSelect from './LanguageToggle.astro';
+import SiteTitle from './SiteTitle.astro';
+import SocialIcons from './SocialIcons.astro';
+import ThemeSelect from './ThemeToggle.astro';
+
+const { locale, hasSidebar } = Astro.locals.starlightRoute;
+const language = locale === 'en' ? 'en' : 'zh';
+const isEnglish = language === 'en';
+---
+
+<div class="fynvra-docs-header">
+  <SiteTitle />
+  <nav class="fynvra-site-links print:hidden" aria-label={isEnglish ? 'Website' : '网站导航'}>
+    <a class="product-link" href={`/${language}/#features`}>{isEnglish ? 'Features' : '功能'}</a>
+    <a class="product-link" href={`/${language}/#safety`}>{isEnglish ? 'Safety' : '安全'}</a>
+    <a href={`/${language}/docs/overview/`} aria-current="true">{isEnglish ? 'Docs' : '使用文档'}</a>
+  </nav>
+  {/* Sidebar pages have one search instance, above their chapter navigation. */}
+  {!hasSidebar && <Search />}
+  <div class="fynvra-header-actions sl-hidden md:sl-flex print:hidden">
+    <SocialIcons />
+    <ThemeSelect />
+    <LanguageSelect />
+  </div>
+</div>

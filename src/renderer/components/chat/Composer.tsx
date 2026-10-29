@@ -36,10 +36,12 @@ import {
   isBusy,
   type QueuedMessage,
   selectApprovalsOf,
+  selectCompactingOf,
   selectDraftImagesOf,
   selectDraftOf,
   selectMessagesOf,
   selectQueueOf,
+  selectRecoveryBlockedOf,
   selectReplySuggestionOf,
   selectSessionOf,
   selectStatusOf,
@@ -194,6 +196,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const removeQueued = useSessionsStore((state) => state.removeQueued);
   const recallQueued = useSessionsStore((state) => state.recallQueued);
   const queue = useSessionsStore(selectQueueOf(sessionId));
+  const paused = useSessionsStore((state) => state.pausedQueues[sessionId] === true);
+  const compacting = useSessionsStore(selectCompactingOf(sessionId));
+  const recoveryBlocked = useSessionsStore(selectRecoveryBlockedOf(sessionId));
+  const recovering = useSessionsStore((state) => state.recoveringCompaction[sessionId] === true);
+  const stopping = useSessionsStore((state) => state.stopping[sessionId] === true);
+  const resumeQueue = useSessionsStore((state) => state.resumeQueue);
   const abort = useSessionsStore((state) => state.abort);
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
@@ -227,7 +235,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     [messages]
   );
 
-  const busy = isBusy(status);
+  const busy = isBusy(status) || compacting || recovering;
   // 灰字只在空闲、没队列 / 审批 / 图片、没翻历史且草稿恰好是建议前缀时显示；它不进 draft，也不影响 canSend
   const ghostVisible =
     suggestion !== undefined &&
@@ -250,6 +258,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
   };
   /** Idle: same as send. Running: steer the latest queued message, or the draft when none is queued */
   const steerNow = () => {
+    if (recoveryBlocked) {
+      if (queue.length === 0) submit();
+      return;
+    }
     if (!busy) {
       submit();
       return;
@@ -498,9 +510,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
   return (
     <div className="shrink-0 px-4 pb-3">
       <div className="mx-auto max-w-3xl rounded-xl border bg-background shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
+        {paused && queue.length > 0 && (
+          <div className="flex items-center justify-between gap-2 px-3 pt-3 text-muted-foreground text-xs">
+            <span role="status">{t('chat.queuePaused')}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || recoveryBlocked || stopping}
+              onClick={() => resumeQueue(sessionId)}
+            >
+              {t('chat.resumeQueue')}
+            </Button>
+          </div>
+        )}
         <QueuedMessages
           queue={queue}
           steerLabel={steerLabel}
+          blocked={recoveryBlocked}
+          compacting={compacting}
           onSendNow={sendQueuedNow}
           onRecall={recallForEditing}
           onRemove={dropQueued}
@@ -579,23 +606,37 @@ export function Composer({ sessionId }: { sessionId: string }) {
             <ApprovalModePicker sessionId={sessionId} />
             {busy && (
               <span className="shrink-0 text-muted-foreground text-xs">
-                {t(`sessions.status.${status}`)}
+                {t(
+                  compacting
+                    ? 'chat.compacting'
+                    : recovering
+                      ? 'chat.compactionRecovering'
+                      : `sessions.status.${status}`
+                )}
               </span>
             )}
             {busy && (
               <span className="truncate text-muted-foreground text-xs">
-                {t('chat.queueHint', { queue: sendLabel, steer: steerLabel })}
+                {t(recoveryBlocked ? 'chat.compactionQueueHint' : 'chat.queueHint', {
+                  queue: sendLabel,
+                  steer: steerLabel,
+                })}
               </span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {busy && (
-              <Button size="sm" variant="secondary" onClick={() => void abort()}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={stopping}
+                onClick={() => void abort()}
+              >
                 <CircleStop />
-                {t('chat.stop')}
+                {t(stopping ? 'chat.stopping' : 'chat.stop')}
               </Button>
             )}
-            {busy ? (
+            {busy || recoveryBlocked ? (
               <Button size="sm" variant="outline" disabled={!canSend} onClick={submit}>
                 <ListPlus />
                 {t('chat.queue')}
@@ -664,12 +705,16 @@ const DraftImages = memo(function DraftImages({
 const QueuedMessages = memo(function QueuedMessages({
   queue,
   steerLabel,
+  blocked,
+  compacting,
   onSendNow,
   onRecall,
   onRemove,
 }: {
   queue: QueuedMessage[];
   steerLabel: string;
+  blocked: boolean;
+  compacting: boolean;
   onSendNow: (id: string) => void;
   onRecall: (id: string) => void;
   onRemove: (id: string) => void;
@@ -680,6 +725,11 @@ const QueuedMessages = memo(function QueuedMessages({
     'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50';
   return (
     <ul className="flex flex-col gap-1 px-3 pt-3">
+      {blocked && (
+        <li role="status" className="pb-1 text-muted-foreground text-xs">
+          {t(compacting ? 'chat.queuedForCompaction' : 'chat.queuedForRecovery')}
+        </li>
+      )}
       {queue.map((item) => {
         const preview = item.text.trim().split(/\r?\n/)[0] ?? '';
         return (
@@ -702,7 +752,8 @@ const QueuedMessages = memo(function QueuedMessages({
               aria-label={t('chat.sendNow', { chord: steerLabel })}
               title={t('chat.sendNow', { chord: steerLabel })}
               onClick={() => onSendNow(item.id)}
-              className={buttonClass}
+              disabled={blocked}
+              className={`${buttonClass} disabled:pointer-events-none disabled:opacity-40`}
             >
               <SendHorizontal className="size-3.5" />
             </button>

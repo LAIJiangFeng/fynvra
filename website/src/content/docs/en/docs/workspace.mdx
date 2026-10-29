@@ -1,0 +1,65 @@
+---
+title: "Add workspaces and manage folders"
+description: "A workspace is a folder attached to Fynvra and the root for every session and task. Each workspace in the sidebar expands into its own session list; only one workspace is viewed at a time."
+sidebar:
+  label: "Workspaces"
+  order: 4
+---
+
+<span id="workspace" />
+
+A workspace is a folder attached to Fynvra and the root for every session and task. Each workspace in the sidebar expands into its own session list; only one workspace is viewed at a time.
+
+<span id="workspace-add" />
+
+## Attach a folder
+
+1. ### Find the add control
+
+   Use **+** next to “Workspaces” in the left sidebar, or the “Attach folder” button in the empty center area.
+
+2. ### Pick a folder in the system dialog
+
+   Choose the Git repository root. If you pick a subfolder inside a repository, Fynvra asks whether to attach the repository root or the subfolder as a plain folder; the plain-folder option creates no worktrees.
+
+3. ### Confirm the workspace row
+
+   The row shows the folder name and path. Git repositories get a folder icon; plain folders carry a “No git” badge.
+
+4. ### Expand its sessions
+
+   Click the chevron at the left of the workspace, or click the selected workspace again, to open the Sessions group underneath.
+
+<span id="workspace-sessions" />
+
+## Expand, switch, and search sessions
+
+Each workspace expands independently. Inside the Sessions group, the heading has a search button and a new-session **+**. Clicking a session switches to it; expanding another workspace loads its list without changing the session you are viewing.
+
+To search sessions, click the search icon or press <kbd>Ctrl</kbd>+<kbd>K</kbd> (<kbd>⌘</kbd>+<kbd>K</kbd> on macOS), then type a title fragment above the list. <kbd>Enter</kbd> opens the first result; <kbd>Esc</kbd> clears and closes the search.
+
+<span id="workspace-actions" />
+
+## More workspace actions
+
+Hover a workspace row and click its ellipsis, or right-click the row. The menu offers:
+
+- **Open in**: open the folder in VS Code, the file manager, or a custom app. A custom app must be selected and named first.
+- **Copy path / Copy name / Copy current branch**: copy text only; the branch item appears for Git workspaces.
+- **Remove from list**: removes the workspace from Fynvra; it does not delete the project folder on disk.
+
+<span id="workspace-worktrees" />
+
+## Worktrees in a Git workspace
+
+For each dispatch the orchestrator creates a separate Git worktree on branch `fynvra/<slug>`. By default it sits beside the repository as `<repo>-worktrees`. Change the location or restore the default under Settings → General → Worktree location; Disk usage lists the worktree count and size per workspace.
+
+After a merge the orchestrator cleans up that worktree. To inspect saved changes from a cleaned worktree, open the task details and click View changes.
+
+<aside class="docs-callout docs-callout-warn">
+
+**No git**
+
+A plain folder can still run sessions and dispatch workers, but it runs in place: no worktree, workers edit that folder, and review lists the files they reported. Parallel workers would share those files, so dispatch one task at a time.
+
+</aside>

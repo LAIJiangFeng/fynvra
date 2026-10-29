@@ -1,4 +1,4 @@
-/* Fynvra 官网与使用文档共用样式：<html data-theme> 切换明暗，<html data-locale> 切换中英文 */
+/* Fynvra 首页样式：<html data-theme> 切换明暗，语言由 /zh/、/en/ 静态路由决定。 */
 
 :root {
   color-scheme: light;
@@ -139,7 +139,7 @@ html:root[data-locale="en"] [data-l="zh"] {
   display: none;
 }
 
-:root:not(.js) [data-action] {
+:root:not(.js) button[data-action] {
   display: none;
 }
 

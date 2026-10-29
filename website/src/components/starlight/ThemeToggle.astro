@@ -1,0 +1,144 @@
+---
+const isEnglish = Astro.locals.starlightRoute.locale === 'en';
+const toLight = isEnglish ? 'Switch to light theme' : '切换到亮色主题';
+const toDark = isEnglish ? 'Switch to dark theme' : '切换到暗色主题';
+---
+
+<button
+  class="fynvra-theme-toggle"
+  type="button"
+  title={toLight}
+  aria-label={toLight}
+  data-to-light={toLight}
+  data-to-dark={toDark}
+  hidden
+  disabled
+>
+  <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+  </svg>
+  <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+  </svg>
+</button>
+
+<script>
+  type Theme = 'light' | 'dark';
+  const storageKey = 'starlight-theme';
+  const root = document.documentElement;
+  const buttons = document.querySelectorAll<HTMLButtonElement>('.fynvra-theme-toggle');
+  const lightScheme = window.matchMedia('(prefers-color-scheme: light)');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function loadPreference(): Theme | null {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      return stored === 'light' || stored === 'dark' ? stored : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Keep explicit choices in memory too, so blocked storage cannot re-enable auto mode.
+  let preference = loadPreference();
+  const systemTheme = (): Theme => lightScheme.matches ? 'light' : 'dark';
+  let theme = preference ?? systemTheme();
+  let revision = 0;
+  let activeTransition: ReturnType<Document['startViewTransition']> | undefined;
+  let activeAnimation: Animation | undefined;
+
+  function applyTheme(next: Theme) {
+    // Starlight and Pagefind both derive their colors from this attribute.
+    root.dataset.theme = next;
+    for (const button of buttons) {
+      const label = (next === 'dark' ? button.dataset.toLight : button.dataset.toDark)!;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    }
+  }
+
+  function changeTheme(next: Theme, origin?: { x: number; y: number }) {
+    const currentRevision = ++revision;
+    theme = next;
+    activeTransition?.skipTransition();
+    activeAnimation?.cancel();
+    activeTransition = undefined;
+    activeAnimation = undefined;
+    root.classList.remove('fynvra-theme-transition');
+
+    // A skipped transition may still run its callback after a newer click.
+    const commit = () => {
+      if (currentRevision === revision) applyTheme(next);
+    };
+    if (!origin || reducedMotion.matches || !document.startViewTransition || !root.animate) {
+      commit();
+      return;
+    }
+
+    const { x, y } = origin;
+    const radius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    );
+    try {
+      root.classList.add('fynvra-theme-transition');
+      const transition = document.startViewTransition(commit);
+      activeTransition = transition;
+      const cleanup = () => {
+        if (currentRevision !== revision) return;
+        activeTransition = undefined;
+        activeAnimation = undefined;
+        root.classList.remove('fynvra-theme-transition');
+      };
+      void transition.ready.then(() => {
+        if (currentRevision !== revision) return;
+        activeAnimation = root.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          {
+            duration: 520,
+            easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
+            pseudoElement: '::view-transition-new(root)',
+          }
+        );
+        return activeAnimation.finished;
+      }).catch(() => {
+        // Skipped transitions and unsupported/cancelled animations still apply the theme.
+        transition.skipTransition();
+        commit();
+      });
+      void transition.updateCallbackDone.catch(commit);
+      void transition.finished.then(cleanup, cleanup);
+    } catch {
+      root.classList.remove('fynvra-theme-transition');
+      commit();
+    }
+  }
+
+  // Also recover if the framework's inline provider could not read localStorage.
+  applyTheme(theme);
+  for (const button of buttons) {
+    button.addEventListener('click', (event) => {
+      preference = theme === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem(storageKey, preference);
+      } catch {
+        // The current page remains usable when persistent storage is unavailable.
+      }
+      const rect = button.getBoundingClientRect();
+      changeTheme(preference, {
+        x: event.detail > 0 ? event.clientX : rect.left + rect.width / 2,
+        y: event.detail > 0 ? event.clientY : rect.top + rect.height / 2,
+      });
+    });
+    button.disabled = false;
+    button.hidden = false;
+  }
+
+  lightScheme.addEventListener('change', () => {
+    if (!preference) changeTheme(systemTheme());
+  });
+  reducedMotion.addEventListener('change', () => {
+    if (reducedMotion.matches) changeTheme(theme);
+  });
+</script>

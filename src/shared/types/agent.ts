@@ -20,7 +20,8 @@ import {
   parseChatImages,
   type SessionStatus,
 } from './chat';
-import { type CompactionStrategy, isCompactionStrategy } from './settings';
+import { parseCompactionState, parseContextRuntime, parseRetryState } from './contextRuntime';
+import { type CompactionStrategy, isCompactionStrategy, isCompactionTimeoutMs } from './settings';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -118,6 +119,7 @@ export interface SpawnSessionSpec {
    * Main 在新会话或应用重启后恢复会话时读取已保存的设置；运行中的会话不热切换
    */
   compactionStrategy?: CompactionStrategy;
+  compactionTimeoutMs?: number;
   /**
    * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
@@ -166,6 +168,7 @@ export type AgentCommand =
    * 带图片时 text 可以是空串，不带图片时 text 不能为空
    */
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: ChatImage[] }
+  | { type: 'retry-compaction'; identity: SessionIdentity; requestId: string }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -212,6 +215,12 @@ export type AgentWorkerEvent =
   /** `seq` 按 identity 从 1 递增，与 `event.seq` 相同 */
   | { type: 'session-event'; identity: SessionIdentity; seq: number; event: FynvraSessionEvent }
   | { type: 'session-status'; identity: SessionIdentity; status: SessionStatus }
+  | {
+      type: 'compaction-recovery-result';
+      identity: SessionIdentity;
+      requestId: string;
+      result: { ok: true } | { ok: false; error: string };
+    }
   | {
       type: 'host-invoke';
       identity: SessionIdentity;
@@ -326,6 +335,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       const images = parseChatImages(record.images);
       return images ? { type: 'steer', identity, text, images } : null;
     }
+    case 'retry-compaction':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'retry-compaction', identity, requestId: record.requestId }
+        : null;
     case 'abort':
       return { type: 'abort', identity };
     case 'dispose-session':
@@ -370,6 +383,17 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       const event = parseSessionEvent(record.event);
       if (!isPositiveInteger(seq) || !event || event.seq !== seq) return null;
       return { type: 'session-event', identity, seq, event };
+    }
+    case 'compaction-recovery-result': {
+      const result = parseHostCallResult(record.result);
+      return isNonEmptyString(record.requestId) && result
+        ? {
+            type: 'compaction-recovery-result',
+            identity,
+            requestId: record.requestId,
+            result: result.ok ? { ok: true } : { ok: false, error: result.error },
+          }
+        : null;
     }
     case 'session-status':
       return isSessionStatus(record.status)
@@ -618,7 +642,8 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       : isCompactionStrategy(record.compactionStrategy)
         ? record.compactionStrategy
         : null;
-  if (compactionStrategy === null) return null;
+  if (compactionStrategy === null || !isOptional(record.compactionTimeoutMs, isCompactionTimeoutMs))
+    return null;
   const instructionFile =
     record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
   if (
@@ -653,6 +678,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       : {}),
     ...(shellPath !== undefined ? { shellPath: shellPath as string } : {}),
     ...(compactionStrategy ? { compactionStrategy } : {}),
+    ...(record.compactionTimeoutMs !== undefined
+      ? { compactionTimeoutMs: record.compactionTimeoutMs as number }
+      : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
   };
 }
@@ -665,6 +693,18 @@ type EventBodyParsers = {
 
 // 映射类型强制穷举：core 新增事件变体而这里没加解析会编译失败。
 const EVENT_BODY_PARSERS: EventBodyParsers = {
+  context_runtime: ({ snapshot }) => {
+    const parsed = parseContextRuntime(snapshot);
+    return parsed ? { type: 'context_runtime', snapshot: parsed } : null;
+  },
+  compaction: ({ state }) => {
+    const parsed = parseCompactionState(state);
+    return parsed ? { type: 'compaction', state: parsed } : null;
+  },
+  retry: ({ state }) => {
+    const parsed = parseRetryState(state);
+    return parsed ? { type: 'retry', state: parsed } : null;
+  },
   text_delta: ({ delta }) => (isString(delta) ? { type: 'text_delta', delta } : null),
   thinking_delta: ({ delta }) => (isString(delta) ? { type: 'thinking_delta', delta } : null),
   tool_start: ({ toolCallId, toolName, args, parentToolCallId }) => {

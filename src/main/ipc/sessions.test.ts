@@ -34,6 +34,7 @@ const host = {
   prompt: vi.fn(async () => ({ ok: true })),
   steer: vi.fn(async () => ({ ok: true })),
   abort: vi.fn(async () => ({ ok: true })),
+  retryCompaction: vi.fn(async () => ({ ok: true })),
   history: vi.fn(async () => ({ ok: true, messages: [] })),
   respondApproval: vi.fn(async () => ({ ok: true })),
   setModel: vi.fn(async () => ({ ok: true })),
@@ -167,6 +168,7 @@ describe('sessions IPC', () => {
       .filter((channel) => mocks.handlers.has(channel));
     expect(channels.sort()).toEqual(
       [
+        'sessions:retry-compaction',
         'sessions:abort',
         'sessions:archive',
         'sessions:create',
@@ -282,9 +284,18 @@ describe('sessions IPC', () => {
       await invoke(IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: '  ', cwd: '/' })
     ).toMatchObject({ ok: false });
     expect(host.steer).toHaveBeenCalledTimes(2);
+    await invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, 's-1');
+    expect(host.retryCompaction).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_ABORT, 's-1');
     expect(host.abort).toHaveBeenCalledWith('s-1');
-    await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');
+    const coldHistory = {
+      ok: true,
+      messages: [],
+      contextRecovery: { recoveryRequired: true },
+      contextRuntimeSeq: 0,
+    };
+    host.history.mockResolvedValueOnce(coldHistory);
+    expect(await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1')).toEqual(coldHistory);
     expect(host.history).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_REMOVE, 's-1');
     expect(host.remove).toHaveBeenCalledWith('s-1');
@@ -351,6 +362,8 @@ describe('sessions IPC', () => {
       IPC_CHANNELS.SESSIONS_PROMPT,
       { sessionId: 's-1', text: 'hi', images: [{ ...screenshot, mimeType: 'image/bmp' }] },
     ],
+    [IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, { sessionId: 's-1', path: '/secret' }],
+    [IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, '../s'],
     [IPC_CHANNELS.SESSIONS_ABORT, 42],
     [IPC_CHANNELS.SESSIONS_HISTORY, 'C:\\data\\agent\\sessions\\x.jsonl'],
     [IPC_CHANNELS.SESSIONS_REMOVE, ''],

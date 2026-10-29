@@ -1,0 +1,45 @@
+---
+title: "Track tasks: the tab, details, and worker output"
+description: "The Tasks tab groups task cards by run; click a card to open details. Details show the brief, dependencies, every attempt, messages, the latest worker output, and a shortcut to that dispatch’s diff."
+sidebar:
+  label: "Task tracking"
+  order: 9
+---
+
+<span id="tasks" />
+
+The Tasks tab groups task cards by run; click a card to open details. Details show the brief, dependencies, every attempt, messages, the latest worker output, and a shortcut to that dispatch’s diff.
+
+<span id="tasks-view" />
+
+## Reading the task list
+
+Open the Tasks tab. The top card shows the current run’s objective, creation time, completed count, and progress bar; abandoned tasks are expandable and a run switcher appears when more than one run exists.
+
+Groups follow status: Not started, In progress, In review, Completed, Failed, Abandoned. Group headers collapse, and Abandoned starts closed. A task card shows its title, role badge, branch, running time, attempt count, dependencies, and latest message. Click it to open details.
+
+<span id="tasks-detail" />
+
+## Task details
+
+The drawer covers the right panel; close it with <kbd>Esc</kbd> or the back arrow. The header shows status, role, and branch. For a task in review or completed with Git, “View changes” sits at the top right.
+
+The body contains a collapsible brief, dependency tasks, an attempt timeline, the message stream, and worker output for the latest attempt. Click a dependency to switch to it. Historical attempts show success/failure, start and end times, a summary, and changed files.
+
+The drawer is read-only. To change the task or ask for a merge / rejection, return to the orchestrator’s conversation.
+
+<span id="tasks-output" />
+
+## Worker output
+
+The bottom of task details is Worker output: monospaced text that follows the end automatically. Scrolling up stops following; Pause freezes the view while fetching continues in the background. The pause control shows how many characters arrived, and Resume or the jump-to-bottom button catches up at once.
+
+Only the latest attempt’s complete output is shown; earlier attempts remain in the timeline above. If output was truncated, the number of dropped leading characters is shown. Failed reads can be retried; empty tasks show “No output” or “Waiting for output…”.
+
+<span id="tasks-review" />
+
+## Jump to the diff
+
+View changes closes the drawer, switches to Changes, and loads the dispatch’s historical review. “View current conversation changes” returns to the session’s changes. After a merge and worktree cleanup the saved diff remains viewable, with a note that it is a pre-cleanup snapshot.
+
+To inspect the worker’s own messages, you can also open its Worker session from the left session list.

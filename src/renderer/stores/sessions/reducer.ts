@@ -1,4 +1,9 @@
-import type { FynvraSessionEvent } from '@fynvra/core';
+import type {
+  CompactionState,
+  ContextRuntimeSnapshot,
+  FynvraSessionEvent,
+  RetryState,
+} from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import {
   type ApprovalKind,
@@ -11,6 +16,8 @@ import {
   type SessionSummary,
   stripImageHints,
 } from '@shared/types/chat';
+
+import { translate } from '../../i18n';
 
 type SessionWarning = 'magic-context';
 
@@ -53,6 +60,18 @@ export interface SessionRuntime {
   dismissedWarningSeq?: number;
   /** 最近一次正常结束（非 aborted）的 settled 事件的会话级 seq：回复建议只对这一轮有效 */
   settledSeq?: number;
+  /** Runtime facts are reported by the loaded worker, never inferred from settings/model names. */
+  contextRuntime?: ContextRuntimeSnapshot;
+  contextSeq?: number;
+  /** Recovery survives an unloaded worker; effective engine/context do not. */
+  recoveryRequired?: boolean;
+  pendingPromptCount?: number;
+  compaction?: CompactionState;
+  retry?: RetryState;
+  /** An unsuccessful attempt is provisional until retries and the turn settle. */
+  pendingAssistantFailure?: { stopReason: 'error' | 'aborted'; message?: string };
+  /** A terminal operation cannot be revived; operation IDs restart in a new worker instance. */
+  closedCompaction?: Pick<CompactionState, 'operationId' | 'startedAt'>;
   /** 运行中工具的本地开始时间（toolCallId → epoch ms），tool_end 缺 durationMs 时据此推算。 */
   toolStartedAt: Record<string, number>;
 }
@@ -128,19 +147,169 @@ export function reduceSessionEvent<S extends ChatProjection>(
 ): S {
   const { sessionId, event } = envelope;
   const before = sliceOf(state, sessionId);
-  if (event.seq <= before.runtime.lastSeq) return state;
+  if (
+    event.seq <= before.runtime.lastSeq ||
+    (isContextMetadata(event) && event.seq <= (before.runtime.contextSeq ?? 0))
+  )
+    return state;
   const current: Slice = {
     ...before,
     runtime: {
       ...before.runtime,
       lastSeq: event.seq,
+      ...(isContextMetadata(event) ? { contextSeq: event.seq } : {}),
       activitySeq:
-        event.type === 'warning'
+        isContextMetadata(event) || event.type === 'warning' || event.type === 'tool_notice'
           ? (before.runtime.activitySeq ?? before.runtime.lastSeq)
           : event.seq,
     },
   };
   return commit(state, sessionId, before, applyEvent(current, sessionId, event, now));
+}
+
+export function isContextMetadata(event: FynvraSessionEvent): boolean {
+  return event.type === 'context_runtime' || event.type === 'compaction' || event.type === 'retry';
+}
+
+export function compactionActive(state: CompactionState | undefined): boolean {
+  return state?.phase === 'running' || state?.phase === 'backoff';
+}
+
+export function compactionNeedsRecovery(
+  state: CompactionState | undefined,
+  effectiveStrategy?: ContextRuntimeSnapshot['effectiveStrategy']
+): boolean {
+  return (
+    (state?.phase === 'failed' || state?.phase === 'cancelled') &&
+    !(effectiveStrategy === 'magic-context' && state.cancelSource === 'sdk')
+  );
+}
+
+function isClosedCompaction(runtime: SessionRuntime, state: CompactionState): boolean {
+  return (
+    runtime.closedCompaction?.operationId === state.operationId &&
+    runtime.closedCompaction.startedAt === state.startedAt
+  );
+}
+
+function withCompaction(runtime: SessionRuntime, state: CompactionState): SessionRuntime {
+  if (compactionActive(state) && isClosedCompaction(runtime, state)) return runtime;
+  if (runtime.compaction && state.startedAt < runtime.compaction.startedAt) return runtime;
+  return {
+    ...runtime,
+    compaction: state,
+    ...(compactionActive(state)
+      ? {
+          status:
+            runtime.status === 'waiting-approval'
+              ? ('waiting-approval' as const)
+              : ('running' as const),
+          error: undefined,
+        }
+      : {}),
+    ...(compactionNeedsRecovery(state, runtime.contextRuntime?.effectiveStrategy)
+      ? { recoveryRequired: true }
+      : {}),
+    retry: compactionActive(state) ? runtime.retry : undefined,
+    ...(state.phase === 'succeeded' && runtime.contextRuntime
+      ? {
+          contextRuntime: {
+            ...runtime.contextRuntime,
+            context: {
+              ...runtime.contextRuntime.context,
+              tokens: null,
+              source: 'unknown' as const,
+            },
+          },
+        }
+      : {}),
+    ...(compactionActive(state)
+      ? {}
+      : { closedCompaction: { operationId: state.operationId, startedAt: state.startedAt } }),
+  };
+}
+
+function endProgress(runtime: SessionRuntime, now: number, aborted = false): SessionRuntime {
+  const compaction = runtime.compaction;
+  return {
+    ...runtime,
+    retry: undefined,
+    ...(compactionActive(compaction) && compaction
+      ? {
+          closedCompaction: {
+            operationId: compaction.operationId,
+            startedAt: compaction.startedAt,
+          },
+          recoveryRequired: true,
+          compaction: {
+            ...compaction,
+            phase: aborted ? ('cancelled' as const) : ('failed' as const),
+            endedAt: now,
+            cancelSource: 'sdk' as const,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Snapshot metadata does not start a new turn or invalidate a reply suggestion. */
+export function applyContextRuntime<S extends ChatProjection>(
+  state: S,
+  sessionId: string,
+  snapshot: ContextRuntimeSnapshot | undefined,
+  seq?: number,
+  recoveryRequired?: boolean
+): S {
+  const before = sliceOf(state, sessionId);
+  if (
+    seq === undefined
+      ? (snapshot !== undefined || recoveryRequired !== undefined) &&
+        before.runtime.contextSeq !== undefined
+      : seq < Math.max(before.runtime.lastSeq, before.runtime.contextSeq ?? 0)
+  )
+    return state;
+  return commit(state, sessionId, before, {
+    ...before,
+    runtime: {
+      ...runtimeWithContext(before.runtime, snapshot),
+      // A persisted checkpoint is a recovery hint, never evidence of a loaded engine or context.
+      ...(!snapshot && recoveryRequired !== undefined ? { recoveryRequired } : {}),
+      ...(seq === undefined ? {} : { contextSeq: seq }),
+    },
+  });
+}
+
+function runtimeWithContext(
+  previous: SessionRuntime,
+  snapshot: ContextRuntimeSnapshot | undefined
+): SessionRuntime {
+  if (!snapshot) return { ...endProgress(previous, Date.now()), contextRuntime: undefined };
+  if (
+    snapshot.compaction &&
+    compactionActive(snapshot.compaction) &&
+    isClosedCompaction(previous, snapshot.compaction)
+  )
+    return previous;
+  let runtime = snapshot.compaction
+    ? withCompaction(previous, snapshot.compaction)
+    : { ...previous, compaction: snapshot.recoveryRequired ? previous.compaction : undefined };
+  runtime = {
+    ...runtime,
+    contextRuntime: snapshot,
+    recoveryRequired: snapshot.recoveryRequired,
+    pendingPromptCount: snapshot.pendingPromptCount,
+    ...(snapshot.retry?.kind === 'model' &&
+    snapshot.retry.phase === 'finished' &&
+    snapshot.retry.success
+      ? { pendingAssistantFailure: undefined }
+      : {}),
+    retry:
+      (runtime.status === 'running' || runtime.status === 'waiting-approval') &&
+      snapshot.retry?.phase !== 'finished'
+        ? snapshot.retry
+        : undefined,
+  };
+  return runtime;
 }
 
 function applyEvent(
@@ -151,6 +320,27 @@ function applyEvent(
 ): Slice {
   const fresh = { id: `live-${event.seq}`, sessionId, createdAt: now };
   switch (event.type) {
+    case 'context_runtime':
+      return { ...slice, runtime: runtimeWithContext(slice.runtime, event.snapshot) };
+    case 'compaction':
+      return { ...slice, runtime: withCompaction(slice.runtime, event.state) };
+    case 'retry':
+      return {
+        ...slice,
+        runtime: {
+          ...slice.runtime,
+          ...(event.state.kind === 'model' &&
+          event.state.phase === 'finished' &&
+          event.state.success
+            ? { pendingAssistantFailure: undefined }
+            : {}),
+          retry:
+            (slice.runtime.status === 'running' || slice.runtime.status === 'waiting-approval') &&
+            event.state.phase !== 'finished'
+              ? event.state
+              : undefined,
+        },
+      };
     case 'text_delta':
       return active(
         updateStreaming(slice, fresh, (message) => ({
@@ -165,10 +355,25 @@ function applyEvent(
           thinking: (message.thinking ?? '') + event.delta,
         }))
       );
-    case 'message_end':
-      return event.role === 'user'
-        ? startTurn(confirmUser(slice, fresh, event.text))
-        : active(finishAssistant(slice, fresh, event.text));
+    case 'message_end': {
+      if (event.role === 'user') return startTurn(confirmUser(slice, fresh, event.text));
+      const next = active(finishAssistant(slice, fresh, event.text));
+      return {
+        ...next,
+        runtime: {
+          ...next.runtime,
+          pendingAssistantFailure:
+            event.stopReason === 'error' || event.stopReason === 'aborted'
+              ? {
+                  stopReason: event.stopReason,
+                  ...(event.stopReason === 'error'
+                    ? { message: event.errorMessage || translate('chat.modelFailed') }
+                    : {}),
+                }
+              : undefined,
+        },
+      };
+    }
     case 'tool_start': {
       const next = upsertToolCall(slice, fresh, event.toolCallId, () => ({
         id: event.toolCallId,
@@ -232,17 +437,24 @@ function applyEvent(
     case 'tool_notice':
       // 只用于旁路通知；不能据此把工具标为开始或成功。
       return slice;
-    case 'agent_settled':
+    case 'agent_settled': {
+      const error =
+        slice.runtime.error ??
+        (!event.aborted && slice.runtime.pendingAssistantFailure?.stopReason === 'error'
+          ? slice.runtime.pendingAssistantFailure.message
+          : undefined);
       return {
         messages: settleMessages(slice.messages),
         runtime: {
-          ...slice.runtime,
-          status: slice.runtime.error === undefined ? 'idle' : 'error',
+          ...endProgress(slice.runtime, now, event.aborted),
+          error,
+          status: error === undefined ? 'idle' : 'error',
           toolStartedAt: {},
           ...(event.aborted ? {} : { settledSeq: event.seq }),
         },
         approvals: EMPTY_APPROVALS,
       };
+    }
     case 'error':
       return {
         ...slice,
@@ -250,7 +462,7 @@ function applyEvent(
         messages: slice.messages.map((message) =>
           message.optimistic && !message.failed ? { ...message, failed: true } : message
         ),
-        runtime: { ...slice.runtime, status: 'error', error: event.message },
+        runtime: { ...endProgress(slice.runtime, now), status: 'error', error: event.message },
       };
     case 'warning':
       return {
@@ -273,7 +485,10 @@ function active(slice: Slice): Slice {
 /** 新一轮开始：清掉上一轮的错误。 */
 function startTurn(slice: Slice): Slice {
   const next = active(slice);
-  return { ...next, runtime: { ...next.runtime, error: undefined } };
+  return {
+    ...next,
+    runtime: { ...next.runtime, error: undefined, pendingAssistantFailure: undefined },
+  };
 }
 
 /** 乐观回显之前的消息数（权威区长度）。 */
@@ -352,13 +567,22 @@ function finishAssistant(slice: Slice, fresh: Fresh, text: string): Slice {
 }
 
 /**
- * user 的 message_end：确认最早的乐观回显（原位、去掉标记，图片留着）；没有回显就追加一条。
+ * user 的 message_end：只确认正文匹配的乐观回显，避免旧 pending 输入确认新投递。
  * 带图片的回显，正文取去掉 pi 提示行后的文本（事件里不带图片）。
  */
 function confirmUser(slice: Slice, fresh: Fresh, text: string): Slice {
-  const index = slice.messages.findIndex((message) => message.optimistic);
+  const index = slice.messages.findIndex(
+    (message) => message.optimistic && deliveredAs(message, { text })
+  );
   if (index < 0) {
-    return { ...slice, messages: [...slice.messages, newMessage(fresh, 'user', text, false)] };
+    return {
+      ...slice,
+      messages: insertAt(
+        slice.messages,
+        authoritativeLength(slice.messages),
+        newMessage(fresh, 'user', text, false)
+      ),
+    };
   }
   const { optimistic: _optimistic, failed: _failed, ...confirmed } = slice.messages[index];
   const delivered = confirmed.images ? stripImageHints(text) : text;
@@ -372,7 +596,7 @@ function confirmUser(slice: Slice, fresh: Fresh, text: string): Slice {
  * history 里的 user 消息是不是这条回显送达后的样子。投影里带图片的已去掉 pi 的提示行，
  * 图片都被 pi 略去的没有图片、正文还带着提示行；pi 存的是规整后的图片，所以只比正文。
  */
-function deliveredAs(echo: TimelineMessage, message: ChatMessage): boolean {
+function deliveredAs(echo: TimelineMessage, message: Pick<ChatMessage, 'text'>): boolean {
   if (message.text === echo.text) return true;
   return echo.images !== undefined && stripImageHints(message.text) === echo.text;
 }
@@ -593,7 +817,12 @@ export function syncSessionStatuses<S extends ChatProjection>(
     const runtime = state.runtimeBySession[session.id];
     if (!runtime || runtime.status === session.status || skip.has(session.id)) continue;
     runtimeBySession ??= { ...state.runtimeBySession };
-    runtimeBySession[session.id] = { ...runtime, status: session.status };
+    runtimeBySession[session.id] = {
+      ...(session.status === 'idle' || session.status === 'error'
+        ? endProgress(runtime, Date.now())
+        : runtime),
+      status: session.status,
+    };
   }
   return runtimeBySession ? { ...state, runtimeBySession } : state;
 }

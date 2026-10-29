@@ -155,7 +155,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     });
     expect(existsSync(worktree.path)).toBe(false);
     expect(git(repo, 'branch', '--list', 'fynvra/*')).toBe('');
-    expect(launcher.disposeSession).toHaveBeenCalledWith(attempt.workerSessionId);
+    expect(launcher.disposeSession).toHaveBeenCalledWith(attempt.workerSessionId, undefined);
 
     const snapshot = await service.snapshot();
     expect(snapshot.tasks.map((task) => task.status)).toEqual(['completed']);
@@ -669,7 +669,7 @@ describe('编排全流程（普通目录，没有 git）', () => {
       ok: true,
       mode: 'in-place',
     });
-    expect(launcher.disposeSession).toHaveBeenCalledWith(attempt.workerSessionId);
+    expect(launcher.disposeSession).toHaveBeenCalledWith(attempt.workerSessionId, undefined);
 
     // 改动原地留在目录里；目录旁边没有建出 worktree 目录，也没有 .git
     expect(readFileSync(join(notes, 'hello.txt'), 'utf8')).toBe('hello\n');

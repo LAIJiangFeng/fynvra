@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
-import type { TimelineMessage } from '@/stores/sessions';
+import { selectCompactingOf, type TimelineMessage, useSessionsStore } from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
 import { ChatMarkdown } from './ChatMarkdown';
 import { CopyButton } from './CopyButton';
@@ -75,14 +75,38 @@ function UserMessage({ message }: { message: TimelineMessage }) {
           {message.text}
         </div>
       )}
-      {message.optimistic && (
-        <span
-          className={cn('text-xs', message.failed ? 'text-destructive' : 'text-muted-foreground')}
-        >
-          {t(message.failed ? 'chat.undelivered' : 'chat.sending')}
-        </span>
-      )}
+      {message.optimistic && <PendingDelivery message={message} />}
     </div>
+  );
+}
+
+function PendingDelivery({ message }: { message: TimelineMessage }) {
+  const compacting = useSessionsStore(selectCompactingOf(message.sessionId));
+  const pending = useSessionsStore(
+    (state) => state.runtimeBySession[message.sessionId]?.pendingPromptCount ?? 0
+  );
+  const recovery = useSessionsStore(
+    (state) => state.runtimeBySession[message.sessionId]?.recoveryRequired
+  );
+  const t = useT();
+  const key = compacting
+    ? 'chat.queuedForCompaction'
+    : pending > 0 && recovery
+      ? 'chat.pendingForRecovery'
+      : pending > 0
+        ? 'chat.acceptedPending'
+        : message.failed
+          ? 'chat.undelivered'
+          : 'chat.sending';
+  return (
+    <span
+      className={cn(
+        'text-xs',
+        message.failed && pending === 0 ? 'text-destructive' : 'text-muted-foreground'
+      )}
+    >
+      {t(key)}
+    </span>
   );
 }
 

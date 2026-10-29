@@ -1,0 +1,58 @@
+---
+import { type DemoLocale, type DemoPromptName, promptLabels, prompts } from './prompts';
+
+interface Props {
+  name: DemoPromptName;
+  locale: DemoLocale;
+}
+
+const { name, locale } = Astro.props;
+const labelId = `prompt-${name}`;
+const copyLabel = locale === 'zh' ? '复制' : 'Copy';
+const copySuccess = locale === 'zh' ? '已复制到剪贴板' : 'Copied to clipboard';
+const copyFailure =
+  locale === 'zh'
+    ? '复制失败，请手动选择并复制文本。'
+    : 'Copy failed. Select and copy the text manually.';
+---
+
+<div class="docs-prompt">
+  <div class="docs-prompt-bar">
+    <div class="docs-prompt-label" id={labelId}>{promptLabels[name][locale]}</div>
+    <button
+      class="docs-prompt-copy"
+      type="button"
+      aria-label={`${copyLabel} ${promptLabels[name][locale]}`}
+      data-copy-prompt
+      data-copy-success={copySuccess}
+      data-copy-failure={copyFailure}
+      data-pagefind-ignore
+      hidden
+    >{copyLabel}</button>
+  </div>
+  <pre aria-labelledby={labelId}><code data-demo-prompt={name} data-demo-lang={locale}>{prompts[name][locale]}</code></pre>
+  <div class="docs-prompt-status" role="status" aria-live="polite" aria-atomic="true" data-copy-status data-pagefind-ignore></div>
+</div>
+
+<script>
+  for (const prompt of document.querySelectorAll('.docs-prompt')) {
+    const button = prompt.querySelector<HTMLButtonElement>('[data-copy-prompt]');
+    const code = prompt.querySelector<HTMLElement>('code[data-demo-prompt]');
+    const status = prompt.querySelector<HTMLElement>('[data-copy-status]');
+    if (!button || !code || !status) continue;
+
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      status.textContent = '';
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '');
+        status.textContent = button.dataset.copySuccess ?? '';
+      } catch {
+        status.textContent = button.dataset.copyFailure ?? '';
+      } finally {
+        button.disabled = false;
+      }
+    });
+    button.hidden = false;
+  }
+</script>

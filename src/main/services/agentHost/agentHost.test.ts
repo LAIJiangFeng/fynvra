@@ -24,11 +24,271 @@ import { createFakeExec, createFakeRoles } from '../orchestration/testing';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/branches';
+import * as historyProjection from '../sessions/history';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
 import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
+
+describe('context runtime snapshots and recovery', () => {
+  it('ACKs unloaded recovery before resource loading, and Stop prevents a late spawn', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    expect(await env.host.prompt(session.id, 'must remain unsent')).toMatchObject({ ok: false });
+    expect(await env.host.abort(session.id)).toEqual({ ok: true });
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    await flush();
+    await flush();
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.sent('retry-compaction')).toHaveLength(0);
+    expect(env.host.get(session.id)).toMatchObject({ status: 'idle' });
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+  });
+
+  it('prefers new live runtime over a delayed cold checkpoint read', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const disk = Promise.withResolvers<historyProjection.HistoryProjection>();
+    const read = vi
+      .spyOn(historyProjection, 'readHistoryProjection')
+      .mockReturnValueOnce(disk.promise);
+    try {
+      const response = env.host.history(session.id);
+      await env.host.prompt(session.id, 'new live input');
+      const snapshot = {
+        configuredStrategy: 'native',
+        effectiveStrategy: 'native',
+        compactionTimeoutMs: 600000,
+        context: { tokens: null, contextWindow: 100000, source: 'unknown' },
+        recoveryRequired: false,
+        pendingPromptCount: 0,
+      } as const;
+      env.worker().emit({
+        type: 'session-event',
+        identity: { sessionId: session.id, generation: 1 },
+        seq: 1,
+        event: { type: 'context_runtime', snapshot, seq: 1 },
+      });
+      disk.resolve(
+        historyProjection.projectHistoryProjection(
+          JSON.stringify({
+            type: 'custom',
+            id: 'checkpoint',
+            parentId: null,
+            customType: 'fynvra-context-recovery',
+            data: { blocked: true, pending: [] },
+          }),
+          session.id
+        )
+      );
+      const result = await response;
+      expect(result).toMatchObject({ ok: true, contextRuntime: snapshot, contextRuntimeSeq: 1 });
+      expect(result).not.toHaveProperty('contextRecovery');
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('keeps the pre-read watermark and drops the cold hint when newer live facts arrive without a runtime snapshot', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const disk = Promise.withResolvers<historyProjection.HistoryProjection>();
+    const read = vi
+      .spyOn(historyProjection, 'readHistoryProjection')
+      .mockReturnValueOnce(disk.promise);
+    try {
+      const response = env.host.history(session.id);
+      await env.host.prompt(session.id, 'new attempt');
+      env.worker().emit({
+        type: 'session-error',
+        identity: { sessionId: session.id, generation: 1 },
+        fatal: true,
+        error: 'new loading failure',
+      });
+      expect(env.events(session.id).at(-1)?.seq).toBeGreaterThan(0);
+      disk.resolve(
+        historyProjection.projectHistoryProjection(
+          JSON.stringify({
+            type: 'custom',
+            id: 'checkpoint',
+            parentId: null,
+            customType: 'fynvra-context-recovery',
+            data: { blocked: false, pending: [] },
+          }),
+          session.id
+        )
+      );
+      expect(await response).toEqual({ ok: true, messages: [], contextRuntimeSeq: 0 });
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('does not advertise a disk recovery hint while an explicit recovery is still loading', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
+    writeFileSync(
+      sessionFilePath(join(env.dir, 'agent'), session.id),
+      JSON.stringify({
+        type: 'custom',
+        id: 'checkpoint',
+        parentId: null,
+        customType: 'fynvra-context-recovery',
+        data: { blocked: true, pending: [] },
+      })
+    );
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(await env.host.history(session.id)).toEqual({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 0,
+    });
+    await env.host.abort(session.id);
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    await flush();
+    expect(await env.host.history(session.id)).toMatchObject({
+      ok: true,
+      contextRuntimeSeq: 0,
+      contextRecovery: { recoveryRequired: true },
+    });
+  });
+
+  it('holds the recovery mutex until the matching worker result, even across intermediate idle status', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    await vi.waitFor(() => expect(env.sent('retry-compaction')).toHaveLength(1));
+    const command = env.sent('retry-compaction')[0];
+    if (command?.type !== 'retry-compaction') throw new Error('missing recovery command');
+    env.worker().emit({ type: 'session-status', identity: command.identity, status: 'idle' });
+    env.worker().emit({
+      type: 'compaction-recovery-result',
+      identity: command.identity,
+      requestId: 'stale',
+      result: { ok: true },
+    });
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    env.worker().emit({
+      type: 'compaction-recovery-result',
+      identity: command.identity,
+      requestId: command.requestId,
+      result: { ok: false, error: 'No compaction recovery is required.' },
+    });
+    expect(env.host.get(session.id)?.status).toBe('error');
+    expect(env.events(session.id).at(-1)).toMatchObject({
+      type: 'error',
+      source: 'compaction',
+      message: 'No compaction recovery is required.',
+    });
+    expect(env.sent('prompt')).toHaveLength(0);
+  });
+  it('keeps grey reply suggestions valid across context metadata events', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'short');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 1,
+      event: { type: 'agent_settled', aborted: false, seq: 1 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    const snapshot = {
+      configuredStrategy: 'native',
+      effectiveStrategy: 'native',
+      compactionTimeoutMs: 600000,
+      recoveryRequired: false,
+      pendingPromptCount: 0,
+      context: { tokens: 100, contextWindow: 272000, source: 'sdk' },
+    };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 2,
+      event: { type: 'context_runtime', snapshot, seq: 2 },
+    });
+    const result = env.host.suggestReply({ sessionId: session.id, roundId: 1 });
+    const command = env.sent('suggest-reply')[0];
+    expect(command?.type).toBe('suggest-reply');
+    if (command?.type !== 'suggest-reply') throw new Error('missing suggestion command');
+    env.worker().emit({ ...command, type: 'suggestion-result', text: 'Show the next step.' });
+    expect(await result).toMatchObject({
+      ok: true,
+      suggestion: { text: 'Show the next step.', roundId: 1 },
+    });
+  });
+  it('snapshots spawn policy, forwards ordered state, and accepts one explicit recovery without awaiting compaction', async () => {
+    let timeout = 30_000;
+    const env = setup({
+      resolveCompactionStrategy: () => 'magic-context',
+      resolveCompactionTimeoutMs: () => timeout,
+    });
+    const session = await createSession(env);
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+    await env.host.prompt(session.id, 'first');
+    timeout = 60_000;
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn).toMatchObject({
+      spec: { compactionStrategy: 'magic-context', compactionTimeoutMs: 30_000 },
+    });
+    const identity = { sessionId: session.id, generation: 1 };
+    const snapshot = {
+      configuredStrategy: 'magic-context' as const,
+      effectiveStrategy: 'native' as const,
+      compactionTimeoutMs: 30_000,
+      recoveryRequired: true,
+      pendingPromptCount: 1,
+      context: { tokens: null, contextWindow: 272000, source: 'unknown' as const },
+    };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 1,
+      event: { type: 'context_runtime', snapshot, seq: 1 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'error' });
+    expect(env.host.get(session.id)).toMatchObject({
+      contextRuntime: snapshot,
+      contextRuntimeSeq: 1,
+    });
+    expect(await env.host.history(session.id)).toMatchObject({
+      contextRuntime: snapshot,
+      contextRuntimeSeq: 1,
+    });
+    expect(await env.host.prompt(session.id, 'must stay in UI')).toMatchObject({ ok: false });
+    expect(env.sent('prompt')).toHaveLength(1);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    expect(env.sent('retry-compaction')).toHaveLength(1);
+    env.worker().emit({
+      type: 'session-event',
+      identity: { ...identity, generation: 0 },
+      seq: 10,
+      event: {
+        type: 'context_runtime',
+        snapshot: { ...snapshot, recoveryRequired: false },
+        seq: 10,
+      },
+    });
+    expect(env.host.get(session.id)?.contextRuntime?.recoveryRequired).toBe(true);
+  });
+});
 
 class FakeProcess implements WorkerProcess {
   sent: AgentCommand[] = [];
@@ -144,6 +404,93 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 }
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('explicit abandoned-worker error cleanup', () => {
+  function launcher(env: ReturnType<typeof setup>) {
+    return env.host.implementsLauncher();
+  }
+
+  it.each([false, true])(
+    'clears error only on explicit cleanup, preserves jsonl/dispatch and drops late events (loaded: %s)',
+    async (loaded) => {
+      const env = setup();
+      const session = await createSession(env);
+      env.store.update(session.id, { dispatchId: 'failed-dispatch' });
+      const identity = { sessionId: session.id, generation: 1 };
+      if (loaded) {
+        await env.host.prompt(session.id, 'failed task');
+        env.worker().emit({ type: 'session-status', identity, status: 'error' });
+      } else env.store.update(session.id, { status: 'error' });
+      const failure = env.host.implementsLauncher().sessionFailure?.(session.id);
+      if (loaded) expect(failure).toContain('Worker attempt interrupted');
+      const file = sessionFilePath(join(env.dir, 'agent'), session.id);
+      mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
+      const jsonl = `${JSON.stringify({ type: 'custom', customType: 'fynvra-context-recovery', data: { blocked: true, resume: true, pending: [{ text: 'held original input' }] } })}\n`;
+      writeFileSync(file, jsonl);
+      const changedBefore = env.pushed(IPC_CHANNELS.SESSIONS_CHANGED).length;
+      const eventsBefore = env.events(session.id).length;
+      await launcher(env).disposeSession(session.id, { clearError: true });
+      expect(env.host.get(session.id)?.status).toBe('idle');
+      expect(env.pushed(IPC_CHANNELS.SESSIONS_CHANGED)).toHaveLength(changedBefore + 1);
+      expect(env.store.get(session.id)?.dispatchId).toBe('failed-dispatch');
+      expect(env.host.implementsLauncher().sessionFailure?.(session.id)).toBe(failure);
+      expect(readFileSync(file, 'utf8')).toBe(jsonl);
+      env.worker().emit({ type: 'session-status', identity, status: 'error' });
+      env.worker().emit({ type: 'session-status', identity, status: 'running' });
+      expect(env.host.get(session.id)?.status).toBe('idle');
+      expect(env.events(session.id)).toHaveLength(eventsBefore); // No fake successful settled event.
+    }
+  );
+
+  it.each([undefined, { clearError: false }])(
+    'preserves error on ordinary unload (%j)',
+    async (options) => {
+      const env = setup();
+      const session = await createSession(env);
+      await env.host.prompt(session.id, 'failed task');
+      env.worker().emit({
+        type: 'session-status',
+        identity: { sessionId: session.id, generation: 1 },
+        status: 'error',
+      });
+      await launcher(env).disposeSession(session.id, options);
+      expect(env.host.get(session.id)?.status).toBe('error');
+    }
+  );
+
+  it('invalidates an old prompt waiting to spawn instead of resurrecting a cleaned-up session', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    env.store.update(session.id, { status: 'error' });
+    const prompt = env.host.prompt(session.id, 'old queued input');
+    await launcher(env).disposeSession(session.id, { clearError: true });
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    expect(await prompt).toMatchObject({ ok: false });
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.sent('prompt')).toHaveLength(0);
+    expect(env.host.get(session.id)?.status).toBe('idle');
+  });
+
+  it('removes the discarded session from pending worker crash respawns', async () => {
+    vi.useFakeTimers();
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'failed task');
+    env.worker().exit(1);
+    expect(env.host.get(session.id)?.status).toBe('error');
+    await launcher(env).disposeSession(session.id, { clearError: true });
+    await vi.advanceTimersByTimeAsync(0);
+    env.worker().emit({ type: 'ready' });
+    expect(env.processes).toHaveLength(2);
+    expect(env.sent('spawn-session')).toHaveLength(0);
+    expect(env.host.get(session.id)?.status).toBe('idle');
+  });
+});
 
 describe('worker attempt lifecycle', () => {
   async function dispatched() {
@@ -755,6 +1102,7 @@ describe('createAgentHost sessions', () => {
         role: getBuiltinRole('worker'),
         cwd: env.workspace.repoPath,
         sessionFile: sessionFilePath(join(env.dir, 'agent'), session.id),
+        compactionTimeoutMs: 600_000,
         model: {
           providerId: RUNTIME_PROVIDER,
           api: 'anthropic-messages',
@@ -1056,7 +1404,11 @@ describe('createAgentHost sessions', () => {
       { type: 'abort', identity: { sessionId: session.id, generation: 1 } },
     ]);
 
-    expect(await env.host.history(session.id)).toEqual({ ok: true, messages: [] });
+    expect(await env.host.history(session.id)).toEqual({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 0,
+    });
     const file = sessionFilePath(join(env.dir, 'agent'), session.id);
     mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
     writeFileSync(

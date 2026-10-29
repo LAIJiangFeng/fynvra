@@ -1,0 +1,34 @@
+---
+const locale = Astro.locals.starlightRoute.locale === 'en' ? 'en' : 'zh';
+const homeLabel = locale === 'en' ? 'Product home' : '产品首页';
+---
+
+<a class="site-title" href={`/${locale}/`} aria-label={`Fynvra — ${homeLabel}`}>
+  <svg class="brand-mark" viewBox="0 0 512 512" width="28" height="28" aria-hidden="true">
+    <rect width="512" height="512" rx="112" />
+    <path d="M167 120h192v60H228v48h92v59h-92v104h-61z" />
+  </svg>
+  <span translate="no">Fynvra</span>
+</a>
+
+<style>
+  .site-title {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 11px;
+    color: var(--fynvra-ink);
+    font-size: 18px;
+    font-stretch: 112%;
+    font-weight: 760;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .brand-mark {
+    flex: none;
+    filter: drop-shadow(0 5px 12px rgb(18 19 16 / 18%));
+  }
+  .brand-mark rect { fill: var(--fynvra-ink); }
+  .brand-mark path { fill: var(--fynvra-paper); }
+</style>

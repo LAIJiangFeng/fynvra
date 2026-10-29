@@ -1,0 +1,25 @@
+---
+import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
+
+const { sidebar, locale } = Astro.locals.starlightRoute;
+const group = sidebar.find(
+  (entry) =>
+    entry.type === 'group' &&
+    entry.entries.some((child) => child.type === 'link' && child.isCurrent)
+);
+const current =
+  group?.type === 'group'
+    ? group.entries.find((entry) => entry.type === 'link' && entry.isCurrent)
+    : undefined;
+---
+
+{current && (
+  <div class="fynvra-docs-breadcrumbs" data-pagefind-ignore>
+    <span>{locale === 'en' ? 'Docs' : '使用文档'}</span>
+    <span aria-hidden="true">/</span>
+    <span>{group?.label}</span>
+    <span aria-hidden="true">/</span>
+    <span>{current.label}</span>
+  </div>
+)}
+<DefaultPageTitle />

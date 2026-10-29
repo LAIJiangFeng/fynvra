@@ -1,0 +1,45 @@
+---
+title: "Connect MCP servers"
+description: "MCP servers add external tools for agents. Add a local process or remote service under Settings → MCP, or import existing local configs. As with skills, a role must select the server before a session loads it."
+sidebar:
+  label: "MCP"
+  order: 15
+---
+
+<span id="mcp" />
+
+MCP servers add external tools for agents. Add a local process or remote service under Settings → MCP, or import existing local configs. As with skills, a role must select the server before a session loads it.
+
+<span id="mcp-add" />
+
+## Add a server
+
+1. ### Open MCP
+
+   Go to Settings → MCP and click Add server.
+
+2. ### Name it and pick a transport
+
+   Transports are Local process (stdio), Remote (Streamable HTTP), and Remote (SSE).
+
+3. ### Configure the connection
+
+   For stdio, enter the command, arguments (one per line), and environment variables. For remote, enter the URL and headers. Secret values stay on this computer; the list shows only key names.
+
+4. ### Enable and save
+
+   Check Enable and save. The card shows the transport, a masked command or URL, and the saved secret key names.
+
+<span id="mcp-import" />
+
+## Import from this computer
+
+Click “Import from this computer…”. Fynvra scans MCP configs from Claude Code, Codex, Grok CLI, Gemini CLI, Cursor, VS Code, OpenCode, and CC Switch. Select only the sources you need; results appear as candidates for confirmation before import. If nothing is found it says so, and existing entries with the same URL or command are marked as duplicates.
+
+<span id="mcp-manage" />
+
+## Toggle, edit, remove, and assign
+
+The card switch enables or disables a server; the pencil edits it; the trash asks for confirmation, after which roles that reference it stop loading it. To assign it, open a role under Settings → Roles and select it in the MCP servers list; save, and new sessions pick it up.
+
+MCP tool calls also go through approvals: Supervised and Auto-accept edits still ask; Full treats them as ordinary tools. Capability is still limited by the role’s tool policy.

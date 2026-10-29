@@ -12,7 +12,11 @@ import {
   type SessionSummary,
 } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import { compactionStrategyOf, sessionPreferencesOf } from '@shared/types/settings';
+import {
+  compactionStrategyOf,
+  compactionTimeoutMsOf,
+  sessionPreferencesOf,
+} from '@shared/types/settings';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
@@ -127,6 +131,7 @@ function createAppAgentHost(): AgentHostService {
       mcpServers: getMcpRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
+    resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     broadcast: sendToAllWindows,
@@ -200,6 +205,10 @@ export function registerSessionHandlers(
       ? guard(() => host().steer(input.sessionId, input.text, input.images))
       : invalid(translate('sessions.invalidPrompt'));
   });
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => host().retryCompaction(sessionId))
+  );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>
     withSessionId(raw, (sessionId) => host().abort(sessionId))

@@ -1,0 +1,39 @@
+---
+const isEnglish = Astro.locals.starlightRoute.locale === 'en';
+const targetLocale = isEnglish ? 'zh' : 'en';
+const targetLanguage = isEnglish ? 'zh-CN' : 'en';
+const label = isEnglish ? '切换到中文' : 'Switch to English';
+// The translated articles share their path after the fixed /zh/ or /en/ prefix.
+const translatedPath = Astro.url.pathname.replace(/^\/(?:zh|en)\//, `/${targetLocale}/`);
+const href =
+  translatedPath === Astro.url.pathname ? `/${targetLocale}/docs/overview/` : translatedPath;
+---
+
+<a
+  class="fynvra-language-toggle"
+  href={href}
+  hreflang={targetLanguage}
+  lang={targetLanguage}
+  rel="alternate"
+  aria-label={label}
+  title={label}
+>
+  {isEnglish ? '中文' : 'EN'}
+</a>
+
+<script>
+  const links = document.querySelectorAll<HTMLAnchorElement>('.fynvra-language-toggle');
+  // Fragments are only available in the browser. The rendered link works without JS.
+  function syncHash() {
+    for (const link of links) {
+      const target = new URL(link.href);
+      if (target.origin !== window.location.origin || !/^\/(?:zh|en)\//.test(target.pathname)) continue;
+      target.hash = window.location.hash;
+      link.href = target.pathname + target.hash;
+    }
+  }
+  syncHash();
+  window.addEventListener('hashchange', syncHash);
+  window.addEventListener('pageshow', syncHash);
+  for (const link of links) link.addEventListener('click', syncHash);
+</script>

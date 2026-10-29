@@ -9,8 +9,10 @@ import {
   selectStatusOf,
   useSessionsStore,
 } from '@/stores/sessions';
+import { useGeneralPreferencesStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
 import { Composer } from './Composer';
+import { strategyLabel, strategyNotice } from './contextDisplay';
 import { NewSessionButton } from './NewSessionButton';
 import { RoleBadge, StatusDot, useSessionBranch } from './SessionBadges';
 import { StatusBar } from './StatusBar';
@@ -36,6 +38,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       </header>
       <ChatNotice />
       <ChatWarning sessionId={sessionId} />
+      <RuntimeStrategyNotice sessionId={sessionId} />
       <Timeline sessionId={sessionId} />
       <ApprovalBar sessionId={sessionId} />
       <Composer sessionId={sessionId} />
@@ -54,6 +57,20 @@ function BranchBadge({ branch, cwd }: { branch: string; cwd: string }) {
       <GitBranch aria-hidden />
       <span className="truncate">{branch}</span>
     </Badge>
+  );
+}
+
+function RuntimeStrategyNotice({ sessionId }: { sessionId: string }) {
+  const snapshot = useSessionsStore((state) => state.runtimeBySession[sessionId]?.contextRuntime);
+  const selected = useGeneralPreferencesStore((state) => state.compaction);
+  const t = useT();
+  const notice = strategyNotice(snapshot, selected, t);
+  // The existing warning handles fallback. This row explains unapplied settings without a fake reload action.
+  if (!notice || snapshot?.configuredStrategy === selected) return null;
+  return (
+    <div role="status" className="shrink-0 border-b px-4 py-1.5 text-muted-foreground text-xs">
+      {t('chat.actualEngine', { engine: strategyLabel(snapshot?.effectiveStrategy, t) })} · {notice}
+    </div>
   );
 }
 
