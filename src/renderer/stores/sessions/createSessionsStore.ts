@@ -49,6 +49,8 @@ export interface QueuedMessage {
   images: ChatImage[];
 }
 
+type RecallQueuedResult = 'recalled' | 'draft-exists' | 'missing';
+
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
   workspaceId: string | null;
@@ -108,6 +110,8 @@ export interface SessionsState extends ChatProjection {
   steer(sessionId: string, queuedId?: string): Promise<boolean>;
   /** Drop a queued message */
   removeQueued(sessionId: string, queuedId: string): void;
+  /** Restore an unsent queued message only into an empty draft, atomically with its removal */
+  recallQueued(sessionId: string, queuedId: string): RecallQueuedResult;
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
@@ -812,6 +816,46 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       removeQueued(sessionId, queuedId) {
         setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
+      },
+
+      recallQueued(sessionId, queuedId) {
+        let result: RecallQueuedResult = 'missing';
+        set((state) => {
+          const queue = state.queuedBySession[sessionId] ?? [];
+          const item = queue.find((candidate) => candidate.id === queuedId);
+          // A drain/steer or deletion may have taken it since the row was rendered.
+          if (!item || removedSessions.has(sessionId) || !findSession(state, sessionId)) {
+            return state;
+          }
+          if (
+            (state.drafts[sessionId] ?? '') !== '' ||
+            (state.draftImages[sessionId]?.length ?? 0) > 0
+          ) {
+            result = 'draft-exists';
+            return state;
+          }
+          const rest = queue.filter((candidate) => candidate.id !== queuedId);
+          // Invalidate visible and pending suggestions without a second store update.
+          const suggestion = state.replySuggestions[sessionId];
+          if (suggestion) suggestionIgnored.set(sessionId, suggestion.roundId);
+          bumpSuggestionVersion(sessionId);
+          result = 'recalled';
+          return {
+            queuedBySession:
+              rest.length > 0
+                ? { ...state.queuedBySession, [sessionId]: rest }
+                : omitKey(state.queuedBySession, sessionId),
+            drafts: item.text
+              ? { ...state.drafts, [sessionId]: item.text }
+              : omitKey(state.drafts, sessionId),
+            draftImages:
+              item.images.length > 0
+                ? { ...state.draftImages, [sessionId]: item.images }
+                : omitKey(state.draftImages, sessionId),
+            replySuggestions: omitKey(state.replySuggestions, sessionId),
+          };
+        });
+        return result;
       },
 
       async abort() {

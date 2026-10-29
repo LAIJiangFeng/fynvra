@@ -7,7 +7,7 @@ import {
   MAX_CHAT_IMAGES_TOTAL_BYTES,
   nextApprovalMode,
 } from '@shared/types/chat';
-import { CircleStop, ImagePlus, ListPlus, SendHorizontal, X } from 'lucide-react';
+import { CircleStop, ImagePlus, ListPlus, SendHorizontal, Undo2, X } from 'lucide-react';
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -133,8 +133,8 @@ function supportedImages(files: File[]) {
   );
 }
 
-/** 图片提示显示多久 */
-const IMAGE_HINT_MS = 5_000;
+/** 输入框操作提示显示多久 */
+const COMPOSER_HINT_MS = 5_000;
 const MiB = 1024 * 1024;
 
 /** 文件读成 base64（去掉 `data:…;base64,` 前缀）；读不出来时为 null。不缩放、不重编码，交给 pi */
@@ -192,6 +192,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const send = useSessionsStore((state) => state.send);
   const steer = useSessionsStore((state) => state.steer);
   const removeQueued = useSessionsStore((state) => state.removeQueued);
+  const recallQueued = useSessionsStore((state) => state.recallQueued);
   const queue = useSessionsStore(selectQueueOf(sessionId));
   const abort = useSessionsStore((state) => state.abort);
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
@@ -212,10 +213,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
   useActionHandler('focus-composer', () => input.current?.focus());
   /** 正在翻的历史；null 表示没在浏览（输入框里是草稿） */
   const history = useRef<InputHistory | null>(null);
-  /** 翻到新内容后光标放哪：↑ 放开头（接着按 ↑ 继续往前翻），↓ 放末尾 */
-  const pendingCaret = useRef<Caret | null>(null);
-  /** 图片没加进去时的提示；每次设成新对象，同样的提示再出现也重新计时 */
-  const [imageHint, setImageHint] = useState<{ text: string } | null>(null);
+  /** 换内容后的光标位置；撤回编辑还要聚焦，按会话核对以免抢走新会话的焦点 */
+  const pendingCaret = useRef<{ sessionId: string; caret: Caret; focus?: boolean } | null>(null);
+  /** 图片或撤回操作的提示；每次设成新对象，同样的提示再出现也重新计时 */
+  const [composerHint, setComposerHint] = useState<{ text: string } | null>(null);
 
   // 历史来源：这个会话里 user 的消息，含 history 回放的与这次发出去的（都在 store 的时间线里）
   const sent = useMemo(
@@ -277,7 +278,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       placeCaret(caret);
       return;
     }
-    pendingCaret.current = caret;
+    pendingCaret.current = { sessionId, caret };
     setDraft(sessionId, entry.text);
   };
 
@@ -308,7 +309,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       history.current = null;
       setBrowsing(false);
     }
-    setImageHint(problem ? { text: imageProblem(problem, t) } : null);
+    setComposerHint(problem ? { text: imageProblem(problem, t) } : null);
   };
 
   // × 按钮随图片一起消失：焦点放回输入框，不掉到 body 上
@@ -338,13 +339,30 @@ export function Composer({ sessionId }: { sessionId: string }) {
     [sessionId, removeQueued]
   );
 
+  const recallForEditing = useCallback(
+    (id: string) => {
+      if (useSessionsStore.getState().activeSessionId !== sessionId) return;
+      const result = recallQueued(sessionId, id);
+      if (result === 'draft-exists') {
+        setComposerHint({ text: t('chat.recallQueuedDraftExists') });
+        return;
+      }
+      if (result !== 'recalled') return;
+      history.current = null;
+      pendingCaret.current = { sessionId, caret: 'end', focus: true };
+      setBrowsing(false);
+      setComposerHint(null);
+    },
+    [sessionId, recallQueued, t]
+  );
+
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.files);
     const pasted = supportedImages(files);
     if (pasted.length === 0) {
       // 剪贴板里的图片格式不支持（BMP、SVG 等）：文字照常粘贴，提示一下
       if (files.some((file) => file.type.startsWith('image/'))) {
-        setImageHint({ text: imageProblem('unsupported', t) });
+        setComposerHint({ text: imageProblem('unsupported', t) });
       }
       return;
     }
@@ -375,7 +393,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       event.preventDefault();
       history.current = null;
       setBrowsing(false);
-      pendingCaret.current = 'end';
+      pendingCaret.current = { sessionId, caret: 'end' };
       // 采纳后与 Esc 一样结束本轮建议：之后删空草稿也不会再冒出来
       ignoreSuggestion(sessionId);
       setDraft(sessionId, suggestion.text);
@@ -436,12 +454,19 @@ export function Composer({ sessionId }: { sessionId: string }) {
     submit();
   };
 
-  // 受控的 value 换了之后光标会落到末尾：渲染出翻到的内容后，按翻的方向重新放（只是读一个 ref，每次渲染都查）
+  // 受控内容渲染后再放光标；撤回编辑的焦点只归发起操作的当前会话。
   useLayoutEffect(() => {
-    const caret = pendingCaret.current;
-    if (!caret) return;
+    const pending = pendingCaret.current;
+    if (!pending) return;
     pendingCaret.current = null;
-    placeCaret(caret);
+    if (
+      pending.sessionId !== sessionId ||
+      useSessionsStore.getState().activeSessionId !== sessionId
+    ) {
+      return;
+    }
+    if (pending.focus) input.current?.focus();
+    placeCaret(pending.caret);
   });
 
   // 切到这个会话时把焦点放进输入框（不用 autoFocus：a11y 规则禁止）
@@ -449,12 +474,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
     input.current?.focus();
   }, []);
 
-  // 图片提示过一会儿自己消失
+  // 操作提示过一会儿自己消失
   useEffect(() => {
-    if (!imageHint) return;
-    const timer = setTimeout(() => setImageHint(null), IMAGE_HINT_MS);
+    if (!composerHint) return;
+    const timer = setTimeout(() => setComposerHint(null), COMPOSER_HINT_MS);
     return () => clearTimeout(timer);
-  }, [imageHint]);
+  }, [composerHint]);
 
   // 离开这个会话时还在翻历史：放弃浏览，把原来的草稿放回去（同 Esc）
   useEffect(
@@ -477,12 +502,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
           queue={queue}
           steerLabel={steerLabel}
           onSendNow={sendQueuedNow}
+          onRecall={recallForEditing}
           onRemove={dropQueued}
         />
         <DraftImages images={images} onRemove={removeImage} />
-        {imageHint && (
+        {composerHint && (
           <p role="status" className="px-4 pt-2 text-destructive text-xs">
-            {imageHint.text}
+            {composerHint.text}
           </p>
         )}
         <div className="relative">
@@ -632,18 +658,20 @@ const DraftImages = memo(function DraftImages({
 });
 
 /**
- * Messages queued while the session runs, oldest first: text preview, image count, send now (steer)
- * and remove. They are not in the timeline until they are actually sent
+ * Messages queued while the session runs, oldest first: text preview, image count, send now (steer),
+ * recall to edit and remove. They are not in the timeline until they are actually sent
  */
 const QueuedMessages = memo(function QueuedMessages({
   queue,
   steerLabel,
   onSendNow,
+  onRecall,
   onRemove,
 }: {
   queue: QueuedMessage[];
   steerLabel: string;
   onSendNow: (id: string) => void;
+  onRecall: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
   const t = useT();
@@ -677,6 +705,15 @@ const QueuedMessages = memo(function QueuedMessages({
               className={buttonClass}
             >
               <SendHorizontal className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('chat.recallQueued')}
+              title={t('chat.recallQueued')}
+              onClick={() => onRecall(item.id)}
+              className={buttonClass}
+            >
+              <Undo2 className="size-3.5" />
             </button>
             <button
               type="button"
