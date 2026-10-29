@@ -1418,7 +1418,9 @@ html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
   font-size: 12px;
   line-height: 1.4;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .docs-demo-replay:hover {

@@ -67,6 +67,13 @@ export interface UiFlushReply {
   dirty: boolean;
 }
 
+// Strip C0/C1 controls while retaining plain-text tabs and line breaks.
+export function sanitizeTerminalScreen(screen: string): string {
+  return screen.replace(/\p{Cc}/gu, (character) =>
+    character === '\t' || character === '\n' ? character : ''
+  );
+}
+
 export function textBytes(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
@@ -144,7 +151,7 @@ export function parseWorkspaceUi(raw: unknown, workspaceId: string): WorkspaceUi
         !integer(tab.rows ?? 24, 1, 300)
       )
         return null;
-      const screen = String(tab.screen ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+      const screen = sanitizeTerminalScreen(String(tab.screen ?? ''));
       screens += textBytes(screen);
       tabs.push({
         kind: 'terminal',

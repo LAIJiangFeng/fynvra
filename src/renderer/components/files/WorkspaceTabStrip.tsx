@@ -35,7 +35,7 @@ export function WorkspaceTabStrip({
   const order = useWorkspaceTabsStore((state) => state.views[workspaceId]?.order);
   const dragged = useRef<string | null>(null);
   const [target, setTarget] = useState<{ key: string; after: boolean } | null>(null);
-  const scroll = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLFieldSetElement>(null);
   const speed = useRef(0);
   const frame = useRef(0);
   const scrollWhileDragging = () => {
@@ -62,9 +62,9 @@ export function WorkspaceTabStrip({
   });
   return (
     <StripContext.Provider value={{ workspaceId, dragged, target, setTarget }}>
-      <div
+      <fieldset
         ref={scroll}
-        className="flex min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+        className="m-0 flex min-w-0 flex-initial overflow-x-auto overflow-y-hidden border-0 p-0 [scrollbar-width:thin]"
         onDragOver={(event) => {
           if (!dragged.current || !event.dataTransfer.types.includes(MIME)) {
             event.preventDefault();
@@ -96,7 +96,7 @@ export function WorkspaceTabStrip({
         }}
       >
         {tabs}
-      </div>
+      </fieldset>
     </StripContext.Provider>
   );
 }
@@ -109,10 +109,10 @@ export function WorkspaceTab({ tabKey, children }: { tabKey: string; children: R
   const { workspaceId, dragged, target, setTarget } = context;
   const accepted = (types: readonly string[]) => !!dragged.current && types.includes(MIME);
   return (
-    <div
+    <fieldset
       draggable
       className={cn(
-        'relative flex shrink-0',
+        'relative m-0 flex min-w-0 shrink-0 border-0 p-0',
         target?.key === tabKey && (target.after ? 'after:right-0' : 'after:left-0'),
         target?.key === tabKey &&
           'after:pointer-events-none after:absolute after:inset-y-0 after:z-10 after:w-0.5 after:bg-primary'
@@ -165,6 +165,6 @@ export function WorkspaceTab({ tabKey, children }: { tabKey: string; children: R
       }}
     >
       {children}
-    </div>
+    </fieldset>
   );
 }

@@ -6,8 +6,8 @@ import type { WorkspaceFileEntry } from '@shared/types/files';
 import {
   emptyWorkspaceUi,
   parseWorkspaceUi,
-  workspaceTabKey,
   type WorkspaceUiSnapshot,
+  workspaceTabKey,
 } from '@shared/types/workspaceUi';
 import type { createFilesService } from './files';
 
@@ -80,7 +80,7 @@ export function createWorkspaceUiService(
               !relativePath ||
               relativePath.includes('\\') ||
               relativePath.includes(':') ||
-              /[\x00-\x1f]/.test(relativePath) ||
+              Array.from(relativePath).some((character) => character.charCodeAt(0) < 32) ||
               relativePath.split('/').some((p) => !p || p === '.' || p === '..')
             )
               throw new Error('invalid file descriptor');
@@ -91,7 +91,7 @@ export function createWorkspaceUiService(
               // An unavailable workspace must not erase its drafts. Reads still fail safely.
               tab.entry = {
                 id: tab.id,
-                name: relativePath.split('/').pop()!,
+                name: relativePath.slice(relativePath.lastIndexOf('/') + 1),
                 relativePath,
                 kind: 'file',
               };

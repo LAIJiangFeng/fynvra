@@ -5,12 +5,12 @@ import type { zhCN } from './zh-CN';
 export const en: MessagesShape<typeof zhCN> = {
   workspaceTabs: {
     drag: 'Drag to reorder tabs',
-    failed: 'Could not save or restore tabs. Keep this window open and retry.',
+    failed: 'Could not save or restore tabs. Keep this window open and retry',
     limits:
-      'Tab storage limit reached (64 tabs; drafts up to 256 KiB). Close tabs or reduce the draft; no text was truncated.',
-    corrupt: 'A damaged tab snapshot was set aside. The original file is retained in workspace-ui.',
+      'Tab storage limit reached (64 tabs; drafts up to 256 KiB). Close tabs or reduce the draft; no text was truncated',
+    corrupt: 'A damaged tab snapshot was set aside. The original file is retained in workspace-ui',
     removeDrafts:
-      'Remove this workspace and its saved tabs and unsaved drafts? Files on disk will be kept.',
+      'Remove this workspace and its saved tabs and unsaved drafts? Files on disk will be kept',
   },
   terminals: {
     restored: 'History restored · New terminal session',
@@ -298,8 +298,7 @@ export const en: MessagesShape<typeof zhCN> = {
     sendNow: 'Send now ({chord})',
     removeQueued: 'Remove from queue',
     recallQueued: 'Recall to edit',
-    recallQueuedDraftExists:
-      'Finish or clear the current draft before recalling a queued message.',
+    recallQueuedDraftExists: 'Finish or clear the current draft before recalling a queued message',
     replySuggestionHint: 'Reply suggestion: {suggestion}. Press Right Arrow to fill it in',
   },
   model: {

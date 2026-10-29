@@ -3,13 +3,14 @@ import {
   MAX_TERMINAL_BYTES,
   MAX_WORKSPACE_SCREEN_BYTES,
   type SavedTerminalTab,
+  sanitizeTerminalScreen,
 } from '@shared/types/workspaceUi';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { create } from 'zustand';
 import { attachTerminalClipboard } from '../components/terminal/terminalClipboard';
-import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 import { translate } from '../i18n';
+import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 
 interface TerminalTab {
   id: string;
@@ -176,7 +177,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       }
       if (restored) {
         // Plain buffer text only. It can never reach api.write / the new PTY.
-        const screen = restored.screen.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
+        const screen = sanitizeTerminalScreen(restored.screen);
         await writeScreen(resource, screen.replace(/\n/g, '\r\n'));
         if (terminalResources.get(id) !== resource || resource.closing) return;
         if (restored.exited) return;
