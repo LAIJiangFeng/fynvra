@@ -7,9 +7,10 @@
   if (!app) return;
 
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const hoverCapable = window.matchMedia('(hover: hover)');
-  const TYPE_INTERVAL = 27;
-  const END_HOLD = 3000;
+  const TYPE_INTERVAL = 20;
+  // 打完最后一个字符后短暂停留即可提交，不再白等固定 2 秒起。
+  const TYPE_SETTLE = 300;
+  const END_HOLD = 1200;
 
   const collabText = {
     zh: '优化官网首页：标题收紧一点，把顶部演示改成真实操作流程；文档页交给另一个 Worker。',
@@ -43,10 +44,8 @@
   };
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
-  const typingDelay = (text) => Math.max(2200, text.length * TYPE_INTERVAL + 700);
 
   let inView = true;
-  let appHovered = false;
   let activeScene = null;
 
   function renderCollabScene(element, phase) {
@@ -234,7 +233,16 @@
       ? config.typing
       : [{ phase: config.typePhase, text: config.text }];
     const typePhases = new Set(typing.map((entry) => entry.phase));
-    const state = { phase: 0, typedIndex: 0, autoTimer: 0, typeTimer: 0 };
+    const state = {
+      phase: 0,
+      typedIndex: 0,
+      autoTimer: 0,
+      typeTimer: 0,
+      running: false,
+      // 当前阶段还剩多少毫秒推进；离屏/隐藏暂停后只补这部分。
+      deadline: 0,
+      remaining: 0,
+    };
 
     function typedText(phase) {
       const entry = typing.find((item) => item.phase === phase);
@@ -249,13 +257,22 @@
     }
 
     function shouldRun() {
-      return activeScene === api && inView && !document.hidden && !motion.matches && !appHovered;
+      // 只在真正离屏、页签隐藏或减少动画时停下；鼠标停在演示窗上不暂停。
+      return activeScene === api && inView && !document.hidden && !motion.matches;
     }
 
     function clearAuto() {
+      if (state.autoTimer) window.clearTimeout(state.autoTimer);
+      state.autoTimer = 0;
+      state.remaining = 0;
+    }
+
+    // 暂停时记下当前阶段剩余时间，恢复后只等剩下的部分，不重等整个阶段。
+    function pauseAuto() {
       if (!state.autoTimer) return;
       window.clearTimeout(state.autoTimer);
       state.autoTimer = 0;
+      state.remaining = Math.max(0, state.deadline - performance.now());
     }
 
     function clearTypewriter() {
@@ -313,15 +330,48 @@
       });
     }
 
+    function scheduleNext() {
+      const typingNow = typePhases.has(state.phase);
+      const full = typingNow ? typedText(state.phase) : '';
+      let delay;
+      if (typingNow) {
+        // 按实际剩余字符计时：打完再留一小段阅读停留就推进。
+        delay = Math.max(0, full.length - state.typedIndex) * TYPE_INTERVAL + TYPE_SETTLE;
+      } else if (state.remaining > 0) {
+        delay = state.remaining;
+      } else {
+        delay = state.phase === LAST ? END_HOLD : config.durations[state.phase];
+      }
+      clearAuto();
+      state.deadline = performance.now() + delay;
+      state.autoTimer = window.setTimeout(() => {
+        state.autoTimer = 0;
+        if (!shouldRun()) return;
+        // 计时器被节流时先补完剩余文字，绝不跳字推进。
+        if (typePhases.has(state.phase) && state.typedIndex < typedText(state.phase).length) {
+          if (!state.typeTimer) startTypewriter(false);
+          scheduleNext();
+          return;
+        }
+        // 最后一个阶段的结果停留结束后让位给下一个场景，四个场景按顺序无限循环。
+        if (state.phase === LAST) selectScene(config.next);
+        else applyPhase(state.phase + 1);
+      }, delay);
+    }
+
     function sync() {
       const run = shouldRun();
       element.dataset.active = String(run);
       root.dataset.active = String(run);
-      clearAuto();
       if (!run) {
+        pauseAuto();
         clearTypewriter();
+        state.running = false;
         return;
       }
+
+      const resumed = !state.running;
+      state.running = true;
 
       const typingNow = typePhases.has(state.phase);
       const full = typingNow ? typedText(state.phase) : '';
@@ -329,18 +379,9 @@
         startTypewriter(false);
       }
 
-      const delay = typingNow
-        ? typingDelay(full)
-        : state.phase === LAST
-          ? END_HOLD
-          : config.durations[state.phase];
-      state.autoTimer = window.setTimeout(() => {
-        state.autoTimer = 0;
-        if (!shouldRun()) return;
-        // 最后一个阶段的结果停留结束后让位给下一个场景，四个场景按顺序无限循环。
-        if (state.phase === LAST) selectScene(config.next);
-        else applyPhase(state.phase + 1);
-      }, delay);
+      // 正在跑且计时器有效时不要重新排队：可见性等重复回调不该延长当前阶段。
+      if (!resumed && state.autoTimer) return;
+      scheduleNext();
     }
 
     function applyPhase(next) {
@@ -371,14 +412,17 @@
       sync();
     }
 
+    // 激活与“再点当前 tab 重播”共用：清掉旧 timer，从场景头（或减少动画的静态阶段）开始。
     function activate() {
       element.hidden = false;
+      state.running = false;
       applyPhase(motion.matches ? STATIC : 0);
     }
 
     function deactivate() {
       clearAuto();
       clearTypewriter();
+      state.running = false;
       element.dataset.active = 'false';
       root.dataset.active = 'false';
       element.hidden = true;
@@ -387,6 +431,8 @@
     function localeChanged() {
       const full = typedText(state.phase);
       if (typePhases.has(state.phase)) {
+        // 文本长度变了：重打当前语言并按新文本重新计时，避免旧计时器提前截断。
+        clearAuto();
         if (shouldRun()) {
           startTypewriter(true);
         } else {
@@ -415,12 +461,21 @@
       }
     }
 
-    const api = { name, activate, deactivate, localeChanged, handleMotion, sync };
+    const api = {
+      name,
+      activate,
+      deactivate,
+      // 手动再次点击当前 tab 时重播；自动轮播只调 selectScene。
+      restart: activate,
+      localeChanged,
+      handleMotion,
+      sync,
+    };
     return api;
   }
 
   const collab = createScene('collab', root.querySelector('[data-scene="collab"]'), {
-    durations: [0, 2200, 2200, 2300, 2200, 2600, 2200, 2500, 2200, 0],
+    durations: [0, 900, 750, 800, 750, 1000, 900, 950, 1100, 0],
     typePhase: 0,
     keepTextUntil: 1,
     emptyUntil: 2,
@@ -431,7 +486,7 @@
   });
 
   const model = createScene('model', root.querySelector('[data-scene="model"]'), {
-    durations: [0, 2200, 2800, 2200, 2800, 2600, 2400, 0],
+    durations: [0, 850, 800, 800, 950, 900, 1100, 0],
     typePhase: 0,
     keepTextUntil: 1,
     emptyUntil: 2,
@@ -443,7 +498,7 @@
 
   const queueScene = createScene('queue', root.querySelector('[data-scene="queue"]'), {
     // 0/2 各打一段后续需求；1/3 提交后清空输入；4/5 当前回合结束并按顺序接续队列。
-    durations: [0, 1500, 0, 2300, 2400, 2600, 0],
+    durations: [0, 800, 0, 750, 900, 600, 0],
     // 减少动画时停在“当前回合运行 + 两条排队消息”。
     staticPhase: 3,
     typing: [
@@ -457,7 +512,7 @@
 
   const roleScene = createScene('roles', root.querySelector('[data-scene="roles"]'), {
     // 0/4 新建会话选角色；2/5 直接向该会话输入；3/6/7 保留该角色的回复结果。
-    durations: [2400, 1600, 0, 2800, 2400, 0, 3400, 0],
+    durations: [550, 160, 0, 1300, 550, 0, 1500, 0],
     // 减少动画时停在审查员的只读审查结果，两个会话和自定义标记仍然可见。
     staticPhase: 7,
     typing: [
@@ -488,9 +543,14 @@
     style.setProperty('--fd-scene-pill-h', `${pill.height}px`);
   }
 
-  function selectScene(name) {
+  // 自动轮播只传场景名；手动点击带 restart，当前 tab 再点一次会从头重播。
+  function selectScene(name, restart) {
     const next = scenes[name];
-    if (!next || next === activeScene) return;
+    if (!next) return;
+    if (next === activeScene) {
+      if (restart) next.restart();
+      return;
+    }
     activeScene?.deactivate();
     activeScene = next;
     for (const button of sceneButtons) {
@@ -501,7 +561,7 @@
   }
 
   for (const button of sceneButtons) {
-    button.addEventListener('click', () => selectScene(button.dataset.sceneBtn));
+    button.addEventListener('click', () => selectScene(button.dataset.sceneBtn, true));
   }
 
   if (sceneSwitch && 'ResizeObserver' in window) {
@@ -519,22 +579,7 @@
     observer.observe(root);
   }
 
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && hoverCapable.matches) appHovered = app.matches(':hover');
-    activeScene?.sync();
-  });
-
-  app.addEventListener('pointerenter', (event) => {
-    if (event.pointerType !== 'mouse' || !hoverCapable.matches) return;
-    appHovered = true;
-    activeScene?.sync();
-  });
-
-  app.addEventListener('pointerleave', (event) => {
-    if (event.pointerType !== 'mouse') return;
-    appHovered = false;
-    activeScene?.sync();
-  });
+  document.addEventListener('visibilitychange', () => activeScene?.sync());
 
   const handleMotionChange = () => activeScene?.handleMotion();
   if (typeof motion.addEventListener === 'function')
