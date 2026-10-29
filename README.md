@@ -20,7 +20,8 @@
 <p align="center">
   <a href="https://github.com/LAIJiangFeng/fynvra/releases"><strong>Download Fynvra</strong></a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="#documentation">Documentation</a>
+  <a href="https://jfengl.cn/">Website</a> ·
+  <a href="https://jfengl.cn/en/docs/">Documentation</a>
 </p>
 
 Fynvra brings AI conversations, code editing, terminals, and multi-agent collaboration to your desktop. Give the main agent a goal, follow the workers as they implement it, and keep the resulting changes visible through review and merge.
@@ -109,7 +110,9 @@ Agents and MCP tools can execute commands and contact external services. Configu
 
 ## Documentation
 
-These guides are currently in Chinese:
+Read the [official user documentation](https://jfengl.cn/en/docs/) for help using Fynvra.
+
+The following developer guides are currently written in Chinese:
 
 - [Product definition](docs/PRODUCT.md) — workflow, roles, and product scope.
 - [Architecture](docs/ARCHITECTURE.md) — process boundaries, persistence, and cross-layer contracts.
