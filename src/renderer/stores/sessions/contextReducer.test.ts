@@ -30,6 +30,26 @@ function apply(state: ChatProjection, seq: number, event: FynvraSessionEventBody
 }
 
 describe('context metadata projection', () => {
+  it('hydrates checkpoint recovery independently of loaded runtime and enforces its watermark', () => {
+    let state = applyContextRuntime(emptyProjection(), 's', undefined, 7, true);
+    expect(state.runtimeBySession.s).toMatchObject({ recoveryRequired: true, contextSeq: 7 });
+    expect(state.runtimeBySession.s.contextRuntime).toBeUndefined();
+    expect(state.runtimeBySession.s.pendingPromptCount).toBeUndefined();
+    state = applyContextRuntime(state, 's', undefined); // ordinary unloaded summary
+    expect(state.runtimeBySession.s.recoveryRequired).toBe(true);
+    expect(apply(state, 6, { type: 'context_runtime', snapshot })).toBe(state);
+    state = apply(state, 8, { type: 'context_runtime', snapshot });
+    expect(applyContextRuntime(state, 's', undefined, 7, true)).toBe(state);
+    expect(applyContextRuntime(state, 's', undefined, undefined, true)).toBe(state);
+    expect(state.runtimeBySession.s.recoveryRequired).toBe(false);
+  });
+
+  it('an actual loaded snapshot takes precedence over a checkpoint hint', () => {
+    const state = applyContextRuntime(emptyProjection(), 's', snapshot, 5, true);
+    expect(state.runtimeBySession.s.recoveryRequired).toBe(false);
+    expect(state.runtimeBySession.s.contextRuntime).toEqual(snapshot);
+  });
+
   it('uses the event timestamp across retries, without altering the conversation activity sequence', () => {
     let state = apply(emptyProjection(), 1, {
       type: 'message_end',

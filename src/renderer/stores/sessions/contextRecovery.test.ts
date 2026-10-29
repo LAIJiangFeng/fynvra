@@ -80,6 +80,184 @@ async function failed(patch: Partial<CompactionState> = {}) {
   return env;
 }
 
+async function coldRecovery(recoveryRequired: boolean) {
+  const env = await setup();
+  const store = createSessionsStore(env.api, { schedule: (flush) => flush() });
+  store.setState({ workspaceId: 'ws' });
+  expect(store.getState().runtimeBySession[env.id]).toBeUndefined();
+  vi.spyOn(env.api, 'history').mockResolvedValueOnce({
+    ok: true,
+    messages: [],
+    contextRuntimeSeq: 7,
+    contextRecovery: { recoveryRequired },
+  });
+  await store.getState().selectSession(env.id);
+  return { ...env, store };
+}
+
+describe('cold checkpoint recovery hydration', () => {
+  it('offers recovery by ID from a fresh store without inventing loaded context or resending old input', async () => {
+    const { store, id, retry, prompt } = await coldRecovery(true);
+    expect(store.getState().runtimeBySession[id]).toMatchObject({
+      recoveryRequired: true,
+      contextSeq: 7,
+    });
+    expect(store.getState().runtimeBySession[id].contextRuntime).toBeUndefined();
+    expect(store.getState().runtimeBySession[id].pendingPromptCount).toBeUndefined();
+    expect(store.getState().messagesBySession[id]).toEqual([]);
+    await store.getState().loadSessions('ws');
+    expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(true);
+    await store.getState().retryCompaction(id);
+    expect(retry).toHaveBeenCalledExactlyOnceWith(id);
+    expect(store.getState().recoveringCompaction[id]).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('does not offer recovery for an unblocked checkpoint', async () => {
+    const { store, id, retry, prompt } = await coldRecovery(false);
+    expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
+    expect(store.getState().runtimeBySession[id].contextRuntime).toBeUndefined();
+    await store.getState().retryCompaction(id);
+    expect(retry).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a delayed blocked hint after live recovery completes', async () => {
+    const { store, id, api, retry } = await coldRecovery(true);
+    const history = deferred<Awaited<ReturnType<SessionsApi['history']>>>();
+    vi.mocked(api.history).mockReturnValueOnce(history.promise);
+    const selecting = store.getState().selectSession(id);
+    store.getState().receiveEvent({
+      sessionId: id,
+      event: { seq: 8, type: 'context_runtime', snapshot: snapshot() },
+    });
+    history.resolve({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 7,
+      contextRecovery: { recoveryRequired: true },
+    });
+    await selecting;
+    expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
+    expect(store.getState().runtimeBySession[id].contextSeq).toBe(8);
+    await store.getState().retryCompaction(id);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('rejects older history requests even when no live event intervened', async () => {
+    const { store, id, api } = await coldRecovery(true);
+    const history = deferred<Awaited<ReturnType<SessionsApi['history']>>>();
+    vi.mocked(api.history).mockReturnValueOnce(history.promise);
+    const selecting = store.getState().selectSession(id);
+    vi.mocked(api.history).mockResolvedValueOnce({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 9,
+      contextRecovery: { recoveryRequired: false },
+    });
+    await store.getState().selectSession(id);
+    history.resolve({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 7,
+      contextRecovery: { recoveryRequired: true },
+    });
+    await selecting;
+    expect(store.getState().runtimeBySession[id]).toMatchObject({
+      recoveryRequired: false,
+      contextSeq: 9,
+    });
+  });
+
+  it('keeps recovery in progress through an intermediate settled event until the runtime unlocks', async () => {
+    const { store, id, prompt } = await coldRecovery(true);
+    store.getState().receiveEvent({
+      sessionId: id,
+      event: {
+        seq: 8,
+        type: 'error',
+        source: 'host',
+        message: 'previous load failed',
+      },
+    });
+    await store.getState().send('new local message');
+    await store.getState().retryCompaction(id);
+    expect(store.getState().runtimeBySession[id].error).toBeUndefined();
+    store.getState().receiveEvent({
+      sessionId: id,
+      event: {
+        seq: 9,
+        type: 'context_runtime',
+        snapshot: snapshot({ recoveryRequired: true }),
+      },
+    });
+    store
+      .getState()
+      .receiveEvent({ sessionId: id, event: { seq: 10, type: 'agent_settled', aborted: false } });
+    expect(store.getState().recoveringCompaction[id]).toBe(true);
+    store
+      .getState()
+      .receiveEvent({
+        sessionId: id,
+        event: { seq: 11, type: 'context_runtime', snapshot: snapshot() },
+      });
+    expect(store.getState().recoveringCompaction[id]).toBeUndefined();
+    expect(store.getState().runtimeBySession[id].status).toBe('idle');
+    expect(store.getState().runtimeBySession[id].error).toBeUndefined();
+    expect(store.getState().pausedQueues[id]).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(['success', 'load-error', 'status-error'] as const)(
+    'settles recovery without a compaction_start on %s and keeps the local queue held',
+    async (result) => {
+      const { store, id, api, retry, prompt } = await coldRecovery(true);
+      await store.getState().send('new local message');
+      await store.getState().retryCompaction(id);
+      expect(store.getState().recoveringCompaction[id]).toBe(true);
+      if (result === 'success') {
+        store.getState().receiveEvent({
+          sessionId: id,
+          event: { seq: 8, type: 'context_runtime', snapshot: snapshot() },
+        });
+        store.getState().receiveEvent({
+          sessionId: id,
+          event: { seq: 9, type: 'agent_settled', aborted: false },
+        });
+        expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
+      } else if (result === 'load-error') {
+        store.getState().receiveEvent({
+          sessionId: id,
+          event: {
+            seq: 8,
+            type: 'error',
+            source: 'host',
+            message: 'Could not load original session',
+          },
+        });
+        expect(store.getState().runtimeBySession[id].error).toBe('Could not load original session');
+      } else {
+        const list = await api.list('ws');
+        if (!list.ok) throw new Error(list.error);
+        vi.spyOn(api, 'list').mockResolvedValueOnce({
+          ok: true,
+          sessions: list.sessions.map((session) => ({ ...session, status: 'error' })),
+        });
+        await store.getState().loadSessions('ws');
+        expect(store.getState().runtimeBySession[id].status).toBe('error');
+      }
+      expect(store.getState().recoveringCompaction[id]).toBeUndefined();
+      expect(store.getState().runtimeBySession[id].compaction).toBeUndefined();
+      expect(store.getState().pausedQueues[id]).toBe(true);
+      expect(store.getState().queuedBySession[id]?.map((item) => item.text)).toEqual([
+        'new local message',
+      ]);
+      expect(retry).toHaveBeenCalledExactlyOnceWith(id);
+      expect(prompt).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('context recovery and renderer queue ownership', () => {
   it.each([
     { phase: 'failed', cancelSource: 'exception' },

@@ -257,12 +257,14 @@ export function applyContextRuntime<S extends ChatProjection>(
   state: S,
   sessionId: string,
   snapshot: ContextRuntimeSnapshot | undefined,
-  seq?: number
+  seq?: number,
+  recoveryRequired?: boolean
 ): S {
   const before = sliceOf(state, sessionId);
   if (
     seq === undefined
-      ? snapshot !== undefined && before.runtime.contextSeq !== undefined
+      ? (snapshot !== undefined || recoveryRequired !== undefined) &&
+        before.runtime.contextSeq !== undefined
       : seq < Math.max(before.runtime.lastSeq, before.runtime.contextSeq ?? 0)
   )
     return state;
@@ -270,6 +272,8 @@ export function applyContextRuntime<S extends ChatProjection>(
     ...before,
     runtime: {
       ...runtimeWithContext(before.runtime, snapshot),
+      // A persisted checkpoint is a recovery hint, never evidence of a loaded engine or context.
+      ...(!snapshot && recoveryRequired !== undefined ? { recoveryRequired } : {}),
       ...(seq === undefined ? {} : { contextSeq: seq }),
     },
   });

@@ -109,6 +109,21 @@ describe('generation progress presentation', () => {
     expect(html).not.toContain('animate-spin');
   });
 
+  it.each([false, true])(
+    'shows a recovery button from a cold checkpoint only when blocked (%s)',
+    (blocked) => {
+      state();
+      data.state.runtimeBySession.s.compaction = undefined;
+      data.state.runtimeBySession.s.contextRuntime = undefined;
+      data.state.runtimeBySession.s.recoveryRequired = blocked;
+      const html = renderToStaticMarkup(
+        <GenerationProgress sessionId="s" status="idle" showWorking={false} error={undefined} />
+      );
+      expect(html.includes('重试历史压缩')).toBe(blocked);
+      expect(html).not.toContain('animate-spin');
+    }
+  );
+
   it('does not display a failure for an SDK hook cancellation that needs no recovery', () => {
     state();
     data.state.runtimeBySession.s.compaction = {

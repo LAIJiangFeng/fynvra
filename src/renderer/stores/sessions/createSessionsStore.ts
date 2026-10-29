@@ -484,7 +484,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         )
           holdQueue(sessionId);
         if (
-          event.type === 'agent_settled' ||
+          (event.type === 'agent_settled' &&
+            (event.aborted || !get().runtimeBySession[sessionId]?.recoveryRequired)) ||
           event.type === 'error' ||
           (event.type === 'compaction' &&
             !compactionActive(event.state) &&
@@ -848,10 +849,17 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               next,
               sessionId,
               result.contextRuntime,
-              result.contextRuntimeSeq
+              result.contextRuntimeSeq,
+              result.contextRecovery?.recoveryRequired
             );
           }
-          return { ...next, loadingHistory };
+          return {
+            ...next,
+            loadingHistory,
+            ...(next.runtimeBySession[sessionId]?.recoveryRequired
+              ? { pausedQueues: { ...next.pausedQueues, [sessionId]: true as const } }
+              : {}),
+          };
         });
       },
 
@@ -1007,6 +1015,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         holdQueue(sessionId);
         set((state) => ({
           recoveringCompaction: { ...state.recoveringCompaction, [sessionId]: true },
+          runtimeBySession: {
+            ...state.runtimeBySession,
+            [sessionId]: { ...runtime, error: undefined, pendingAssistantFailure: undefined },
+          },
         }));
         recoveryRequests.add(sessionId);
         const result = await safely(() => api.retryCompaction(sessionId));
