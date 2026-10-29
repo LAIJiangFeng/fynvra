@@ -1,4 +1,4 @@
-import type { ApprovalMode } from '@fynvra/core';
+import type { ApprovalMode, ContextRuntimeSnapshot } from '@fynvra/core';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -33,9 +33,17 @@ export interface SessionsApi {
   prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   /** Steer the running turn right away (pi steer); same input as prompt. Acts as prompt when idle */
   steer(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
+  /** Accept an explicit recovery attempt; progress and failure arrive through session events. */
+  retryCompaction(sessionId: string): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
-  history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
+  history(sessionId: string): Promise<
+    IpcResult<{
+      messages: ChatMessage[];
+      contextRuntime?: ContextRuntimeSnapshot;
+      contextRuntimeSeq?: number;
+    }>
+  >;
   respondApproval(input: {
     sessionId: string;
     requestId: string;
@@ -95,6 +103,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     remove: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_REMOVE, sessionId),
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
     steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
+    retryCompaction: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, sessionId),
     abort: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ABORT, sessionId),
     history: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_HISTORY, sessionId),
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),

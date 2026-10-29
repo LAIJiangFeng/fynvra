@@ -9,6 +9,7 @@ import {
   type SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { FynvraSessionEvent } from '@fynvra/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPiSessionFactory } from './piSession';
 
@@ -24,8 +25,8 @@ describe('createPiSessionFactory switching the model of a live pi session', () =
     faux = fauxProvider({
       provider: 'fynvra-faux',
       models: [
-        { id: 'faux-a' },
-        { id: 'faux-b', reasoning: true },
+        { id: 'faux-a', contextWindow: 128_000 },
+        { id: 'faux-b', reasoning: true, contextWindow: 256_000 },
         { id: 'faux-max', reasoning: true },
       ],
     });
@@ -73,6 +74,8 @@ describe('createPiSessionFactory switching the model of a live pi session', () =
       host: null,
       workerHost: null,
     });
+    const events: FynvraSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
     const requests: { model: string; reasoning?: string; messages: number }[] = [];
     const answer =
       (text: string) =>
@@ -103,6 +106,14 @@ describe('createPiSessionFactory switching the model of a live pi session', () =
       await session.dispose();
     }
 
+    const contexts = events.filter((event) => event.type === 'context_runtime');
+    expect(contexts[0]?.snapshot).toMatchObject({
+      effectiveStrategy: 'native',
+      compactionTimeoutMs: 600_000,
+      context: { contextWindow: 128_000 },
+    });
+    expect(contexts.at(-1)?.snapshot.context.contextWindow).toBe(256_000);
+    expect(contexts.at(-1)?.snapshot.context.tokens).not.toBeNull();
     expect(requests.map(({ messages: _messages, ...request }) => request)).toEqual([
       { model: 'faux-a' },
       { model: 'faux-b', reasoning: 'high' },

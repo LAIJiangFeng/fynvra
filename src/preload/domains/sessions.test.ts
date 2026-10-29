@@ -29,6 +29,7 @@ describe('createSessionsApi', () => {
       images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
     });
     await api.steer({ sessionId: 's-1', text: 'also check docs' });
+    await api.retryCompaction('s-1');
     await api.abort('s-1');
     await api.history('s-1');
     await api.respondApproval({ sessionId: 's-1', requestId: 'r-1', decision: 'allow' });
@@ -58,6 +59,7 @@ describe('createSessionsApi', () => {
         },
       ],
       [IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: 'also check docs' }],
+      [IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, 's-1'],
       [IPC_CHANNELS.SESSIONS_ABORT, 's-1'],
       [IPC_CHANNELS.SESSIONS_HISTORY, 's-1'],
       [

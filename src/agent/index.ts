@@ -33,6 +33,7 @@ const supervisor = new SessionSupervisor({
   openSession: createPiSessionFactory({
     agentDir,
     resolveModel: async (spec) => (await modelRegistry()).resolve(spec),
+    onContextLog: (message) => log('info', `context ${message}`),
     onListenerError: (error) =>
       log('error', `session event listener failed: ${errorMessage(error)}`),
     // 只写协议、模型、档位与请求地址（去掉 userinfo 与 query），不写 key

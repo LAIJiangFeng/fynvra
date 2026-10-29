@@ -1,5 +1,5 @@
 import { dirname } from 'node:path';
-import type { ImageContent, Message } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import { type AgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 import {
   type ApprovalGate,
@@ -12,7 +12,9 @@ import type { MagicContextFallbackReason, Role } from '@fynvra/core';
 import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
-import { type ChatImage, normalizeReplySuggestion } from '@shared/types/chat';
+import { normalizeReplySuggestion } from '@shared/types/chat';
+import { compactionTimeoutMsOf } from '@shared/types/settings';
+import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import type { OpenSession } from './supervisor';
@@ -56,6 +58,8 @@ export interface PiSessionFactoryOptions {
   resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
   /** 事件 listener 抛出的异常（被 subscribeNormalized 兜住，不打断 pi 的 jsonl 持久化） */
   onListenerError?: (error: unknown) => void;
+  /** 脱敏的压缩生命周期日志（session / generation / operation / deadline / result）。 */
+  onContextLog?: (message: string) => void;
   /** 会话用上了一个模型（创建时、换模型后）：入口据此记一条日志，之后的请求都打到这个地址 */
   onModelSelected?: (sessionId: string, model: ResolvedModel) => void;
 }
@@ -133,20 +137,49 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       throw error;
     }
     const { session } = created;
+    const timeoutMs = compactionTimeoutMsOf(spec);
+    const recovery = createContextRecovery({
+      session,
+      strategy: spec.compactionStrategy ?? 'native',
+      timeoutMs,
+      contextWindow: () => activeModel.model?.contextWindow ?? 0,
+      log: (message) =>
+        options.onContextLog?.(
+          `session=${identity.sessionId} generation=${identity.generation} ${message}`
+        ),
+    });
+    if (pendingFallback) recovery.fallback();
     dropEmptyUserText(session);
     const setFastMode = installFastMode(session, spec.model.fastMode === true);
     // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
     options.onModelSelected?.(identity.sessionId, model);
+    let listener: ((event: import('@fynvra/core').FynvraSessionEvent) => void) | undefined;
+    const retrySettings = session.settingsManager.getRetrySettings();
+    const subscription = subscribeNormalized(
+      session,
+      (event) => {
+        try {
+          listener?.(event);
+        } finally {
+          recovery.onEvent(event);
+        }
+      },
+      {
+        compactionTimeoutMs: timeoutMs,
+        compactionMaxAttempts: retrySettings.enabled ? retrySettings.maxRetries + 1 : 1,
+        ...(options.onListenerError ? { onListenerError: options.onListenerError } : {}),
+      }
+    );
+    recovery.bind(subscription);
     return {
       warnings: [...created.warnings, ...(magic?.warnings ?? [])],
-      subscribe: (listener) => {
-        const subscription = subscribeNormalized(
-          session,
-          listener,
-          options.onListenerError ? { onListenerError: options.onListenerError } : {}
-        );
-        const emitWarning = (reason: MagicContextFallbackReason) =>
+      subscribe: (nextListener) => {
+        listener = nextListener;
+        recovery.publish();
+        const emitWarning = (reason: MagicContextFallbackReason) => {
+          recovery.fallback();
           subscription.emit({ type: 'warning', source: 'magic-context', reason });
+        };
         emitFallback = emitWarning;
         if (pendingFallback) {
           const reason = pendingFallback;
@@ -156,19 +189,14 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         return {
           unsubscribe: () => {
             if (emitFallback === emitWarning) emitFallback = undefined;
-            subscription.unsubscribe();
+            listener = undefined;
           },
           emit: subscription.emit,
         };
       },
-      prompt: (text, images) =>
-        session.prompt(text, {
-          streamingBehavior: 'followUp',
-          ...(images?.length ? { images: images.map(toImageContent) } : {}),
-        }),
-      steer: async (text, images) => {
-        await session.steer(text, images?.length ? images.map(toImageContent) : undefined);
-      },
+      prompt: (text, images) => recovery.prompt(text, images),
+      steer: (text, images) => recovery.prompt(text, images, true),
+      retryCompaction: () => recovery.retryCompaction(),
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
@@ -179,6 +207,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         setFastMode(next.fastMode === true);
         activeModel = resolved;
         options.onModelSelected?.(identity.sessionId, resolved);
+        recovery.publish();
       },
       setApprovalMode: (mode) => {
         if (!gate) throw new Error('this session has no approval gate to switch');
@@ -186,16 +215,21 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       },
       abort: () => {
         magic?.interrupt();
-        return session.abort();
+        return recovery.abort();
       },
-      isIdle: () => session.isIdle,
+      isIdle: () => recovery.isIdle(),
       suggestReply: ({ signal }) => suggestReply(session, activeModel, signal),
       dispose: async () => {
         // Invalidate before waiting for Pi: background historian/ctx work must
         // not publish while session_shutdown is draining.
         magic?.dispose();
-        if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
-        await created.dispose();
+        recovery.dispose();
+        try {
+          if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
+          await created.dispose();
+        } finally {
+          subscription.unsubscribe();
+        }
       },
     };
   };
@@ -223,11 +257,6 @@ function installFastMode(session: AgentSession, initial: boolean): (enabled: boo
 function withRoleThinking(model: ResolvedModelSpec, role: Role): ResolvedModelSpec {
   const thinking = model.thinking ?? role.model?.thinking;
   return thinking ? { ...model, thinking } : model;
-}
-
-/** 粘贴的图片 → pi 的 ImageContent（缩放、转 PNG 由 pi 的 prompt 自己做） */
-function toImageContent({ data, mimeType }: ChatImage): ImageContent {
-  return { type: 'image', data, mimeType };
 }
 
 /**

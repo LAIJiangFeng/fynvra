@@ -30,6 +30,100 @@ import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
 import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
 
+describe('context runtime snapshots and recovery', () => {
+  it('keeps grey reply suggestions valid across context metadata events', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'short');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 1,
+      event: { type: 'agent_settled', aborted: false, seq: 1 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+    const snapshot = {
+      configuredStrategy: 'native',
+      effectiveStrategy: 'native',
+      compactionTimeoutMs: 600000,
+      recoveryRequired: false,
+      pendingPromptCount: 0,
+      context: { tokens: 100, contextWindow: 272000, source: 'sdk' },
+    };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 2,
+      event: { type: 'context_runtime', snapshot, seq: 2 },
+    });
+    const result = env.host.suggestReply({ sessionId: session.id, roundId: 1 });
+    const command = env.sent('suggest-reply')[0];
+    expect(command?.type).toBe('suggest-reply');
+    if (command?.type !== 'suggest-reply') throw new Error('missing suggestion command');
+    env.worker().emit({ ...command, type: 'suggestion-result', text: 'Show the next step.' });
+    expect(await result).toMatchObject({
+      ok: true,
+      suggestion: { text: 'Show the next step.', roundId: 1 },
+    });
+  });
+  it('snapshots spawn policy, forwards ordered state, and accepts one explicit recovery without awaiting compaction', async () => {
+    let timeout = 30_000;
+    const env = setup({
+      resolveCompactionStrategy: () => 'magic-context',
+      resolveCompactionTimeoutMs: () => timeout,
+    });
+    const session = await createSession(env);
+    expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+    await env.host.prompt(session.id, 'first');
+    timeout = 60_000;
+    const spawn = env.sent('spawn-session')[0];
+    expect(spawn).toMatchObject({
+      spec: { compactionStrategy: 'magic-context', compactionTimeoutMs: 30_000 },
+    });
+    const identity = { sessionId: session.id, generation: 1 };
+    const snapshot = {
+      configuredStrategy: 'magic-context' as const,
+      effectiveStrategy: 'native' as const,
+      compactionTimeoutMs: 30_000,
+      recoveryRequired: true,
+      pendingPromptCount: 1,
+      context: { tokens: null, contextWindow: 272000, source: 'unknown' as const },
+    };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 1,
+      event: { type: 'context_runtime', snapshot, seq: 1 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'error' });
+    expect(env.host.get(session.id)).toMatchObject({
+      contextRuntime: snapshot,
+      contextRuntimeSeq: 1,
+    });
+    expect(await env.host.history(session.id)).toMatchObject({
+      contextRuntime: snapshot,
+      contextRuntimeSeq: 1,
+    });
+    expect(await env.host.prompt(session.id, 'must stay in UI')).toMatchObject({ ok: false });
+    expect(env.sent('prompt')).toHaveLength(1);
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
+    expect(env.sent('retry-compaction')).toHaveLength(1);
+    env.worker().emit({
+      type: 'session-event',
+      identity: { ...identity, generation: 0 },
+      seq: 10,
+      event: {
+        type: 'context_runtime',
+        snapshot: { ...snapshot, recoveryRequired: false },
+        seq: 10,
+      },
+    });
+    expect(env.host.get(session.id)?.contextRuntime?.recoveryRequired).toBe(true);
+  });
+});
+
 class FakeProcess implements WorkerProcess {
   sent: AgentCommand[] = [];
   #onMessage: ((message: unknown) => void) | undefined;
@@ -755,6 +849,7 @@ describe('createAgentHost sessions', () => {
         role: getBuiltinRole('worker'),
         cwd: env.workspace.repoPath,
         sessionFile: sessionFilePath(join(env.dir, 'agent'), session.id),
+        compactionTimeoutMs: 600_000,
         model: {
           providerId: RUNTIME_PROVIDER,
           api: 'anthropic-messages',
