@@ -109,6 +109,8 @@ export interface Task {
   model?: string;
   /** 派发时指定的思考档位；缺省按模型 / 角色 / 主 agent 的默认。 */
   thinking?: ThinkingLevel;
+  /** 派发的 Fast 请求（不是生效状态）：true 按协议支持开启，false 关闭继承，缺省保持原默认。 */
+  fastMode?: boolean;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
 }

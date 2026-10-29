@@ -463,6 +463,15 @@ function dispatchTaskSchema(roles: readonly RoleOption[]) {
             'Thinking level for the worker. Only set it when the user names one; omitted = the default of the model, role or your session.',
         })
       ),
+      fast: Type.Optional(
+        Type.Boolean({
+          description:
+            'Fast priority-service request for the worker. Only set it when the user explicitly asks to enable or disable Fast. ' +
+            'true = request Fast if the selected model protocol supports it; unsupported protocols ignore it and keep the same model. ' +
+            'false = disable inherited Fast; omitted = keep the model, role or session default. ' +
+            'Can be combined with model and thinking; does not guarantee provider acceleration.',
+        })
+      ),
     },
     { additionalProperties: false }
   );
@@ -499,6 +508,7 @@ function normalizeRole(value: unknown, roles: readonly RoleOption[]): unknown {
 function normalizeDispatchArgs(raw: unknown, roles: readonly RoleOption[]): ArgRecord {
   const args = asRecord(raw);
   const title = trimmed(pick(args, 'title'));
+  const fast = [args.fast, args.fast_mode, args.fastMode].find((value) => value !== undefined);
   return compact({
     title:
       typeof title === 'string' ? truncateHeadChars(oneLine(title), TITLE_MAX_CHARS).text : title,
@@ -509,6 +519,8 @@ function normalizeDispatchArgs(raw: unknown, roles: readonly RoleOption[]): ArgR
     thinking: normalizeThinking(
       pick(args, 'thinking', 'thinking_level', 'thinkingLevel', 'reasoning_effort')
     ),
+    // 保留 false；非法值包成对象，避免 pi 的 schema 校验把 "true" / 1 等强转 boolean。
+    fast: fast === undefined || typeof fast === 'boolean' ? fast : { invalidBoolean: fast },
   });
 }
 
@@ -552,6 +564,9 @@ function parseDispatchArgs(
   if (args.thinking !== undefined && thinking === undefined) {
     return { ok: false, error: `thinking must be one of ${THINKING_LEVELS.join(', ')}` };
   }
+  if (args.fast !== undefined && typeof args.fast !== 'boolean') {
+    return { ok: false, error: 'fast must be a boolean' };
+  }
   return {
     ok: true,
     value: {
@@ -561,6 +576,7 @@ function parseDispatchArgs(
       dependsOn: args.depends_on,
       ...(args.model !== undefined ? { model: args.model } : {}),
       ...(thinking !== undefined ? { thinking } : {}),
+      ...(args.fast !== undefined ? { fastMode: args.fast } : {}),
     },
   };
 }
@@ -671,11 +687,16 @@ function firstLine(text: string): string {
   return text.trim().split('\n', 1)[0] ?? '';
 }
 
-/** 派发时指定了模型或思考档位才显示 */
+/** 派发请求的模型 / 思考档位 / Fast；Task 不是实际生效的会话模型。 */
 function modelLines(task: Task): string[] {
-  if (task.model === undefined && task.thinking === undefined) return [];
+  if (task.model === undefined && task.thinking === undefined && task.fastMode === undefined)
+    return [];
   const thinking = task.thinking ? ` · thinking: ${task.thinking}` : '';
-  return [`- model: ${task.model ?? 'default'}${thinking}`];
+  const fast =
+    task.fastMode === undefined
+      ? ''
+      : ` · fast requested: ${task.fastMode ? 'true (auto-if-supported)' : 'false (disabled)'}`;
+  return [`- model: ${task.model ?? 'default'}${thinking}${fast}`];
 }
 
 function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
