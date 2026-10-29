@@ -303,6 +303,135 @@ describe('native compaction recovery with the installed SDK and an offline provi
     expect(restored.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
   });
 
+  it('keeps durable recovery when unloaded immediately after summary commit, before input resumption', async () => {
+    const env = await setup();
+    env.faux.setResponses([
+      fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'summary unavailable' }),
+    ]);
+    await env.recovery.prompt('original before resume');
+    env.faux.setResponses([fauxAssistantMessage('committed summary')]);
+    const unsubscribe = env.session.subscribe((event) => {
+      if (event.type === 'compaction_end' && event.result && !event.aborted) env.recovery.dispose();
+    });
+    await env.recovery.retryCompaction();
+    unsubscribe();
+    expect(env.manager.getEntries().filter((entry) => entry.type === 'compaction')).toHaveLength(1);
+    const restored = await env.reopen();
+    expect(restored.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 0 });
+    const compact = vi.spyOn(restored.session, 'compact');
+    env.faux.setResponses([fauxAssistantMessage('resumed after reload')]);
+    await restored.recovery.retryCompaction();
+    expect(compact).not.toHaveBeenCalled();
+    expect(
+      restored.manager.getEntries().filter((entry) => entry.type === 'compaction')
+    ).toHaveLength(1);
+    const history = projectHistory(await readFile(join(env.dir, 'session.jsonl'), 'utf8'), 's1');
+    expect(
+      history.filter(
+        (message) => message.role === 'user' && message.text === 'original before resume'
+      )
+    ).toHaveLength(1);
+    expect(restored.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
+  });
+
+  it.each([false, true])(
+    'persists the recovery gate through resumed provider work and reloads without duplicate users (held input: %s)',
+    async (held) => {
+      const env = await setup();
+      env.faux.setResponses([
+        fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'summary unavailable' }),
+      ]);
+      await env.recovery.prompt('original resumed input');
+      if (held) await env.recovery.prompt('held resumed input');
+      const entered = Promise.withResolvers<void>();
+      const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+      env.faux.setResponses([
+        fauxAssistantMessage('committed summary'),
+        () => {
+          entered.resolve();
+          return late.promise;
+        },
+      ]);
+      const attempt = env.recovery.retryCompaction().catch(() => undefined);
+      await entered.promise;
+      const committed = env.manager.getEntries().findLast((entry) => entry.type === 'compaction');
+      expect(committed).toBeDefined();
+      const checkpoint = env.manager
+        .getEntries()
+        .findLast(
+          (entry) => entry.type === 'custom' && entry.customType === 'fynvra-context-recovery'
+        );
+      expect(checkpoint).toMatchObject({
+        data: { blocked: true, resume: true, resumeCompactionId: committed?.id, pending: [] },
+      });
+      const reopening = env.reopen();
+      late.resolve(fauxAssistantMessage('late interrupted answer'));
+      await attempt;
+      const restored = await reopening;
+      expect(restored.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 0 });
+      const compact = vi.spyOn(restored.session, 'compact');
+      env.faux.setResponses([fauxAssistantMessage('finished after reload')]);
+      await restored.recovery.retryCompaction();
+      expect(compact).not.toHaveBeenCalled();
+      expect(
+        restored.manager.getEntries().filter((entry) => entry.type === 'compaction')
+      ).toHaveLength(1);
+      const history = projectHistory(await readFile(join(env.dir, 'session.jsonl'), 'utf8'), 's1');
+      expect(
+        history.filter(
+          (message) => message.role === 'user' && message.text === 'original resumed input'
+        )
+      ).toHaveLength(1);
+      expect(
+        history.filter(
+          (message) => message.role === 'user' && message.text === 'held resumed input'
+        )
+      ).toHaveLength(held ? 1 : 0);
+      expect(restored.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
+      expect(
+        restored.manager
+          .getEntries()
+          .findLast(
+            (entry) => entry.type === 'custom' && entry.customType === 'fynvra-context-recovery'
+          )
+      ).toMatchObject({ data: { blocked: false, resume: false, pending: [] } });
+    }
+  );
+
+  it('Stop after compaction keeps the interrupted resumption available for a later explicit retry', async () => {
+    const env = await setup();
+    env.faux.setResponses([
+      fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'summary unavailable' }),
+    ]);
+    await env.recovery.prompt('stopped resumed input');
+    const entered = Promise.withResolvers<void>();
+    const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    env.faux.setResponses([
+      fauxAssistantMessage('committed summary'),
+      () => {
+        entered.resolve();
+        return late.promise;
+      },
+    ]);
+    const attempt = env.recovery.retryCompaction().catch(() => undefined);
+    await entered.promise;
+    const stopped = env.recovery.abort();
+    late.resolve(fauxAssistantMessage('late interrupted answer'));
+    await Promise.all([attempt, stopped]);
+    expect(env.latest().recoveryRequired).toBe(true);
+    env.faux.setResponses([fauxAssistantMessage('explicitly resumed')]);
+    const compact = vi.spyOn(env.session, 'compact');
+    await env.recovery.retryCompaction();
+    expect(compact).not.toHaveBeenCalled();
+    const history = projectHistory(await readFile(join(env.dir, 'session.jsonl'), 'utf8'), 's1');
+    expect(
+      history.filter(
+        (message) => message.role === 'user' && message.text === 'stopped resumed input'
+      )
+    ).toHaveLength(1);
+    expect(env.latest().recoveryRequired).toBe(false);
+  });
+
   it('handles Stop in the public compact allocation gap without committing or reviving the turn', async () => {
     const env = await setup();
     env.faux.setResponses([
