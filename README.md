@@ -121,6 +121,10 @@ The following developer guides are currently written in Chinese:
 
 Package guides: [Core domain](packages/core/README.md) · [Agent runtime](packages/agent-runtime/README.md).
 
+## Links
+
+- [Linux DO](https://linux.do/)
+
 ## License
 
 Fynvra is open source under [Apache-2.0](LICENSE). Third-party dependencies follow their respective licenses.
