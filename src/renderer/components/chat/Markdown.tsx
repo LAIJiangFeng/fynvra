@@ -116,6 +116,7 @@ export const Markdown = memo(function Markdown({
   className,
   rehypePlugins,
   components,
+  urlTransform,
 }: {
   text: string;
   streaming?: boolean;
@@ -123,6 +124,8 @@ export const Markdown = memo(function Markdown({
   /** 文件预览显式提供 raw → sanitize；聊天保持默认解析行为。 */
   rehypePlugins?: Options['rehypePlugins'];
   components?: Components;
+  /** 聊天链接可保留原值给受控组件，DOM URL 仍须过滤。 */
+  urlTransform?: Options['urlTransform'];
 }) {
   const renderers = useMemo(
     () => ({ ...(streaming ? STREAMING_COMPONENTS : STATIC_COMPONENTS), ...components }),
@@ -134,6 +137,7 @@ export const Markdown = memo(function Markdown({
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
         components={renderers}
+        urlTransform={urlTransform}
       >
         {text}
       </ReactMarkdown>

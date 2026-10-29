@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   reveal: vi.fn(),
   copy: vi.fn(),
+  openHtml: vi.fn(),
 }));
 vi.mock('electron', () => ({
   ipcMain: {
@@ -36,6 +37,7 @@ describe('文件 IPC', () => {
     ['remove', IPC_CHANNELS.FILES_DELETE],
     ['reveal', IPC_CHANNELS.FILES_REVEAL],
     ['copy', IPC_CHANNELS.FILES_COPY],
+    ['openHtml', IPC_CHANNELS.FILES_OPEN_HTML],
   ] as const)(
     '%s：真实 preload 载荷是第二个参数，不把 IPC 事件当作请求',
     async (method, channel) => {
@@ -50,6 +52,8 @@ describe('文件 IPC', () => {
         null,
         { ...input, entryId: '../outside' },
         { ...input, path: '/secret' },
+        { ...input, url: 'file:///secret.html' },
+        { ...input, args: ['--execute'] },
       ]) {
         expect(await invoke(channel, raw)).toEqual({ ok: false, error: 'invalidRequest' });
       }

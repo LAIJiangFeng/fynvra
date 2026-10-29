@@ -17,6 +17,7 @@ export type FileError =
   | 'notDirectory'
   | 'notFile'
   | 'notText'
+  | 'notHtml'
   | 'tooLarge'
   | 'conflict'
   | 'unavailable'
@@ -65,7 +66,7 @@ export interface RenameEntryRequest {
   name: string;
 }
 
-/** 指向文件或目录的条目引用（删除 / 显示 / 复制 / 解析路径）。 */
+/** 指向文件或目录的条目引用（删除 / 显示 / 复制 / 解析路径 / 在浏览器打开 HTML）。 */
 export interface EntryRefRequest {
   workspaceId: string;
   entryId: string;

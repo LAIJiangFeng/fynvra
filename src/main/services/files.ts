@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { type BigIntStats, constants } from 'node:fs';
 import { copyFile, lstat, mkdir, open, opendir, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   type CreateEntryRequest,
   type DirectoryRequest,
@@ -152,12 +153,17 @@ export interface FilesShell {
   copyFiles(paths: string[]): void;
   /** 移到系统回收站；不直接抹除。 */
   trash(path: string): Promise<void>;
+  /** 仅供 openHtml 在真实路径、文件类型及扩展名校验后调用。 */
+  openExternal(url: string): Promise<void>;
 }
 
 const noopShell: FilesShell = {
   reveal: () => undefined,
   copyFiles: () => undefined,
   trash: async () => undefined,
+  openExternal: async () => {
+    throw new FileAccessError('unavailable');
+  },
 };
 
 export function createFilesService({
@@ -453,6 +459,29 @@ export function createFilesService({
     }
   }
 
+  async function openHtml(raw: unknown): Promise<MutationResult> {
+    const input = parseEntryRefRequest(raw);
+    if (!input) return { ok: false, error: 'invalidRequest' };
+    try {
+      const files = await workspace(input.workspaceId);
+      const entry = find(files, input.entryId);
+      if (entry.kind !== 'file') throw new FileAccessError('notFile');
+      if (!/\.html?$/i.test(entry.name)) throw new FileAccessError('notHtml');
+      const path = await checkedPath(files.root, entry.relativePath);
+      if (!(await lstat(path)).isFile()) throw new FileAccessError('notFile');
+      if (!/\.html?$/i.test(path)) throw new FileAccessError('notHtml');
+      const url = pathToFileURL(path);
+      // 不把网络共享路径或 Renderer 提供的 URL 交给系统协议处理器。
+      if (url.hostname) throw new FileAccessError('outsideWorkspace');
+      if ((await checkedPath(files.root, entry.relativePath)) !== path)
+        throw new FileAccessError('conflict');
+      await shell.openExternal(url.href);
+      return { ok: true };
+    } catch (error) {
+      return failure(error);
+    }
+  }
+
   return {
     /** Main-only persistence adapter. Renderer cannot submit a relative path here. */
     async describeEntry(workspaceId: string, fileId: string): Promise<WorkspaceFileEntry> {
@@ -552,5 +581,6 @@ export function createFilesService({
     reveal,
     copy,
     resolve,
+    openHtml,
   };
 }

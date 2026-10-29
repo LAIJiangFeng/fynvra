@@ -191,6 +191,7 @@ export const en: MessagesShape<typeof zhCN> = {
       notDirectory: 'This entry is not a browsable folder',
       notFile: 'This entry is not a previewable file',
       notText: 'This file is not editable UTF-8 text',
+      notHtml: 'Only .html or .htm files can be opened in the browser',
       tooLarge: 'Content exceeds the 256 KiB limit. Reduce the text and retry',
       conflict:
         'The file changed on disk and was not overwritten. Your draft is kept. Copy the changes you need before reloading from disk',
@@ -272,6 +273,16 @@ export const en: MessagesShape<typeof zhCN> = {
     copy: 'Copy',
     copied: 'Copied',
     copyReply: 'Copy reply',
+    fileLinks: {
+      opening: 'Opening file…',
+      invalidLink: 'Cannot open this link: invalid path or unsupported protocol',
+      unsupportedRoot:
+        'This link belongs to an unregistered session directory or worker worktree. It cannot be opened safely; a same-named file in the main workspace will not be substituted',
+      unsupportedParameters:
+        'Local file links do not support queries or # anchors yet. Use a file link without parameters',
+      sessionUnavailable:
+        'The session for this message was not found. Reopen the session and retry',
+    },
     copyCode: 'Copy code',
     thinking: 'Thinking…',
     thoughts: 'Thoughts',
