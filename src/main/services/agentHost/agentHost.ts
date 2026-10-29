@@ -8,6 +8,7 @@ import type {
   ThinkingLevel,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
+import { supportsFastMode } from '@shared/modelFast';
 import type {
   AgentApprovalRequest,
   AgentCommand,
@@ -1272,8 +1273,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (input.thinking !== undefined) {
         const supported = await checkThinking(resolved.ref, input.thinking);
         if (!supported.ok) return supported;
-        requested = { ...resolved.ref, thinking: input.thinking };
       }
+      // 模型落定后覆盖 Fast（包括没有角色 / 主会话模型的默认分支）；false 明确关闭继承。
+      // 只存协议允许的值，随后 buildSpec 从会话记录解析最终 spec，不支持时仍用同一模型。
+      const fastMode =
+        (input.fastMode ?? resolved.model.fastMode) === true && supportsFastMode(resolved.model.api);
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -1288,7 +1292,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
+        model: sessionModelOf(resolved.ref, input.thinking ?? requested?.thinking, fastMode),
         // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
         approvalMode:
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
