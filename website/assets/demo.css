@@ -1,9 +1,9 @@
 /* 首页与文档共用的产品界面演示样式（.fd-*）。
    场景结构与播放由 assets/home.js 共用的控制器驱动；文档侧容器只在 docs.css 里收紧。 */
 
-/* 演示内的通用图标尺寸；页面级 .i（首页 hero / 导航图标）仍由各自样式提供。 */
-.fd-app .i,
-.fd-scene-switch .i {
+/* 演示内的通用图标尺寸；用 :where() 保持 .i 本身的一层权重，
+   .fd-tool-icon 之类单 class 专属规则仍能覆盖。页面级 .i（首页 hero / 导航）由各自样式提供。 */
+:where(.fd-app, .fd-scene-switch) .i {
   width: 18px;
   height: 18px;
   flex: none;

@@ -360,8 +360,9 @@
           applyPhase(state.phase + 1);
           return;
         }
-        const nextScene = scenes[config.next];
-        if (nextScene && nextScene !== api) selectScene(config.next);
+        // 切场景的回调由 initDemo 在激活前挂到 host 上：createScene 不引用它的词法作用域。
+        const nextScene = host.scenes[config.next];
+        if (nextScene && nextScene !== api) host.selectScene(config.next);
         else activate();
       }, delay);
     }
@@ -594,6 +595,9 @@
       moveScenePill();
       next.activate();
     }
+
+    // 供 createScene 的阶段计时器调用，保持每个容器自己的切场景实现。
+    host.selectScene = selectScene;
 
     for (const button of sceneButtons) {
       button.addEventListener('click', () => selectScene(button.dataset.sceneBtn, true));

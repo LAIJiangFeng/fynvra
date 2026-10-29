@@ -1366,7 +1366,7 @@ html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
   max-height: none;
 }
 
-/* 正文的段落/列表间距不进入演示内部（首页没有这些 prose 规则）。 */
+/* 正文的段落/列表/强调样式不进入演示内部（首页没有这些 prose 规则）。 */
 .docs-article.prose .docs-demo p + p {
   margin-top: 5px;
 }
@@ -1375,10 +1375,20 @@ html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
   margin-top: 0;
 }
 
+/* 审查结果里的 Issues / Suggestions 用演示自己的文字色，不套文档正文色。 */
+.docs-article.prose .docs-demo strong {
+  color: inherit;
+}
+
 .docs-demo-actions {
-  display: flex;
+  display: none;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+/* 只在控制器接管后出现重播按钮；无 JS 时保留静态演示，不留点不动的按钮。 */
+.docs-demo[data-enhanced="true"] .docs-demo-actions {
+  display: flex;
 }
 
 .docs-demo-replay {
