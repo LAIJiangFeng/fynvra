@@ -5,6 +5,7 @@ import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
 import { ModelRuntime, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { Role } from '@fynvra/core';
 import { type AgentCommand, parseAgentCommand } from '@shared/types/agent';
+import type { SessionEventEnvelope } from '@shared/types/chat';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createPiSessionFactory } from '../../../agent/piSession';
 import { projectHistory, sessionFilePath } from '../sessions/history';
@@ -82,6 +83,8 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
     await host.shutdown(1000);
     await Promise.all(workers.map((worker) => worker.supervisor.shutdown()));
   });
+  const events: SessionEventEnvelope[] = [];
+  host.observe({ event: (event) => events.push(event) });
   host.start();
   const created = await host.create({ workspaceId: 'ws1', roleId: 'worker' });
   if (!created.ok) throw new Error(created.error);
@@ -122,7 +125,7 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
     faux.setResponses(
       Array.from({ length: 5 }, () => fauxAssistantMessage('valid summary or answer'))
     );
-  return { host, id, file, faux, workers, commands, recovered, users, validResponses };
+  return { host, id, file, faux, workers, commands, events, recovered, users, validResponses };
 }
 
 it('reloads the original checkpoint after worker exit using only explicit recovery, without resending either input', async () => {
@@ -138,10 +141,28 @@ it('reloads the original checkpoint after worker exit using only explicit recove
   await first.supervisor.shutdown();
   first.kill();
   expect(env.host.get(env.id)?.contextRuntime).toBeUndefined();
+  const priorEventCount = env.events.length;
+  const priorSeq = env.events.at(-1)?.event.seq ?? 0;
   env.validResponses();
   expect(await env.host.retryCompaction(env.id)).toEqual({ ok: true });
   await env.recovered();
   expect(env.workers).toHaveLength(2);
+  const spawns = env.commands.filter((command) => command.type === 'spawn-session');
+  expect(spawns.map((command) => command.identity)).toEqual([
+    { sessionId: env.id, generation: 1 },
+    { sessionId: env.id, generation: 2 },
+  ]);
+  const operations = env.events.flatMap(({ event }) =>
+    event.type === 'compaction' ? [event.state.operationId] : []
+  );
+  expect(new Set(operations).size).toBe(2);
+  const seqs = env.events.map(({ event }) => event.seq);
+  expect(new Set(seqs).size).toBe(seqs.length);
+  expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  expect(env.events[priorEventCount]?.event.seq).toBeGreaterThan(priorSeq);
+  expect(env.host.get(env.id)?.contextRuntimeSeq).toBe(
+    env.events.findLast(({ event }) => event.type === 'context_runtime')?.event.seq
+  );
   expect(env.commands.filter((command) => command.type === 'prompt')).toHaveLength(0);
   const users = await env.users();
   expect(users.filter((text) => text === 'already written input')).toHaveLength(1);

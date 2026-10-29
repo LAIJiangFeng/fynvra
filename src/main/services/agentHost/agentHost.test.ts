@@ -291,9 +291,7 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe('explicit abandoned-worker error cleanup', () => {
-  function launcher(env: ReturnType<typeof setup>): {
-    disposeSession(sessionId: string, options?: { clearError?: boolean }): Promise<void>;
-  } {
+  function launcher(env: ReturnType<typeof setup>) {
     return env.host.implementsLauncher();
   }
 
