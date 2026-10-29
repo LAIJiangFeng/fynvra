@@ -1,12 +1,11 @@
 import {
   MAX_UI_TABS,
   parseWorkspaceUi,
-  workspaceTabKey,
   type SavedWorkspaceTab,
   type WorkspaceUiSnapshot,
+  workspaceTabKey,
 } from '@shared/types/workspaceUi';
 import { create } from 'zustand';
-import { setWorkspaceTabAdmission } from './workspaceTabPolicy';
 import { translate } from '../i18n';
 import { bindDiffTabSelection, diffTabsStoreFor } from './diffTabs';
 import { filesStoreFor, hasUnsavedFiles, isFileDirty } from './files';
@@ -20,6 +19,7 @@ import {
   terminalNextNumber,
   useTerminalsStore,
 } from './terminals';
+import { setWorkspaceTabAdmission } from './workspaceTabPolicy';
 
 interface TabUi {
   order: string[];
@@ -51,13 +51,14 @@ function updateView(id: string, change: Partial<TabUi>) {
     views: {
       ...state.views,
       [id]: {
-        order: ['chat'],
-        active: 'chat',
-        ready: false,
-        error: null,
-        warning: null,
-        sessionId: null,
-        ...state.views[id],
+        ...(state.views[id] ?? {
+          order: ['chat'],
+          active: 'chat',
+          ready: false,
+          error: null,
+          warning: null,
+          sessionId: null,
+        }),
         ...change,
       },
     },

@@ -2,9 +2,9 @@ import { errorMessage } from '@shared/guards';
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import { create } from 'zustand';
 import type { OpenWithTarget, WorkspaceCopyKind } from '../../preload/domains/workspaces';
+import { translate } from '../i18n';
 import { filesStoreFor } from './files';
 import { forgetWorkspaceTabs } from './workspaceTabs';
-import { translate } from '../i18n';
 
 /** 需要用户确认的提示（如挂入被拒绝的原因），由 NoticeDialog 展示。 */
 export interface Notice {

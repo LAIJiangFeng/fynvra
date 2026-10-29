@@ -1277,7 +1277,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // 模型落定后覆盖 Fast（包括没有角色 / 主会话模型的默认分支）；false 明确关闭继承。
       // 只存协议允许的值，随后 buildSpec 从会话记录解析最终 spec，不支持时仍用同一模型。
       const fastMode =
-        (input.fastMode ?? resolved.model.fastMode) === true && supportsFastMode(resolved.model.api);
+        (input.fastMode ?? resolved.model.fastMode) === true &&
+        supportsFastMode(resolved.model.api);
       const time = now();
       const stored: StoredSession = {
         id: newId(),

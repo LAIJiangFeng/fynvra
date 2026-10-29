@@ -1,8 +1,8 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { TerminalEvent } from '@shared/types/terminal';
-import { MAX_UI_TABS } from '@shared/types/workspaceUi';
 import { parseWorkspaceId } from '@shared/types/workspace';
+import { MAX_UI_TABS } from '@shared/types/workspaceUi';
 import { app, ipcMain, type WebContents } from 'electron';
 import type { IPty } from 'node-pty';
 import { translate } from '../i18n';

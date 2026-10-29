@@ -1,7 +1,7 @@
 import { create, type StoreApi } from 'zustand';
 import type { DiffFileStatus } from '../components/orchestration/diff';
-import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 import type { FilesStore } from './files';
+import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 
 export type DiffSection = 'committed' | 'uncommitted';
 export type DiffSource =

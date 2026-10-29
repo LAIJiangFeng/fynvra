@@ -10,8 +10,8 @@ import type { SavedFileTab } from '@shared/types/workspaceUi';
 import { create } from 'zustand';
 import type { FilesApi } from '../../preload/domains/files';
 import { createMarkdownReferences, type MarkdownReferences } from '../lib/markdownPreview';
-import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 import { diffTabsStoreFor } from './diffTabs';
+import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 
 export const ROOT_DIRECTORY_ID = 'root';
 type FilesViewError = FileError | 'restartRequired';

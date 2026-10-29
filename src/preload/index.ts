@@ -13,8 +13,8 @@ import { createSkillsApi } from './domains/skills';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
-import { createWorkspaceUiApi } from './domains/workspaceUi';
 import { createWorkspacesApi } from './domains/workspaces';
+import { createWorkspaceUiApi } from './domains/workspaceUi';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */

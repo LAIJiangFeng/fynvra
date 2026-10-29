@@ -33,8 +33,8 @@ import {
   useWorkspaceTabsStore,
   workspaceTabLimitReached,
 } from '@/stores/workspaceTabs';
-import { WorkspaceTab, WorkspaceTabStrip } from './WorkspaceTabStrip';
 import { FilePane } from './FilePane';
+import { WorkspaceTab, WorkspaceTabStrip } from './WorkspaceTabStrip';
 
 /** 中央标签与对话共用空间，切换时不卸载对话或已打开的编辑器。 */
 export function FileWorkspace({
