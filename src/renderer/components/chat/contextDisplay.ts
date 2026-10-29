@@ -1,6 +1,6 @@
 import type { CompactionState, ContextRuntimeSnapshot } from '@fynvra/core';
 import type { CompactionStrategy } from '@shared/types/settings';
-import type { T } from '@/i18n';
+import type { T } from '../../i18n';
 import { formatTokens } from './format';
 
 export function compactionFailure(state: CompactionState | undefined, t: T): string | undefined {

@@ -13,9 +13,9 @@ import {
   type WorktreesUsage,
 } from '@shared/types/settings';
 import { create } from 'zustand';
-import { translate } from '@/i18n';
-import { KEY_PLATFORM } from '@/lib/keybindings/platform';
-import { createKeybindingsStore } from '@/lib/keybindings/store';
+import { translate } from '../i18n';
+import { KEY_PLATFORM } from '../lib/keybindings/platform';
+import { createKeybindingsStore } from '../lib/keybindings/store';
 import { createNotificationSettingsStore } from './createNotificationSettingsStore';
 import { createSettingsStore } from './createSettingsStore';
 

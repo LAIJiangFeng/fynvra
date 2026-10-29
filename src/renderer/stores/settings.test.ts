@@ -1,9 +1,9 @@
 import type { Preferences, PreferencesResult } from '@shared/types/settings';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-async function setup(initial: Preferences = {}) {
+async function setup(initial: Partial<Preferences> = {}) {
   vi.resetModules();
-  let preferences = initial;
+  let preferences: Preferences = { theme: 'system', sidePanelOpen: true, ...initial };
   const get = vi.fn(async (): Promise<PreferencesResult> => ({ ok: true, preferences }));
   const update = vi.fn(async (patch: Partial<Preferences>): Promise<PreferencesResult> => {
     preferences = { ...preferences, ...patch };
@@ -54,7 +54,12 @@ describe('general compaction preferences', () => {
     await store.getState().update({ compactionTimeoutMs: 1_800_000, compactionStrategy: 'off' });
     finish({
       ok: true,
-      preferences: { compactionTimeoutMs: 600_000, compactionStrategy: 'native' },
+      preferences: {
+        theme: 'system',
+        sidePanelOpen: true,
+        compactionTimeoutMs: 600_000,
+        compactionStrategy: 'native',
+      },
     });
     await loading;
     expect(store.getState().compactionTimeoutMs).toBe(1_800_000);
