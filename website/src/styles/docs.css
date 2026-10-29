@@ -78,12 +78,59 @@
   background: var(--sl-color-bg-sidebar);
 }
 
-.docs-prompt-label {
+.docs-prompt-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--sl-color-hairline-light);
+}
+
+.docs-prompt-label {
   color: var(--sl-color-gray-2);
   font-family: var(--__sl-font-mono);
   font-size: var(--sl-text-xs);
+}
+
+.docs-prompt-copy {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 0.25rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  font-size: var(--sl-text-xs);
+  cursor: pointer;
+}
+
+.docs-prompt-copy[hidden] {
+  display: none;
+}
+
+.docs-prompt-copy:hover {
+  border-color: var(--sl-color-accent);
+}
+
+.docs-prompt-copy:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.docs-prompt-copy:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.sl-markdown-content .docs-prompt-status {
+  margin: 0;
+  color: var(--sl-color-text);
+  font-size: var(--sl-text-sm);
+}
+
+.docs-prompt-status:not(:empty) {
+  padding: 0 1rem 0.75rem;
 }
 
 .sl-markdown-content .docs-prompt pre {
