@@ -1,5 +1,5 @@
-// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型 / 输入排队）。
-// 三个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
+// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型 / 输入排队 / 角色对话）。
+// 四个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
 (() => {
   const root = document.querySelector('[data-demo]');
   if (!root) return;
@@ -28,6 +28,17 @@
     second: {
       zh: '再补一份使用说明。',
       en: 'Then add a short usage guide.',
+    },
+  };
+  // 角色场景在两个独立会话里分别向 Worker 和自定义审查员直接提需求。
+  const roleText = {
+    worker: {
+      zh: '为设置页增加侧栏折叠。',
+      en: 'Add sidebar collapse to the settings page.',
+    },
+    review: {
+      zh: '检查当前改动，只列问题与建议，不修改文件。',
+      en: 'Review the current diff. List issues and suggestions only — do not edit files.',
     },
   };
 
@@ -120,6 +131,56 @@
     if (panelTasks) panelTasks.hidden = !showTasks;
     for (const tab of element.querySelectorAll('[data-panel-tab]')) {
       tab.classList.toggle('is-active', (tab.dataset.panelTab === 'tasks') === showTasks);
+    }
+  }
+
+  function renderRoleScene(element, phase) {
+    // 0/4 打开新建会话：0 选 Worker，4 选自定义审查员；5 之后切到审查会话。
+    const picked = phase === 0 ? 'worker' : phase === 4 ? 'review' : '';
+    const modal = element.querySelector('[data-newsession]');
+    if (modal) modal.hidden = !picked;
+    for (const option of element.querySelectorAll('[data-role-option]')) {
+      option.classList.toggle('is-picked', option.dataset.roleOption === picked);
+    }
+
+    const workerLive = phase >= 1 && phase < 5;
+    const reviewLive = phase >= 5;
+    const running = phase === 2 || phase === 5;
+    const activeRole = workerLive ? 'worker' : reviewLive ? 'review' : '';
+
+    const sessionWorker = element.querySelector('[data-session="role-worker"]');
+    const sessionReview = element.querySelector('[data-session="role-review"]');
+    sessionWorker?.classList.toggle('is-active', workerLive);
+    sessionWorker?.classList.toggle('is-idle', !workerLive);
+    sessionReview?.classList.toggle('is-active', reviewLive);
+    sessionReview?.classList.toggle('is-idle', !reviewLive);
+
+    const head = element.querySelector('[data-role-head]');
+    head?.classList.toggle('is-idle', !activeRole || phase === 1);
+    if (head) head.dataset.state = !activeRole ? 'idle' : running ? 'run' : 'done';
+    for (const title of element.querySelectorAll('[data-role-title]')) {
+      title.hidden = title.dataset.roleTitle !== activeRole;
+    }
+    for (const chip of element.querySelectorAll('[data-role-chip]')) {
+      chip.hidden = chip.dataset.roleChip !== activeRole;
+    }
+
+    // 两个角色会话各自成段：审查阶段只显示审查会话，重播时不残留上一段消息。
+    const workerChat = element.querySelector('[data-role-chat="worker"]');
+    const reviewChat = element.querySelector('[data-role-chat="review"]');
+    if (workerChat) workerChat.hidden = phase === 0 || phase >= 5;
+    if (reviewChat) reviewChat.hidden = phase < 5;
+    const reviewEmpty = element.querySelector('[data-role-empty]');
+    if (reviewEmpty) reviewEmpty.hidden = phase !== 5;
+
+    const reviewMode = phase >= 5;
+    for (const placeholder of element.querySelectorAll('[data-role-placeholder]')) {
+      placeholder.hidden = (placeholder.dataset.rolePlaceholder === 'review') !== reviewMode;
+    }
+
+    for (const card of element.querySelectorAll('[data-role-card]')) {
+      const isActive = card.dataset.roleCard === activeRole;
+      card.dataset.state = isActive ? (running ? 'run' : 'done') : 'idle';
     }
   }
 
@@ -275,7 +336,7 @@
       state.autoTimer = window.setTimeout(() => {
         state.autoTimer = 0;
         if (!shouldRun()) return;
-        // 最后一个阶段的结果停留结束后让位给下一个场景，三个场景按顺序无限循环。
+        // 最后一个阶段的结果停留结束后让位给下一个场景，四个场景按顺序无限循环。
         if (state.phase === LAST) selectScene(config.next);
         else applyPhase(state.phase + 1);
       }, delay);
@@ -389,11 +450,26 @@
       { phase: 2, text: (lang) => queueText.second[lang] },
     ],
     hotPhases: [0, 2],
-    next: 'collab',
+    next: 'roles',
     render: renderQueueScene,
   });
 
-  const scenes = { collab, model, queue: queueScene };
+  const roleScene = createScene('roles', root.querySelector('[data-scene="roles"]'), {
+    // 0/4 新建会话选角色；2/5 直接向该会话输入；3/6/7 保留该角色的回复结果。
+    durations: [2400, 1600, 0, 2800, 2400, 0, 3400, 0],
+    // 减少动画时停在审查员的只读审查结果，两个会话和自定义标记仍然可见。
+    staticPhase: 7,
+    typing: [
+      { phase: 2, text: (lang) => roleText.worker[lang] },
+      { phase: 5, text: (lang) => roleText.review[lang] },
+    ],
+    hotPhases: [2, 5],
+    emptyUntil: 3,
+    next: 'collab',
+    render: renderRoleScene,
+  });
+
+  const scenes = { collab, model, queue: queueScene, roles: roleScene };
   const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
   const sceneSwitch = root.querySelector('.fd-scene-switch');
 
