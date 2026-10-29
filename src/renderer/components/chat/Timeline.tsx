@@ -1,3 +1,4 @@
+import type { SessionStatus } from '@shared/types/chat';
 import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare, TriangleAlert } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Components, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
@@ -22,9 +23,7 @@ import { useGeneralPreferencesStore } from '@/stores/settings';
 import { MessageItem } from './MessageItem';
 
 interface TimelineContext {
-  busy: boolean;
-  /** 最后一条 assistant 正在流式输出正文 */
-  streaming: boolean;
+  status: SessionStatus;
   error: string | undefined;
 }
 
@@ -34,14 +33,20 @@ const COMPONENTS: Components<TimelineRow, TimelineContext> = {
   Footer: ({ context }) => <TimelineFooter {...context} />,
 };
 
-function TimelineFooter({ busy, streaming, error }: TimelineContext) {
+function TimelineFooter({ status, error }: TimelineContext) {
   const t = useT();
   return (
     <div className="mx-auto max-w-3xl px-6 pb-6">
-      {busy && !streaming && (
-        <div className="flex items-center gap-2 py-2 text-muted-foreground text-xs">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          {t('chat.working')}
+      {(status === 'running' || status === 'waiting-approval') && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 py-2 text-muted-foreground text-xs"
+        >
+          {status === 'running' && (
+            <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
+          )}
+          {t(status === 'running' ? 'chat.working' : 'sessions.status.waiting-approval')}
         </div>
       )}
       {error && (
@@ -90,8 +95,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
 
   const last = messages.at(-1);
   const busy = isBusy(status);
-  const streaming = Boolean(last?.role === 'assistant' && last.streaming && last.text);
-  const context = useMemo(() => ({ busy, streaming, error }), [busy, streaming, error]);
+  const context = useMemo(() => ({ status, error }), [status, error]);
   // 最后一条提问之后的行是正在跑的这一轮：文件修改卡片按设置自动展开
   const liveFrom = useMemo(() => rows.findLastIndex((row) => row.kind === 'user'), [rows]);
 
@@ -126,7 +130,7 @@ export function Timeline({ sessionId }: { sessionId: string }) {
     });
   }, []);
 
-  // 最后一条消息在长高（流式正文、思考、工具状态）：跟随时贴底。
+  // 最后一条消息长高（流式正文、思考、工具状态）或页脚状态变化：跟随时贴底。
   // 布局阶段调用，赶在 Virtuoso 量到新高度之前登记
   const growth = last
     ? [
@@ -137,8 +141,10 @@ export function Timeline({ sessionId }: { sessionId: string }) {
       ].join(':')
     : '';
   useLayoutEffect(() => {
-    if (growth && follow.current) virtuoso.current?.autoscrollToBottom();
-  }, [growth]);
+    if ((growth || status === 'running' || status === 'waiting-approval') && follow.current) {
+      virtuoso.current?.autoscrollToBottom();
+    }
+  }, [growth, status]);
 
   // 折叠历史轮次时发了新消息：之前的轮次折起来，回到底部看新的一轮
   const sentId = foldHistoryTurns && last?.role === 'user' ? last.id : undefined;
