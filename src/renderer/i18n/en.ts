@@ -3,7 +3,17 @@ import type { zhCN } from './zh-CN';
 
 /** 界面文案（English）：与 ./zh-CN.ts 同形，同样极简 */
 export const en: MessagesShape<typeof zhCN> = {
+  workspaceTabs: {
+    drag: 'Drag to reorder tabs',
+    failed: 'Could not save or restore tabs. Keep this window open and retry.',
+    limits:
+      'Tab storage limit reached (64 tabs; drafts up to 256 KiB). Close tabs or reduce the draft; no text was truncated.',
+    corrupt: 'A damaged tab snapshot was set aside. The original file is retained in workspace-ui.',
+    removeDrafts:
+      'Remove this workspace and its saved tabs and unsaved drafts? Files on disk will be kept.',
+  },
   terminals: {
+    restored: 'History restored · New terminal session',
     copy: 'Copy',
     paste: 'Paste',
     selectAll: 'Select all',

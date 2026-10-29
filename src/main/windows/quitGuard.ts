@@ -4,6 +4,7 @@ export function createQuitGuard({
   shutdown,
   quit,
   completeQuit = quit,
+  prepare,
   mac,
 }: {
   windows(): { close(): void }[];
@@ -11,17 +12,40 @@ export function createQuitGuard({
   quit(): void;
   /** 服务收尾完成后的最终动作；更新安装只能放在这里。 */
   completeQuit?(): void;
+  /** Flush UI and confirm drafts while the renderer and agent are still alive. */
+  prepare?(): Promise<boolean>;
   mac: boolean;
 }) {
   let requested = false;
   let stopping = false;
   let stopped = false;
+  let preparing = false;
+  let prepared = false;
   return {
     isQuitRequested: () => requested,
     beforeQuit(event: { preventDefault(): void }) {
       if (stopped) return;
       event.preventDefault();
       requested = true;
+      if (prepare && !prepared) {
+        if (preparing) return;
+        preparing = true;
+        void prepare()
+          .then((ok) => {
+            preparing = false;
+            if (!ok) {
+              requested = false;
+              return;
+            }
+            prepared = true;
+            quit();
+          })
+          .catch(() => {
+            preparing = false;
+            requested = false;
+          });
+        return;
+      }
       const opened = windows();
       if (opened.length > 0) {
         for (const window of opened) window.close();
@@ -39,6 +63,7 @@ export function createQuitGuard({
     },
     cancel() {
       requested = false;
+      prepared = false;
     },
   };
 }

@@ -2,6 +2,8 @@ import { errorMessage } from '@shared/guards';
 import type { WorkspaceSummary } from '@shared/types/workspace';
 import { create } from 'zustand';
 import type { OpenWithTarget, WorkspaceCopyKind } from '../../preload/domains/workspaces';
+import { filesStoreFor } from './files';
+import { forgetWorkspaceTabs } from './workspaceTabs';
 import { translate } from '../i18n';
 
 /** 需要用户确认的提示（如挂入被拒绝的原因），由 NoticeDialog 展示。 */
@@ -35,6 +37,8 @@ export interface WorkspacesState {
 }
 
 const api = window.fynvra.workspaces;
+let selectionVersion = 0;
+let restoredSelection = false;
 
 export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
   workspaces: [],
@@ -93,6 +97,10 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
         set({ notice: { title: translate('workspaces.loadFailed'), message: result.error } });
         return;
       }
+      for (const previous of get().workspaces) {
+        if (!result.workspaces.some((workspace) => workspace.id === previous.id))
+          forgetWorkspaceTabs(previous.id);
+      }
       set((state) => ({
         workspaces: result.workspaces,
         expandedWorkspaces: Object.fromEntries(
@@ -108,6 +116,19 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
           ? state.selectedId
           : null,
       }));
+      if (!restoredSelection) {
+        restoredSelection = true;
+        const version = selectionVersion;
+        const restored = await window.fynvra.workspaceUi.selection();
+        if (
+          restored.ok &&
+          restored.workspaceId &&
+          version === selectionVersion &&
+          !get().selectedId &&
+          get().workspaces.some((workspace) => workspace.id === restored.workspaceId)
+        )
+          get().select(restored.workspaceId);
+      }
     } catch (error) {
       set({ notice: { title: translate('workspaces.loadFailed'), message: errorMessage(error) } });
     }
@@ -132,6 +153,15 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
   },
 
   async remove(id) {
+    const previews = Object.values(filesStoreFor(id, window.fynvra.files).getState().previews);
+    if (previews.some((preview) => preview.saving)) {
+      set({
+        notice: { title: translate('workspaces.removeFailed'), message: translate('files.saving') },
+      });
+      return;
+    }
+    // Include snapshots of workspaces that have not been hydrated in this run.
+    if (!window.confirm(translate('workspaceTabs.removeDrafts'))) return;
     try {
       const result = await api.remove(id);
       if (!result.ok) {
@@ -146,11 +176,27 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
     }
   },
 
-  select: (selectedId) =>
+  select: (selectedId) => {
+    selectionVersion++;
     set((state) => ({
       selectedId,
       expandedWorkspaces: { ...state.expandedWorkspaces, [selectedId]: true },
-    })),
+    }));
+    void window.fynvra.workspaceUi
+      .selection(selectedId)
+      .then((result) => {
+        if (!result.ok)
+          set({ notice: { title: translate('workspaceTabs.failed'), message: result.error } });
+      })
+      .catch(() =>
+        set({
+          notice: {
+            title: translate('workspaceTabs.failed'),
+            message: translate('workspaceTabs.failed'),
+          },
+        })
+      );
+  },
   toggleSessions: (workspaceId) =>
     set((state) => ({
       expandedWorkspaces: {

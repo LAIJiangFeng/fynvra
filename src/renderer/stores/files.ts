@@ -6,9 +6,11 @@ import type {
   ResolveResult,
   WorkspaceFileEntry,
 } from '@shared/types/files';
+import type { SavedFileTab } from '@shared/types/workspaceUi';
 import { create } from 'zustand';
 import type { FilesApi } from '../../preload/domains/files';
 import { createMarkdownReferences, type MarkdownReferences } from '../lib/markdownPreview';
+import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 import { diffTabsStoreFor } from './diffTabs';
 
 export const ROOT_DIRECTORY_ID = 'root';
@@ -51,6 +53,8 @@ export interface FilesState {
   loadDirectory(directoryId?: string, force?: boolean): Promise<void>;
   toggleDirectory(directoryId: string): Promise<void>;
   openFile(entry: WorkspaceFileEntry): Promise<void>;
+  restoreFile(tab: SavedFileTab): Promise<void>;
+  discardDrafts(): void;
   /** 只读引用解析器；缓存限定到调用方的 Markdown 预览生命周期。 */
   markdownReferences(fileId: string): MarkdownReferences;
   closeFile(fileId: string, discard?: boolean): boolean;
@@ -185,11 +189,80 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
       async openFile(entry) {
         if (entry.kind !== 'file') return;
         if (!get().opened.some((file) => file.id === entry.id)) {
+          if (!canOpenWorkspaceTab(workspaceId)) return;
           set((state) => ({ opened: [...state.opened, entry] }));
         }
         set({ selectedId: entry.id });
         const preview = get().previews[entry.id];
         if (!preview || (preview.error && !isFileDirty(preview))) await read(entry.id);
+      },
+
+      async restoreFile(tab) {
+        const entry = tab.entry;
+        if (!entry || get().opened.some((file) => file.id === entry.id)) return;
+        set((state) => ({ opened: [...state.opened, entry] }));
+        if (!tab.draft) {
+          set((state) => ({
+            previews: {
+              ...state.previews,
+              [entry.id]: {
+                preview: null,
+                draft: '',
+                mode: tab.mode,
+                loading: true,
+                saving: false,
+                error: null,
+                saveError: null,
+              },
+            },
+          }));
+          await read(entry.id);
+          return;
+        }
+        const base: PreviewState = {
+          preview: tab.draft.base,
+          draft: tab.draft.text,
+          mode: tab.mode,
+          loading: false,
+          saving: false,
+          error: null,
+          saveError: null,
+        };
+        set((state) => ({ previews: { ...state.previews, [entry.id]: base } }));
+        // Never replace a restored draft/baseline with disk contents. The original hash
+        // must remain the write precondition when the file changed outside the app.
+        try {
+          const result = await api?.read({ workspaceId, fileId: entry.id });
+          if (get().previews[entry.id] !== base) return;
+          const saveError = !result
+            ? 'unavailable'
+            : !result.ok
+              ? result.error
+              : result.preview.kind !== 'text' || result.preview.version !== tab.draft.base.version
+                ? 'conflict'
+                : null;
+          set((state) => ({ previews: { ...state.previews, [entry.id]: { ...base, saveError } } }));
+        } catch {
+          if (get().previews[entry.id] === base)
+            set((state) => ({
+              previews: { ...state.previews, [entry.id]: { ...base, saveError: 'unavailable' } },
+            }));
+        }
+      },
+
+      discardDrafts() {
+        set((state) => ({
+          previews: Object.fromEntries(
+            Object.entries(state.previews).map(([id, preview]) => [
+              id,
+              {
+                ...preview,
+                draft: preview.preview?.kind === 'text' ? preview.preview.text : '',
+                saveError: null,
+              },
+            ])
+          ),
+        }));
       },
 
       markdownReferences(fileId) {
@@ -241,6 +314,19 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
       async reloadFile(fileId, discard = false) {
         const current = get().previews[fileId];
         if (!current || current.saving || (isFileDirty(current) && !discard)) return;
+        if (discard && current.preview?.kind === 'text') {
+          const draft = current.preview.text;
+          set((state) => ({
+            previews: {
+              ...state.previews,
+              [fileId]: {
+                ...current,
+                draft,
+                saveError: null,
+              },
+            },
+          }));
+        }
         await read(fileId);
       },
 
@@ -390,7 +476,7 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
 export type FilesStore = ReturnType<typeof createFilesStore>;
 const stores = new Map<string, FilesStore>();
 
-/** 切换页签、工作区或收起右栏只隐藏视图，本次运行中保留已打开文件。 */
+/** 各工作区的视图缓存；持久化恢复由 workspaceTabs 协调。 */
 export function filesStoreFor(workspaceId: string, api: FilesApi | undefined): FilesStore {
   let store = stores.get(workspaceId);
   if (!store) {

@@ -219,14 +219,16 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - `workspaces:pick-app` 由 Main 原生选择器签发自定义应用 id、路径与建议名称；`settings:update` 保存 / 移除 `preferences.openWithApps`（最多 20 项），新增或改路径须匹配本窗口已选择的应用，已存项可改名称。Renderer 通过重新选择修改路径，不传工作区路径或任意命令。Windows 仅接受自定义 `.exe`，VS Code 的 `code.cmd` 只用于定位真实 `Code.exe`；macOS `.app` 交给 `/usr/bin/open`；启动参数独立传递且禁用 shell。
 - 此功能仅改 workspace IPC / Main 应用探测启动 helper、typed preload、settings 校验、侧栏菜单 / 自定义应用对话框 / Base UI 子菜单封装、中英文字典及测试；不改会话、文件编辑或终端能力。
 
-- 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与固定的「对话」标签并列，支持多开、切换和关闭。
+- 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与唯一不可关闭的「对话」标签并列，支持多开、切换和关闭。
 - `files:list` 接收 `{ workspaceId, directoryId? }`，省略目录 id 时列出工作区根目录；`files:read` 接收 `{ workspaceId, fileId }`；`files:write` 接收 `{ workspaceId, fileId, version, text }`，版本是读取时的文件内容摘要。
 - Main 根据工作区记录定位根目录，为列出的条目签发不透明 id；Renderer 只能回传这些 id，展示用相对路径不能作为访问参数。
 - 每次读取重新校验真实路径位于登记的工作区内，拒绝跨工作区 id、失效条目及越界链接；符号链接只展示，不展开或预览。
 - UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 复用 GFM 渲染组件，支持编辑 / 预览 / 双栏；文件预览可呈现经 HTML 解析后白名单过滤的语义标签与对齐，不执行脚本或文档 CSS（聊天默认不解析 HTML）。相对图片按源文件目录在 Renderer 解析，通过所属工作区的 `files:list` 查找条目 id，再经 `files:read` 获取已校验的本地栅格图像；不传路径、不放宽 CSP，引用失败显示 alt。本地文档链接复用条目解析并在本工作区打开。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。独立 HTML / SVG 文件仍仅按源码显示，不执行。
 - Main 按文件串行保存，写前核对当前内容版本，冲突时保留磁盘与草稿；同目录临时文件写完后替换原文件。拒绝越界链接、二进制和超限写入；保留 UTF-8 BOM，编辑器沿用原文件的换行格式。
 - 未保存草稿不被目录刷新覆盖；切换对话、文件、工作区或折叠右栏不丢草稿；关闭标签及退出窗口前确认，取消退出不停止 agent 服务。保存中的新输入不能被旧保存响应覆盖。
-- 文件内容与打开标签只在内存，不写 `settings.json`；不执行文件、不切换到 worker 的 worktree。
+- 中央标签统一按工作区保存身份、类型、顺序和活动项；对话唯一不可关闭，文件 / diff / 终端可跨类型拖动混排，＋不参与排序。Main 在独立 `userData/workspace-ui/` 版本化文件中原子、串行保存，不写 `settings.json`。Renderer 完成 hydration 后才能写入，写入绑定窗口代际、租约与递增序号。
+- 文件恢复仅由 Main 将已存相对路径重新绑定到原工作区条目 id，所有后续读写仍执行真实路径校验；草稿及原内容版本分别保存（单份 UTF-8 文本至多 256 KiB，超限拒绝并提示，不截断），外部修改仍触发版本冲突。保存 / 明确放弃同步推进快照，缺失文件保留可关闭提示与可复制草稿。diff 只存原 source / path 描述，正文按原会话或 dispatch 加载；聊天只存会话选择，正文仍以 pi jsonl 为权威。
+- 正常退出在窗口销毁和 agent 停止前完成 Renderer flush / Main 落盘确认，允许保留草稿或明确放弃；取消或落盘失败不停止 agent。
 - 目录树右键支持新建、重命名、副本、复制、显示位置及确认后移入回收站；操作仍由 Main 按条目 id 校验路径。新建在目标目录下显示行内输入，名称非空时失焦自动创建，空白名称失焦取消；也支持 Enter 确认、Escape 取消，不能因按键与失焦重复创建，失败保留名称并提示；显示位置等操作失败不可静默忽略。
 - 本次文件操作修复仅涉及 Main `ipc/files.ts` 的事件/载荷签名、Renderer `FilesView.tsx` / `FileTreeContextMenu.tsx` 与文件 store 的新建目录加载，以及对应测试；沿用现有通道和 preload 类型，不引入文件管理依赖或永久删除能力。全链路回归运行 `pnpm build && node scripts/verify-files.cjs`，使用隔离 userData / 临时工作区，回收站只处理脚本生成的条目。
 
@@ -264,7 +266,8 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Windows agent 默认依次探测 Git Bash → Windows PowerShell 5.1 → PowerShell 7；未安装 Git 时以警告日志说明 PowerShell 回退，保证无 git 工作区也能启动会话。只有三者均不可用时才报错，禁止交给 pi 自动选到 WSL。手写 `shellPath` 仍优先；否则按 `agentShell` 选择，失效时按上述默认顺序回退。pi 1.4 的 bash 工具通过 `spawn(shellPath, ['-c', command])` 执行（没有 shell args 设置，`shellCommandPrefix` 仅追加命令文本），故支持 Git Bash / PowerShell 7 / Windows PowerShell，不提供 cmd / WSL；自定义须兼容 `-c`。非 bash 的语法说明经既有 role systemPrompt 追加路径传给 pi，不改 pi 内部或角色持久化。仅下次启动会话生效，非 Windows 隐藏 agent 选项。
 - `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
-- 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
+- 终端恢复保存有界的可读屏幕 / 回滚文本和尺寸、编号、结束状态；每标签至多 128 KiB、每工作区至多 2 MiB，全部有效 workspace-ui 快照合计至多 64 MiB（超限拒绝写入并提示；隔离的损坏文件单独保留，不占用恢复写入额度）。输出触发节流快照，不逐字符写盘；退出等待最后一次快照。恢复文本只送 xterm 显示（去除控制字符），绝不送 PTY 或重跑历史命令；活标签显示「已恢复历史，新终端会话」后在 Main 登记的 workspace cwd 启新 shell，已结束标签只读保留。旧 PTY 在关闭 / 刷新 / 销毁时清理，异步创建以窗口代际及取消标记防止复活。
+- 本次变更仅涉及中央标签 / 文件与终端 stores、Main workspace-ui 持久化与文件服务内部 id 重绑、退出接线、shared / preload typed API 和中英文案；不改 agent 协议、模型或权限配置，不保存终端环境与 provider 密钥。
 
 ### 7.5 指令文件
 

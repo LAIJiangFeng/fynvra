@@ -192,6 +192,13 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
   SESSIONS_FOCUS: 'sessions:focus',
 
+  // --- workspace UI ---
+  WORKSPACE_UI_SELECTION: 'workspace-ui:selection',
+  WORKSPACE_UI_LOAD: 'workspace-ui:load',
+  WORKSPACE_UI_SAVE: 'workspace-ui:save',
+  WORKSPACE_UI_FLUSH: 'workspace-ui:flush',
+  WORKSPACE_UI_FLUSHED: 'workspace-ui:flushed',
+
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
   USAGE_SUMMARY: 'usage:summary',

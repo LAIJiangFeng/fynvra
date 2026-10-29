@@ -13,6 +13,7 @@ import { createSkillsApi } from './domains/skills';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
+import { createWorkspaceUiApi } from './domains/workspaceUi';
 import { createWorkspacesApi } from './domains/workspaces';
 import type { FynvraApi, Unsubscribe } from './types';
 
@@ -28,6 +29,7 @@ function subscribe(channel: string, listener: (...args: unknown[]) => void): Uns
 const api: FynvraApi = {
   updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: createSettingsApi(ipcRenderer, subscribe),
+  workspaceUi: createWorkspaceUiApi(ipcRenderer, subscribe),
   workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),

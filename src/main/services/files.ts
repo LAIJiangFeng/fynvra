@@ -454,6 +454,25 @@ export function createFilesService({
   }
 
   return {
+    /** Main-only persistence adapter. Renderer cannot submit a relative path here. */
+    async describeEntry(workspaceId: string, fileId: string): Promise<WorkspaceFileEntry> {
+      return { ...find(await workspace(workspaceId), fileId) };
+    },
+    async restoreEntry(workspaceId: string, relativePath: string): Promise<WorkspaceFileEntry> {
+      if (
+        !relativePath ||
+        relativePath.length > 4096 ||
+        relativePath.includes('\\') ||
+        relativePath.includes(':') ||
+        relativePath.includes('\0') ||
+        isAbsolute(relativePath) ||
+        relativePath.split('/').some((part) => !part || part === '.' || part === '..')
+      )
+        throw new FileAccessError('outsideWorkspace');
+      // Registration does not read the file. Every later read/write rechecks realpath,
+      // including missing files and parents replaced by links while the app was closed.
+      return register(await workspace(workspaceId), relativePath, 'file');
+    },
     async list(raw: DirectoryRequest): Promise<DirectoryResult> {
       const input = parseDirectoryRequest(raw);
       if (!input) return { ok: false, error: 'invalidRequest' };
