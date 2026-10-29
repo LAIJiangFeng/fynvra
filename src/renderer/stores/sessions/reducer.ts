@@ -1,4 +1,9 @@
-import type { FynvraSessionEvent } from '@fynvra/core';
+import type {
+  CompactionState,
+  ContextRuntimeSnapshot,
+  FynvraSessionEvent,
+  RetryState,
+} from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import {
   type ApprovalKind,
@@ -11,6 +16,8 @@ import {
   type SessionSummary,
   stripImageHints,
 } from '@shared/types/chat';
+
+import { translate } from '../../i18n';
 
 type SessionWarning = 'magic-context';
 
@@ -53,6 +60,16 @@ export interface SessionRuntime {
   dismissedWarningSeq?: number;
   /** 最近一次正常结束（非 aborted）的 settled 事件的会话级 seq：回复建议只对这一轮有效 */
   settledSeq?: number;
+  /** Runtime facts are reported by the loaded worker, never inferred from settings/model names. */
+  contextRuntime?: ContextRuntimeSnapshot;
+  contextSeq?: number;
+  /** Recovery survives an unloaded worker; effective engine/context do not. */
+  recoveryRequired?: boolean;
+  pendingPromptCount?: number;
+  compaction?: CompactionState;
+  retry?: RetryState;
+  /** A terminal operation cannot be revived by a delayed snapshot/event. */
+  closedCompactionId?: string;
   /** 运行中工具的本地开始时间（toolCallId → epoch ms），tool_end 缺 durationMs 时据此推算。 */
   toolStartedAt: Record<string, number>;
 }
@@ -128,19 +145,135 @@ export function reduceSessionEvent<S extends ChatProjection>(
 ): S {
   const { sessionId, event } = envelope;
   const before = sliceOf(state, sessionId);
-  if (event.seq <= before.runtime.lastSeq) return state;
+  if (
+    event.seq <= before.runtime.lastSeq ||
+    (isContextMetadata(event) && event.seq <= (before.runtime.contextSeq ?? 0))
+  )
+    return state;
   const current: Slice = {
     ...before,
     runtime: {
       ...before.runtime,
       lastSeq: event.seq,
+      ...(isContextMetadata(event) ? { contextSeq: event.seq } : {}),
       activitySeq:
-        event.type === 'warning'
+        isContextMetadata(event) || event.type === 'warning' || event.type === 'tool_notice'
           ? (before.runtime.activitySeq ?? before.runtime.lastSeq)
           : event.seq,
     },
   };
   return commit(state, sessionId, before, applyEvent(current, sessionId, event, now));
+}
+
+export function isContextMetadata(event: FynvraSessionEvent): boolean {
+  return event.type === 'context_runtime' || event.type === 'compaction' || event.type === 'retry';
+}
+
+export function compactionActive(state: CompactionState | undefined): boolean {
+  return state?.phase === 'running' || state?.phase === 'backoff';
+}
+
+function withCompaction(runtime: SessionRuntime, state: CompactionState): SessionRuntime {
+  if (compactionActive(state) && runtime.closedCompactionId === state.operationId) return runtime;
+  if (runtime.compaction && state.startedAt < runtime.compaction.startedAt) return runtime;
+  return {
+    ...runtime,
+    compaction: state,
+    ...(compactionActive(state)
+      ? {
+          status:
+            runtime.status === 'waiting-approval'
+              ? ('waiting-approval' as const)
+              : ('running' as const),
+          error: undefined,
+        }
+      : {}),
+    ...(state.phase === 'failed' || state.phase === 'cancelled' ? { recoveryRequired: true } : {}),
+    retry: compactionActive(state) ? runtime.retry : undefined,
+    ...(state.phase === 'succeeded' && runtime.contextRuntime
+      ? {
+          contextRuntime: {
+            ...runtime.contextRuntime,
+            context: {
+              ...runtime.contextRuntime.context,
+              tokens: null,
+              source: 'unknown' as const,
+            },
+          },
+        }
+      : {}),
+    ...(compactionActive(state) ? {} : { closedCompactionId: state.operationId }),
+  };
+}
+
+function endProgress(runtime: SessionRuntime, now: number, aborted = false): SessionRuntime {
+  const compaction = runtime.compaction;
+  return {
+    ...runtime,
+    retry: undefined,
+    ...(compactionActive(compaction) && compaction
+      ? {
+          closedCompactionId: compaction.operationId,
+          recoveryRequired: true,
+          compaction: {
+            ...compaction,
+            phase: aborted ? ('cancelled' as const) : ('failed' as const),
+            endedAt: now,
+            cancelSource: 'sdk' as const,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Snapshot metadata does not start a new turn or invalidate a reply suggestion. */
+export function applyContextRuntime<S extends ChatProjection>(
+  state: S,
+  sessionId: string,
+  snapshot: ContextRuntimeSnapshot | undefined,
+  seq?: number
+): S {
+  const before = sliceOf(state, sessionId);
+  if (
+    seq === undefined
+      ? snapshot !== undefined && before.runtime.contextSeq !== undefined
+      : seq < Math.max(before.runtime.lastSeq, before.runtime.contextSeq ?? 0)
+  )
+    return state;
+  return commit(state, sessionId, before, {
+    ...before,
+    runtime: {
+      ...runtimeWithContext(before.runtime, snapshot),
+      ...(seq === undefined ? {} : { contextSeq: seq }),
+    },
+  });
+}
+
+function runtimeWithContext(
+  previous: SessionRuntime,
+  snapshot: ContextRuntimeSnapshot | undefined
+): SessionRuntime {
+  if (!snapshot) return { ...endProgress(previous, Date.now()), contextRuntime: undefined };
+  if (
+    compactionActive(snapshot.compaction) &&
+    snapshot.compaction?.operationId === previous.closedCompactionId
+  )
+    return previous;
+  let runtime = snapshot.compaction
+    ? withCompaction(previous, snapshot.compaction)
+    : { ...previous, compaction: snapshot.recoveryRequired ? previous.compaction : undefined };
+  runtime = {
+    ...runtime,
+    contextRuntime: snapshot,
+    recoveryRequired: snapshot.recoveryRequired,
+    pendingPromptCount: snapshot.pendingPromptCount,
+    retry:
+      (runtime.status === 'running' || runtime.status === 'waiting-approval') &&
+      snapshot.retry?.phase !== 'finished'
+        ? snapshot.retry
+        : undefined,
+  };
+  return runtime;
 }
 
 function applyEvent(
@@ -151,6 +284,23 @@ function applyEvent(
 ): Slice {
   const fresh = { id: `live-${event.seq}`, sessionId, createdAt: now };
   switch (event.type) {
+    case 'context_runtime':
+      return { ...slice, runtime: runtimeWithContext(slice.runtime, event.snapshot) };
+    case 'compaction':
+      return { ...slice, runtime: withCompaction(slice.runtime, event.state) };
+    case 'retry':
+      return {
+        ...slice,
+        runtime: {
+          ...slice.runtime,
+          ...(event.state.phase !== 'finished' ? { error: undefined } : {}),
+          retry:
+            (slice.runtime.status === 'running' || slice.runtime.status === 'waiting-approval') &&
+            event.state.phase !== 'finished'
+              ? event.state
+              : undefined,
+        },
+      };
     case 'text_delta':
       return active(
         updateStreaming(slice, fresh, (message) => ({
@@ -165,10 +315,20 @@ function applyEvent(
           thinking: (message.thinking ?? '') + event.delta,
         }))
       );
-    case 'message_end':
-      return event.role === 'user'
-        ? startTurn(confirmUser(slice, fresh, event.text))
-        : active(finishAssistant(slice, fresh, event.text));
+    case 'message_end': {
+      if (event.role === 'user') return startTurn(confirmUser(slice, fresh, event.text));
+      const next = active(finishAssistant(slice, fresh, event.text));
+      if (event.stopReason !== 'error' && event.stopReason !== 'aborted') return next;
+      return {
+        ...next,
+        runtime: {
+          ...endProgress(next.runtime, now, event.stopReason === 'aborted'),
+          ...(event.stopReason === 'error'
+            ? { error: event.errorMessage || translate('chat.modelFailed') }
+            : {}),
+        },
+      };
+    }
     case 'tool_start': {
       const next = upsertToolCall(slice, fresh, event.toolCallId, () => ({
         id: event.toolCallId,
@@ -236,7 +396,7 @@ function applyEvent(
       return {
         messages: settleMessages(slice.messages),
         runtime: {
-          ...slice.runtime,
+          ...endProgress(slice.runtime, now, event.aborted),
           status: slice.runtime.error === undefined ? 'idle' : 'error',
           toolStartedAt: {},
           ...(event.aborted ? {} : { settledSeq: event.seq }),
@@ -250,7 +410,7 @@ function applyEvent(
         messages: slice.messages.map((message) =>
           message.optimistic && !message.failed ? { ...message, failed: true } : message
         ),
-        runtime: { ...slice.runtime, status: 'error', error: event.message },
+        runtime: { ...endProgress(slice.runtime, now), status: 'error', error: event.message },
       };
     case 'warning':
       return {
@@ -593,7 +753,12 @@ export function syncSessionStatuses<S extends ChatProjection>(
     const runtime = state.runtimeBySession[session.id];
     if (!runtime || runtime.status === session.status || skip.has(session.id)) continue;
     runtimeBySession ??= { ...state.runtimeBySession };
-    runtimeBySession[session.id] = { ...runtime, status: session.status };
+    runtimeBySession[session.id] = {
+      ...(session.status === 'idle' || session.status === 'error'
+        ? endProgress(runtime, Date.now())
+        : runtime),
+      status: session.status,
+    };
   }
   return runtimeBySession ? { ...state, runtimeBySession } : state;
 }

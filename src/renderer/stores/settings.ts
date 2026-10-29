@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import {
   type CompactionStrategy,
   compactionStrategyOf,
+  compactionTimeoutMsOf,
   type PickWorktreesRootResult,
   type Preferences,
   type SessionPreferences,
@@ -146,7 +147,9 @@ window.fynvra.settings.onChanged(() => {
 });
 // --- sessions / timeline / context ---
 type GeneralPatch = Partial<
-  SessionPreferences & TimelinePreferences & Pick<Preferences, 'compactionStrategy'>
+  SessionPreferences &
+    TimelinePreferences &
+    Pick<Preferences, 'compactionStrategy' | 'compactionTimeoutMs'>
 >;
 
 export interface GeneralPreferencesState {
@@ -154,6 +157,7 @@ export interface GeneralPreferencesState {
   sessions: SessionPreferences;
   timeline: TimelinePreferences;
   compaction: CompactionStrategy;
+  compactionTimeoutMs: number;
   /** 最近一次保存失败的原因 */
   error: string | null;
   load(): Promise<void>;
@@ -166,6 +170,7 @@ function resolveGeneral(preferences: GeneralPatch) {
     sessions: sessionPreferencesOf(preferences),
     timeline: timelinePreferencesOf(preferences),
     compaction: compactionStrategyOf(preferences),
+    compactionTimeoutMs: compactionTimeoutMsOf(preferences),
   };
 }
 
@@ -195,6 +200,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
           ...state.sessions,
           ...state.timeline,
           compactionStrategy: state.compaction,
+          compactionTimeoutMs: state.compactionTimeoutMs,
           ...patch,
         })
       );

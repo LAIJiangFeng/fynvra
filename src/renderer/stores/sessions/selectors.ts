@@ -6,7 +6,12 @@ import type {
   SessionSummary,
 } from '@shared/types/chat';
 import type { QueuedMessage, SessionsState } from './createSessionsStore';
-import type { PendingApproval, SessionRuntime, TimelineMessage } from './reducer';
+import {
+  compactionActive,
+  type PendingApproval,
+  type SessionRuntime,
+  type TimelineMessage,
+} from './reducer';
 
 // 选择器返回 store 里已有的引用；缺省值用模块级常量，避免每次渲染都拿到新对象
 const EMPTY_SESSIONS: SessionSummary[] = [];
@@ -105,7 +110,14 @@ export const selectReplySuggestionOf =
     const suggestion = state.replySuggestions[sessionId];
     if (!suggestion) return undefined;
     const runtime = state.runtimeBySession[sessionId];
-    if (runtime?.status !== 'idle') return undefined;
+    if (
+      runtime?.status !== 'idle' ||
+      compactionActive(runtime.compaction) ||
+      runtime.recoveryRequired ||
+      runtime.pendingPromptCount ||
+      state.recoveringCompaction[sessionId]
+    )
+      return undefined;
     if (
       runtime.settledSeq !== suggestion.roundId ||
       (runtime.activitySeq ?? runtime.lastSeq) !== suggestion.roundId
@@ -120,6 +132,19 @@ export const selectQueueOf =
   (sessionId: string) =>
   (state: SessionsState): QueuedMessage[] =>
     state.queuedBySession[sessionId] ?? EMPTY_QUEUE;
+
+export const selectCompactingOf = (sessionId: string) => (state: SessionsState) =>
+  compactionActive(state.runtimeBySession[sessionId]?.compaction);
+
+export const selectRecoveryBlockedOf = (sessionId: string) => (state: SessionsState) => {
+  const runtime = state.runtimeBySession[sessionId];
+  return Boolean(
+    compactionActive(runtime?.compaction) ||
+      runtime?.recoveryRequired ||
+      runtime?.pendingPromptCount ||
+      state.recoveringCompaction[sessionId]
+  );
+};
 
 export const selectLoadingHistoryOf = (sessionId: string) => (state: SessionsState) =>
   state.loadingHistory[sessionId] === true;

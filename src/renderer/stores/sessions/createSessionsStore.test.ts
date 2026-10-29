@@ -113,8 +113,9 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       }): Promise<IpcResult> => ({ ok: true })
     ),
     abort: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
+    retryCompaction: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     history: vi.fn(
-      async (_sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>> => ({
+      async (_sessionId: string): ReturnType<SessionsApi['history']> => ({
         ok: true,
         messages: [],
       })
@@ -1448,7 +1449,7 @@ describe('createSessionsStore · queue while running', () => {
     expect(texts(store)).toEqual([]);
   });
 
-  it('keeps the queue after a stop or an error; the next manual send resumes it', async () => {
+  it('keeps the queue after a stop or an error; a manual send does not resume it', async () => {
     const { store, api, emitEvent } = await running();
     await store.getState().send('second');
     await store.getState().abort();
@@ -1465,6 +1466,57 @@ describe('createSessionsStore · queue while running', () => {
     expect(selectStatusOf('s1')(store.getState())).toBe('error');
     expect(api.prompt).toHaveBeenCalledTimes(2);
     expect(texts(store)).toEqual(['second']);
+  });
+
+  it('drains exactly once when settled arrives before the prompt acknowledgement', async () => {
+    const { store, api, emitEvent } = await setup();
+    await store.getState().selectSession('s1');
+    const ack = deferred<IpcResult>();
+    api.prompt.mockReturnValueOnce(ack.promise);
+    const first = store.getState().send('first');
+    await store.getState().send('second');
+    await store.getState().send('third');
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    ack.resolve({ ok: true });
+    await first;
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(texts(store)).toEqual(['third']);
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('a late successful ACK cannot resume a stopped queue; explicit resume is idempotent', async () => {
+    const { store, api, emitEvent } = await setup();
+    await store.getState().selectSession('s1');
+    const ack = deferred<IpcResult>();
+    api.prompt.mockReturnValueOnce(ack.promise);
+    const first = store.getState().send('first');
+    await store.getState().send('second');
+    await store.getState().send('third');
+    await store.getState().abort();
+    emitEvent(1, { type: 'agent_settled', aborted: true });
+    ack.resolve({ ok: true });
+    await first;
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(store.getState().pausedQueues.s1).toBe(true);
+    store.getState().resumeQueue('s1');
+    store.getState().resumeQueue('s1');
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(texts(store)).toEqual(['third']);
+  });
+
+  it('stale aborted events cannot pause a newer active queue', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    emitEvent(3, { type: 'text_delta', delta: 'reply' });
+    emitEvent(2, { type: 'agent_settled', aborted: true });
+    emitEvent(4, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(store.getState().pausedQueues.s1).toBeUndefined();
   });
 
   it('removes a queued message', async () => {

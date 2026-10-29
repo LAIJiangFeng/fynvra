@@ -1,7 +1,10 @@
 import { GitBranch, Zap } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
 import { useSessionsStore } from '@/stores/sessions';
+import { useGeneralPreferencesStore } from '@/stores/settings';
 import { ApprovalModeStatus } from './ApprovalModePicker';
+import { contextLabel, strategyLabel, strategyNotice } from './contextDisplay';
 import { formatCost, formatTokens } from './format';
 import { useSessionModel } from './ModelPicker';
 import { useSessionBranch } from './SessionBadges';
@@ -12,6 +15,8 @@ import { useSessionBranch } from './SessionBadges';
  */
 export function StatusBar({ sessionId }: { sessionId: string }) {
   const usage = useSessionsStore((state) => state.runtimeBySession[sessionId]?.usage);
+  const snapshot = useSessionsStore((state) => state.runtimeBySession[sessionId]?.contextRuntime);
+  const selected = useGeneralPreferencesStore((state) => state.compaction);
   const reportedModel = useSessionsStore((state) => state.runtimeBySession[sessionId]?.model);
   const branch = useSessionBranch(sessionId);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
@@ -20,16 +25,45 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const { label, fastMode } = useSessionModel(sessionId);
   const model = label ? [label.model, label.thinking].filter(Boolean).join(' · ') : reportedModel;
 
+  const context = contextLabel(snapshot, t);
+  const total = `${t('chat.usageTotal')} ↑${formatTokens(usage?.inputTokens ?? 0)} ↓${formatTokens(usage?.outputTokens ?? 0)} ${formatCost(usage?.costUsd ?? 0)}`;
+  const engine = t('chat.actualEngine', { engine: strategyLabel(snapshot?.effectiveStrategy, t) });
+  const details = [
+    context.label,
+    context.nearThreshold ? t('chat.contextNearThreshold') : '',
+    engine,
+    t('chat.configuredEngine', { engine: strategyLabel(snapshot?.configuredStrategy, t) }),
+    t('chat.selectedEngine', { engine: strategyLabel(selected, t) }),
+    strategyNotice(snapshot, selected, t),
+    t('chat.tokensHint'),
+    total,
+    t('chat.costHint'),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-4 border-t px-4 text-muted-foreground text-xs">
-      <span title={t('chat.tokensHint')} className="shrink-0">
-        tokens ↑{formatTokens(usage?.inputTokens ?? 0)} ↓{formatTokens(usage?.outputTokens ?? 0)}
+    <footer className="flex min-h-7 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-1 text-muted-foreground text-xs">
+      <Tooltip>
+        <TooltipTrigger
+          render={<button type="button" />}
+          className="min-w-0 max-w-full truncate text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={details}
+        >
+          {context.label}
+          {context.nearThreshold ? ` · ${t('chat.contextNearThreshold')}` : ''}
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm whitespace-pre-line">{details}</TooltipContent>
+      </Tooltip>
+      <span className="min-w-0 max-w-full truncate" title={details}>
+        {engine}
       </span>
-      {usage && usage.costUsd > 0 && (
-        <span title={t('chat.costHint')} className="shrink-0">
-          {formatCost(usage.costUsd)}
-        </span>
-      )}
+      <span
+        title={`${t('chat.tokensHint')} · ${t('chat.costHint')}`}
+        className="min-w-0 max-w-full truncate"
+      >
+        {total}
+      </span>
       <div className="ml-auto flex min-w-0 items-center gap-3">
         <ApprovalModeStatus sessionId={sessionId} />
         {branch && (

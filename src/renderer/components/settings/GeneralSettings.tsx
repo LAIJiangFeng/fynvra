@@ -8,6 +8,8 @@ import {
   isCompactionStrategy,
   isDeleteArchivedDays,
   languageOf,
+  MAX_COMPACTION_TIMEOUT_MS,
+  MIN_COMPACTION_TIMEOUT_MS,
   type Preferences,
   parseShellPreference,
   type ShellPreference,
@@ -538,12 +540,13 @@ function CompactionSection() {
   ];
   return (
     <section>
+      <SectionHeader title={t('settings.general.compaction')} />
       <ul className="divide-y rounded-lg border">
         <li className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
             <Minimize2 className="size-4 shrink-0 text-muted-foreground" />
             <label htmlFor={id} title={hint} className="min-w-0 text-sm">
-              {t('settings.general.compaction')}
+              {t('settings.general.compactionSelected')}
             </label>
           </div>
           <Select
@@ -558,7 +561,7 @@ function CompactionSection() {
               size="sm"
               className="w-56"
               title={hint}
-              aria-label={t('settings.general.compaction')}
+              aria-label={t('settings.general.compactionSelected')}
             >
               <SelectValue />
             </SelectTrigger>
@@ -572,7 +575,65 @@ function CompactionSection() {
           </Select>
         </li>
       </ul>
+      <p className="mt-2 text-muted-foreground text-xs">{hint}</p>
+      <CompactionTimeoutSetting />
     </section>
+  );
+}
+
+function CompactionTimeoutSetting() {
+  const timeout = useGeneralPreferencesStore((state) => state.compactionTimeoutMs);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const error = useGeneralPreferencesStore((state) => state.error);
+  const [seconds, setSeconds] = useState(String(timeout / 1_000));
+  const [saving, setSaving] = useState(false);
+  const t = useT();
+  const id = useId();
+  useEffect(() => setSeconds(String(timeout / 1_000)), [timeout]);
+  const ms = Number(seconds) * 1_000;
+  const valid =
+    seconds.trim() !== '' &&
+    Number.isSafeInteger(ms) &&
+    ms >= MIN_COMPACTION_TIMEOUT_MS &&
+    ms <= MAX_COMPACTION_TIMEOUT_MS;
+  return (
+    <form
+      className="mt-3 grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || saving) return;
+        setSaving(true);
+        void update({ compactionTimeoutMs: ms }).finally(() => setSaving(false));
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="mr-auto text-sm">
+          {t('settings.general.compactionTimeout')}
+        </label>
+        <Input
+          id={id}
+          className="w-28"
+          type="number"
+          min={MIN_COMPACTION_TIMEOUT_MS / 1_000}
+          max={MAX_COMPACTION_TIMEOUT_MS / 1_000}
+          step="1"
+          required
+          value={seconds}
+          onChange={(event) => setSeconds(event.target.value)}
+          disabled={saving}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={!valid || saving || ms === timeout}
+        >
+          {t('common.save')}
+        </Button>
+      </div>
+      <p className="text-muted-foreground text-xs">{t('settings.general.compactionTimeoutHint')}</p>
+      {error && <InlineMessage tone="error">{error}</InlineMessage>}
+    </form>
   );
 }
 
