@@ -143,6 +143,9 @@
     chatHead?.classList.toggle('is-idle', !running);
     if (chatHead) chatHead.dataset.state = running ? 'run' : 'done';
 
+    const composerInput = element.querySelector('.fd-composer-input');
+    if (composerInput) composerInput.dataset.mode = running ? 'queue' : 'idle';
+
     const send = element.querySelector('[data-send]');
     if (send) send.dataset.mode = running ? 'queue' : 'idle';
 
@@ -160,6 +163,10 @@
     const input = element.querySelector('.fd-composer-input');
     const send = element.querySelector('[data-send]');
     const LAST = config.durations.length - 1;
+    // 减少动画时停在可读的静态阶段；旧场景默认停在最终结果。
+    const STATIC = Number.isInteger(config.staticPhase)
+      ? Math.max(0, Math.min(LAST, config.staticPhase))
+      : LAST;
     // 旧场景只有一个输入阶段；queue 用 typing 声明多个阶段，各阶段对应一段输入文本。
     const typing = config.typing?.length
       ? config.typing
@@ -304,7 +311,7 @@
 
     function activate() {
       element.hidden = false;
-      applyPhase(motion.matches ? LAST : 0);
+      applyPhase(motion.matches ? STATIC : 0);
     }
 
     function deactivate() {
@@ -338,8 +345,8 @@
 
     function handleMotion() {
       if (motion.matches) {
-        applyPhase(LAST);
-      } else if (state.phase === LAST) {
+        applyPhase(STATIC);
+      } else if (state.phase === STATIC) {
         applyPhase(0);
       } else {
         sync();
@@ -375,6 +382,8 @@
   const queueScene = createScene('queue', root.querySelector('[data-scene="queue"]'), {
     // 0/2 各打一段后续需求；1/3 提交后清空输入；4/5 当前回合结束并按顺序接续队列。
     durations: [0, 1500, 0, 2300, 2400, 2600, 0],
+    // 减少动画时停在“当前回合运行 + 两条排队消息”。
+    staticPhase: 3,
     typing: [
       { phase: 0, text: (lang) => queueText.first[lang] },
       { phase: 2, text: (lang) => queueText.second[lang] },

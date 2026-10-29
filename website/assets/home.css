@@ -1035,6 +1035,18 @@
   display: none;
 }
 
+.fd-placeholder-idle {
+  display: none;
+}
+
+.fd-composer-input[data-mode="idle"] .fd-placeholder-queue {
+  display: none;
+}
+
+.fd-composer-input[data-mode="idle"] .fd-placeholder-idle {
+  display: inline;
+}
+
 .fd-send[data-mode="idle"] .fd-send-queue {
   display: none;
 }
@@ -2410,6 +2422,16 @@
 :root[data-theme="dark"] .fd-run,
 :root[data-theme="dark"] .fd-task {
   background: var(--fd-chrome);
+}
+
+:root[data-theme="dark"] .fd-queue {
+  border-color: var(--fd-line-2);
+  background: rgb(255 255 255 / 3%);
+}
+
+:root[data-theme="dark"] .fd-queue-count {
+  background: rgb(255 255 255 / 8%);
+  color: var(--fd-soft);
 }
 
 :root[data-theme="dark"] .cap-card:hover {
