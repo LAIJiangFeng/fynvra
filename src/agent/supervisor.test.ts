@@ -172,6 +172,25 @@ afterEach(() => {
 });
 
 describe('SessionSupervisor compaction recovery', () => {
+  it('does not start a queued recovery when Stop arrives while the original session is opening', async () => {
+    const opening = Promise.withResolvers<SupervisedSession>();
+    const session = new FakeSession();
+    const env = setup(() => opening.promise);
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    env.supervisor.handle({ type: 'retry-compaction', identity: id1, requestId: 'cancelled' });
+    env.supervisor.handle({ type: 'abort', identity: id1 });
+    opening.resolve(session);
+    await settle();
+    expect(session.retryCompaction).not.toHaveBeenCalled();
+    expect(session.aborts).toBe(1);
+    expect(env.of('compaction-recovery-result')).toMatchObject([
+      {
+        requestId: 'cancelled',
+        result: { ok: false, error: 'Compaction recovery was cancelled.' },
+      },
+    ]);
+    await env.supervisor.shutdown();
+  });
   it('settles manual failures and recognizes a resumed pending user turn without another IPC prompt', async () => {
     const env = setup();
     env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
@@ -179,21 +198,25 @@ describe('SessionSupervisor compaction recovery', () => {
     const session = env.sessions[0];
     if (!session) throw new Error('missing session');
     session.retryCompaction.mockRejectedValueOnce(new Error('compaction failed'));
-    env.supervisor.handle({ type: 'retry-compaction', identity: id1 });
+    env.supervisor.handle({ type: 'retry-compaction', identity: id1, requestId: 'failed' });
     await settle();
     expect(env.of('session-status').at(-1)?.status).toBe('error');
     expect(env.of('session-event').at(-1)?.event).toMatchObject({
       type: 'error',
       source: 'compaction',
     });
-    env.supervisor.handle({ type: 'retry-compaction', identity: id1 });
+    env.supervisor.handle({ type: 'retry-compaction', identity: id1, requestId: 'success' });
     await settle();
     expect(env.of('session-status').at(-1)?.status).toBe('idle');
     session.emit({ type: 'message_end', role: 'user', text: 'retained input' });
     expect(env.of('session-status').at(-1)?.status).toBe('running');
     session.emit({ type: 'agent_settled', aborted: false });
     expect(env.of('session-status').at(-1)?.status).toBe('idle');
-    env.supervisor.handle({ type: 'retry-compaction', identity: { ...id1, generation: 0 } });
+    env.supervisor.handle({
+      type: 'retry-compaction',
+      identity: { ...id1, generation: 0 },
+      requestId: 'stale',
+    });
     await settle();
     expect(session.retryCompaction).toHaveBeenCalledTimes(2);
     await env.supervisor.shutdown();

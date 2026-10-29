@@ -7,11 +7,15 @@ describe('compaction lifecycle normalization', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1000);
     const normalizer = createEventNormalizer(30000);
-    expect(normalizer.push({ type: 'compaction_start', reason: 'threshold' })).toMatchObject([
+    const started = normalizer.push({ type: 'compaction_start', reason: 'threshold' });
+    const operationId =
+      started[0]?.type === 'compaction' ? started[0].state.operationId : undefined;
+    expect(operationId).toMatch(/^compaction-[0-9a-f-]{36}$/);
+    expect(started).toMatchObject([
       {
         type: 'compaction',
         state: {
-          operationId: 'compaction-1',
+          operationId,
           phase: 'running',
           startedAt: 1000,
           deadlineAt: 31000,
@@ -30,7 +34,7 @@ describe('compaction lifecycle normalization', () => {
       {
         type: 'compaction',
         state: {
-          operationId: 'compaction-1',
+          operationId,
           phase: 'backoff',
           startedAt: 1000,
           deadlineAt: 31000,
@@ -73,6 +77,21 @@ describe('compaction lifecycle normalization', () => {
         willRetry: false,
       })
     ).toEqual([]);
+  });
+  it('gives replacement instances distinct operation identities even in the same millisecond', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const first = createEventNormalizer();
+    const old = first.push({ type: 'compaction_start', reason: 'manual' })[0];
+    first.cancelCompaction('shutdown');
+    const replacement = createEventNormalizer().push({
+      type: 'compaction_start',
+      reason: 'manual',
+    })[0];
+    if (old?.type !== 'compaction' || replacement?.type !== 'compaction')
+      throw new Error('missing lifecycle');
+    expect(replacement.state.startedAt).toBe(old.state.startedAt);
+    expect(replacement.state.operationId).not.toBe(old.state.operationId);
   });
   it('reports model retries independently and never converts successful retry completion to a failure', () => {
     const normalizer = createEventNormalizer();

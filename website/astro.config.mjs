@@ -38,9 +38,30 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/LAIJiangFeng/fynvra' },
       ],
-      customCss: ['./src/styles/docs.css'],
+      customCss: ['./src/styles/docs-theme.css', './src/styles/docs.css'],
+      // The original docs have a navigation column and a single reading column.
+      tableOfContents: false,
+      expressiveCode: {
+        themes: ['starlight-dark'],
+        useStarlightUiThemeColors: false,
+        styleOverrides: {
+          borderRadius: '10px',
+          codeFontSize: '12.75px',
+          codeLineHeight: '1.75',
+          codePaddingBlock: '14px',
+          codePaddingInline: '16px',
+          frames: {
+            editorBackground: 'var(--fynvra-code-bg)',
+            terminalBackground: 'var(--fynvra-code-bg)',
+            frameBoxShadowCssValue: 'none',
+          },
+        },
+      },
       components: {
         Head: './src/components/docs/Head.astro',
+        Header: './src/components/starlight/Header.astro',
+        Sidebar: './src/components/starlight/Sidebar.astro',
+        PageTitle: './src/components/starlight/PageTitle.astro',
         SiteTitle: './src/components/starlight/SiteTitle.astro',
         SocialIcons: './src/components/starlight/SocialIcons.astro',
       },

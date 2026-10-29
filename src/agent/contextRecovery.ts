@@ -41,11 +41,19 @@ export function createContextRecovery({
   let recovering = false;
   let running = false;
   let resume = false;
+  let resumeCompactionId: string | undefined;
+  let lastCompactionId: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const pending: PendingInput[] = [];
 
   // Recovery survives unloading/restarting without putting message bodies in settings.json.
   for (const entry of session.sessionManager.getBranch()) {
+    if (entry.type === 'compaction') {
+      lastCompactionId = entry.id;
+      // The SDK committed before we could write our next checkpoint (including process exit).
+      if (blocked) resumeCompactionId = entry.id;
+      continue;
+    }
     if (entry.type === 'message' && entry.message.role === 'user') {
       const content = entry.message.content;
       const text =
@@ -58,13 +66,20 @@ export function createContextRecovery({
       const index = pending.findIndex(
         (input) => input.text === (input.images?.length ? stripImageHints(text) : text)
       );
-      pending.splice(Math.max(index, 0), 1);
+      if (pending.length) {
+        pending.splice(Math.max(index, 0), 1);
+        resume = true;
+      }
       continue;
     }
     if (entry.type !== 'custom' || entry.customType !== CHECKPOINT) continue;
     const data = asRecord(entry.data);
     if (!data || typeof data.blocked !== 'boolean' || !Array.isArray(data.pending)) continue;
     blocked = data.blocked;
+    resumeCompactionId =
+      typeof data.resumeCompactionId === 'string' && data.resumeCompactionId === lastCompactionId
+        ? data.resumeCompactionId
+        : undefined;
     resume = data.resume === true;
     pending.length = 0;
     for (const item of data.pending) {
@@ -78,7 +93,9 @@ export function createContextRecovery({
   function checkpoint() {
     if (disposed) return;
     session.sessionManager.appendCustomEntry(CHECKPOINT, {
-      blocked,
+      // The live provider gate may open after compact(), but durable recovery ends only after resumption.
+      blocked: blocked || recovering,
+      ...(resumeCompactionId ? { resumeCompactionId } : {}),
       resume,
       pending: pending.map(({ text, images }) => ({ text, ...(images ? { images } : {}) })),
     });
@@ -164,7 +181,14 @@ export function createContextRecovery({
         );
         // Magic legitimately cancels the native hook while it owns context. It is not a native failure.
         const magicOwns = effective === 'magic-context' && compaction.cancelSource === 'sdk';
+        if (compaction.phase === 'succeeded' && recovering) {
+          resumeCompactionId = session.sessionManager
+            .getBranch()
+            .findLast((entry) => entry.type === 'compaction')?.id;
+          checkpoint();
+        }
         if (compaction.phase !== 'succeeded' && !magicOwns) {
+          resumeCompactionId = undefined;
           blocked = true;
           resume = true;
           checkpoint();
@@ -275,11 +299,17 @@ export function createContextRecovery({
       if (!blocked) throw new Error('No compaction recovery is required.');
       recovering = true;
       stopped = false;
+      let completed = false;
       publish();
       try {
-        await session.compact();
-        if (stopped || disposed || compaction?.phase !== 'succeeded') return;
-        // Only a committed compaction unlocks provider requests. Keep UI recoveryRequired until resumption ends.
+        // A previous attempt may have committed the summary before exit/Stop. Reuse that boundary;
+        // compacting the already compacted projection again can fail with "session too small".
+        if (!resumeCompactionId) {
+          await session.compact();
+          if (compaction?.phase !== 'succeeded') return;
+        }
+        if (stopped || disposed) return;
+        // Only a committed compaction unlocks provider requests. Keep durable recovery until resumption ends.
         blocked = false;
         checkpoint();
         if (pending.length === 0 && resume) {
@@ -295,11 +325,14 @@ export function createContextRecovery({
           if (!blocked && !stopped) resume = false;
         }
         await drain(true);
+        completed = !blocked && !stopped && !disposed && pending.length === 0 && !resume;
       } catch {
         blocked = true;
         if (compaction?.phase === 'running' || compaction?.phase === 'backoff') cancel('exception');
         throw new Error(BLOCKED);
       } finally {
+        if (!completed) blocked = true;
+        else resumeCompactionId = undefined;
         recovering = false;
         checkpoint();
         publish();

@@ -96,7 +96,7 @@ export function createOrchestrationRegistry(
     promptSession: (sessionId, text, options) => launcher.promptSession(sessionId, text, options),
     readTranscript: (sessionId, cursor) => launcher.readTranscript(sessionId, cursor),
     sessionFailure: (sessionId) => launcher.sessionFailure?.(sessionId),
-    disposeSession: (sessionId) => launcher.disposeSession(sessionId),
+    disposeSession: (sessionId, options) => launcher.disposeSession(sessionId, options),
   };
   const exec = options.exec ?? nodeExec;
   const runChecks = options.runChecks ?? createShellRunner();

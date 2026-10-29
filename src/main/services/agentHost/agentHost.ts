@@ -194,10 +194,17 @@ export interface AgentHostService extends AgentHost {
   observe(observer: SessionObserver): () => void;
 }
 
+interface PendingCompactionRecovery {
+  requestId: string;
+  phase: 'loading' | 'requested';
+  cancelled: boolean;
+}
+
 /** Main 侧每个会话的运行态（不落盘） */
 interface LiveSession {
   contextRuntime?: ContextRuntimeSnapshot;
   contextRuntimeSeq?: number;
+  recovery?: PendingCompactionRecovery;
   /** 最近一次 spawn 用的 generation；0 表示还没 spawn 过 */
   generation: number;
   /** spawn-session 已交给当前 worker 进程，且没有关闭 / 失败 */
@@ -226,6 +233,8 @@ interface LiveSession {
   lastError?: string;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
+  /** Invalidates requests waiting to spawn when abandoned-worker cleanup explicitly clears error. */
+  cleanupEpoch?: number;
   /** 最近一次正常结束（非 aborted）的 agent_settled 的会话级 seq；新一轮开始 / 换模型时清 0 */
   lastSettledSeq: number;
   /** 当前 generation 里正常结束的回合数：与 worker 同步计数，用于双重核对轮次 */
@@ -289,6 +298,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 在途的建议请求：requestId → 结算；同时用它限制并发并丢弃旧回包 */
   const suggestions = new Map<string, PendingSuggestion>();
   let suggestionSeq = 0;
+  let recoverySeq = 0;
   /** 模型的思考档位：pi 目录随 worker 版本固定，同一（协议, 模型, reasoning 标记）的回答不会变 */
   const capabilities = new Map<string, ModelThinkingCapability>();
   /** 等 worker 回答的 describe-models：requestId → 结算 */
@@ -457,6 +467,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     state.spawned = false;
     state.contextRuntime = undefined;
     state.contextRuntimeSeq = undefined;
+    state.recovery = undefined;
     state.running = false;
     state.lastSettledSeq = 0;
     state.suggestedRound = 0;
@@ -700,6 +711,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       stored.status === 'running' ||
       stored.status === 'waiting-approval' ||
       state?.running === true ||
+      state?.recovery !== undefined ||
       (state?.prompting ?? 0) > 0
     );
   }
@@ -719,7 +731,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /** 会话首次使用（或 worker 丢了它）时在 worker 里创建；transcript 先从 jsonl 初始化，再接实时事件 */
-  async function ensureSpawned(stored: StoredSession): Promise<Result> {
+  async function ensureSpawned(
+    stored: StoredSession,
+    wanted: () => boolean = () => true
+  ): Promise<Result> {
     const state = liveOf(stored.id);
     if (state.spawned) return { ok: true };
     if (client.state === 'stopped') client.start();
@@ -729,14 +744,77 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!built.ok) return built;
     await ensureTranscript(stored, state);
     if (!deps.store.get(stored.id)) return fail(translate('common.sessionNotFound'));
+    if (!wanted()) return fail('The session operation was cancelled.');
     if (state.spawned) return { ok: true };
     return spawnWith(stored.id, state, built.spec)
       ? { ok: true }
       : fail(translate('agent.workerUnavailable'));
   }
 
+  function finishRecovery(
+    sessionId: string,
+    state: LiveSession,
+    operation: PendingCompactionRecovery,
+    result: Result
+  ): void {
+    if (state.recovery !== operation) return;
+    state.recovery = undefined;
+    state.running = false;
+    if (operation.cancelled) {
+      setStatus(sessionId, 'idle');
+    } else if (!result.ok) {
+      if (state.lastError !== result.error)
+        deliver(sessionId, state, { type: 'error', source: 'compaction', message: result.error });
+      state.lastError = result.error;
+      setStatus(sessionId, 'error');
+    } else {
+      setStatus(
+        sessionId,
+        state.contextRuntime?.recoveryRequired || deps.store.get(sessionId)?.status === 'error'
+          ? 'error'
+          : 'idle'
+      );
+    }
+  }
+
+  async function startRecovery(
+    stored: StoredSession,
+    state: LiveSession,
+    operation: PendingCompactionRecovery
+  ): Promise<void> {
+    const wanted = () => state.recovery === operation && !operation.cancelled;
+    try {
+      if (client.state === 'restarting') client.start();
+      const spawned = await ensureSpawned(stored, wanted);
+      if (!wanted()) return;
+      if (!spawned.ok) {
+        finishRecovery(stored.id, state, operation, spawned);
+        return;
+      }
+      operation.phase = 'requested';
+      if (
+        !send({
+          type: 'retry-compaction',
+          identity: identityOf(stored.id, state),
+          requestId: operation.requestId,
+        })
+      ) {
+        finishRecovery(stored.id, state, operation, fail(translate('agent.workerUnavailable')));
+      }
+    } catch (error) {
+      if (wanted()) finishRecovery(stored.id, state, operation, fail(errorMessage(error)));
+    }
+  }
+
   function handleEvent(event: Exclude<AgentWorkerEvent, { type: 'ready' }>): void {
     switch (event.type) {
+      case 'compaction-recovery-result': {
+        const state = currentOf(event.identity);
+        const operation = state?.recovery;
+        if (!state || !operation || operation.requestId !== event.requestId) return;
+        finishRecovery(event.identity.sessionId, state, operation, event.result);
+        return;
+      }
       case 'session-event': {
         const state = currentOf(event.identity);
         // 过期 generation、重复或乱序的 seq 一律丢弃
@@ -1064,16 +1142,19 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
-    if (pending.contextRuntime?.recoveryRequired)
+    if (pending.recovery || pending.contextRuntime?.recoveryRequired)
       return fail(translate('agent.compactionRecoveryRequired'));
     // 用户开始新一轮（或插话）：旧轮的建议立即作废，worker 里的在途请求也中止
     invalidateSuggestion(sessionId, pending);
     const epoch = pending.roundEpoch;
+    const cleanupEpoch = pending.cleanupEpoch;
+    const stillWanted = () => pending.cleanupEpoch === cleanupEpoch;
     pending.activity += 1;
     tellObservers((observer) => observer.activity?.(sessionId, 'prompt'));
     pending.prompting += 1;
     try {
-      const spawned = await ensureSpawned(stored);
+      const spawned = await ensureSpawned(stored, stillWanted);
+      if (!stillWanted()) return fail('The session was cleaned up before message delivery.');
       if (signal?.aborted) return fail('feedback delivery was aborted');
       if (!spawned.ok) return spawned;
       const state = liveOf(sessionId);
@@ -1366,8 +1447,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       failureListeners.add(listener);
       return () => failureListeners.delete(listener);
     },
-    async disposeSession(sessionId) {
+    async disposeSession(sessionId, options?: { clearError?: boolean }) {
       disposeLive(sessionId);
+      if (options?.clearError !== true) return;
+      const state = live.get(sessionId);
+      if (state) {
+        state.cleanupEpoch = (state.cleanupEpoch ?? 0) + 1;
+        state.respawn = false;
+        // disposeLive may return early for an already unloaded worker. Still invalidate any
+        // pending recovery/host calls and reject late events from the discarded generation.
+        detach(sessionId, state);
+      }
+      if (deps.store.get(sessionId)?.status === 'error') setStatus(sessionId, 'idle');
     },
   };
 
@@ -1460,15 +1551,21 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!stored) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
       if (isBusy(stored)) return fail(translate('agent.switchWhileRunning'));
-      if (!state.spawned || !state.contextRuntime?.recoveryRequired)
+      if (state.spawned && state.contextRuntime && !state.contextRuntime.recoveryRequired)
         return fail(translate('agent.noCompactionRecovery'));
       invalidateSuggestion(sessionId, state);
-      if (!send({ type: 'retry-compaction', identity: identityOf(sessionId, state) }))
-        return fail(translate('agent.workerUnavailable'));
+      const operation: PendingCompactionRecovery = {
+        requestId: `compaction-recovery-${++recoverySeq}`,
+        phase: 'loading',
+        cancelled: false,
+      };
+      state.recovery = operation;
       state.running = true;
       state.interruption = undefined;
       state.lastError = undefined;
       setStatus(sessionId, 'running');
+      // ACK acceptance now. Opening the original jsonl and checking its checkpoint happen asynchronously.
+      void startRecovery(stored, state, operation);
       return { ok: true };
     },
     async abort(sessionId) {
@@ -1477,6 +1574,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       invalidateSuggestion(sessionId, state);
       state.activity += 1;
       state.roundEpoch += 1;
+      const recovery = state.recovery;
+      if (recovery) {
+        recovery.cancelled = true;
+        if (recovery.phase === 'loading') {
+          // No recovery command was sent. Invalidate pending reads before they can spawn, and discard
+          // a spawn that won the final microtask race without killing the shared worker process.
+          if (state.spawned)
+            send({ type: 'dispose-session', identity: identityOf(sessionId, state) });
+          detach(sessionId, state);
+          setStatus(sessionId, 'idle');
+        }
+      }
       for (const [requestId, pending] of approvals) {
         if (pending.sessionId === sessionId) approvals.delete(requestId);
       }

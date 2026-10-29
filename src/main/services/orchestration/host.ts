@@ -231,9 +231,12 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
   }
 
-  async function disposeWorker(sessionId: string): Promise<void> {
+  async function disposeWorker(
+    sessionId: string,
+    options?: { clearError?: boolean }
+  ): Promise<void> {
     try {
-      await launcher.disposeSession(sessionId);
+      await launcher.disposeSession(sessionId, options);
     } catch {
       // 会话可能已经不在了；清理 worktree 照常进行
     }
@@ -830,14 +833,17 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       // 取消意图先落盘：即使资源删除失败，任务也确实已被主动放弃，重试清理不改变汇报。
       abandon(task);
     }
+    // abandon 写回 store 后再读取最终状态；已放弃的重复清理也需结算会话错误。
+    const disposeOptions =
+      store.tasks.get(task.id)?.status === 'abandoned' ? { clearError: true } : undefined;
     if (isInPlace(dispatch)) {
       // 普通目录只停 worker，改动留在目录里；验收与取消仍遵循相同的状态契约。
-      await disposeWorker(dispatch.workerSessionId);
+      await disposeWorker(dispatch.workerSessionId, disposeOptions);
       return { ok: true, removedWorktree: false, deletedBranch: false, mode: 'in-place' };
     }
     if (worktree === undefined) {
       // 不再按旧 branch 名称删分支：它可能已被后续任务复用。
-      if (!completed) await disposeWorker(dispatch.workerSessionId);
+      if (!completed) await disposeWorker(dispatch.workerSessionId, disposeOptions);
       return { ok: true, removedWorktree: false, deletedBranch: false };
     }
     if (completed) {
@@ -851,7 +857,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       }
     }
     // 先停 worker：它的进程可能还占着 worktree 里的文件。
-    await disposeWorker(dispatch.workerSessionId);
+    await disposeWorker(dispatch.workerSessionId, disposeOptions);
     const removed = completed
       ? await git.remove({ repoPath, path: worktree.path })
       : await removeWorktree(worktree);

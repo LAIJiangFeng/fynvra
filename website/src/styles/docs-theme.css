@@ -1,0 +1,661 @@
+/* Fynvra docs shell, adapted from f2d3449's docs.css and site.css.
+   Loaded only by Starlight: do not import the homepage reset or controllers. */
+:root {
+  --fynvra-paper: #080808;
+  --fynvra-paper-2: #0c0c0c;
+  --fynvra-surface: #101010;
+  --fynvra-surface-2: #141414;
+  --fynvra-ink: #f5f5f5;
+  --fynvra-ink-2: #bdbdbd;
+  --fynvra-ink-3: #8a8a8a;
+  --fynvra-line: #242424;
+  --fynvra-line-2: #383838;
+  --fynvra-accent: #f5f5f5;
+  --fynvra-link: #f5f5f5;
+  --fynvra-active: rgb(255 255 255 / 8%);
+  --fynvra-active-hover: rgb(255 255 255 / 8%);
+  --fynvra-active-ring: inset 0 0 0 1px rgb(255 255 255 / 14%);
+  --fynvra-hover: rgb(255 255 255 / 4.5%);
+  --fynvra-focus: rgb(255 255 255 / 55%);
+  --fynvra-search-focus: rgb(255 255 255 / 26%);
+  --fynvra-focus-ring: rgb(255 255 255 / 7%);
+  --fynvra-card: rgb(255 255 255 / 2%);
+  --fynvra-card-line: rgb(255 255 255 / 8%);
+  --fynvra-card-hover: rgb(255 255 255 / 4%);
+  --fynvra-card-line-hover: rgb(255 255 255 / 16%);
+  --fynvra-button-bg: #f5f5f5;
+  --fynvra-button-ink: #0a0a0a;
+  --fynvra-warn: #f0c674;
+  --fynvra-code-bg: #0a0a0a;
+  --fynvra-code-ink: #f0f0f0;
+  --fynvra-code-dim: #8a8a8a;
+  --fynvra-shadow: 0 70px 130px -50px rgb(0 0 0 / 80%), 0 0 0 1px rgb(255 255 255 / 5%);
+
+  --sl-font: "Archivo", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  --sl-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --sl-nav-height: 64px;
+  --sl-nav-pad-x: clamp(20px, 4vw, 40px);
+  --sl-nav-pad-y: 0px;
+  --sl-sidebar-width: 300px;
+  --sl-sidebar-pad-x: 24px;
+  --sl-content-width: 780px;
+  --sl-content-pad-x: clamp(24px, 4.6vw, 56px);
+  --sl-content-gap-y: 14px;
+  --sl-main-pad: 0;
+  --sl-mobile-toc-height: 0px;
+  --sl-text-h1: clamp(1.9rem, 2.7vw, 2.35rem);
+  --sl-text-h2: clamp(1.28rem, 1.6vw, 1.42rem);
+  --sl-text-h3: 1.06rem;
+  --sl-text-h4: 1rem;
+  --sl-text-code: 12.75px;
+  --sl-line-height: 1.78;
+}
+
+:root[data-theme="light"] {
+  --fynvra-paper: #f7f6f2;
+  --fynvra-paper-2: #efede6;
+  --fynvra-surface: #fffefb;
+  --fynvra-surface-2: #f9f8f3;
+  --fynvra-ink: #121310;
+  --fynvra-ink-2: #4b4c45;
+  --fynvra-ink-3: #6e6f65;
+  --fynvra-line: #e3e0d6;
+  --fynvra-line-2: #cec9bc;
+  --fynvra-accent: #2d5bff;
+  --fynvra-link: #2447c9;
+  --fynvra-active: rgb(45 91 255 / 9%);
+  --fynvra-active-hover: rgb(45 91 255 / 13%);
+  --fynvra-active-ring: none;
+  --fynvra-hover: rgb(18 19 16 / 4.5%);
+  --fynvra-focus: #2d5bff;
+  --fynvra-search-focus: color-mix(in srgb, #2d5bff 55%, #cec9bc);
+  --fynvra-focus-ring: rgb(45 91 255 / 12%);
+  --fynvra-card: var(--fynvra-surface);
+  --fynvra-card-line: var(--fynvra-line);
+  --fynvra-card-hover: var(--fynvra-paper-2);
+  --fynvra-card-line-hover: var(--fynvra-line-2);
+  --fynvra-button-bg: #161712;
+  --fynvra-button-ink: #fffefb;
+  --fynvra-warn: #9a5a16;
+  --fynvra-code-bg: #141612;
+  --fynvra-code-ink: #edefe8;
+  --fynvra-code-dim: #8b9187;
+  --fynvra-shadow: 0 60px 120px -52px rgb(18 24 16 / 38%), 0 24px 50px -34px rgb(18 24 16 / 22%);
+}
+
+/* Map the whole framework palette, including dialogs and controls, not just accent. */
+:root,
+:root[data-theme="light"] {
+  --sl-color-white: var(--fynvra-ink);
+  --sl-color-gray-1: var(--fynvra-ink);
+  --sl-color-gray-2: var(--fynvra-ink-2);
+  --sl-color-gray-3: var(--fynvra-ink-3);
+  --sl-color-gray-4: var(--fynvra-line-2);
+  --sl-color-gray-5: var(--fynvra-line);
+  --sl-color-gray-6: var(--fynvra-paper-2);
+  --sl-color-gray-7: var(--fynvra-surface-2);
+  --sl-color-black: var(--fynvra-paper);
+  --sl-color-accent: var(--fynvra-accent);
+  --sl-color-accent-low: var(--fynvra-active);
+  --sl-color-accent-high: var(--fynvra-link);
+  --sl-color-text: var(--fynvra-ink-2);
+  --sl-color-text-accent: var(--fynvra-link);
+  --sl-color-text-invert: var(--fynvra-button-ink);
+  --sl-color-bg: var(--fynvra-paper);
+  --sl-color-bg-nav: var(--fynvra-paper);
+  --sl-color-bg-sidebar: var(--fynvra-paper);
+  --sl-color-bg-inline-code: var(--fynvra-paper-2);
+  --sl-color-bg-accent: var(--fynvra-button-bg);
+  --sl-color-hairline: var(--fynvra-line);
+  --sl-color-hairline-light: var(--fynvra-line);
+  --sl-color-hairline-shade: var(--fynvra-line);
+  --sl-shadow-lg: var(--fynvra-shadow);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--fynvra-accent) 24%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--fynvra-focus);
+  outline-offset: 3px;
+}
+
+/* Header and native Starlight preference controls. */
+.page > .header {
+  background: color-mix(in srgb, var(--fynvra-paper) 90%, transparent);
+  border-bottom-color: var(--fynvra-line);
+  backdrop-filter: saturate(1.5) blur(18px);
+}
+
+.fynvra-docs-header {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  height: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+
+.fynvra-site-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fynvra-site-links a {
+  padding: 6px 11px;
+  border-radius: 999px;
+  color: var(--fynvra-ink-2);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.fynvra-site-links a:hover {
+  background: var(--fynvra-surface);
+  color: var(--fynvra-ink);
+}
+
+.fynvra-site-links [aria-current] {
+  color: var(--fynvra-ink);
+  font-weight: 600;
+}
+
+.fynvra-site-links [aria-current]::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-inline-end: 7px;
+  border-radius: 50%;
+  background: var(--fynvra-accent);
+  vertical-align: 2px;
+}
+
+.fynvra-header-actions {
+  align-items: center;
+  gap: 12px;
+  margin-inline-start: auto;
+}
+
+:is(.fynvra-header-actions, .mobile-preferences) a[rel~="me"] {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--fynvra-ink-2);
+}
+
+:is(.fynvra-header-actions, .mobile-preferences) a[rel~="me"]:hover {
+  border-color: var(--fynvra-line);
+  background: var(--fynvra-surface);
+  color: var(--fynvra-ink);
+  opacity: 1;
+}
+
+:is(.fynvra-header-actions, .mobile-preferences) a[rel~="me"] svg {
+  width: 18px;
+  height: 18px;
+}
+
+:is(starlight-theme-select, starlight-lang-select) label {
+  color: var(--fynvra-ink-2);
+}
+
+:is(starlight-theme-select, starlight-lang-select) select {
+  min-height: 38px;
+  border-radius: 9px;
+  font-family: var(--__sl-font-mono);
+  font-size: 12px;
+}
+
+:is(starlight-theme-select, starlight-lang-select) select:hover {
+  background: var(--fynvra-hover);
+  color: var(--fynvra-ink);
+}
+
+/* Preserve #starlight__sidebar as the scroll container for framework persistence. */
+.sidebar-pane {
+  background: var(--fynvra-paper);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fynvra-line-2) transparent;
+}
+
+.sidebar-content {
+  gap: 8px;
+  padding: 0 var(--sl-sidebar-pad-x) 18px;
+}
+
+.fynvra-sidebar-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: none;
+  padding: 16px 0 8px;
+  background: var(--fynvra-paper);
+}
+
+.sidebar-content .top-level > li + li {
+  margin-top: 15px;
+}
+
+.sidebar-content ul ul {
+  margin-top: 1px;
+}
+
+.sidebar-content ul ul li {
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+  border-inline-start: 0;
+}
+
+.sidebar-content ul ul li + li {
+  margin-top: 1px;
+}
+
+.sidebar-content summary {
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--fynvra-ink-3);
+}
+
+.sidebar-content summary .large {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sidebar-content summary .caret {
+  order: -1;
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar-content summary:hover {
+  background: var(--fynvra-hover);
+  color: var(--fynvra-ink);
+}
+
+.sidebar-content .top-level a {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--fynvra-ink-2);
+  font-size: 15px;
+  line-height: 1.4;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.sidebar-content .top-level a:hover {
+  background: var(--fynvra-hover);
+  color: var(--fynvra-ink);
+}
+
+.sidebar-content .top-level a[aria-current="page"] {
+  background: var(--fynvra-active);
+  box-shadow: var(--fynvra-active-ring);
+  color: var(--fynvra-link);
+  font-weight: 600;
+}
+
+.sidebar-content .top-level a[aria-current="page"]:hover {
+  background: var(--fynvra-active-hover);
+}
+
+.sidebar-content :is(a, summary):focus-visible {
+  outline-offset: -2px;
+}
+
+.mobile-preferences {
+  border-color: var(--fynvra-line);
+}
+
+/* The search is still Pagefind's accessible dialog, now in the original sidebar position. */
+site-search button[data-open-modal] {
+  width: 100%;
+  max-width: none;
+  height: 38px;
+  gap: 7px;
+  padding: 0 8px 0 11px;
+  border: 1px solid var(--fynvra-line);
+  border-radius: 9px;
+  background: var(--fynvra-surface);
+  color: var(--fynvra-ink-3);
+  font-size: 14px;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+
+site-search button[data-open-modal] > svg {
+  width: 16px;
+  height: 16px;
+}
+
+site-search button[data-open-modal] > span {
+  display: block;
+}
+
+site-search button[data-open-modal] > kbd {
+  display: flex;
+  gap: 0.25em;
+  margin-inline-start: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--fynvra-line-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fynvra-ink-3);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+site-search kbd {
+  font-family: var(--__sl-font-mono);
+}
+
+site-search button[data-open-modal]:hover {
+  border-color: var(--fynvra-line-2);
+  color: var(--fynvra-ink);
+}
+
+site-search button[data-open-modal]:focus-visible,
+#starlight__search .pagefind-ui__search-input:focus {
+  border-color: var(--fynvra-search-focus);
+  box-shadow: 0 0 0 3px var(--fynvra-focus-ring);
+  outline: none;
+}
+
+site-search dialog {
+  background: var(--fynvra-surface);
+  border-color: var(--fynvra-line);
+  box-shadow: var(--fynvra-shadow);
+}
+
+/* A keyboard shortcut can open search while the mobile sidebar is hidden. */
+site-search dialog[open] {
+  visibility: visible;
+}
+
+site-search dialog::backdrop {
+  background: rgb(12 14 11 / 38%);
+}
+
+:root[data-theme="dark"] site-search dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+#starlight__search {
+  --pagefind-ui-background: var(--fynvra-surface);
+  --pagefind-ui-border: var(--fynvra-line);
+  --pagefind-ui-border-radius: 9px;
+  --pagefind-ui-primary: var(--fynvra-ink);
+  --pagefind-ui-text: var(--fynvra-ink-2);
+  --pagefind-ui-font: var(--__sl-font);
+  --sl-search-corners: 9px;
+}
+
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)),
+#starlight__search .pagefind-ui__result-nested {
+  background: var(--fynvra-surface);
+}
+
+#starlight__search :is(.pagefind-ui__result-title, .pagefind-ui__result-nested):is(:hover, :focus-within) {
+  background: var(--fynvra-hover);
+  outline-color: var(--fynvra-focus);
+}
+
+#starlight__search .pagefind-ui__result-excerpt {
+  color: var(--fynvra-ink-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#starlight__search mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fynvra-accent) 18%, transparent);
+  color: inherit;
+}
+
+/* Both title and body panels share the same centered reading column. */
+.main-pane {
+  min-width: 0;
+}
+
+.content-panel {
+  padding: 0 var(--sl-content-pad-x);
+}
+
+.content-panel:first-of-type {
+  padding-block-start: clamp(28px, 4vw, 52px);
+}
+
+.content-panel + .content-panel {
+  border-top: 0;
+  padding-block: 14px 96px;
+}
+
+.content-panel .sl-container {
+  margin-inline: auto;
+}
+
+.fynvra-docs-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-height: 18px;
+  margin-bottom: 20px;
+  color: var(--fynvra-ink-3);
+  font-family: var(--__sl-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.fynvra-docs-breadcrumbs span:last-child {
+  color: var(--fynvra-ink-2);
+}
+
+.content-panel h1 {
+  max-width: 32ch;
+  margin: 0;
+  color: var(--fynvra-ink);
+  font-size: var(--sl-text-h1);
+  font-stretch: 108%;
+  font-weight: 780;
+  letter-spacing: -0.026em;
+  line-height: 1.18;
+}
+
+.content-panel h1:lang(zh) {
+  max-width: 26ch;
+  letter-spacing: -0.01em;
+  line-height: 1.28;
+}
+
+.content-panel footer {
+  gap: 22px;
+  margin-top: 64px;
+  padding-top: 28px;
+  border-top: 1px solid var(--fynvra-line);
+}
+
+.content-panel footer .meta {
+  margin-top: 0;
+}
+
+.content-panel footer .meta:empty {
+  display: none;
+}
+
+.pagination-links {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pagination-links a {
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--fynvra-card-line);
+  border-radius: 10px;
+  background: var(--fynvra-card);
+  color: var(--fynvra-ink-3);
+  box-shadow: none;
+  font-family: var(--__sl-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.pagination-links a:hover {
+  border-color: var(--fynvra-card-line-hover);
+  background: var(--fynvra-card-hover);
+}
+
+.pagination-links [rel="next"] {
+  grid-column: 2;
+}
+
+.pagination-links .link-title {
+  color: var(--fynvra-ink);
+  font-family: var(--__sl-font);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+.pagination-links svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Use Starlight's 50rem breakpoint so its menu and sidebar persistence agree. */
+@media screen and (min-width: 50rem) {
+  :root[data-has-sidebar] body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  [data-has-sidebar] .page {
+    height: 100%;
+    min-height: 0;
+  }
+
+  [data-has-sidebar] .main-frame {
+    height: calc(100vh - var(--sl-nav-height));
+    height: calc(100dvh - var(--sl-nav-height));
+    margin-block-start: var(--sl-nav-height);
+    padding-block-start: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding-block-start: 24px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--fynvra-line-2) transparent;
+  }
+
+  site-search dialog {
+    border-radius: 12px;
+  }
+}
+
+@media (min-width: 50rem) and (max-width: 70rem) {
+  :root {
+    --sl-sidebar-width: 278px;
+    --sl-content-pad-x: clamp(24px, 3.6vw, 44px);
+    --sl-text-h1: clamp(1.85rem, 2.5vw, 2.1rem);
+  }
+}
+
+@media (max-width: 60rem) {
+  .fynvra-site-links .product-link {
+    display: none;
+  }
+}
+
+@media (max-width: 49.999rem) {
+  :root {
+    --sl-content-pad-x: 22px;
+    --sl-sidebar-pad-x: 18px;
+    --sl-text-h1: clamp(1.8rem, 6.4vw, 2.15rem);
+  }
+
+  .fynvra-docs-header {
+    gap: 12px;
+  }
+
+  .content-panel:first-of-type {
+    padding-block-start: 26px;
+  }
+
+  .content-panel + .content-panel {
+    padding-block-end: 64px;
+  }
+
+  .content-panel h1,
+  .content-panel h1:lang(zh) {
+    max-width: none;
+  }
+
+  .fynvra-docs-breadcrumbs {
+    margin-bottom: 16px;
+  }
+
+  starlight-menu-button button {
+    border: 1px solid var(--fynvra-line);
+    border-radius: 9px;
+    background: var(--fynvra-surface);
+    color: var(--fynvra-ink-2);
+    box-shadow: none;
+  }
+
+  starlight-menu-button[aria-expanded="true"] button {
+    border-color: var(--fynvra-line-2);
+    background: var(--fynvra-hover);
+    color: var(--fynvra-ink);
+  }
+
+  .pagination-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pagination-links [rel="next"] {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --sl-content-pad-x: 18px;
+    --sl-sidebar-pad-x: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}

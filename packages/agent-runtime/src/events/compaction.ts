@@ -1,9 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 import type { CompactionState, FynvraSessionEventBody, RetryState } from '@fynvra/core';
 
 /** One deadline per operation, never renewed by a retry. No provider text crosses this boundary. */
 export function createCompactionLifecycle(timeoutMs = 600_000, maxAttempts = 1) {
-  let operation = 0;
   let compaction: CompactionState | undefined;
   let retry: RetryState | undefined;
   const active = () => compaction?.phase === 'running' || compaction?.phase === 'backoff';
@@ -43,7 +43,7 @@ export function createCompactionLifecycle(timeoutMs = 600_000, maxAttempts = 1) 
         case 'compaction_start': {
           const startedAt = Date.now();
           compaction = {
-            operationId: `compaction-${++operation}`,
+            operationId: `compaction-${randomUUID()}`,
             reason: event.reason,
             phase: 'running',
             startedAt,

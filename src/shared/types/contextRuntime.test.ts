@@ -78,9 +78,32 @@ describe('context runtime protocol', () => {
     };
     expect(parseAgentWorkerEvent(event)).toEqual(event);
     expect(parseAgentWorkerEvent({ ...event, seq: 2 })).toBeNull();
-    expect(parseAgentCommand({ type: 'retry-compaction', identity })).toEqual({
+    expect(parseAgentCommand({ type: 'retry-compaction', identity, requestId: 'r1' })).toEqual({
       type: 'retry-compaction',
       identity,
+      requestId: 'r1',
     });
+    expect(parseAgentCommand({ type: 'retry-compaction', identity })).toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        type: 'compaction-recovery-result',
+        identity,
+        requestId: 'r1',
+        result: { ok: true },
+      })
+    ).toEqual({
+      type: 'compaction-recovery-result',
+      identity,
+      requestId: 'r1',
+      result: { ok: true },
+    });
+    expect(
+      parseAgentWorkerEvent({
+        type: 'compaction-recovery-result',
+        identity,
+        requestId: 'r1',
+        result: { ok: false },
+      })
+    ).toBeNull();
   });
 });

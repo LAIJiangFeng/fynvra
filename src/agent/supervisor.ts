@@ -158,7 +158,7 @@ export class SessionSupervisor {
         void this.#run(command.identity, command.text, 'steer', command.images);
         return;
       case 'retry-compaction':
-        void this.#retryCompaction(command.identity);
+        void this.#retryCompaction(command.identity, command.requestId);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -585,22 +585,43 @@ export class SessionSupervisor {
     this.#post({ type: 'models-described', requestId, result });
   }
 
-  async #retryCompaction(identity: SessionIdentity): Promise<void> {
+  async #retryCompaction(identity: SessionIdentity, requestId: string): Promise<void> {
+    const finish = (error?: string) =>
+      this.#post({
+        type: 'compaction-recovery-result',
+        identity,
+        requestId,
+        result: error ? { ok: false, error } : { ok: true },
+      });
     const managed = this.#current(identity);
-    if (!managed) return;
+    if (!managed) {
+      finish('The session is not loaded.');
+      return;
+    }
+    const epoch = managed.approvalEpoch;
     const session = await managed.opening;
-    if (!session || managed.closed || !session.retryCompaction) return;
-    if (!session.isIdle()) return;
+    if (!session || managed.closed || managed.approvalEpoch !== epoch) {
+      finish('Compaction recovery was cancelled.');
+      return;
+    }
+    if (!session.retryCompaction || !session.isIdle()) {
+      finish('The session is not ready for compaction recovery.');
+      return;
+    }
     this.#cancelSuggestions(identity.sessionId);
     managed.failed = false;
     this.#setStatus(managed, 'running');
+    let failure: string | undefined;
     try {
+      // The restored session is authoritative: no checkpoint means no manual compaction.
       await session.retryCompaction();
     } catch (error) {
+      failure = errorMessage(error);
       managed.failed = true;
-      managed.events?.emit({ type: 'error', source: 'compaction', message: errorMessage(error) });
+      managed.events?.emit({ type: 'error', source: 'compaction', message: failure });
     }
     this.#settleIfIdle(managed, session);
+    finish(failure);
   }
 
   async #abort(identity: SessionIdentity): Promise<void> {
