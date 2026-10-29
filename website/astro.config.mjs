@@ -60,6 +60,7 @@ export default defineConfig({
       components: {
         Head: './src/components/docs/Head.astro',
         Header: './src/components/starlight/Header.astro',
+        ThemeSelect: './src/components/starlight/ThemeToggle.astro',
         Sidebar: './src/components/starlight/Sidebar.astro',
         PageTitle: './src/components/starlight/PageTitle.astro',
         SiteTitle: './src/components/starlight/SiteTitle.astro',
