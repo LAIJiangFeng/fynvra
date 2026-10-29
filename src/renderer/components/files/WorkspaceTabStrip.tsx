@@ -64,7 +64,7 @@ export function WorkspaceTabStrip({
     <StripContext.Provider value={{ workspaceId, dragged, target, setTarget }}>
       <div
         ref={scroll}
-        className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+        className="flex min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
         onDragOver={(event) => {
           if (!dragged.current || !event.dataTransfer.types.includes(MIME)) {
             event.preventDefault();
