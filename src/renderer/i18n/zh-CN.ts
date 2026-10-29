@@ -706,7 +706,7 @@ export const zhCN = {
       compactionSelected: '设置选择的策略',
       compactionTimeout: '压缩总等待时限（秒）',
       compactionTimeoutHint:
-        '含摘要重试的总等待时间，30～1800 秒，默认 600 秒（10 分钟）。新加载会话生效；已加载会话重启应用后生效。超时会保留原会话和待发送消息，可手动重试。',
+        '含摘要重试的总等待时间，30～1800 秒，默认 600 秒（10 分钟）。新加载会话生效；已加载会话重启应用后生效。超时会保留原会话和待发送消息，可手动重试',
       compactionNative: 'pi 原生自动压缩（默认）',
       compactionMagic: 'Magic Context（插件）',
       compactionOff: '关闭自动压缩',

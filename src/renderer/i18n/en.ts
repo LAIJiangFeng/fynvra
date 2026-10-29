@@ -272,17 +272,17 @@ export const en: MessagesShape<typeof zhCN> = {
     stopping: 'Cancelling…',
     compacting: 'Compacting conversation history',
     compactionRecovering: 'Resuming history compaction…',
-    modelFailed: 'Model request failed. Pending messages are preserved.',
+    modelFailed: 'Model request failed. Pending messages are preserved',
     modelRetrying: 'Request failed; retrying {attempt}/{max}',
     summaryRetrying: 'Summary request failed; retrying {attempt}/{max}',
     compactionTimeout:
-      'History compaction timed out. The original conversation is preserved; you can retry.',
+      'History compaction timed out. The original conversation is preserved; you can retry',
     compactionCancelled:
-      'History compaction cancelled. The conversation and pending messages are preserved; you can retry.',
+      'History compaction cancelled. The conversation and pending messages are preserved; you can retry',
     compactionInterrupted:
-      'History compaction interrupted. The original conversation is preserved; you can retry.',
+      'History compaction interrupted. The original conversation is preserved; you can retry',
     compactionFailed:
-      'History compaction failed. The original conversation is preserved; you can retry.',
+      'History compaction failed. The original conversation is preserved; you can retry',
     retryCompaction: 'Retry history compaction',
     noCompactionRecovery: 'This session has no history compaction to recover',
     compactionRetryFailed: 'Could not resume history compaction: {error}',
@@ -290,7 +290,7 @@ export const en: MessagesShape<typeof zhCN> = {
     queuedForCompaction: 'Queued; waiting for history compaction',
     queuedForRecovery: 'Queued; waiting for compaction recovery',
     pendingForRecovery:
-      'Message preserved; it will send after compaction succeeds. No need to resubmit.',
+      'Message preserved; it will send after compaction succeeds. No need to resubmit',
     acceptedPending: 'Accepted; waiting for generation to start',
     engineNative: 'pi native',
     engineOff: 'Off',
@@ -299,7 +299,7 @@ export const en: MessagesShape<typeof zhCN> = {
     configuredEngine: 'Configured when loaded: {engine}',
     selectedEngine: 'Selected in settings: {engine}',
     strategyPending:
-      'The selected strategy is not active in this loaded session. It applies to new instances or after restarting the app.',
+      'The selected strategy is not active in this loaded session. It applies to new instances or after restarting the app',
     contextUnknown: 'Current context: not yet estimated',
     contextReestimating: 'Current context: awaiting estimate / {window}',
     contextUsage: 'Current context ≈ {tokens} / {window}',
@@ -735,7 +735,7 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionSelected: 'Strategy selected in settings',
       compactionTimeout: 'Total compaction wait limit (seconds)',
       compactionTimeoutHint:
-        'Includes summary retries. 30–1800 seconds; default 600 seconds (10 minutes). Applies to newly loaded sessions; restart the app for already loaded sessions. On timeout, the conversation and pending messages are preserved for manual retry.',
+        'Includes summary retries. 30–1800 seconds; default 600 seconds (10 minutes). Applies to newly loaded sessions; restart the app for already loaded sessions. On timeout, the conversation and pending messages are preserved for manual retry',
       compactionNative: 'pi native auto-compaction (default)',
       compactionMagic: 'Magic Context (plugin)',
       compactionOff: 'Turn off auto-compaction',
