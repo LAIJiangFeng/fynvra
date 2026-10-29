@@ -7,6 +7,7 @@ import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getAgentHost } from './ipc/sessions';
+import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { getSettingsFile } from './ipc/settings';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
@@ -70,6 +71,21 @@ if (!app.requestSingleInstanceLock()) {
       app.quit();
     },
     mac: process.platform === 'darwin',
+    prepare: async () => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!(await prepareWorkspaceWindowClose(win))) {
+          getUpdateService().cancelInstall();
+          return false;
+        }
+      }
+      try {
+        await getWorkspaceUiService().flush();
+        return true;
+      } catch {
+        getUpdateService().cancelInstall();
+        return false;
+      }
+    },
     shutdown: () =>
       getAgentHost()
         .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)

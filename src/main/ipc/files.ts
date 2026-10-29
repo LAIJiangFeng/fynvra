@@ -51,11 +51,17 @@ const shellAdapter: FilesShell = {
   trash: (path) => shell.trashItem(path),
 };
 
-export function registerFilesHandlers(): void {
-  const service = createFilesService({
+let filesService: ReturnType<typeof createFilesService> | undefined;
+export function getFilesService(): ReturnType<typeof createFilesService> {
+  filesService ??= createFilesService({
     getWorkspace: (id) => getWorkspaceService().get(id),
     shell: shellAdapter,
   });
+  return filesService;
+}
+
+export function registerFilesHandlers(): void {
+  const service = getFilesService();
   ipcMain.handle(
     IPC_CHANNELS.FILES_LIST,
     async (_event, raw: unknown): Promise<DirectoryResult> => {

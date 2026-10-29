@@ -4,7 +4,15 @@
  * 参数写成 `{name}`；`{n|单数|复数}` 是英文的单复数写法，中文写一种即可。
  */
 export const zhCN = {
+  workspaceTabs: {
+    drag: '拖动调整标签顺序',
+    failed: '无法保存或恢复标签，请保留此窗口并重试',
+    limits: '标签存储已达上限（64 个标签；草稿最多 256 KiB），请关闭标签或缩小草稿，文本未被截断',
+    corrupt: '损坏的标签快照已隔离，原文件保留在 workspace-ui 目录',
+    removeDrafts: '移除此工作区及保存的标签和未保存草稿？磁盘文件会保留',
+  },
   terminals: {
+    restored: '已恢复历史，新终端会话',
     copy: '复制',
     paste: '粘贴',
     selectAll: '全选',

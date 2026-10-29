@@ -36,6 +36,15 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
       'Running tasks will stop. Unsaved files require a separate confirmation. Canceling exit cancels installation.',
     install: 'Restart and install',
   },
+  workspaceUi: {
+    failed:
+      'Could not save or restore tabs. The window will stay open. Check available disk space and retry.',
+    limits:
+      'Tab storage limit reached. Close tabs or reduce drafts (256 KiB each); no text was truncated.',
+    keep: 'Keep drafts and leave',
+    exitHint:
+      'Keep drafts to restore them next time, or discard them explicitly. Cancel returns to the editor without stopping running tasks.',
+  },
   files: {
     unsavedTitle: 'Unsaved file changes',
     unsavedMessage: 'Some files have unsaved changes or are still being saved.',
