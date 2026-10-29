@@ -1,5 +1,5 @@
 import { Cpu } from 'lucide-react';
-import anthropic from '@/assets/model-icons/anthropic.svg';
+import claude from '@/assets/model-icons/claude.svg';
 import deepseek from '@/assets/model-icons/deepseek.svg';
 import gemini from '@/assets/model-icons/google-gemini.svg';
 import openai from '@/assets/model-icons/openai.svg';
@@ -8,7 +8,15 @@ import xai from '@/assets/model-icons/xai.svg';
 import glm from '@/assets/model-icons/zai.svg';
 import type { ModelBrand } from '@/lib/modelBrand';
 
-const BRAND_ICONS: Record<ModelBrand, string> = { openai, anthropic, xai, gemini, glm, deepseek, qwen };
+const BRAND_ICONS: Record<ModelBrand, string> = {
+  openai,
+  anthropic: claude,
+  xai,
+  gemini,
+  glm,
+  deepseek,
+  qwen,
+};
 
 /** Local SVG masks inherit the text color in both themes; the adjacent model ID is the label. */
 export function ModelBrandIcon({ brand }: { brand: ModelBrand | undefined }) {
