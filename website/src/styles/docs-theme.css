@@ -126,7 +126,7 @@ body {
   outline-offset: 3px;
 }
 
-/* Header and native Starlight preference controls. */
+/* Header and Starlight preference controls. */
 .page > .header {
   background: color-mix(in srgb, var(--fynvra-paper) 90%, transparent);
   border-bottom-color: var(--fynvra-line);
@@ -209,20 +209,62 @@ body {
   height: 18px;
 }
 
-:is(starlight-theme-select, starlight-lang-select) label {
+.fynvra-theme-toggle:not([hidden]),
+.fynvra-language-toggle {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
   color: var(--fynvra-ink-2);
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s, color 0.2s;
 }
 
-:is(starlight-theme-select, starlight-lang-select) select {
-  min-height: 38px;
-  border-radius: 9px;
+.fynvra-theme-toggle:hover,
+.fynvra-language-toggle:hover {
+  border-color: var(--fynvra-line);
+  background: var(--fynvra-surface);
+  color: var(--fynvra-ink);
+}
+
+.fynvra-theme-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+:root[data-theme="dark"] .fynvra-theme-toggle .icon-moon,
+:root:not([data-theme="dark"]) .fynvra-theme-toggle .icon-sun {
+  display: none;
+}
+
+/* The new theme expands over the old one in either direction, without cross-fading. */
+:root.fynvra-theme-transition::view-transition-old(root),
+:root.fynvra-theme-transition::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+:root.fynvra-theme-transition::view-transition-old(root) {
+  z-index: 1;
+}
+
+:root.fynvra-theme-transition::view-transition-new(root) {
+  z-index: 2;
+}
+
+.fynvra-language-toggle {
+  width: auto;
+  min-width: 38px;
+  padding: 0 11px;
   font-family: var(--__sl-font-mono);
   font-size: 12px;
-}
-
-:is(starlight-theme-select, starlight-lang-select) select:hover {
-  background: var(--fynvra-hover);
-  color: var(--fynvra-ink);
+  font-weight: 600;
+  text-decoration: none;
 }
 
 /* Preserve #starlight__sidebar as the scroll container for framework persistence. */
