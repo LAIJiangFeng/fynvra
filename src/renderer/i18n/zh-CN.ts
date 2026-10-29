@@ -187,6 +187,7 @@ export const zhCN = {
       notDirectory: '此条目不是可浏览的目录',
       notFile: '此条目不是可预览的文件',
       notText: '此文件不是可编辑的 UTF-8 文本',
+      notHtml: '仅支持在浏览器中打开 .html 或 .htm 文件',
       tooLarge: '保存内容超过 256 KiB 限制，请减少正文后重试',
       conflict:
         '磁盘文件已被其他程序修改，未覆盖。草稿已保留，请先复制需要的修改，再重新读取磁盘文件',
@@ -261,6 +262,14 @@ export const zhCN = {
     copy: '复制',
     copied: '已复制',
     copyReply: '复制回复',
+    fileLinks: {
+      opening: '正在打开文件…',
+      invalidLink: '无法打开此链接：路径无效或协议不受支持',
+      unsupportedRoot:
+        '此链接属于未挂入的会话目录或 worker worktree，无法安全打开；不会改开主工作区的同名文件',
+      unsupportedParameters: '本地文件链接暂不支持 query 或 # 锚点，请使用不带参数的文件链接',
+      sessionUnavailable: '找不到此消息所属的会话，请重新打开会话后重试',
+    },
     copyCode: '复制代码',
     thinking: '思考中…',
     thoughts: '思考过程',

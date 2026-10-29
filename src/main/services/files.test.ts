@@ -262,6 +262,7 @@ describe('文件条目变更（右键菜单背后的服务）', () => {
     reveal: (path: string) => void shell.revealed.push(path),
     copyFiles: (paths: string[]) => void shell.copied.push(paths),
     trash: async (path: string) => void shell.trashed.push(path),
+    openExternal: async () => undefined,
   };
 
   beforeEach(async () => {

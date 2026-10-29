@@ -49,6 +49,7 @@ const shellAdapter: FilesShell = {
   reveal: (path) => shell.showItemInFolder(path),
   copyFiles: copyFilesToClipboard,
   trash: (path) => shell.trashItem(path),
+  openExternal: (url) => shell.openExternal(url),
 };
 
 let filesService: ReturnType<typeof createFilesService> | undefined;
@@ -149,6 +150,10 @@ export function registerFilesHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.FILES_COPY,
     mutating((input) => service.copy(input))
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.FILES_OPEN_HTML,
+    mutating((input) => service.openHtml(input))
   );
   ipcMain.handle(
     IPC_CHANNELS.FILES_RESOLVE,
