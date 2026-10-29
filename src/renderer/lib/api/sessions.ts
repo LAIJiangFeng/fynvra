@@ -604,6 +604,11 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true };
     },
 
+    async retryCompaction(sessionId) {
+      if (!sessions.has(sessionId)) return missing();
+      return { ok: false, error: translate('chat.noCompactionRecovery') };
+    },
+
     async abort(sessionId) {
       const session = sessions.get(sessionId);
       if (!session) return missing();

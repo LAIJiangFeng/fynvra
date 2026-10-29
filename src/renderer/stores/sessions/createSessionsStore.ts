@@ -21,7 +21,11 @@ import { translate } from '../../i18n';
 import type { SessionsApi } from '../../lib/api/sessions';
 import {
   addOptimisticMessage,
+  applyContextRuntime,
   applyHistory,
+  compactionActive,
+  compactionNeedsRecovery,
+  isContextMetadata,
   type ChatProjection,
   dequeueApproval,
   emptyProjection,
@@ -67,9 +71,15 @@ export interface SessionsState extends ChatProjection {
   replySuggestions: Record<string, ReplySuggestion>;
   /**
    * Messages queued while the session was running, oldest first. Sent one at a time as prompts when
-   * the turn settles to idle; kept (not sent) after a stop or an error until the user sends again
+   * the turn settles to idle; kept (not sent) after a stop or an error until explicit resume.
    */
   queuedBySession: Record<string, QueuedMessage[]>;
+  /** Stopped/failed queues only continue after an explicit resume. */
+  pausedQueues: Record<string, true>;
+  resumeQueue(sessionId: string): void;
+  recoveringCompaction: Record<string, true>;
+  stopping: Record<string, true>;
+  retryCompaction(sessionId: string): Promise<void>;
   /** 正在拉 history 的会话 */
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
@@ -289,6 +299,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   let localSeq = 0;
   /** prompt 调用还在途的会话：列表刷新不覆盖它们的乐观 running */
   const sending = new Set<string>();
+  /** ACKs can arrive after terminal events; keep request exclusion separate from progress UI. */
+  const recoveryRequests = new Set<string>();
   /** 正在删除或已删除的会话：晚到的列表、history 与事件不能把它们放回来；失败时撤销。 */
   const removedSessions = new Set<string>();
   /** 每个工作区 / 会话最近一次请求的序号：回包晚于更新的请求时丢弃 */
@@ -314,11 +326,17 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   // 任何后续导航 / 创建都使旧创建的自动选中失效，即使用户又切回了同一工作区
   let selectionVersion = 0;
   let requestSeq = 0;
-  /** Sessions whose queue is paused: the user stopped the turn (or a queued send failed) */
-  const heldQueues = new Set<string>();
   let queueSeq = 0;
 
   return create<SessionsState>()((set, get) => {
+    function holdQueue(sessionId: string): void {
+      set((state) => ({ pausedQueues: { ...state.pausedQueues, [sessionId]: true } }));
+    }
+
+    function releaseQueue(sessionId: string): void {
+      set((state) => ({ pausedQueues: omitKey(state.pausedQueues, sessionId) }));
+    }
+
     /** 推进这个会话的建议代数，并作废所有在途回包 */
     function bumpSuggestionVersion(sessionId: string): number {
       const version = (suggestionVersions.get(sessionId) ?? 0) + 1;
@@ -355,7 +373,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
      */
     function maybeRequestSuggestion(sessionId: string, roundId: number): void {
       const state = get();
-      if (state.activeSessionId !== sessionId) return;
+      if (state.activeSessionId !== sessionId || recoveryBlocked(sessionId)) return;
       const runtime = state.runtimeBySession[sessionId];
       if (runtime?.settledSeq !== roundId || (runtime.activitySeq ?? runtime.lastSeq) !== roundId)
         return;
@@ -398,7 +416,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           (currentRuntime.activitySeq ?? currentRuntime.lastSeq) !== roundId
         )
           return;
-        if (statusOf(current, sessionId) !== 'idle') return;
+        if (statusOf(current, sessionId) !== 'idle' || recoveryBlocked(sessionId)) return;
         if ((current.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
         if ((current.queuedBySession[sessionId]?.length ?? 0) > 0) return;
         const currentSession = findSession(current, sessionId);
@@ -414,17 +432,32 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
     function flushEvents(): void {
       scheduled = false;
       if (pending.length === 0) return;
-      const batch = pending;
+      const received = pending;
       pending = [];
+      const batch: SessionEventEnvelope[] = [];
+      const failedSettlements = new Set<SessionEventEnvelope>();
       set((state) => {
         let next = state;
-        for (const envelope of batch) next = reduceSessionEvent(next, envelope, now());
+        for (const envelope of received) {
+          const reduced = reduceSessionEvent(next, envelope, now());
+          // Stale events must not run side effects either (pause/drain/suggestions).
+          if (reduced !== next) {
+            batch.push(envelope);
+            const runtime = reduced.runtimeBySession[envelope.sessionId];
+            if (
+              envelope.event.type === 'agent_settled' &&
+              (envelope.event.aborted || runtime?.error || runtime?.pendingAssistantFailure)
+            )
+              failedSettlements.add(envelope);
+          }
+          next = reduced;
+        }
         return next;
       });
       // 正文与执行状态变化（含等待审批）使旧建议失效；旁路通知不是新回合。
       // agent_settled 正常结束由下面的 maybeRequestSuggestion 统一处理。
       for (const { sessionId, event } of batch) {
-        if (event.type === 'tool_notice') continue;
+        if (event.type === 'tool_notice' || isContextMetadata(event)) continue;
         if (event.type === 'agent_settled' && !event.aborted) continue;
         // 服务告警不改变对话轮次，保留当前输入框建议。
         if (event.type === 'warning') continue;
@@ -433,15 +466,63 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
       const settled = new Set<string>();
       const normal = new Map<string, number>();
-      for (const { sessionId, event } of batch) {
+      for (const envelope of batch) {
+        const { sessionId, event } = envelope;
+        if (
+          event.type === 'error' ||
+          failedSettlements.has(envelope) ||
+          (event.type === 'context_runtime' && event.snapshot.recoveryRequired) ||
+          get().runtimeBySession[sessionId]?.recoveryRequired
+        )
+          holdQueue(sessionId);
+        if (
+          event.type === 'compaction' &&
+          compactionNeedsRecovery(
+            event.state,
+            get().runtimeBySession[sessionId]?.contextRuntime?.effectiveStrategy
+          )
+        )
+          holdQueue(sessionId);
+        if (
+          (event.type === 'agent_settled' &&
+            (event.aborted || !get().runtimeBySession[sessionId]?.recoveryRequired)) ||
+          event.type === 'error' ||
+          (event.type === 'compaction' &&
+            !compactionActive(event.state) &&
+            event.state.phase !== 'succeeded') ||
+          (event.type === 'context_runtime' &&
+            !event.snapshot.recoveryRequired &&
+            event.snapshot.pendingPromptCount === 0 &&
+            !compactionActive(event.snapshot.compaction))
+        ) {
+          set((state) => ({
+            recoveringCompaction: omitKey(state.recoveringCompaction, sessionId),
+          }));
+        }
+        // A final metadata snapshot can clear pending input *after* settled. Re-check the
+        // queue there as well; stopped/failed queues are still protected by their hold.
+        if (event.type === 'context_runtime' && !recoveryBlocked(sessionId)) {
+          settled.add(sessionId);
+          const roundId = get().runtimeBySession[sessionId]?.settledSeq;
+          if (roundId !== undefined) normal.set(sessionId, roundId);
+        }
         if (event.type !== 'agent_settled') continue;
-        if (event.aborted) heldQueues.add(sessionId);
-        else normal.set(sessionId, event.seq);
+        if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
       for (const sessionId of settled) drainQueue(sessionId);
       // 队列真的空了、状态仍 idle 才请求；drainQueue 发了下一条时这里会看到 running
       for (const [sessionId, roundId] of normal) maybeRequestSuggestion(sessionId, roundId);
+    }
+
+    function recoveryBlocked(sessionId: string): boolean {
+      const runtime = get().runtimeBySession[sessionId];
+      return Boolean(
+        get().recoveringCompaction[sessionId] ||
+          compactionActive(runtime?.compaction) ||
+          runtime?.recoveryRequired ||
+          runtime?.pendingPromptCount
+      );
     }
 
     function queueOf(sessionId: string): QueuedMessage[] {
@@ -481,10 +562,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const result = await safely(() =>
           api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
         );
-        if (result.ok) {
-          heldQueues.delete(sessionId);
-          return true;
-        }
+        flushEvents();
+        if (result.ok) return true;
+        // Only this echo's message/history confirmation can outweigh a failed ACK.
+        // A backend pending count may belong to an older input rejected by the recovery gate.
+        const current = get();
+        const echo = current.messagesBySession[sessionId]?.find((message) => message.id === id);
+        if (!echo?.optimistic) return true;
+        holdQueue(sessionId);
         set((state) => ({
           ...withdrawOptimisticMessage(state, sessionId, id, {
             status: previous,
@@ -495,19 +580,27 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return false;
       } finally {
         sending.delete(sessionId);
+        // settled may arrive before the prompt ACK; it could not drain while sending.
+        drainQueue(sessionId);
       }
     }
 
     /** Send the oldest queued message when the session is idle and its queue is not paused */
-    function drainQueue(sessionId: string): void {
-      if (heldQueues.has(sessionId) || sending.has(sessionId)) return;
-      if (statusOf(get(), sessionId) !== 'idle') return;
+    function drainQueue(sessionId: string, resume = false): void {
+      if (
+        get().pausedQueues[sessionId] ||
+        get().stopping[sessionId] ||
+        sending.has(sessionId) ||
+        recoveryBlocked(sessionId)
+      )
+        return;
+      const status = statusOf(get(), sessionId);
+      if (status !== 'idle' && !(resume && status === 'error')) return;
       const [next] = queueOf(sessionId);
       if (!next) return;
       setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
       void deliver(sessionId, next.text, next.images, (state) => {
         // Put it back in front and pause the queue so a broken session does not loop
-        heldQueues.add(sessionId);
         const queue = state.queuedBySession[sessionId] ?? [];
         return { queuedBySession: { ...state.queuedBySession, [sessionId]: [next, ...queue] } };
       });
@@ -573,6 +666,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       draftImages: {},
       replySuggestions: {},
       queuedBySession: {},
+      pausedQueues: {},
+      recoveringCompaction: {},
+      stopping: {},
       loadingHistory: {},
       listErrors: {},
       approvalSubmissions: {},
@@ -600,6 +696,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       async loadSessions(workspaceId) {
         const request = ++requestSeq;
         listRequests.set(workspaceId, request);
+        const runtimes = get().runtimeBySession;
         // 归档的也拉：侧栏底部的「已归档」分组用
         const result = await safely(() => api.list(workspaceId, { includeArchived: true }));
         if (listRequests.get(workspaceId) !== request) return;
@@ -627,12 +724,52 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           !sessions.some((session) => session.id === active);
         // 列表刷新导致活动会话没了：旧灰字与在途回包一并作废
         if (removed) clearAllSuggestions();
-        set((state) => ({
-          ...syncSessionStatuses(state, sessions, sending),
-          ...placeSessions(state, workspaceId, sessions),
-          listErrors: omitKey(state.listErrors, workspaceId),
-          ...(removed ? { activeSessionId: null } : {}),
-        }));
+        flushEvents();
+        const synchronized = new Set<string>();
+        set((state) => {
+          const skip = new Set(sending);
+          for (const session of sessions) {
+            if (
+              (state.runtimeBySession[session.id]?.lastSeq ?? 0) !==
+                (runtimes[session.id]?.lastSeq ?? 0) ||
+              state.runtimeBySession[session.id]?.contextSeq !== runtimes[session.id]?.contextSeq
+            )
+              skip.add(session.id);
+          }
+          let next = state;
+          for (const session of sessions) {
+            if (skip.has(session.id)) continue;
+            const hydrated = applyContextRuntime(
+              next,
+              session.id,
+              session.contextRuntime,
+              session.contextRuntimeSeq
+            );
+            // A rejected snapshot must not reset progress through its associated status either.
+            if (hydrated === next) skip.add(session.id);
+            else synchronized.add(session.id);
+            next = hydrated;
+          }
+          next = syncSessionStatuses(next, sessions, skip);
+          return {
+            ...next,
+            ...placeSessions(state, workspaceId, sessions),
+            listErrors: omitKey(state.listErrors, workspaceId),
+            ...(removed ? { activeSessionId: null } : {}),
+          };
+        });
+        for (const session of sessions) {
+          if (get().runtimeBySession[session.id]?.recoveryRequired) holdQueue(session.id);
+          if (
+            synchronized.has(session.id) &&
+            !recoveryRequests.has(session.id) &&
+            (session.status === 'idle' || session.status === 'error')
+          ) {
+            set((state) => ({
+              recoveringCompaction: omitKey(state.recoveringCompaction, session.id),
+            }));
+          }
+        }
       },
 
       async createSession(roleId, model, workspaceId = get().workspaceId ?? undefined) {
@@ -686,6 +823,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           if (target !== state.workspaceId) void get().loadSessions(target);
         }
         const request = ++requestSeq;
+        const snapshotRuntime = get().runtimeBySession[sessionId];
         historyRequests.set(sessionId, request);
         set((state) => ({ loadingHistory: { ...state.loadingHistory, [sessionId]: true } }));
         const result = await safely(() => api.history(sessionId));
@@ -702,7 +840,26 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
                 : {}),
             };
           }
-          return { ...applyHistory(state, sessionId, result.messages), loadingHistory };
+          let next = applyHistory(state, sessionId, result.messages);
+          if (
+            (state.runtimeBySession[sessionId]?.lastSeq ?? 0) === (snapshotRuntime?.lastSeq ?? 0) &&
+            state.runtimeBySession[sessionId]?.contextSeq === snapshotRuntime?.contextSeq
+          ) {
+            next = applyContextRuntime(
+              next,
+              sessionId,
+              result.contextRuntime,
+              result.contextRuntimeSeq,
+              result.contextRecovery?.recoveryRequired
+            );
+          }
+          return {
+            ...next,
+            loadingHistory,
+            ...(next.runtimeBySession[sessionId]?.recoveryRequired
+              ? { pausedQueues: { ...next.pausedQueues, [sessionId]: true as const } }
+              : {}),
+          };
         });
       },
 
@@ -717,7 +874,13 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           draftImages: omitKey(state.draftImages, sessionId),
         });
         // Running (or a prompt still in flight): queue it, it is sent when the turn settles
-        if (sending.has(sessionId) || isBusy(statusOf(get(), sessionId))) {
+        flushEvents();
+        if (
+          sending.has(sessionId) ||
+          get().stopping[sessionId] ||
+          isBusy(statusOf(get(), sessionId)) ||
+          recoveryBlocked(sessionId)
+        ) {
           const item: QueuedMessage = { id: `queued-${++queueSeq}`, text: body, images };
           set((state) => ({
             ...clearDraft(state),
@@ -744,6 +907,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       async steer(sessionId, queuedId) {
+        flushEvents();
+        if (get().stopping[sessionId]) return false;
+        // Never hand a steer to the SDK while it is compacting/recovering: it may discard it.
+        if (recoveryBlocked(sessionId)) {
+          if (queuedId || queueOf(sessionId).length > 0) return false;
+          if (get().activeSessionId !== sessionId) return false;
+          return get().send(get().drafts[sessionId] ?? '');
+        }
         clearSuggestion(sessionId);
         const queue = queueOf(sessionId);
         const item = queuedId
@@ -814,6 +985,56 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return false;
       },
 
+      resumeQueue(sessionId) {
+        flushEvents();
+        if (
+          sending.has(sessionId) ||
+          get().stopping[sessionId] ||
+          isBusy(statusOf(get(), sessionId)) ||
+          recoveryBlocked(sessionId)
+        )
+          return;
+        releaseQueue(sessionId);
+        drainQueue(sessionId, true);
+      },
+
+      async retryCompaction(sessionId) {
+        flushEvents();
+        const runtime = get().runtimeBySession[sessionId];
+        if (
+          !runtime?.recoveryRequired ||
+          recoveryRequests.has(sessionId) ||
+          get().recoveringCompaction[sessionId] ||
+          get().stopping[sessionId] ||
+          sending.has(sessionId) ||
+          isBusy(statusOf(get(), sessionId)) ||
+          compactionActive(runtime.compaction)
+        )
+          return;
+        clearSuggestion(sessionId);
+        holdQueue(sessionId);
+        set((state) => ({
+          recoveringCompaction: { ...state.recoveringCompaction, [sessionId]: true },
+          runtimeBySession: {
+            ...state.runtimeBySession,
+            [sessionId]: { ...runtime, error: undefined, pendingAssistantFailure: undefined },
+          },
+        }));
+        recoveryRequests.add(sessionId);
+        const result = await safely(() => api.retryCompaction(sessionId));
+        flushEvents();
+        recoveryRequests.delete(sessionId);
+        if (removedSessions.has(sessionId)) return;
+        if (!result.ok && get().recoveringCompaction[sessionId])
+          set((state) => ({
+            recoveringCompaction: omitKey(state.recoveringCompaction, sessionId),
+            ...(state.activeSessionId === sessionId
+              ? { notice: translate('chat.compactionRetryFailed', { error: result.error }) }
+              : {}),
+          }));
+        // An ACK is only acceptance. Events/settled own completion; queued messages stay held.
+      },
+
       removeQueued(sessionId, queuedId) {
         setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
       },
@@ -860,11 +1081,13 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       async abort() {
         const sessionId = get().activeSessionId;
-        if (!sessionId) return;
+        if (!sessionId || get().stopping[sessionId]) return;
         clearSuggestion(sessionId);
+        set((state) => ({ stopping: { ...state.stopping, [sessionId]: true } }));
         // Stop keeps the queue but pauses it: the user decides what to send next
-        heldQueues.add(sessionId);
+        holdQueue(sessionId);
         const result = await safely(() => api.abort(sessionId));
+        set((state) => ({ stopping: omitKey(state.stopping, sessionId) }));
         if (!result.ok)
           set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
       },
@@ -1104,9 +1327,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const nextId = allSessionsOf(lists, workspaceId)[0]?.id ?? null;
         removedSessions.add(sessionId);
         historyRequests.delete(sessionId);
-        const wasHeld = heldQueues.delete(sessionId);
         set({
           ...lists,
+          pausedQueues: omitKey(before.pausedQueues, sessionId),
+          recoveringCompaction: omitKey(before.recoveringCompaction, sessionId),
+          stopping: omitKey(before.stopping, sessionId),
           drafts: omitKey(before.drafts, sessionId),
           draftImages: omitKey(before.draftImages, sessionId),
           queuedBySession: omitKey(before.queuedBySession, sessionId),
@@ -1127,7 +1352,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           return result;
         }
         removedSessions.delete(sessionId);
-        if (wasHeld) heldQueues.add(sessionId);
         const restore = <T>(current: Record<string, T>, previous: Record<string, T>) => {
           const value = previous[sessionId];
           return value === undefined ? current : { ...current, [sessionId]: value };
@@ -1143,6 +1367,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           drafts: restore(state.drafts, before.drafts),
           draftImages: restore(state.draftImages, before.draftImages),
           queuedBySession: restore(state.queuedBySession, before.queuedBySession),
+          pausedQueues: restore(state.pausedQueues, before.pausedQueues),
+          recoveringCompaction: restore(state.recoveringCompaction, before.recoveringCompaction),
+          stopping: restore(state.stopping, before.stopping),
           messagesBySession: restore(state.messagesBySession, before.messagesBySession),
           runtimeBySession: restore(state.runtimeBySession, before.runtimeBySession),
           pendingApprovals: restore(state.pendingApprovals, before.pendingApprovals),
