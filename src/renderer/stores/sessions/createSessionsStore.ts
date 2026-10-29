@@ -435,12 +435,21 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const received = pending;
       pending = [];
       const batch: SessionEventEnvelope[] = [];
+      const failedSettlements = new Set<SessionEventEnvelope>();
       set((state) => {
         let next = state;
         for (const envelope of received) {
           const reduced = reduceSessionEvent(next, envelope, now());
           // Stale events must not run side effects either (pause/drain/suggestions).
-          if (reduced !== next) batch.push(envelope);
+          if (reduced !== next) {
+            batch.push(envelope);
+            const runtime = reduced.runtimeBySession[envelope.sessionId];
+            if (
+              envelope.event.type === 'agent_settled' &&
+              (envelope.event.aborted || runtime?.error || runtime?.pendingAssistantFailure)
+            )
+              failedSettlements.add(envelope);
+          }
           next = reduced;
         }
         return next;
@@ -457,14 +466,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
       const settled = new Set<string>();
       const normal = new Map<string, number>();
-      for (const { sessionId, event } of batch) {
-        const failedMessage =
-          event.type === 'message_end' &&
-          event.role === 'assistant' &&
-          (event.stopReason === 'error' || event.stopReason === 'aborted');
+      for (const envelope of batch) {
+        const { sessionId, event } = envelope;
         if (
           event.type === 'error' ||
-          failedMessage ||
+          failedSettlements.has(envelope) ||
           (event.type === 'context_runtime' && event.snapshot.recoveryRequired) ||
           get().runtimeBySession[sessionId]?.recoveryRequired
         )
@@ -480,7 +486,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (
           event.type === 'agent_settled' ||
           event.type === 'error' ||
-          failedMessage ||
           (event.type === 'compaction' &&
             !compactionActive(event.state) &&
             event.state.phase !== 'succeeded') ||
@@ -501,8 +506,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           if (roundId !== undefined) normal.set(sessionId, roundId);
         }
         if (event.type !== 'agent_settled') continue;
-        if (event.aborted) holdQueue(sessionId);
-        else normal.set(sessionId, event.seq);
+        if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
       for (const sessionId of settled) drainQueue(sessionId);
@@ -559,12 +563,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         );
         flushEvents();
         if (result.ok) return true;
-        // A user message/history confirmation (or backend pending checkpoint) is stronger
-        // evidence than a late failed ACK. Never restore and resend an accepted message.
+        // Only this echo's message/history confirmation can outweigh a failed ACK.
+        // A backend pending count may belong to an older input rejected by the recovery gate.
         const current = get();
         const echo = current.messagesBySession[sessionId]?.find((message) => message.id === id);
-        if (!echo?.optimistic || (current.runtimeBySession[sessionId]?.pendingPromptCount ?? 0) > 0)
-          return true;
+        if (!echo?.optimistic) return true;
         holdQueue(sessionId);
         set((state) => ({
           ...withdrawOptimisticMessage(state, sessionId, id, {

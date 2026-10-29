@@ -133,6 +133,44 @@ describe('context metadata projection', () => {
     expect(state.runtimeBySession.s.contextRuntime).toBeUndefined();
   });
 
+  it.each(['event', 'snapshot'] as const)(
+    'accepts a new instance reusing an operation ID through %s after unload',
+    (delivery) => {
+      let state = apply(emptyProjection(), 1, { type: 'compaction', state: operation });
+      state = apply(state, 2, {
+        type: 'compaction',
+        state: { ...operation, phase: 'cancelled', cancelSource: 'timeout' },
+      });
+      state = apply(state, 3, { type: 'agent_settled', aborted: true });
+      state = applyContextRuntime(state, 's', undefined);
+      expect(state.runtimeBySession.s.contextRuntime).toBeUndefined();
+      // Unloading must not resurrect the exact operation that already ended.
+      state = apply(state, 4, {
+        type: 'context_runtime',
+        snapshot: { ...snapshot, compaction: operation },
+      });
+      expect(state.runtimeBySession.s.compaction?.phase).toBe('cancelled');
+      const restarted = { ...operation, startedAt: 700_000, deadlineAt: 1_300_000 };
+      state = apply(
+        state,
+        5,
+        delivery === 'event'
+          ? { type: 'compaction', state: restarted }
+          : {
+              type: 'context_runtime',
+              snapshot: { ...snapshot, compaction: restarted, recoveryRequired: true },
+            }
+      );
+      expect(state.runtimeBySession.s).toMatchObject({
+        status: 'running',
+        compaction: restarted,
+      });
+      state = apply(state, 6, { type: 'compaction', state: { ...restarted, phase: 'succeeded' } });
+      state = apply(state, 7, { type: 'compaction', state: restarted });
+      expect(state.runtimeBySession.s.compaction?.phase).toBe('succeeded');
+    }
+  );
+
   it('metadata preserves the existing message projection, including unknown-context snapshots', () => {
     let state = apply(emptyProjection(), 1, {
       type: 'message_end',

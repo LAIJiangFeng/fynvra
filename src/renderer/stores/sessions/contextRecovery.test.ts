@@ -114,6 +114,7 @@ describe('context recovery and renderer queue ownership', () => {
         stopReason,
         errorMessage: 'safe failure',
       });
+      expect(store.getState().pausedQueues[id]).toBeUndefined();
       emit({ type: 'agent_settled', aborted: false });
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(queue()).toEqual(['queued']);
@@ -124,6 +125,200 @@ describe('context recovery and renderer queue ownership', () => {
       expect(prompt).toHaveBeenCalledTimes(2);
     }
   );
+
+  it.each([false, true])(
+    'drains after an intermediate model failure retries successfully (batched: %s)',
+    async (batched) => {
+      let flush = () => {};
+      const { store, id, emit, prompt, queue } = await setup(
+        batched
+          ? (callback) => {
+              flush = callback;
+            }
+          : undefined
+      );
+      await store.getState().send('original');
+      emit({ type: 'message_end', role: 'user', text: 'original' });
+      await store.getState().send('queued');
+      emit({
+        type: 'message_end',
+        role: 'assistant',
+        text: '',
+        stopReason: 'error',
+        errorMessage: 'transient failure',
+      });
+      emit({
+        type: 'retry',
+        state: { kind: 'model', phase: 'backoff', attempt: 1, maxAttempts: 3, delayMs: 1_000 },
+      });
+      emit({
+        type: 'retry',
+        state: {
+          kind: 'model',
+          phase: 'finished',
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 0,
+          success: true,
+        },
+      });
+      emit({ type: 'message_end', role: 'assistant', text: 'recovered', stopReason: 'stop' });
+      emit({ type: 'agent_settled', aborted: false });
+      flush();
+      expect(store.getState().pausedQueues[id]).toBeUndefined();
+      expect(store.getState().runtimeBySession[id].error).toBeUndefined();
+      expect(prompt).toHaveBeenCalledTimes(2);
+      expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
+      expect(queue()).toEqual([]);
+    }
+  );
+
+  it('holds the queue when model retries are exhausted', async () => {
+    const { store, id, emit, prompt, queue } = await setup();
+    await store.getState().send('original');
+    emit({ type: 'message_end', role: 'user', text: 'original' });
+    await store.getState().send('queued');
+    emit({ type: 'message_end', role: 'assistant', text: '', stopReason: 'error' });
+    emit({
+      type: 'retry',
+      state: { kind: 'model', phase: 'backoff', attempt: 1, maxAttempts: 1, delayMs: 1_000 },
+    });
+    emit({
+      type: 'message_end',
+      role: 'assistant',
+      text: '',
+      stopReason: 'error',
+      errorMessage: 'final failure',
+    });
+    emit({
+      type: 'retry',
+      state: {
+        kind: 'model',
+        phase: 'finished',
+        attempt: 1,
+        maxAttempts: 1,
+        delayMs: 0,
+        success: false,
+      },
+    });
+    emit({ type: 'error', source: 'model', message: 'final failure' });
+    emit({ type: 'agent_settled', aborted: false });
+    expect(store.getState().runtimeBySession[id].error).toBe('final failure');
+    expect(store.getState().pausedQueues[id]).toBe(true);
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(queue()).toEqual(['queued']);
+  });
+
+  it.each(['stop', 'compaction'] as const)(
+    'a successful model retry cannot release an existing %s hold',
+    async (reason) => {
+      const { store, id, emit, prompt, queue } = await setup();
+      await store.getState().send('original');
+      emit({ type: 'message_end', role: 'user', text: 'original' });
+      await store.getState().send('queued');
+      emit({ type: 'message_end', role: 'assistant', text: '', stopReason: 'error' });
+      if (reason === 'stop') await store.getState().abort();
+      else {
+        emit({ type: 'compaction', state: operation({ phase: 'failed' }) });
+        emit({ type: 'context_runtime', snapshot: snapshot() });
+      }
+      emit({
+        type: 'retry',
+        state: {
+          kind: 'model',
+          phase: 'finished',
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 0,
+          success: true,
+        },
+      });
+      emit({ type: 'message_end', role: 'assistant', text: 'recovered', stopReason: 'stop' });
+      emit({ type: 'agent_settled', aborted: false });
+      expect(store.getState().pausedQueues[id]).toBe(true);
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(queue()).toEqual(['queued']);
+    }
+  );
+
+  it.each([false, true])(
+    'restores a rejected draft despite older pending input (old user message: %s)',
+    async (oldUserMessage) => {
+      const { store, id, emit, prompt } = await setup();
+      const ack = deferred<IpcResult>();
+      prompt.mockReturnValueOnce(ack.promise);
+      store.getState().setDraft(id, 'new input');
+      const sending = store.getState().send('new input');
+      emit({
+        type: 'context_runtime',
+        snapshot: snapshot({ recoveryRequired: true, pendingPromptCount: 1 }),
+      });
+      if (oldUserMessage) emit({ type: 'message_end', role: 'user', text: 'older pending input' });
+      ack.resolve({ ok: false, error: 'Context recovery required' });
+      expect(await sending).toBe(false);
+      expect(store.getState().drafts[id]).toBe('new input');
+      expect(
+        store.getState().messagesBySession[id].some((message) => message.text === 'new input')
+      ).toBe(false);
+      if (oldUserMessage)
+        expect(
+          store
+            .getState()
+            .messagesBySession[id].some((message) => message.text === 'older pending input')
+        ).toBe(true);
+      expect(store.getState().runtimeBySession[id].pendingPromptCount).toBe(1);
+      expect(store.getState().pausedQueues[id]).toBe(true);
+    }
+  );
+
+  it('restores a rejected queued message despite older backend pending input', async () => {
+    const { store, id, emit, prompt, queue } = await setup();
+    await store.getState().send('original');
+    emit({ type: 'message_end', role: 'user', text: 'original' });
+    await store.getState().send('queued');
+    const ack = deferred<IpcResult>();
+    prompt.mockReturnValueOnce(ack.promise);
+    emit({ type: 'agent_settled', aborted: false });
+    emit({
+      type: 'context_runtime',
+      snapshot: snapshot({ recoveryRequired: true, pendingPromptCount: 1 }),
+    });
+    ack.resolve({ ok: false, error: 'Context recovery required' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(queue()).toEqual(['queued']);
+    expect(
+      store.getState().messagesBySession[id].some((message) => message.text === 'queued')
+    ).toBe(false);
+    expect(store.getState().pausedQueues[id]).toBe(true);
+    expect(prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('matching history confirmation still outweighs a late failed ACK', async () => {
+    const { store, id, api, prompt } = await setup();
+    const ack = deferred<IpcResult>();
+    prompt.mockReturnValueOnce(ack.promise);
+    const sending = store.getState().send('delivered input');
+    vi.spyOn(api, 'history').mockResolvedValueOnce({
+      ok: true,
+      messages: [
+        {
+          id: 'history-user',
+          sessionId: id,
+          role: 'user',
+          text: 'delivered input',
+          createdAt: 2_000,
+          toolCalls: [],
+          streaming: false,
+        },
+      ],
+    });
+    await store.getState().selectSession(id);
+    ack.resolve({ ok: false, error: 'late transport error' });
+    expect(await sending).toBe(true);
+    expect(store.getState().drafts[id]).toBeUndefined();
+    expect(store.getState().messagesBySession[id]).toHaveLength(1);
+    expect(store.getState().messagesBySession[id][0].id).toBe('history-user');
+  });
 
   it('flushes buffered delivery evidence before handling a late failed prompt ACK', async () => {
     const { store, id, emit, prompt, queue } = await setup(() => {});
@@ -191,6 +386,26 @@ describe('context recovery and renderer queue ownership', () => {
     expect(store.getState().recoveringCompaction[id]).toBeUndefined();
     expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(true);
     expect(queue()).toEqual(['queued']);
+  });
+
+  it('accepts the same operation ID from a newly loaded instance during explicit recovery', async () => {
+    const { store, id, emit, retry } = await failed();
+    await store.getState().loadSessions('ws');
+    expect(store.getState().runtimeBySession[id].contextRuntime).toBeUndefined();
+    await store.getState().retryCompaction(id);
+    const restarted = operation({ startedAt: 700_000, deadlineAt: 1_300_000 });
+    emit({ type: 'compaction', state: restarted });
+    emit({
+      type: 'context_runtime',
+      snapshot: snapshot({ compaction: restarted, recoveryRequired: true, pendingPromptCount: 1 }),
+    });
+    expect(retry).toHaveBeenCalledExactlyOnceWith(id);
+    expect(store.getState().runtimeBySession[id]).toMatchObject({
+      status: 'running',
+      compaction: restarted,
+      contextRuntime: { compaction: restarted },
+    });
+    expect(store.getState().recoveringCompaction[id]).toBe(true);
   });
 
   it('an unloaded terminal session clears an accepted recovery spinner without releasing the queue', async () => {
