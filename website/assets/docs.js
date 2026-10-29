@@ -23,7 +23,6 @@
       noResults: '没有找到匹配的文档。试试更短的关键词，或改用目录浏览。',
       oneResult: '1 篇匹配',
       manyResults: (count) => `${count} 篇匹配`,
-      onThisPage: '本页小节',
       previous: '上一篇',
       next: '下一篇',
       docsTitle: 'Fynvra 文档',
@@ -35,7 +34,6 @@
       noResults: 'No matching pages. Try a shorter keyword, or browse the navigation.',
       oneResult: '1 result',
       manyResults: (count) => `${count} results`,
-      onThisPage: 'On this page',
       previous: 'Previous',
       next: 'Next',
       docsTitle: 'Fynvra Docs',
@@ -360,35 +358,16 @@
       }
     }
 
-    function buildSubnav(link, article, anchorId) {
-      const headings = Array.from(article.querySelectorAll('.docs-article-body h2[id]'));
-      if (headings.length === 0) return;
-      const list = document.createElement('ul');
-      list.className = 'docs-nav-sub';
-      list.setAttribute('aria-label', strings().onThisPage);
-      for (const heading of headings) {
-        const item = document.createElement('li');
-        const anchor = document.createElement('a');
-        anchor.href = `#${heading.id}`;
-        anchor.textContent = localizedText(heading);
-        if (heading.id === anchorId) anchor.setAttribute('aria-current', 'location');
-        item.append(anchor);
-        list.append(item);
-      }
-      const navItem = link.closest('li');
-      if (navItem) navItem.append(list);
-    }
-
-    function updateNav(article, anchorId, options) {
+    // Sidebar stays two levels deep: group -> page. In-page h2 sections keep their
+    // ids for deep links, cross-links and search routing, but never become nav rows.
+    function updateNav(article, options) {
       const settings = options || {};
-      for (const old of document.querySelectorAll('.docs-nav-sub')) old.remove();
       for (const link of navLinks) {
         const active = link.dataset.docLink === article.id;
         if (active) link.setAttribute('aria-current', 'page');
         else link.removeAttribute('aria-current');
         if (!active) continue;
         openGroupFor(link);
-        buildSubnav(link, article, anchorId);
         if (settings.reveal !== false) {
           window.requestAnimationFrame(() => ensureNavLinkVisible(link));
         }
@@ -500,7 +479,7 @@
         candidate.hidden = !active;
         candidate.classList.toggle('is-active', active);
       }
-      updateNav(article, info.anchor);
+      updateNav(article);
       updateBreadcrumb(article);
       updatePager(article);
       updateDocumentTitle(article);
@@ -561,9 +540,7 @@
     function refreshLocaleTexts() {
       updateSearchChrome();
       if (!activeArticle) return;
-      const info = resolveHash();
-      const anchorId = info.article === activeArticle ? info.anchor : null;
-      updateNav(activeArticle, anchorId, { reveal: false });
+      updateNav(activeArticle, { reveal: false });
       updateBreadcrumb(activeArticle);
       updatePager(activeArticle);
       updateDocumentTitle(activeArticle);
