@@ -806,7 +806,7 @@ describe('cleanupWorktree', () => {
       removedWorktree: true,
       deletedBranch: true,
     });
-    expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1');
+    expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1', undefined);
     expect(commandsSince(start)).toEqual([
       'git status --porcelain',
       'git rev-parse --verify --quiet main^{commit}',
@@ -1028,7 +1028,9 @@ describe('cleanupWorktree', () => {
       deletedBranch: false,
     });
     expect(store.tasks.get(first.task.id)?.status).toBe('abandoned');
-    expect(launcher.disposeSession).toHaveBeenCalledWith(first.dispatch.workerSessionId);
+    expect(launcher.disposeSession).toHaveBeenCalledWith(first.dispatch.workerSessionId, {
+      clearError: true,
+    });
     expect(commandsSince(start)).toEqual([]);
   });
 
@@ -1264,7 +1266,7 @@ describe('普通目录（vcs: none）：原地编排，不调用 git', () => {
     await host.mergeWorktree({ dispatchId: first.dispatch.id });
     const cleaned = { ok: true, removedWorktree: false, deletedBranch: false, mode: 'in-place' };
     expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id })).toEqual(cleaned);
-    expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1');
+    expect(launcher.disposeSession).toHaveBeenCalledWith('session_w1', undefined);
     expect(store.tasks.get(first.task.id)?.status).toBe('completed');
     launcher.disposeSession.mockRejectedValueOnce(new Error('session gone'));
     expect(await host.cleanupWorktree({ dispatchId: first.dispatch.id, abandon: true })).toEqual(
