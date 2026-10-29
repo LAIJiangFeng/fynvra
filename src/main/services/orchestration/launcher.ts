@@ -13,6 +13,8 @@ export interface WorkerSessionLauncher {
     model?: string;
     /** dispatch_task 指定的思考档位；缺省按模型 / 角色 / 主 agent 的默认 */
     thinking?: ThinkingLevel;
+    /** Fast 请求：true 仅在协议支持时开启，false 关闭继承；缺省保持原默认 */
+    fastMode?: boolean;
     brief: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; error: string }>;
   /** Ordinary instructions return after delivery; fresh-attempt waits are cancellable until delivery */

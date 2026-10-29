@@ -345,6 +345,7 @@ const TASK_SCHEMA: Schema<Task> = {
   dependsOn: isStringArray,
   model: { optional: isString },
   thinking: { optional: isThinkingLevel },
+  fastMode: { optional: (value) => typeof value === 'boolean' },
   mergedDiff: {
     optional: (value) =>
       isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),

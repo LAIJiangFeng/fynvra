@@ -10,22 +10,23 @@ import { SettingsView } from '@/components/settings/SettingsView';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
 import { KeybindingProvider } from '@/lib/keybindings';
-import { bindFileUnloadGuard } from '@/stores/files';
 import { useSettingsStore } from '@/stores/settings';
 import { useUpdatesStore } from '@/stores/useUpdates';
+import { bindWorkspaceUiLifecycle, useWorkspaceTabsStore } from '@/stores/workspaceTabs';
 
 /** 应用壳：自绘标题栏 + 三栏（可收起的工作区 / 会话侧栏、主区域、可折叠右侧面板）。 */
 export function App() {
+  const closing = useWorkspaceTabsStore((state) => state.closing);
   const sidePanelOpen = useSettingsStore((state) => state.sidePanelOpen);
   const sidebarOpen = useSettingsStore(sidebarOpenOf);
   // 左栏收起时不挂载：选中的工作区照样同步给会话 store
   useSessionsWorkspaceSync();
-  useEffect(() => bindFileUnloadGuard(window), []);
+  useEffect(() => bindWorkspaceUiLifecycle(), []);
   useEffect(() => useUpdatesStore.getState().bind(), []);
 
   return (
     <TooltipProvider>
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col" inert={closing}>
         <TitleBar />
         <UpdateBanner />
         <div className="flex min-h-0 flex-1">
@@ -34,6 +35,7 @@ export function App() {
           {sidePanelOpen && <SidePanel />}
         </div>
       </div>
+      {closing && <div className="fixed inset-0 z-[100] cursor-wait bg-background/20" />}
       <NoticeDialog />
       <SettingsView />
       <CloseWindowDialog />

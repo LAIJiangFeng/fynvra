@@ -4,6 +4,12 @@ import { diffTabsStoreFor } from '../diffTabs';
 import { filesStoreFor } from '../files';
 import { useTerminalsStore } from '../terminals';
 import { useWorkspacesStore } from '../workspaces';
+import {
+  ensureWorkspaceTabs,
+  markWorkspaceInteraction,
+  rememberWorkspaceSession,
+  useWorkspaceTabsStore,
+} from '../workspaceTabs';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
 export type { ImageRejection, QueuedMessage, SessionsState } from './createSessionsStore';
@@ -13,9 +19,16 @@ export * from './selectors';
 // RENDERER_VITE_SESSIONS_MOCK=1 pnpm dev：不接 Main，用内存 mock 演示会话（无需模型 key）
 const api = getSessionsApi({ mock: import.meta.env.RENDERER_VITE_SESSIONS_MOCK === '1' });
 
+let restoringSelection = false;
+let sessionNavigation = 0;
+
 /** 会话列表、选中、草稿与正文投影；Main 的推送经 reducer 归并。按字段订阅。 */
 export const useSessionsStore = createSessionsStore(api, {
-  onSelectSession(workspaceId) {
+  onSelectSession(workspaceId): void {
+    if (restoringSelection) return;
+    rememberWorkspaceSession(workspaceId, useSessionsStore.getState().activeSessionId);
+    sessionNavigation++;
+    markWorkspaceInteraction(workspaceId);
     useWorkspacesStore.getState().select(workspaceId);
     useTerminalsStore.getState().select(workspaceId, null);
     filesStoreFor(workspaceId, window.fynvra.files).getState().showChat();
@@ -23,15 +36,63 @@ export const useSessionsStore = createSessionsStore(api, {
 });
 
 connectSessionsStore(useSessionsStore, api);
+useSessionsStore.subscribe((state, previous) => {
+  if (
+    state.workspaceId &&
+    state.workspaceId === previous.workspaceId &&
+    state.activeSessionId !== previous.activeSessionId &&
+    !restoringSelection
+  )
+    rememberWorkspaceSession(state.workspaceId, state.activeSessionId);
+});
 
 /** 同步读取最新选择，不让延后的 React effect 用旧工作区覆盖刚点的会话。 */
 export function connectSessionsWorkspace(): () => void {
+  let current: string | null | undefined;
+  let generation = 0;
   const sync = () => {
-    useSessionsStore.getState().setWorkspace(useWorkspacesStore.getState().selectedId);
+    const workspaceId = useWorkspacesStore.getState().selectedId;
+    if (workspaceId === current) return;
+    current = workspaceId;
+    const request = ++generation;
+    const navigation = sessionNavigation;
+    useSessionsStore.getState().setWorkspace(workspaceId);
+    if (!workspaceId) return;
+    void ensureWorkspaceTabs(workspaceId).then(async () => {
+      await useSessionsStore.getState().loadSessions(workspaceId);
+      if (
+        request !== generation ||
+        navigation !== sessionNavigation ||
+        useWorkspacesStore.getState().selectedId !== workspaceId ||
+        useSessionsStore.getState().activeSessionId
+      )
+        return;
+      const sessionId = useWorkspaceTabsStore.getState().views[workspaceId]?.sessionId;
+      if (!sessionId) return;
+      const state = useSessionsStore.getState();
+      const exists = [
+        ...(state.sessionsByWorkspace[workspaceId] ?? []),
+        ...(state.archivedByWorkspace[workspaceId] ?? []),
+      ].some((session) => session.id === sessionId);
+      if (!exists) {
+        if (!state.listErrors[workspaceId]) rememberWorkspaceSession(workspaceId, null);
+        return;
+      }
+      // selectSession updates selection synchronously; its later history response cannot show chat.
+      restoringSelection = true;
+      try {
+        void state.selectSession(sessionId, workspaceId);
+      } finally {
+        restoringSelection = false;
+      }
+    });
   };
   const unsubscribe = useWorkspacesStore.subscribe(sync);
   sync();
-  return unsubscribe;
+  return () => {
+    generation++;
+    unsubscribe();
+  };
 }
 
 // --- notifications ---

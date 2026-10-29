@@ -3,7 +3,17 @@ import type { zhCN } from './zh-CN';
 
 /** 界面文案（English）：与 ./zh-CN.ts 同形，同样极简 */
 export const en: MessagesShape<typeof zhCN> = {
+  workspaceTabs: {
+    drag: 'Drag to reorder tabs',
+    failed: 'Could not save or restore tabs. Keep this window open and retry',
+    limits:
+      'Tab storage limit reached (64 tabs; drafts up to 256 KiB). Close tabs or reduce the draft; no text was truncated',
+    corrupt: 'A damaged tab snapshot was set aside. The original file is retained in workspace-ui',
+    removeDrafts:
+      'Remove this workspace and its saved tabs and unsaved drafts? Files on disk will be kept',
+  },
   terminals: {
+    restored: 'History restored · New terminal session',
     copy: 'Copy',
     paste: 'Paste',
     selectAll: 'Select all',
@@ -181,6 +191,7 @@ export const en: MessagesShape<typeof zhCN> = {
       notDirectory: 'This entry is not a browsable folder',
       notFile: 'This entry is not a previewable file',
       notText: 'This file is not editable UTF-8 text',
+      notHtml: 'Only .html or .htm files can be opened in the browser',
       tooLarge: 'Content exceeds the 256 KiB limit. Reduce the text and retry',
       conflict:
         'The file changed on disk and was not overwritten. Your draft is kept. Copy the changes you need before reloading from disk',
@@ -217,6 +228,7 @@ export const en: MessagesShape<typeof zhCN> = {
     builtin: 'Built-in',
     rolesLoadFailed: 'Failed to load roles: {error}',
     model: 'Model',
+    modelNotSet: 'Model not set',
     create: 'Create',
     pickOrCreate: 'Pick a session on the left, or start a new one',
     none: 'No sessions yet',
@@ -261,6 +273,16 @@ export const en: MessagesShape<typeof zhCN> = {
     copy: 'Copy',
     copied: 'Copied',
     copyReply: 'Copy reply',
+    fileLinks: {
+      opening: 'Opening file…',
+      invalidLink: 'Cannot open this link: invalid path or unsupported protocol',
+      unsupportedRoot:
+        'This link belongs to an unregistered session directory or worker worktree. It cannot be opened safely; a same-named file in the main workspace will not be substituted',
+      unsupportedParameters:
+        'Local file links do not support queries or # anchors yet. Use a file link without parameters',
+      sessionUnavailable:
+        'The session for this message was not found. Reopen the session and retry',
+    },
     copyCode: 'Copy code',
     thinking: 'Thinking…',
     thoughts: 'Thoughts',
@@ -286,6 +308,8 @@ export const en: MessagesShape<typeof zhCN> = {
     queuedImageOnly: '(images only)',
     sendNow: 'Send now ({chord})',
     removeQueued: 'Remove from queue',
+    recallQueued: 'Recall to edit',
+    recallQueuedDraftExists: 'Finish or clear the current draft before recalling a queued message',
     replySuggestionHint: 'Reply suggestion: {suggestion}. Press Right Arrow to fill it in',
   },
   model: {

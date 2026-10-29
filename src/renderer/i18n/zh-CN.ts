@@ -4,7 +4,15 @@
  * 参数写成 `{name}`；`{n|单数|复数}` 是英文的单复数写法，中文写一种即可。
  */
 export const zhCN = {
+  workspaceTabs: {
+    drag: '拖动调整标签顺序',
+    failed: '无法保存或恢复标签，请保留此窗口并重试',
+    limits: '标签存储已达上限（64 个标签；草稿最多 256 KiB），请关闭标签或缩小草稿，文本未被截断',
+    corrupt: '损坏的标签快照已隔离，原文件保留在 workspace-ui 目录',
+    removeDrafts: '移除此工作区及保存的标签和未保存草稿？磁盘文件会保留',
+  },
   terminals: {
+    restored: '已恢复历史，新终端会话',
     copy: '复制',
     paste: '粘贴',
     selectAll: '全选',
@@ -179,6 +187,7 @@ export const zhCN = {
       notDirectory: '此条目不是可浏览的目录',
       notFile: '此条目不是可预览的文件',
       notText: '此文件不是可编辑的 UTF-8 文本',
+      notHtml: '仅支持在浏览器中打开 .html 或 .htm 文件',
       tooLarge: '保存内容超过 256 KiB 限制，请减少正文后重试',
       conflict:
         '磁盘文件已被其他程序修改，未覆盖。草稿已保留，请先复制需要的修改，再重新读取磁盘文件',
@@ -208,6 +217,7 @@ export const zhCN = {
     builtin: '内置',
     rolesLoadFailed: '读取角色失败：{error}',
     model: '模型',
+    modelNotSet: '未指定模型',
     create: '创建',
     pickOrCreate: '从左侧选择一个会话，或新建一个',
     none: '还没有会话',
@@ -252,6 +262,14 @@ export const zhCN = {
     copy: '复制',
     copied: '已复制',
     copyReply: '复制回复',
+    fileLinks: {
+      opening: '正在打开文件…',
+      invalidLink: '无法打开此链接：路径无效或协议不受支持',
+      unsupportedRoot:
+        '此链接属于未挂入的会话目录或 worker worktree，无法安全打开；不会改开主工作区的同名文件',
+      unsupportedParameters: '本地文件链接暂不支持 query 或 # 锚点，请使用不带参数的文件链接',
+      sessionUnavailable: '找不到此消息所属的会话，请重新打开会话后重试',
+    },
     copyCode: '复制代码',
     thinking: '思考中…',
     thoughts: '思考过程',
@@ -277,6 +295,8 @@ export const zhCN = {
     queuedImageOnly: '（仅图片）',
     sendNow: '立即发送（{chord}）',
     removeQueued: '从队列中移除',
+    recallQueued: '撤回编辑',
+    recallQueuedDraftExists: '请先处理输入框中的草稿，再撤回编辑',
     replySuggestionHint: '回复建议：{suggestion}。按右箭头填入输入框',
   },
   model: {

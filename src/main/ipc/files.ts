@@ -49,13 +49,20 @@ const shellAdapter: FilesShell = {
   reveal: (path) => shell.showItemInFolder(path),
   copyFiles: copyFilesToClipboard,
   trash: (path) => shell.trashItem(path),
+  openExternal: (url) => shell.openExternal(url),
 };
 
-export function registerFilesHandlers(): void {
-  const service = createFilesService({
+let filesService: ReturnType<typeof createFilesService> | undefined;
+export function getFilesService(): ReturnType<typeof createFilesService> {
+  filesService ??= createFilesService({
     getWorkspace: (id) => getWorkspaceService().get(id),
     shell: shellAdapter,
   });
+  return filesService;
+}
+
+export function registerFilesHandlers(): void {
+  const service = getFilesService();
   ipcMain.handle(
     IPC_CHANNELS.FILES_LIST,
     async (_event, raw: unknown): Promise<DirectoryResult> => {
@@ -143,6 +150,10 @@ export function registerFilesHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.FILES_COPY,
     mutating((input) => service.copy(input))
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.FILES_OPEN_HTML,
+    mutating((input) => service.openHtml(input))
   );
   ipcMain.handle(
     IPC_CHANNELS.FILES_RESOLVE,

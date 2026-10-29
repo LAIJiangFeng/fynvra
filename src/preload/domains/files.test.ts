@@ -10,6 +10,7 @@ it('文件出口按 id 读取与保存，不转发路径', async () => {
     'create',
     'duplicate',
     'list',
+    'openHtml',
     'read',
     'remove',
     'rename',
@@ -33,4 +34,10 @@ it('文件出口按 id 读取与保存，不转发路径', async () => {
   const write = { workspaceId: 'ws', fileId: 'file', version: 'a'.repeat(64), text: '草稿' };
   await api.write({ ...write, path: '../outside' } as typeof write);
   expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_WRITE, write);
+  const html = { workspaceId: 'ws', entryId: 'html', url: 'file:///outside.html' };
+  await api.openHtml(html);
+  expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_OPEN_HTML, {
+    workspaceId: 'ws',
+    entryId: 'html',
+  });
 });

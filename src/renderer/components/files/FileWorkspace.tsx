@@ -22,12 +22,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
-import { bindDiffTabSelection, type DiffTab, diffTabsStoreFor } from '@/stores/diffTabs';
+import { type DiffTab, diffTabsStoreFor } from '@/stores/diffTabs';
 import { filesStoreFor, isFileDirty } from '@/stores/files';
 import { useSourceDiff } from '@/stores/sessionChanges';
-import { useSessionsStore } from '@/stores/sessions';
 import { useTerminalsStore } from '@/stores/terminals';
+import {
+  ensureWorkspaceTabs,
+  markWorkspaceInteraction,
+  retryWorkspaceTabs,
+  useWorkspaceTabsStore,
+  workspaceTabLimitReached,
+} from '@/stores/workspaceTabs';
 import { FilePane } from './FilePane';
+import { WorkspaceTab, WorkspaceTabStrip } from './WorkspaceTabStrip';
 
 /** 中央标签与对话共用空间，切换时不卸载对话或已打开的编辑器。 */
 export function FileWorkspace({
@@ -48,9 +55,14 @@ export function FileWorkspace({
   const terminals = allTerminals.filter((tab) => tab.workspaceId === workspaceId);
   const terminalId = useTerminalsStore((state) => state.selected[workspaceId] ?? null);
   const [closingTerminal, setClosingTerminal] = useState<string | null>(null);
+  const persistenceError = useWorkspaceTabsStore(
+    (state) => state.views[workspaceId]?.error ?? state.views[workspaceId]?.warning
+  );
+  const tabsReady = useWorkspaceTabsStore((state) => state.views[workspaceId]?.ready ?? false);
   const selectTerminal = (id: string | null) =>
     useTerminalsStore.getState().select(workspaceId, id);
   const showChat = () => {
+    markWorkspaceInteraction(workspaceId);
     selectTerminal(null);
     store.getState().showChat();
   };
@@ -66,27 +78,12 @@ export function FileWorkspace({
       selectedTab.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [selectedId, diffId, terminalId]);
 
-  useEffect(
-    () => bindDiffTabSelection(workspaceId, store, useTerminalsStore),
-    [store, workspaceId]
-  );
-
-  useEffect(
-    () =>
-      useSessionsStore.subscribe((state, previous) => {
-        if (
-          state.workspaceId === workspaceId &&
-          previous.workspaceId === workspaceId &&
-          state.activeSessionId !== previous.activeSessionId
-        ) {
-          useTerminalsStore.getState().select(workspaceId, null);
-          store.getState().showChat();
-        }
-      }),
-    [store, workspaceId]
-  );
+  useEffect(() => {
+    void ensureWorkspaceTabs(workspaceId);
+  }, [workspaceId]);
 
   function requestClose(file: WorkspaceFileEntry) {
+    if (!tabsReady) return;
     if (!store.getState().closeFile(file.id) && !store.getState().previews[file.id]?.saving)
       setConfirm({ file, action: 'close' });
   }
@@ -103,142 +100,166 @@ export function FileWorkspace({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <nav aria-label={t('files.opened')} className="flex h-10 shrink-0 border-b bg-sidebar/60">
-        <button
-          type="button"
-          aria-pressed={selectedId === null && !terminalId && !diffId}
-          onClick={showChat}
-          className={cn(
-            'flex shrink-0 items-center gap-2 border-r border-t-2 border-t-transparent px-4 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-            selectedId === null &&
-              !terminalId &&
-              !diffId &&
-              'border-t-primary bg-background font-medium'
-          )}
-        >
-          <MessageSquare className="size-3.5" />
-          {t('files.chat')}
-        </button>
-        <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]">
-          {opened.map((file) => (
-            <div
-              key={file.id}
-              ref={file.id === selectedId ? selectedTab : undefined}
+        <WorkspaceTabStrip workspaceId={workspaceId}>
+          <WorkspaceTab tabKey="chat">
+            <button
+              type="button"
+              aria-pressed={selectedId === null && !terminalId && !diffId}
+              onClick={showChat}
               className={cn(
-                'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
-                file.id === selectedId && 'border-t-primary bg-background text-foreground'
+                'flex shrink-0 items-center gap-2 border-r border-t-2 border-t-transparent px-4 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                selectedId === null &&
+                  !terminalId &&
+                  !diffId &&
+                  'border-t-primary bg-background font-medium'
               )}
             >
-              <button
-                type="button"
-                title={file.relativePath}
-                aria-pressed={file.id === selectedId}
-                className="flex h-full max-w-52 items-center gap-2 pr-1 pl-3 text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={() => void store.getState().openFile(file)}
-              >
-                <FileCode2 className="size-3.5 shrink-0" />
-                <span className="truncate">{file.name}</span>
-                {isFileDirty(previews[file.id]) && (
-                  <span className="size-1.5 shrink-0 rounded-full bg-amber-500">
-                    <span className="sr-only">{t('files.unsaved')}</span>
-                  </span>
+              <MessageSquare className="size-3.5" />
+              {t('files.chat')}
+            </button>
+          </WorkspaceTab>
+          {opened.map((file) => (
+            <WorkspaceTab key={file.id} tabKey={`file:${file.id}`}>
+              <div
+                key={file.id}
+                ref={file.id === selectedId ? selectedTab : undefined}
+                className={cn(
+                  'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
+                  file.id === selectedId && 'border-t-primary bg-background text-foreground'
                 )}
-              </button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="mx-1 size-6"
-                disabled={previews[file.id]?.saving}
-                aria-label={t('files.closeFile', { name: file.name })}
-                onClick={() => requestClose(file)}
               >
-                <X className="size-3" />
-              </Button>
-            </div>
+                <button
+                  type="button"
+                  title={file.relativePath}
+                  aria-pressed={file.id === selectedId}
+                  className="flex h-full max-w-52 items-center gap-2 pr-1 pl-3 text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  onClick={() => void store.getState().openFile(file)}
+                >
+                  <FileCode2 className="size-3.5 shrink-0" />
+                  <span className="truncate">{file.name}</span>
+                  {isFileDirty(previews[file.id]) && (
+                    <span className="size-1.5 shrink-0 rounded-full bg-amber-500">
+                      <span className="sr-only">{t('files.unsaved')}</span>
+                    </span>
+                  )}
+                </button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="mx-1 size-6"
+                  disabled={!tabsReady || previews[file.id]?.saving}
+                  aria-label={t('files.closeFile', { name: file.name })}
+                  onClick={() => requestClose(file)}
+                >
+                  <X className="size-3" />
+                </Button>
+              </div>
+            </WorkspaceTab>
           ))}
           {diffTabs.map((tab) => (
-            <DiffWorkspaceTab
-              key={tab.id}
-              tab={tab}
-              active={tab.id === diffId}
-              tabRef={tab.id === diffId ? selectedTab : undefined}
-              onSelect={() => diffStore.getState().select(tab.id)}
-              onClose={() => diffStore.getState().close(tab.id)}
-            />
+            <WorkspaceTab key={tab.id} tabKey={`diff:${tab.id}`}>
+              <DiffWorkspaceTab
+                key={tab.id}
+                tab={tab}
+                active={tab.id === diffId}
+                tabRef={tab.id === diffId ? selectedTab : undefined}
+                onSelect={() => diffStore.getState().select(tab.id)}
+                onClose={() => diffStore.getState().close(tab.id)}
+              />
+            </WorkspaceTab>
           ))}
           {terminals.map((tab) => (
-            <div
-              key={tab.id}
-              ref={tab.id === terminalId ? selectedTab : undefined}
-              className={cn(
-                'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
-                tab.id === terminalId && 'border-t-primary bg-background text-foreground'
-              )}
-            >
-              <button
-                type="button"
-                aria-pressed={tab.id === terminalId}
-                className="flex h-full items-center gap-2 pr-1 pl-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={() => {
-                  store.getState().showChat();
-                  selectTerminal(tab.id);
-                }}
-              >
-                <SquareTerminal className="size-3.5" />
-                {t('files.terminal')} {tab.number}
-                {tab.exited && (
-                  <span className="text-muted-foreground">{t('terminals.finished')}</span>
+            <WorkspaceTab key={tab.id} tabKey={`terminal:${tab.id}`}>
+              <div
+                key={tab.id}
+                ref={tab.id === terminalId ? selectedTab : undefined}
+                className={cn(
+                  'flex shrink-0 items-center border-r border-t-2 border-t-transparent text-muted-foreground',
+                  tab.id === terminalId && 'border-t-primary bg-background text-foreground'
                 )}
-              </button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="mx-1 size-6"
-                aria-label={t('terminals.closeTitle')}
-                onClick={() => {
-                  if (tab.exited) void useTerminalsStore.getState().close(tab.id);
-                  else setClosingTerminal(tab.id);
-                }}
               >
-                <X className="size-3" />
-              </Button>
-            </div>
-          ))}
-          <NewSessionButton>
-            {(openChat) => (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="m-1 shrink-0"
-                      aria-label={t('files.newTab')}
-                      title={t('files.newTab')}
-                    />
-                  }
+                <button
+                  type="button"
+                  aria-pressed={tab.id === terminalId}
+                  className="flex h-full items-center gap-2 pr-1 pl-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  onClick={() => {
+                    store.getState().showChat();
+                    selectTerminal(tab.id);
+                  }}
                 >
-                  <Plus />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-36">
-                  <DropdownMenuItem onClick={openChat}>
-                    <MessageSquare />
-                    {t('files.chat')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      store.getState().showChat();
-                      void useTerminalsStore.getState().create(workspaceId);
-                    }}
-                  >
-                    <SquareTerminal />
-                    {t('files.terminal')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </NewSessionButton>
-        </div>
+                  <SquareTerminal className="size-3.5" />
+                  {t('files.terminal')} {tab.number}
+                  {tab.exited && (
+                    <span className="text-muted-foreground">{t('terminals.finished')}</span>
+                  )}
+                </button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="mx-1 size-6"
+                  aria-label={t('terminals.closeTitle')}
+                  onClick={() => {
+                    if (tab.exited) void useTerminalsStore.getState().close(tab.id);
+                    else setClosingTerminal(tab.id);
+                  }}
+                >
+                  <X className="size-3" />
+                </Button>
+              </div>
+            </WorkspaceTab>
+          ))}
+        </WorkspaceTabStrip>
+        <NewSessionButton>
+          {(openChat) => (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="m-1 shrink-0"
+                    aria-label={t('files.newTab')}
+                    title={t('files.newTab')}
+                  />
+                }
+              >
+                <Plus />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-36">
+                <DropdownMenuItem onClick={openChat}>
+                  <MessageSquare />
+                  {t('files.chat')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!tabsReady}
+                  onClick={() => {
+                    if (workspaceTabLimitReached(workspaceId)) return;
+                    markWorkspaceInteraction(workspaceId);
+                    store.getState().showChat();
+                    void useTerminalsStore.getState().create(workspaceId);
+                  }}
+                >
+                  <SquareTerminal />
+                  {t('files.terminal')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </NewSessionButton>
       </nav>
+      {persistenceError && (
+        <div role="alert" className="border-b bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {persistenceError}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-2 h-6"
+            onClick={() => void retryWorkspaceTabs(workspaceId)}
+          >
+            {t('common.retry')}
+          </Button>
+        </div>
+      )}
       <div
         className={cn(
           'min-h-0 flex-1 flex-col',
@@ -255,12 +276,18 @@ export function FileWorkspace({
             selectedId === file.id ? 'flex' : 'hidden'
           )}
         >
-          <FilePane
-            file={file}
-            store={store}
-            active={selectedId === file.id}
-            onReload={() => requestReload(file)}
-          />
+          {tabsReady ? (
+            <FilePane
+              file={file}
+              store={store}
+              active={selectedId === file.id}
+              onReload={() => requestReload(file)}
+            />
+          ) : (
+            <div role="status" className="m-auto p-6 text-muted-foreground text-sm">
+              {t('common.loading')}
+            </div>
+          )}
         </div>
       ))}
       {diffTabs.map((tab) => (

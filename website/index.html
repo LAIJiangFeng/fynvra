@@ -27,6 +27,7 @@
     <script src="assets/site.js"></script>
     <link rel="stylesheet" href="assets/site.css" />
     <link rel="stylesheet" href="assets/home.css" />
+    <link rel="stylesheet" href="assets/demo.css" />
     <script src="assets/home.js" defer></script>
   </head>
   <body>
@@ -43,9 +44,7 @@
         </a>
         <nav class="nav-links" id="site-menu">
           <a href="#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a>
-          <a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a>
           <a href="#safety"><span data-l="zh">安全</span><span data-l="en">Safety</span></a>
-          <a href="#faq"><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></a>
           <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">Docs</span></a>
         </nav>
         <div class="nav-actions">
@@ -70,7 +69,7 @@
             </svg>
           </button>
           <a class="btn btn-primary btn-sm nav-download" href="https://github.com/LAIJiangFeng/fynvra/releases">
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M7.5 10.5 12 15l4.5-4.5M5 20h14" /></svg>
+            <svg class="i i-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
             <span data-l="zh">下载</span><span data-l="en">Download</span></a
           >
           <button class="icon-btn menu-btn" type="button" data-action="toggle-menu" aria-controls="site-menu" aria-expanded="false">
@@ -86,11 +85,6 @@
       <section class="hero">
         <div class="container">
           <div class="hero-intro">
-            <p class="hero-badge rise" style="--i: 0">
-              <span class="badge-dot" aria-hidden="true"></span
-              ><span data-l="zh">开源 · 本地优先 · 内置多 Agent 编排</span
-              ><span data-l="en">Open source · Local-first · Multi-agent built in</span>
-            </p>
             <h1 class="hero-title rise" style="--i: 1">
               <span data-l="zh"
                 ><span class="hero-title-line">只和一个 Agent 对话，</span
@@ -111,17 +105,14 @@
             </h1>
             <div class="hero-copy rise" style="--i: 2">
               <p class="hero-lead" data-l="zh">
-                Fynvra 是开源的桌面 AI 编程工作台。主 Agent 把你的需求拆成任务，为每个任务开一个独立的 git worktree
-                交给 Worker，再审查改动、运行检查、验收合并。你只需要说清楚要做什么。
+                Fynvra 是多 Agent AI 编程工作台，支持任务并行协作、指定 Worker 模型与改动审查合并。
               </p>
               <p class="hero-lead" data-l="en">
-                Fynvra is an open-source desktop workbench for AI coding. The orchestrator splits your request into
-                tasks, gives each one its own git worktree and worker, then reviews the diff, runs the checks, and
-                merges what passes. You just describe the goal.
+                Fynvra is a multi-agent AI coding workbench: parallel tasks, per-task worker models, reviewed merges.
               </p>
               <div class="hero-actions">
                 <a class="btn btn-primary" href="https://github.com/LAIJiangFeng/fynvra/releases">
-                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M7.5 10.5 12 15l4.5-4.5M5 20h14" /></svg>
+                  <svg class="i i-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
                   <span data-l="zh">下载 Fynvra</span><span data-l="en">Download Fynvra</span>
                 </a>
                 <a class="btn btn-ghost" href="docs.html">
@@ -142,26 +133,31 @@
             </div>
           </div>
 
-          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo aria-labelledby="fd-caption">
-            <div class="showcase-caption">
-              <span class="showcase-tag"
-                ><i aria-hidden="true"></i><span data-l="zh">产品流程演示</span><span data-l="en">Product walkthrough</span></span
-              >
-              <span><span data-l="zh">界面示意 · 非截图 · 非联网操作</span><span data-l="en">Interface illustration, not a screenshot or network session</span></span>
+          <figure class="showcase fd-showcase rise" style="--i: 3" data-demo="collab" aria-label="界面演示 / Interface demo">
+            <div class="fd-scene-switch-row">
+              <fieldset class="fd-scene-switch" aria-label="演示场景 / Demo scene">
+                <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">任务协作</span><span data-l="en">Task collaboration</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">协作</span><span data-l="en">Tasks</span></span>
+                </button>
+                <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">指定 Worker 模型</span><span data-l="en">Assign worker models</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">模型</span><span data-l="en">Models</span></span>
+                </button>
+                <button class="fd-scene-btn" type="button" data-scene-btn="queue" aria-pressed="false" aria-controls="fd-scene-queue">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 11h8M4 17h8" /><path d="M17 12v6M14 15l3 3 3-3" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">输入排队</span><span data-l="en">Message queue</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">排队</span><span data-l="en">Queue</span></span>
+                </button>
+                <button class="fd-scene-btn" type="button" data-scene-btn="roles" aria-pressed="false" aria-controls="fd-scene-roles">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><circle cx="10" cy="11" r="1.8" /><path d="M14 15h3.5" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">角色对话</span><span data-l="en">Role chat</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">角色</span><span data-l="en">Roles</span></span>
+                </button>
+              </fieldset>
             </div>
-
-            <fieldset class="fd-scene-switch" aria-label="演示场景 / Demo scene">
-              <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
-                <span class="fd-scene-label-long"><span data-l="zh">任务协作</span><span data-l="en">Task collaboration</span></span>
-                <span class="fd-scene-label-short"><span data-l="zh">协作</span><span data-l="en">Tasks</span></span>
-              </button>
-              <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
-                <span class="fd-scene-label-long"><span data-l="zh">指定 Worker 模型</span><span data-l="en">Assign worker models</span></span>
-                <span class="fd-scene-label-short"><span data-l="zh">Worker 模型</span><span data-l="en">Worker models</span></span>
-              </button>
-            </fieldset>
 
             <div class="fd-app" data-demo-app>
               <div class="fd-titlebar">
@@ -735,68 +731,515 @@
                   </aside>
                 </div>
               </div>
-            </div>
 
-            <figcaption class="fd-caption" id="fd-caption">
-              <span data-l="zh">任务协作：一条需求拆成两个独立 Worker 任务，在各自 worktree 中执行、审查并合并。指定 Worker 模型：直接在需求里写清每个任务用哪个模型，主 Agent 按任务派发。两种界面均为流程示意，动画自动循环；模型名称仅作示例，不代表内置配置。</span>
-              <span data-l="en">Task collaboration: one request becomes two independent worker tasks, each in its own worktree, then reviewed and merged. Assign worker models: name a model for each task in the request and the orchestrator dispatches accordingly. Both views are illustrations and loop automatically; model names are examples, not bundled providers.</span>
-            </figcaption>
+              <div class="fd-scene" id="fd-scene-queue" data-scene="queue" data-phase="0" hidden>
+                <div class="fd-body">
+                  <aside class="fd-side">
+                    <div class="fd-side-head">
+                      <span data-l="zh">工作区</span><span data-l="en">Workspaces</span>
+                      <span class="fd-side-actions" aria-hidden="true">
+                        <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-workspace">
+                      <div class="fd-ws-row">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                        <span>fynvra</span><span class="fd-ws-branch">main</span>
+                      </div>
+                      <p class="fd-ws-path">D:\project\fynvra</p>
+
+                      <div class="fd-sessions-head">
+                        <span data-l="zh">会话</span><span data-l="en">Sessions</span>
+                        <span class="fd-side-actions" aria-hidden="true">
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg></span>
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-active" data-session="queue-current">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">首页：三场景演示</span><span data-l="en">Homepage: three demo scenes</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                            <span class="fd-model-tag">DeepSeek V4.1</span>
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div class="fd-main">
+                    <div class="fd-editor-tabs" aria-hidden="true">
+                      <span class="fd-editor-tab is-active"><span data-l="zh">对话</span><span data-l="en">Chat</span></span>
+                      <span class="fd-editor-tab">index.html</span>
+                      <span class="fd-editor-tab">home.css</span>
+                      <span class="fd-editor-add"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                    </div>
+
+                    <div class="fd-chat-head" data-chat-head data-state="run">
+                      <span class="fd-dot is-run"></span>
+                      <span class="fd-chat-title"><span data-l="zh">首页：三场景演示</span><span data-l="en">Homepage: three demo scenes</span></span>
+                      <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                      <span class="fd-chat-status">
+                        <span class="fd-st-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span>
+                        <span class="fd-st-idle"><span data-l="zh">空闲</span><span data-l="en">Idle</span></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-timeline" data-timeline>
+                      <div class="fd-stream">
+                        <div class="fd-msg is-user" data-appear="0">
+                          <span data-l="zh">把顶部演示改成三个场景轮播，先做桌面布局。</span>
+                          <span data-l="en">Turn the hero demo into three rotating scenes, desktop layout first.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="0">
+                          <p data-l="zh">收到，当前回合正在改演示区。后续需求可以直接提交，会先排队，等我处理完这条再依次接上。</p>
+                          <p data-l="en">On it — this turn is rebuilding the demo. You can submit more requests now; they queue and start in order after this turn.</p>
+                        </div>
+
+                        <div class="fd-tool fd-queue-current" data-appear="0" data-queue-current>
+                          <span class="fd-dot is-run"></span>
+                          <span class="fd-tool-label"><span data-l="zh">当前回合</span><span data-l="en">Current turn</span></span>
+                          <span class="fd-tool-title"><span data-l="zh">重构顶部演示切换</span><span data-l="en">Rebuild the demo scenes</span></span>
+                          <span class="fd-tool-meta fd-queue-current-state">
+                            <span class="fd-queue-run"><span data-l="zh">处理中</span><span data-l="en">Running</span></span>
+                            <span class="fd-queue-done"><span data-l="zh">已完成</span><span data-l="en">Done</span></span>
+                          </span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="4">
+                          <span data-l="zh">补上移动端适配。</span>
+                          <span data-l="en">Add the mobile layout.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="4">
+                          <p data-l="zh">队列 1 / 2 完成：移动端布局已补上。</p>
+                          <p data-l="en">Queued item 1 of 2 done: the mobile layout is in.</p>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="5">
+                          <span data-l="zh">再补一份使用说明。</span>
+                          <span data-l="en">Then add a short usage guide.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="5">
+                          <p data-l="zh">队列 2 / 2 完成：使用说明已补上。排队消息已全部处理完。</p>
+                          <p data-l="en">Queued item 2 of 2 done: the usage guide is in. The queue is clear.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-composer">
+                      <div class="fd-queue" data-queue hidden>
+                        <div class="fd-queue-head">
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 11h8M4 17h8" /><path d="M17 12v6M14 15l3 3 3-3" /></svg>
+                          <span data-l="zh">排队消息</span><span data-l="en">Queued messages</span>
+                          <span class="fd-queue-count" data-queue-count>0</span>
+                        </div>
+                        <ul class="fd-queue-list">
+                          <li class="fd-queue-item" data-queue-item="1" hidden>
+                            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                            <span class="fd-queue-text"><span data-l="zh">补上移动端适配。</span><span data-l="en">Add the mobile layout.</span></span>
+                            <span class="fd-queue-state"><span data-l="zh">排队中</span><span data-l="en">Queued</span></span>
+                          </li>
+                          <li class="fd-queue-item" data-queue-item="2" hidden>
+                            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                            <span class="fd-queue-text"><span data-l="zh">再补一份使用说明。</span><span data-l="en">Then add a short usage guide.</span></span>
+                            <span class="fd-queue-state"><span data-l="zh">排队中</span><span data-l="en">Queued</span></span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div class="fd-composer-box">
+                        <div class="fd-composer-input" data-mode="queue"><span data-typed></span><span class="fd-caret" aria-hidden="true"></span><span class="fd-placeholder"><span class="fd-placeholder-queue"><span data-l="zh">继续输入，提交后排队</span><span data-l="en">Keep typing — new messages will queue</span></span><span class="fd-placeholder-idle"><span data-l="zh">输入消息，Enter 发送</span><span data-l="en">Message Fynvra…</span></span></span></div>
+                        <div class="fd-composer-bar">
+                          <span class="fd-composer-tools">
+                            <span class="fd-mini-btn" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h6M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" /></svg></span>
+                            <span class="fd-chip fd-chip-model"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span class="fd-chip-label">deepseek-v4.1-flash · high</span></span>
+                            <span class="fd-chip fd-chip-approval"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full access</span></span>
+                          </span>
+                          <span class="fd-send" data-send data-mode="queue"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg><span class="fd-send-queue"><span data-l="zh">排队</span><span data-l="en">Queue</span></span><span class="fd-send-idle"><span data-l="zh">发送</span><span data-l="en">Send</span></span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-statusbar" aria-hidden="true">
+                      <span>tokens ↑11.2k ↓2.8k</span><span>$0.04</span>
+                      <span class="fd-status-right">
+                        <span class="is-amber"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full</span></span>
+                        <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                        <span>deepseek-v4.1-flash</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <aside class="fd-panel">
+                    <div class="fd-panel-head">
+                      <div class="fd-panel-tabs">
+                        <span class="fd-panel-tab is-active">
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg>
+                          <span data-l="zh">任务</span><span data-l="en">Tasks</span>
+                        </span>
+                      </div>
+                      <span class="fd-panel-refresh" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 5.3M20 4v7h-7" /></svg></span>
+                    </div>
+
+                    <div class="fd-panel-body">
+                      <div class="fd-task" data-queue-task data-state="run">
+                        <div class="fd-task-head">
+                          <span class="fd-task-title"><span data-l="zh">首页：三场景演示</span><span data-l="en">Homepage: three demo scenes</span></span>
+                          <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                        </div>
+                        <div class="fd-task-meta">
+                          <svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>
+                          <code>fynvra/home-demo</code>
+                          <span class="fd-status st-todo"><span data-l="zh">待开始</span><span data-l="en">To do</span></span>
+                          <span class="fd-status st-run"><span data-l="zh">进行中</span><span data-l="en">Running</span></span>
+                          <span class="fd-status st-review"><span data-l="zh">待验收</span><span data-l="en">In review</span></span>
+                          <span class="fd-status st-done"><span data-l="zh">已完成</span><span data-l="en">Completed</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+              </div>
+
+              <div class="fd-scene" id="fd-scene-roles" data-scene="roles" data-phase="0" hidden>
+                <div class="fd-body">
+                  <aside class="fd-side">
+                    <div class="fd-side-head">
+                      <span data-l="zh">工作区</span><span data-l="en">Workspaces</span>
+                      <span class="fd-side-actions" aria-hidden="true">
+                        <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-workspace">
+                      <div class="fd-ws-row">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                        <span>fynvra</span><span class="fd-ws-branch">main</span>
+                      </div>
+                      <p class="fd-ws-path">D:\project\fynvra</p>
+
+                      <div class="fd-sessions-head">
+                        <span data-l="zh">会话</span><span data-l="en">Sessions</span>
+                        <span class="fd-side-actions" aria-hidden="true">
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg></span>
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="role-worker" data-appear="1">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">设置页：侧栏折叠</span><span data-l="en">Settings: sidebar collapse</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role">Worker</span>
+                            <span class="fd-model-tag">DeepSeek</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="role-review" data-appear="5">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">审查当前改动</span><span data-l="en">Review current diff</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role is-custom">
+                              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                              <span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span>
+                              <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div class="fd-main">
+                    <div class="fd-editor-tabs" aria-hidden="true">
+                      <span class="fd-editor-tab is-active"><span data-l="zh">对话</span><span data-l="en">Chat</span></span>
+                      <span class="fd-editor-tab">Settings.tsx</span>
+                      <span class="fd-editor-tab">settings.css</span>
+                      <span class="fd-editor-add"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                    </div>
+
+                    <div class="fd-chat-head is-idle" data-role-head data-state="idle">
+                      <span class="fd-dot is-run"></span>
+                      <span class="fd-chat-title" data-role-title="worker" hidden><span data-l="zh">Worker · 设置页侧栏折叠</span><span data-l="en">Worker · Settings sidebar collapse</span></span>
+                      <span class="fd-chat-title" data-role-title="review" hidden><span data-l="zh">代码审查员 · 审查当前改动</span><span data-l="en">Code reviewer · Review current diff</span></span>
+                      <span class="fd-role" data-role-chip="worker" hidden>Worker</span>
+                      <span class="fd-role is-custom" data-role-chip="review" hidden>
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                        <span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span>
+                        <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                      </span>
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                      <span class="fd-chat-status">
+                        <span class="fd-st-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span>
+                        <span class="fd-st-idle"><span data-l="zh">空闲</span><span data-l="en">Idle</span></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-timeline" data-timeline>
+                      <div class="fd-stream" data-role-chat="worker">
+                        <div class="fd-empty" data-empty hidden>
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /></svg>
+                          <span data-l="zh">已创建 Worker 会话，直接写明需求，不需要主 Agent 转交。</span>
+                          <span data-l="en">Worker session created. Ask it directly — no main agent handoff.</span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="3">
+                          <span data-l="zh">为设置页增加侧栏折叠。</span>
+                          <span data-l="en">Add sidebar collapse to the settings page.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="3">
+                          <p data-l="zh">已加上折叠按钮：桌面端收起到图标栏，窄屏自动隐藏，折叠状态写入设置。只改了设置页，没有动其他面板。</p>
+                          <p data-l="en">Added a collapse button: it folds to an icon rail on desktop and hides on narrow screens, with the state saved to settings. Only the settings page changed.</p>
+                        </div>
+                      </div>
+
+                      <div class="fd-stream" data-role-chat="review" hidden>
+                        <div class="fd-empty" data-role-empty>
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                          <span data-l="zh">审查会话只读：列出问题与建议，不改文件。</span>
+                          <span data-l="en">Read-only review: list issues and suggestions, never edit files.</span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="6">
+                          <span data-l="zh">检查当前改动，只列问题与建议，不修改文件。</span>
+                          <span data-l="en">Review the current diff. List issues and suggestions only — do not edit files.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="6">
+                          <p data-l="zh"><strong>问题</strong></p>
+                          <p data-l="en"><strong>Issues</strong></p>
+                          <ul class="fd-role-bullets">
+                            <li><span data-l="zh"><code>Settings.tsx</code> 读取折叠状态前没有补默认值，旧配置会读到 undefined。</span><span data-l="en"><code>Settings.tsx</code> reads the collapse state without a fallback; older configs get undefined.</span></li>
+                            <li><span data-l="zh"><code>settings.css</code> 把图标栏宽度写死为 56px，窄屏展开时会和内容重叠。</span><span data-l="en"><code>settings.css</code> hard-codes a 56px icon rail, which overlaps content when expanded on narrow screens.</span></li>
+                          </ul>
+                          <p data-l="zh"><strong>建议</strong></p>
+                          <p data-l="en"><strong>Suggestions</strong></p>
+                          <ul class="fd-role-bullets">
+                            <li><span data-l="zh">读取时用默认值兜底，并为 320px 展开态补一条样式。</span><span data-l="en">Default the value on read and add a style for the 320px expanded state.</span></li>
+                            <li><span data-l="zh">折叠后用 <code>aria-expanded</code> 同步按钮状态。</span><span data-l="en">Sync the button state with <code>aria-expanded</code> after toggling.</span></li>
+                          </ul>
+                          <p class="fd-role-conclusion" data-l="zh">只读审查完成，未修改文件。</p>
+                          <p class="fd-role-conclusion" data-l="en">Read-only review done. No files were modified.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-composer">
+                      <div class="fd-composer-box">
+                        <div class="fd-composer-input">
+                          <span data-typed></span><span class="fd-caret" aria-hidden="true"></span>
+                          <span class="fd-placeholder">
+                            <span data-role-placeholder="worker"><span data-l="zh">向 Worker 发送消息，Enter 发送</span><span data-l="en">Message the Worker, Enter to send</span></span>
+                            <span data-role-placeholder="review" hidden><span data-l="zh">向代码审查员发送消息，Enter 发送</span><span data-l="en">Message the code reviewer, Enter to send</span></span>
+                          </span>
+                        </div>
+                        <div class="fd-composer-bar">
+                          <span class="fd-composer-tools">
+                            <span class="fd-mini-btn" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h6M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" /></svg></span>
+                            <span class="fd-chip fd-chip-model"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span class="fd-chip-label">deepseek-v4.1-flash · high</span></span>
+                            <span class="fd-chip fd-chip-approval"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full access</span></span>
+                          </span>
+                          <span class="fd-send" data-send><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg><span data-l="zh">发送</span><span data-l="en">Send</span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-statusbar" aria-hidden="true">
+                      <span>tokens ↑8.6k ↓2.1k</span><span>$0.03</span>
+                      <span class="fd-status-right">
+                        <span class="is-amber"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full</span></span>
+                        <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                        <span>deepseek-v4.1-flash</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <aside class="fd-panel">
+                    <div class="fd-panel-head">
+                      <div class="fd-panel-tabs">
+                        <span class="fd-panel-tab is-active">
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.6M18 14a5 5 0 0 1 3 4.6" /></svg>
+                          <span data-l="zh">角色</span><span data-l="en">Roles</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="fd-panel-body">
+                      <div class="fd-role-card" data-role-card="worker" data-state="idle">
+                        <div class="fd-role-card-head">
+                          <span class="fd-role-card-name">Worker</span>
+                          <span class="fd-role"><span data-l="zh">开发</span><span data-l="en">Build</span></span>
+                        </div>
+                        <p data-l="zh">直接实现你提出的改动，交付代码与结果。</p>
+                        <p data-l="en">Implements the change you ask for and delivers the code.</p>
+                        <span class="fd-role-card-meta"><span data-l="zh">直接对话 · 无需转交</span><span data-l="en">Direct chat · no handoff</span></span>
+                      </div>
+
+                      <div class="fd-role-card" data-role-card="review" data-state="idle">
+                        <div class="fd-role-card-head">
+                          <span class="fd-role-card-name"><span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span></span>
+                          <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                        </div>
+                        <p data-l="zh">只读检查改动，只列问题与建议，不修改文件。</p>
+                        <p data-l="en">Reads the diff, lists issues and suggestions, and never edits files.</p>
+                        <span class="fd-role-card-meta"><span data-l="zh">只读审查 · 用户自定义</span><span data-l="en">Read-only · user-defined</span></span>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+
+                <div class="fd-newsession" data-appear="0" data-newsession>
+                  <section class="fd-newsession-card" aria-label="新建会话 / New session">
+                    <div class="fd-newsession-head">
+                      <span class="fd-newsession-title"><span data-l="zh">新建会话</span><span data-l="en">New session</span></span>
+                      <span class="fd-newsession-note"><span data-l="zh">选角色后直接对话</span><span data-l="en">Pick a role, chat directly</span></span>
+                    </div>
+                    <p class="fd-newsession-label"><span data-l="zh">选择角色</span><span data-l="en">Choose a role</span></p>
+                    <ul class="fd-role-list">
+                      <li class="fd-role-option" data-role-option="orch">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name">Orchestrator</span>
+                          <span class="fd-role-option-desc"><span data-l="zh">主 Agent · 拆解与派发</span><span data-l="en">Main agent · plan &amp; dispatch</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                      <li class="fd-role-option" data-role-option="worker">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-4 5 4 5M16 7l4 5-4 5M14 5l-4 14" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name">Worker</span>
+                          <span class="fd-role-option-desc"><span data-l="zh">开发实现 · 直接交付</span><span data-l="en">Build · ship the change</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                      <li class="fd-role-option" data-role-option="review">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name"><span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span></span>
+                          <span class="fd-role-option-desc"><span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span> · <span data-l="zh">只读审查</span><span data-l="en">review only</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                    </ul>
+                    <div class="fd-newsession-foot">
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>deepseek-v4.1-flash</span>
+                      <span class="fd-newsession-create"><span data-l="zh">创建</span><span data-l="en">Create</span></span>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
           </figure>
-
-          <div class="spec-strip rise" style="--i: 4">
-            <div class="spec-strip-head">
-              <span class="spec-kicker"
-                ><span data-l="zh">实现细节</span><span data-l="en">Under the hood</span></span
-              >
-              <span class="spec-strip-title" data-l="zh">规格</span>
-              <span class="spec-strip-title" data-l="en">The specs</span>
-            </div>
-            <dl>
-              <div>
-                <dt><span data-l="zh">运行时</span><span data-l="en">Runtime</span></dt>
-                <dd>Electron · pi SDK</dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">编排</span><span data-l="en">Agents</span></dt>
-                <dd><span data-l="zh">1 个主 Agent + N 个 Worker</span><span data-l="en">1 orchestrator + N workers</span></dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">隔离</span><span data-l="en">Isolation</span></dt>
-                <dd><span data-l="zh">每任务独立 worktree</span><span data-l="en">A worktree per task</span></dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">分支</span><span data-l="en">Branches</span></dt>
-                <dd>fynvra/&lt;slug&gt; · merge --no-ff</dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">审批</span><span data-l="en">Approvals</span></dt>
-                <dd><span data-l="zh">3 档 + 保护底线</span><span data-l="en">3 modes + a hard floor</span></dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">协议</span><span data-l="en">Protocols</span></dt>
-                <dd>Anthropic · OpenAI · Google</dd>
-              </div>
-              <div>
-                <dt><span data-l="zh">许可</span><span data-l="en">License</span></dt>
-                <dd>Apache-2.0</dd>
-              </div>
-            </dl>
-          </div>
         </div>
       </section>
 
       <section class="strip" aria-label="Providers">
         <div class="container strip-inner">
-          <div class="strip-row">
-            <p class="strip-label"><span data-l="zh">模型协议</span><span data-l="en">Protocols</span></p>
-            <ul class="strip-list">
-              <li>Anthropic Messages</li>
-              <li>OpenAI Responses</li>
-              <li>OpenAI Chat Completions</li>
-              <li>Google Generative AI</li>
-              <li><span data-l="zh">OpenAI 兼容服务</span><span data-l="en">OpenAI-compatible</span></li>
-            </ul>
+          <!--
+            品牌图标：Anthropic / OpenAI / Google Gemini / DeepSeek / Qwen 取自 Simple Icons（https://simpleicons.org，CC0-1.0）；
+            xAI 取自 xAI 官方标识（X.AI Corp.，公有领域 PD-textlogo，商标归 xAI），经 Wikimedia Commons 本地化。
+            均无运行时远端请求。滚动轨道第 2、3 份副本只用于无缝循环，已对辅助技术隐藏。
+          -->
+          <div class="providers">
+            <p class="providers-title" id="providers-title"><span data-l="zh">模型服务</span><span data-l="en">Model providers</span></p>
+            <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus pauses the scrolling region via :focus-within. -->
+            <section class="providers-marquee" tabindex="0" aria-labelledby="providers-title">
+              <div class="providers-viewport">
+                <div class="providers-track">
+                  <ul class="providers-set">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                  <ul class="providers-set" aria-hidden="true">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                  <ul class="providers-set" aria-hidden="true">
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/anthropic.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Anthropic</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/openai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">OpenAI</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/google-gemini.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Google Gemini</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/deepseek.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">DeepSeek</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/qwen.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">Qwen</span>
+                    </li>
+                    <li class="provider">
+                      <img class="provider-mark" src="assets/providers/xai.svg" alt="" width="30" height="30" aria-hidden="true" />
+                      <span class="provider-name">xAI</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </section>
           </div>
+
           <div class="strip-row">
             <p class="strip-label"><span data-l="zh">配置导入</span><span data-l="en">Import from</span></p>
             <ul class="strip-list strip-list-muted">
@@ -818,231 +1261,67 @@
           <header class="section-head reveal">
             <p class="eyebrow"><b>01</b><span data-l="zh">能力</span><span data-l="en">Capabilities</span></p>
             <h2 class="section-title">
-              <span data-l="zh">把一句需求，变成一条可验收的流水线。</span
-              ><span data-l="en">Turn one request into a pipeline you can review.</span>
+              <span data-l="zh">一个工作台，装下多 Agent 开发。</span
+              ><span data-l="en">One workbench for multi-agent development.</span>
             </h2>
-            <p class="section-lead" data-l="zh">
-              主 Agent 负责拆解和派发，Worker 在各自的工作树里执行，最后统一审查、跑检查、合并。每一步都是可回看的工具调用，不是黑箱。
-            </p>
-            <p class="section-lead" data-l="en">
-              The orchestrator splits and dispatches. Workers execute in isolated worktrees. Review, checks, and merge
-              come back to one place — every step a tool call you can inspect.
-            </p>
           </header>
-
-          <article class="flow-spotlight reveal">
-            <div class="flow-copy">
-              <p class="flow-kicker">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>
-                Orchestrator
-              </p>
-              <h3><span data-l="zh">主 Agent 只派活，不动手。</span><span data-l="en">An orchestrator that delegates.</span></h3>
-              <p data-l="zh">
-                默认的主 Agent 只有只读工具和编排工具：拆任务、派发、回答 Worker 的提问、验收合并。派发之后它不会干等，你可以接着讨论下一件事；收件箱一来消息，Fynvra 就把它叫醒。
-              </p>
-              <p data-l="en">
-                The default orchestrator gets only read-only and orchestration tools. It plans, dispatches, answers
-                workers, reviews, and merges. It never idles after a dispatch — keep talking, and Fynvra wakes it when
-                the inbox has news.
-              </p>
-              <ol class="flow-steps">
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">拆解与派发</span><span data-l="en">Split and dispatch</span></b>
-                    <span data-l="zh">把目标拆成互不依赖的任务，为每个任务建 worktree。</span>
-                    <span data-l="en">Turn the goal into independent tasks, each with its own worktree.</span>
-                  </div>
-                </li>
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">并行执行</span><span data-l="en">Build in parallel</span></b>
-                    <span data-l="zh">Worker 在各自分支里改文件、提交；卡住与完成都回到收件箱。</span>
-                    <span data-l="en">Workers edit and commit on their own branches; questions and results return to the inbox.</span>
-                  </div>
-                </li>
-                <li>
-                  <span class="flow-step-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-                  <div>
-                    <b><span data-l="zh">验收与合并</span><span data-l="en">Review and merge</span></b>
-                    <span data-l="zh">审查改动、运行检查；通过后 merge --no-ff，不达标就退回重做。</span>
-                    <span data-l="en">Review the diff and run checks. Merge with --no-ff when it passes; send it back when it doesn't.</span>
-                  </div>
-                </li>
-              </ol>
-            </div>
-
-            <div class="flow-map" aria-hidden="true">
-              <div class="flow-source">
-                <span class="flow-source-label"><span data-l="zh">需求</span><span data-l="en">Request</span></span>
-                <p><span data-l="zh">“优化首页与文档”</span><span data-l="en">“Polish the homepage and docs”</span></p>
-              </div>
-              <div class="flow-core">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg>
-                <b>Orchestrator</b>
-                <span><span data-l="zh">只读 + 编排</span><span data-l="en">read-only + orchestration</span></span>
-              </div>
-              <div class="flow-task-grid">
-                <div class="flow-task">
-                  <b><span data-l="zh">首页：标题与演示</span><span data-l="en">Homepage: layout + demo</span></b>
-                  <code>fynvra/home-demo</code>
-                  <span class="flow-task-status"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><span data-l="zh">已完成</span><span data-l="en">Done</span></span>
-                </div>
-                <div class="flow-task">
-                  <b><span data-l="zh">文档：阅读与导航</span><span data-l="en">Docs: reading + nav</span></b>
-                  <code>fynvra/docs-nav</code>
-                  <span class="flow-task-status"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><span data-l="zh">已完成</span><span data-l="en">Done</span></span>
-                </div>
-              </div>
-              <div class="flow-merge">
-                <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 15 3 3-3 3M20 18h-7" /></svg>
-                <span>review_diff · run_checks</span>
-                <span class="is-ok">merge --no-ff ✓</span>
-              </div>
-            </div>
-          </article>
 
           <div class="cap-grid">
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg></span>
-              <p class="card-tag">Roles</p>
               <h3><span data-l="zh">角色随项目定制</span><span data-l="en">Roles shaped to your project</span></h3>
-              <p data-l="zh">提示词、模型与思考档位、工具策略、审批档位、技能和 MCP 组成一个角色。内置的 Orchestrator、Worker 也只是可改的模板。</p>
-              <p data-l="en">A role bundles a prompt, model and thinking level, tool policy, approval mode, skills, and MCP. Even the built-in Orchestrator and Worker are editable templates.</p>
-              <p class="cap-meta">roles/*.json · Orchestrator · Worker</p>
+              <p data-l="zh">自定义角色的提示词、模型、工具、技能和 MCP。</p>
+              <p data-l="en">Customize each role’s prompt, model, tools, skills, and MCP.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M9 9h6v6H9zM9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" /></svg></span>
-              <p class="card-tag">Models</p>
               <h3><span data-l="zh">模型自己选，配置可导入</span><span data-l="en">Your models, imported</span></h3>
-              <p data-l="zh">支持 Anthropic、OpenAI（Responses 与 Chat Completions）和 Google 协议；Claude Code、Codex、CC Switch 里的配置可直接导入。</p>
-              <p data-l="en">Speaks Anthropic, OpenAI (Responses and Chat Completions), and Google protocols. Import configs straight from Claude Code, Codex, and CC Switch.</p>
-              <p class="cap-meta">Anthropic · OpenAI · Google · import</p>
+              <p data-l="zh">挑好模型就能开工，其他工具里配好的模型和 MCP 也可以直接导入。</p>
+              <p data-l="en">Pick your model and go; import the providers and MCP servers you already set up elsewhere.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-              <p class="card-tag">Worktrees</p>
               <h3><span data-l="zh">每个任务，一个 worktree</span><span data-l="en">One worktree per task</span></h3>
-              <p data-l="zh">Worker 在各自的分支和目录里干活，互不踩踏；主仓库保持原样，直到验收通过。非 git 目录按原地模式逐个执行。</p>
-              <p data-l="en">Each worker gets its own branch and directory, so parallel agents never collide — and your main checkout stays untouched until review passes. Plain folders run in place, one task at a time.</p>
-              <p class="cap-meta">fynvra/&lt;slug&gt; · isolated directory</p>
+              <p data-l="zh">每个任务在自己的分支和目录里改，互不踩踏，主仓库在验收通过前保持原样。</p>
+              <p data-l="en">Each task works in its own branch and folder, so nothing collides and your main checkout stays untouched until review passes.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg></span>
-              <p class="card-tag">Collaboration</p>
               <h3><span data-l="zh">派发之后，不必干等</span><span data-l="en">Dispatch, then keep moving</span></h3>
-              <p data-l="zh">主 Agent 可以接着讨论下一件事；Worker 的提问、汇报和心跳进入收件箱，Fynvra 在需要时把它叫醒。</p>
-              <p data-l="en">Keep talking to the orchestrator after dispatch. Worker questions, reports, and heartbeats land in the inbox, and Fynvra wakes it when needed.</p>
-              <p class="cap-meta">ask_coordinator · report_done · inbox</p>
+              <p data-l="zh">派发后可以接着讨论下一件事，Worker 的提问和汇报会自动回到收件箱。</p>
+              <p data-l="en">Keep talking after dispatch; worker questions and reports come back to the inbox.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></svg></span>
-              <p class="card-tag">Files · Terminal · Diff</p>
               <h3><span data-l="zh">文件、终端、改动，不用切窗口</span><span data-l="en">Files, terminals, and diffs in one place</span></h3>
-              <p data-l="zh">从右侧目录树打开文件，在中央标签里与对话并排编辑；Markdown 支持编辑、预览、双栏，内置真正的终端。每个任务的改动逐文件可查。</p>
-              <p data-l="en">Open files from the tree and edit them in tabs beside the chat. Markdown has edit, preview, and split views; terminals are real. Every task's changes stay reviewable file by file.</p>
-              <p class="cap-meta">file tree · terminal · git diff</p>
+              <p data-l="zh">文件、终端和逐文件改动都并排在对话旁边，随时可查。</p>
+              <p data-l="en">Files, terminals, and per-file diffs sit beside the chat, always within reach.</p>
             </article>
 
             <article class="cap-card reveal">
               <span class="cap-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg></span>
-              <p class="card-tag">Usage</p>
               <h3><span data-l="zh">花了多少，交付多少</span><span data-l="en">What it cost, what it shipped</span></h3>
-              <p data-l="zh">统计 Token、费用、缓存命中率，以及一次验收通过率和打回次数。数据只从本机会话记录里读。</p>
-              <p data-l="en">Tokens, cost, and cache hit rate — plus first-pass acceptance and rejections. Read only from local session files.</p>
-              <p class="cap-meta">tokens · cost · first-pass acceptance</p>
+              <p data-l="zh">Token、费用、缓存命中率和一次验收通过率，都从本机记录里统计。</p>
+              <p data-l="en">Tokens, cost, cache hit rate, and first-pass acceptance, counted from local records.</p>
             </article>
           </div>
-        </div>
-      </section>
-
-      <section class="section section-alt" id="workflow">
-        <div class="container">
-          <header class="section-head reveal">
-            <p class="eyebrow"><b>02</b><span data-l="zh">工作流</span><span data-l="en">Workflow</span></p>
-            <h2 class="section-title">
-              <span data-l="zh">从一句需求，到一次干净的合并。</span><span data-l="en">From one sentence to a clean merge.</span>
-            </h2>
-            <p class="section-lead" data-l="zh">
-              派发、执行、审查，然后打回或合并，每个环节都是一次工具调用，都留有记录。合并统一走 --no-ff，主分支历史一目了然。
-            </p>
-            <p class="section-lead" data-l="en">
-              Dispatch, execute, review, then reject or merge — every step is a tool call with a record. Merges always
-              use --no-ff, so your main branch history stays readable.
-            </p>
-          </header>
-
-          <ol class="wf-list reveal">
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">01</span>
-                <h3><span data-l="zh">说需求</span><span data-l="en">Describe</span></h3>
-                <p data-l="zh">在 Orchestrator 会话里说清目标、约束和要交给谁；不需要先写命令。</p>
-                <p data-l="en">Tell the orchestrator the goal, the constraints, and who should handle it. No commands required.</p>
-              </div>
-              <span class="wf-tool">chat</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">02</span>
-                <h3><span data-l="zh">派发</span><span data-l="en">Dispatch</span></h3>
-                <p data-l="zh"><code>dispatch_task</code> 建 worktree、启动 Worker、投递任务书；互不依赖的任务可以并行。</p>
-                <p data-l="en"><code>dispatch_task</code> creates a worktree, starts a worker, and hands over the brief. Independent tasks run in parallel.</p>
-              </div>
-              <span class="wf-tool">dispatch_task</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">03</span>
-                <h3><span data-l="zh">执行</span><span data-l="en">Build</span></h3>
-                <p data-l="zh">Worker 在自己的分支上改代码、提交。卡住用 <code>ask_coordinator</code> 提问，做完用 <code>report_done</code> 汇报。</p>
-                <p data-l="en">Workers code and commit on their own branches, <code>ask_coordinator</code> when stuck, and <code>report_done</code> when finished.</p>
-              </div>
-              <span class="wf-tool">ask_coordinator · report_done</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">04</span>
-                <h3><span data-l="zh">验收</span><span data-l="en">Review</span></h3>
-                <p data-l="zh">主 Agent 用 <code>review_diff</code> 读改动、<code>run_checks</code> 跑检查；不达标就 <code>reject_work</code> 打回重做。</p>
-                <p data-l="en">The orchestrator reads the diff and runs the checks; anything short of the bar goes back via <code>reject_work</code>.</p>
-              </div>
-              <span class="wf-tool">review_diff · run_checks</span>
-            </li>
-            <li class="wf-item">
-              <span class="wf-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg></span>
-              <div class="wf-body">
-                <span class="wf-step-num">05</span>
-                <h3><span data-l="zh">合并</span><span data-l="en">Merge</span></h3>
-                <p data-l="zh"><code>merge_worktree</code> 合入当前分支，<code>cleanup_worktree</code> 收尾，再把结果和证据汇报给你。</p>
-                <p data-l="en"><code>merge_worktree</code> lands it, <code>cleanup_worktree</code> tidies up, and you get a report with evidence.</p>
-              </div>
-              <span class="wf-tool">merge_worktree · cleanup</span>
-            </li>
-          </ol>
         </div>
       </section>
 
       <section class="section" id="safety">
         <div class="container">
           <header class="section-head reveal">
-            <p class="eyebrow"><b>03</b><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></p>
+            <p class="eyebrow"><b>02</b><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></p>
             <h2 class="section-title">
               <span data-l="zh">放手让它干，底线不让步。</span><span data-l="en">Let it run. Keep the guardrails.</span>
             </h2>
-            <p class="section-lead" data-l="zh">权限由角色策略和运行时共同执行，不会因为改了提示词就被绕过。</p>
+            <p class="section-lead" data-l="zh">权限按你的角色配置执行，改了提示词也绕不过去。</p>
             <p class="section-lead" data-l="en">
-              Permissions are enforced by role policy and the runtime together — no prompt edit can talk its way around
-              them.
+              Permissions follow your role settings — no prompt can talk its way around them.
             </p>
           </header>
 
@@ -1061,7 +1340,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">执行命令</span><span data-l="en">Commands</span>
-                      <small>bash · powershell · run_checks</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
@@ -1070,7 +1348,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">写改文件</span><span data-l="en">File writes</span>
-                      <small>write · edit · apply_patch</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-auto"><span data-l="zh">自动</span><span data-l="en">Auto</span></span></td>
@@ -1079,7 +1356,6 @@
                   <tr>
                     <th scope="row">
                       <span data-l="zh">MCP 工具</span><span data-l="en">MCP tools</span>
-                      <small>mcp</small>
                     </th>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
                     <td><span class="mark mark-ask"><span data-l="zh">需确认</span><span data-l="en">Ask</span></span></td>
@@ -1112,9 +1388,9 @@
                   </svg>
                 </span>
                 <div>
-                  <h3><span data-l="zh">密钥只在主进程</span><span data-l="en">Keys stay in the main process</span></h3>
-                  <p data-l="zh">API Key、MCP 环境变量和请求头的明文不会通过 IPC 回到界面。</p>
-                  <p data-l="en">Plaintext API keys, MCP env vars, and header values never cross IPC to the UI.</p>
+                  <h3><span data-l="zh">密钥本地保存</span><span data-l="en">Keys stored locally</span></h3>
+                  <p data-l="zh">API Key 保存在本地配置文件里，不是加密凭证库，请不要把应用数据目录分享给别人。</p>
+                  <p data-l="en">API keys live in local config files — not an encrypted vault — so don't share your app data folder.</p>
                 </div>
               </div>
               <div class="guard">
@@ -1139,8 +1415,8 @@
                 </span>
                 <div>
                   <h3><span data-l="zh">文件访问有围栏</span><span data-l="en">Fenced file access</span></h3>
-                  <p data-l="zh">读写限定在登记的工作区内，界面只传不透明 id，越界链接一律拒绝。</p>
-                  <p data-l="en">Reads and writes stay inside registered workspaces; the UI passes only opaque ids, and out-of-bounds links are refused.</p>
+                  <p data-l="zh">内置文件工具只读写已挂入的工作区。</p>
+                  <p data-l="en">Built-in file tools read and write only within attached workspaces.</p>
                 </div>
               </div>
               <div class="guard">
@@ -1152,102 +1428,11 @@
                 </span>
                 <div>
                   <h3><span data-l="zh">本地运行，直连服务</span><span data-l="en">Local, with direct connections</span></h3>
-                  <p data-l="zh">Fynvra 没有中转服务器，模型请求直接发往你配置的服务地址。</p>
-                  <p data-l="en">There is no relay server; model requests go straight to the endpoints you configure.</p>
+                  <p data-l="zh">Fynvra 没有中转服务器，对话请求只发往你配置的模型服务地址。</p>
+                  <p data-l="en">There is no relay server; prompts go only to the endpoints you configure.</p>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section section-alt" id="faq">
-        <div class="container faq">
-          <header class="section-head reveal">
-            <p class="eyebrow"><b>04</b><span data-l="zh">常见问题</span><span data-l="en">FAQ</span></p>
-            <h2 class="section-title"><span data-l="zh">装之前，先看看这些。</span><span data-l="en">Before you install.</span></h2>
-            <p class="section-lead">
-              <span data-l="zh">更完整的说明见</span><span data-l="en">For the full picture, read the</span>
-              <a href="docs.html"><span data-l="zh">使用文档</span><span data-l="en">user guide</span></a><span data-l="zh">。</span
-              ><span data-l="en">.</span>
-            </p>
-          </header>
-
-          <div class="faq-list reveal">
-            <details>
-              <summary>
-                <span data-l="zh">Fynvra 和 Claude Code、Codex 这类 CLI 有什么不同？</span
-                ><span data-l="en">How is Fynvra different from CLIs like Claude Code or Codex?</span>
-              </summary>
-              <p data-l="zh">
-                Claude Code、Codex 是单个 Agent 的命令行工具。Fynvra 是桌面工作台，内置基于 pi SDK 的 Agent 运行时，把主 Agent
-                编排、worktree 隔离、收件箱、审查和合并做成一个完整流程。你在这些工具里配好的模型服务和 MCP 服务器可以直接导入。
-              </p>
-              <p data-l="en">
-                Claude Code and Codex are single-agent CLIs. Fynvra is a desktop workbench with its own pi SDK–based
-                agent runtime that ties orchestration, worktree isolation, an inbox, review, and merge into one flow.
-                The providers and MCP servers you set up in those tools can be imported directly.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">收费吗？</span><span data-l="en">Is it free?</span></summary>
-              <p data-l="zh">Fynvra 本身免费开源，使用 Apache-2.0 许可证。模型调用的费用和额度来自你自己的服务商账号。</p>
-              <p data-l="en">
-                Fynvra itself is free and open source under Apache-2.0. Model usage is billed by whichever provider account
-                you connect.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">我的代码和 API Key 会被上传吗？</span><span data-l="en">Do my code and API keys leave my machine?</span></summary>
-              <p data-l="zh">
-                Fynvra 在本机运行，没有中转服务器，对话请求只发往你配置的模型服务地址。密钥明文只在主进程使用，但目前保存在本地配置文件中，并不是加密凭证库，请不要分享应用数据目录。
-              </p>
-              <p data-l="en">
-                Fynvra runs locally with no relay server; prompts go only to the provider endpoints you configure.
-                Plaintext keys are used only in the main process, but they are stored in local config files — not an
-                encrypted vault — so don't share your app data folder.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">主 Agent 会自己改代码吗？</span><span data-l="en">Will the orchestrator edit code itself?</span></summary>
-              <p data-l="zh">
-                默认不会。内置的 Orchestrator 使用「编排」工具策略，只能读文件、执行只读 git 和调用编排工具，不能写文件或执行任意命令。你可以在角色设置里调整。
-              </p>
-              <p data-l="en">
-                Not by default. The built-in Orchestrator uses the Orchestration tool policy: it can read files, run
-                read-only git, and call orchestration tools, but it can't write files or run arbitrary commands. You can
-                change this in role settings.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">没有 git 的项目能用吗？</span><span data-l="en">Can I use it without git?</span></summary>
-              <p data-l="zh">
-                能。非 git 目录按原地模式工作：不建 worktree，Worker 直接在目录里修改，审查时列出它汇报的改动文件。并行的 Worker
-                会共用同一个目录，建议一次只派一个任务。
-              </p>
-              <p data-l="en">
-                Yes. Folders without git run in in-place mode: no worktrees, workers edit the folder directly, and review
-                lists the files they reported. Parallel workers would share the folder, so dispatch one task at a time.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">支持哪些平台？</span><span data-l="en">Which platforms are supported?</span></summary>
-              <p data-l="zh">Windows x64 和 macOS（Intel / Apple Silicon）。Linux 有 AppImage 构建配置，但暂未纳入自动发布与更新。</p>
-              <p data-l="en">
-                Windows x64 and macOS (Intel and Apple Silicon). Linux has an AppImage build config but isn't part of
-                automated releases or updates yet.
-              </p>
-            </details>
-            <details>
-              <summary><span data-l="zh">Worker 会不会 push 代码或删库？</span><span data-l="en">Can a worker push or wipe my repo?</span></summary>
-              <p data-l="zh">
-                git push、git reset --hard、rm -rf 等保护操作，在任何审批档位下都需要你确认，「本会话都允许」也不会豁免。
-              </p>
-              <p data-l="en">
-                Protected operations such as git push, git reset --hard, and rm -rf need your confirmation in every
-                approval mode, and “Allow for session” doesn't exempt them.
-              </p>
-            </details>
           </div>
         </div>
       </section>
@@ -1256,7 +1441,7 @@
         <div class="container">
           <div class="cta reveal">
             <div class="section-head">
-              <p class="eyebrow"><b>05</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
+              <p class="eyebrow"><b>03</b><span data-l="zh">开始使用</span><span data-l="en">Get started</span></p>
               <h2 class="section-title">
                 <span data-l="zh">把下一个需求，交给主 Agent。</span><span data-l="en">Hand your next task to the orchestrator.</span>
               </h2>
@@ -1266,7 +1451,7 @@
               </p>
               <div class="hero-actions">
                 <a class="btn btn-primary" href="https://github.com/LAIJiangFeng/fynvra/releases">
-                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M7.5 10.5 12 15l4.5-4.5M5 20h14" /></svg>
+                  <svg class="i i-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
                   <span data-l="zh">前往 Releases 下载</span><span data-l="en">Download from Releases</span>
                 </a>
                 <a class="btn btn-ghost" href="docs.html#quickstart">
@@ -1307,7 +1492,6 @@ pnpm dev</code></pre>
           <p class="footer-title"><span data-l="zh">产品</span><span data-l="en">Product</span></p>
           <ul class="footer-links">
             <li><a href="#features"><span data-l="zh">功能</span><span data-l="en">Features</span></a></li>
-            <li><a href="#workflow"><span data-l="zh">工作流</span><span data-l="en">Workflow</span></a></li>
             <li><a href="#safety"><span data-l="zh">安全边界</span><span data-l="en">Guardrails</span></a></li>
             <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l="zh">下载</span><span data-l="en">Download</span></a></li>
           </ul>

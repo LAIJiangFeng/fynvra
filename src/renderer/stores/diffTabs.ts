@@ -1,6 +1,7 @@
 import { create, type StoreApi } from 'zustand';
 import type { DiffFileStatus } from '../components/orchestration/diff';
 import type { FilesStore } from './files';
+import { canOpenWorkspaceTab } from './workspaceTabPolicy';
 
 export type DiffSection = 'committed' | 'uncommitted';
 export type DiffSource =
@@ -40,11 +41,13 @@ export function diffTabId(tab: Pick<DiffTab, 'source' | 'section' | 'path'>): st
 }
 
 export function createDiffTabsStore(workspaceId: string) {
-  return create<DiffTabsState>()((set) => ({
+  return create<DiffTabsState>()((set, get) => ({
     opened: [],
     selectedId: null,
     open(input) {
       const tab: DiffTab = { ...input, workspaceId, id: diffTabId(input) };
+      if (!get().opened.some((item) => item.id === tab.id) && !canOpenWorkspaceTab(workspaceId))
+        return;
       set((state) => ({
         opened: state.opened.some((item) => item.id === tab.id)
           ? state.opened.map((item) => (item.id === tab.id ? tab : item))
@@ -75,7 +78,7 @@ export function createDiffTabsStore(workspaceId: string) {
 
 const stores = new Map<string, ReturnType<typeof createDiffTabsStore>>();
 
-/** 标签只驻内存，切换工作区时保留。 */
+/** 按工作区缓存；重启恢复由 workspaceTabs 协调，source 始终绑定原来源。 */
 export function diffTabsStoreFor(workspaceId: string) {
   let store = stores.get(workspaceId);
   if (!store) {

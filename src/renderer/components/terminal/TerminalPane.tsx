@@ -3,7 +3,7 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { useEffect, useRef, useState } from 'react';
 import { DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { useT } from '@/i18n/I18nProvider';
-import { terminalResources } from '@/stores/terminals';
+import { clearTerminalScreen, terminalResources } from '@/stores/terminals';
 
 export function TerminalPane({ id, active }: { id: string; active: boolean }) {
   const host = useRef<HTMLDivElement>(null);
@@ -67,7 +67,7 @@ export function TerminalPane({ id, active }: { id: string; active: boolean }) {
         <DropdownMenuItem onClick={() => terminalResources.get(id)?.terminal.selectAll()}>
           {t('terminals.selectAll')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => terminalResources.get(id)?.terminal.clear()}>
+        <DropdownMenuItem onClick={() => clearTerminalScreen(id)}>
           {t('terminals.clear')}
         </DropdownMenuItem>
       </DropdownMenuContent>

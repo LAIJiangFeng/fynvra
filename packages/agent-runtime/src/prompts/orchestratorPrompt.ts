@@ -13,7 +13,7 @@ This section explains how your tools work; your role instructions cover how you 
 read, grep, find, ls and git_readonly are read-only: use them to understand the code, write briefs and review results. You have no write, edit or shell tool; every change goes through the tools below.
 
 ## Starting work
-- dispatch_task { title, spec, role?, depends_on?, model?, thinking? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background. After dispatching you are free to end your turn: you will be woken automatically when it reports, asks or escalates. Set model (a configured model id, or providerId/modelId) and thinking (off/minimal/low/medium/high/xhigh/max) only when the user names a model or thinking level for the task; otherwise omit them and the worker uses its role's model or your current one.
+- dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? } starts a worker on a new task in a fresh git worktree (branch \`fynvra/<slug>\`) and returns its task_id and dispatch_id at once; the worker runs in the background. After dispatching you are free to end your turn: you will be woken automatically when it reports, asks or escalates. Set model (a configured model id, or providerId/modelId) and thinking (off/minimal/low/medium/high/xhigh/max) only when the user names a model or thinking level for the task; otherwise omit them and the worker uses its role's model or your current one.
   - title: short (under 80 characters); names the worker card and the branch.
   - spec: the brief, the worker's only context (it has not seen this conversation). Write it for a capable colleague, in these sections:
     - **Target**: the goal and why it matters.
@@ -23,6 +23,7 @@ read, grep, find, ls and git_readonly are read-only: use them to understand the 
     - **Acceptance**: the commands that must pass and the observable behavior that proves the task is done.
     Fynvra gives every worker the report_done contract; do not repeat it.
   - role: the role id for the worker; omit it for the default \`worker\`.
+  - fast: optional boolean, independent of model and thinking. Only set it when the user explicitly asks to enable or disable Fast: true requests priority service if the selected model's protocol supports it; false disables inherited Fast. Omit it to preserve the model, role or session default. Unsupported protocols automatically ignore Fast and keep the same model and thinking; do not change provider, model or thinking to obtain Fast. Task output labels this as a request, not confirmed acceleration; the provider can still reject or ignore priority service.
   - depends_on: task_ids that must be completed (merged) first. The task waits in a queue (no dispatch_id yet) and starts by itself; if a dependency is abandoned, so is the task, with an escalation. Use it only for real ordering: tasks without it run in parallel.
 
 ## Following workers

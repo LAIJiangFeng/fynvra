@@ -302,9 +302,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         roleId: task.roleId,
         cwd: worktree?.path ?? repoPath,
         ...(worktree ? { worktreeId: worktree.id } : {}),
-        // 派发时指定的模型 / 档位记在 Task 上：排队启动与驳回重试都沿用
+        // 派发时指定的模型 / 档位 / Fast 请求记在 Task 上，排队或恢复后启动也保留 false
         ...(task.model !== undefined ? { model: task.model } : {}),
         ...(task.thinking !== undefined ? { thinking: task.thinking } : {}),
+        ...(task.fastMode !== undefined ? { fastMode: task.fastMode } : {}),
         brief,
       });
     } catch (error) {
@@ -426,6 +427,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const spec = input.spec.trim();
     if (title === '') return fail('title must not be empty');
     if (spec === '') return fail('spec must not be empty');
+    if (input.fastMode !== undefined && typeof input.fastMode !== 'boolean') {
+      return fail('fastMode must be a boolean');
+    }
     const role = await roles.get(input.roleId);
     if (role === undefined) return fail(`unknown role "${input.roleId}"`);
     if (role.tools === 'orchestrator') {
@@ -466,6 +470,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       dependsOn,
       ...(model ? { model } : {}),
       ...(input.thinking !== undefined ? { thinking: input.thinking } : {}),
+      ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
     };
     if (!dependsOn.every((id) => store.tasks.get(id)?.status === 'completed')) {
       return { ok: true, task: unwrap(store.tasks.insert(task)).value };

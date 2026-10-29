@@ -1,7 +1,9 @@
 /// <reference types="vite/client" />
 import type { WorkspaceSummary } from '@shared/types/workspace';
+import { emptyWorkspaceUi } from '@shared/types/workspaceUi';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspacesApi } from '../../preload/domains/workspaces';
+import type { WorkspaceUiApi } from '../../preload/domains/workspaceUi';
 
 const workspace = (id: string): WorkspaceSummary => ({
   id,
@@ -25,24 +27,45 @@ async function setup() {
     }),
     onChanged: vi.fn(() => () => {}),
   } satisfies Pick<WorkspacesApi, 'list' | 'add' | 'remove' | 'onChanged'>;
+  const workspaceUi = {
+    selection: vi.fn(async (workspaceId?: string) => ({
+      ok: true as const,
+      workspaceId: workspaceId ?? null,
+    })),
+    load: vi.fn(async () => ({
+      ok: true as const,
+      token: 'lease',
+      snapshot: emptyWorkspaceUi(),
+      warning: false,
+    })),
+    save: vi.fn(async () => ({ ok: true as const })),
+  } satisfies Pick<WorkspaceUiApi, 'selection' | 'load' | 'save'>;
+  const confirm = vi.fn(() => true);
   vi.stubGlobal('window', {
+    confirm,
     fynvra: {
+      workspaceUi,
       workspaces: api,
       notifications: { onFocusSession: vi.fn(), setViewing: vi.fn() },
     },
   });
   const { useWorkspacesStore: store } = await import('./workspaces');
   await store.getState().refresh();
-  return { store, api };
+  return { store, api, workspaceUi, confirm };
 }
 
 beforeEach(() => vi.resetModules());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(async () => {
+  const { forgetWorkspaceTabs, useWorkspaceTabsStore } = await import('./workspaceTabs');
+  for (const id of Object.keys(useWorkspaceTabsStore.getState().views)) forgetWorkspaceTabs(id);
+  vi.unstubAllGlobals();
+});
 
 describe('工作区独立展开', () => {
   it('展开非当前项目不改变选中，切换与折叠只影响指定项目', async () => {
-    const { store } = await setup();
+    const { store, workspaceUi } = await setup();
     store.getState().select('a');
+    expect(workspaceUi.selection).toHaveBeenLastCalledWith('a');
     store.getState().toggleSessions('b');
     store.getState().toggleSessions('c');
     expect(store.getState().selectedId).toBe('a');
@@ -105,6 +128,17 @@ describe('工作区独立展开', () => {
     store.getState().expandSessions();
     expect(store.getState().selectedId).toBe('a');
     expect(store.getState().expandedWorkspaces).toEqual({ a: true, b: true });
+  });
+
+  it('取消移除确认时保留项目和保存的标签', async () => {
+    const { store, api, confirm } = await setup();
+    store.getState().select('a');
+    confirm.mockReturnValue(false);
+    await store.getState().remove('a');
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(api.remove).not.toHaveBeenCalled();
+    expect(store.getState().selectedId).toBe('a');
+    expect(store.getState().workspaces.map((item) => item.id)).toEqual(['a', 'b', 'c']);
   });
 
   it('新挂入的项目展开，刷新保留偏好，移除清理展开记录', async () => {

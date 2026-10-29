@@ -25,6 +25,7 @@ export interface FilesApi {
   reveal(input: EntryRefRequest): Promise<MutationResult>;
   copy(input: EntryRefRequest): Promise<MutationResult>;
   resolve(input: EntryRefRequest): Promise<ResolveResult>;
+  openHtml(input: EntryRefRequest): Promise<MutationResult>;
 }
 
 export function createFilesApi(ipc: {
@@ -68,5 +69,7 @@ export function createFilesApi(ipc: {
       ipc.invoke(IPC_CHANNELS.FILES_COPY, entryRef(input)) as Promise<MutationResult>,
     resolve: (input) =>
       ipc.invoke(IPC_CHANNELS.FILES_RESOLVE, entryRef(input)) as Promise<ResolveResult>,
+    openHtml: (input) =>
+      ipc.invoke(IPC_CHANNELS.FILES_OPEN_HTML, entryRef(input)) as Promise<MutationResult>,
   };
 }

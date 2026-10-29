@@ -3,6 +3,13 @@
   Fynvra
 </h1>
 
+<p align="center">
+  <a href="https://github.com/LAIJiangFeng/fynvra/stargazers"><img src="https://img.shields.io/github/stars/LAIJiangFeng/fynvra?style=flat&amp;logo=github" alt="GitHub Stars" /></a>
+  <a href="https://github.com/LAIJiangFeng/fynvra/releases"><img src="https://img.shields.io/github/downloads/LAIJiangFeng/fynvra/total?style=flat" alt="Total downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat" alt="License: Apache-2.0" /></a>
+  <a href="https://github.com/LAIJiangFeng/fynvra/releases"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue?style=flat" alt="Platform: Windows | macOS" /></a>
+</p>
+
 <p align="center"><a href="README.md">English</a> · 简体中文</p>
 
 <p align="center">

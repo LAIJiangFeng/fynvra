@@ -3,9 +3,9 @@ import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import type { TimelineMessage } from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
+import { ChatMarkdown } from './ChatMarkdown';
 import { CopyButton } from './CopyButton';
 import { ImagePreview } from './ImagePreview';
-import { Markdown } from './Markdown';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ReadonlyTools, ToolCallCard } from './ToolCallCard';
 
@@ -101,7 +101,7 @@ function AssistantMessage({
   return (
     <div className="group/assistant min-w-0 space-y-2">
       {thinking && <ThinkingBlock text={thinking} active={streaming && !text} />}
-      {text && <Markdown text={text} streaming={streaming} />}
+      {text && <ChatMarkdown sessionId={message.sessionId} text={text} streaming={streaming} />}
       {items.length > 0 && (
         <div className="space-y-1.5">
           {items.map((item) =>

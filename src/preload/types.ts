@@ -55,6 +55,7 @@ export interface WindowApi {
 export interface FynvraApi {
   updates: import('./domains/updates').UpdatesApi;
   settings: SettingsApi;
+  workspaceUi: import('./domains/workspaceUi').WorkspaceUiApi;
   workspaces: WorkspacesApi;
   files: import('./domains/files').FilesApi;
   terminals: import('./domains/terminals').TerminalsApi;

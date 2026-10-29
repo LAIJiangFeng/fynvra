@@ -13,6 +13,7 @@ import { registerUpdateHandlers } from './updates';
 import { registerUsageHandlers } from './usage';
 import { registerWindowHandlers } from './window';
 import { registerWorkspaceHandlers } from './workspaces';
+import { registerWorkspaceUiHandlers } from './workspaceUi';
 
 /** 注册全部 IPC handler；必须在创建窗口之前调用。 */
 export function registerIpcHandlers(): void {
@@ -20,6 +21,7 @@ export function registerIpcHandlers(): void {
   registerSettingsHandlers();
   registerWorkspaceHandlers();
   registerFilesHandlers();
+  registerWorkspaceUiHandlers();
   registerTerminalHandlers();
   registerOrchestrationHandlers();
   registerWindowHandlers();

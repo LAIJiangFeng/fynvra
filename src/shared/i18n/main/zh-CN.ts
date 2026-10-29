@@ -32,6 +32,12 @@ export const mainZhCN = {
     installDetail: '正在运行的任务将停止。未保存的文件仍会单独确认，取消退出不会安装更新。',
     install: '重启并安装',
   },
+  workspaceUi: {
+    failed: '无法保存或恢复标签，窗口将保留，请检查磁盘空间后重试',
+    limits: '标签存储已达上限，请关闭标签或缩小草稿（每份最多 256 KiB），文本未被截断',
+    keep: '保留草稿并离开',
+    exitHint: '保留草稿可在下次打开时恢复，也可明确放弃。取消会返回编辑器，不会停止运行中的任务。',
+  },
   files: {
     unsavedTitle: '文件修改尚未保存',
     unsavedMessage: '仍有未保存或正在保存的文件。',

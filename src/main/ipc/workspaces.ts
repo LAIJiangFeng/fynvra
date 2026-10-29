@@ -27,6 +27,8 @@ import { readGitBranch } from '../services/sessions/branches';
 import { createWorkspaceService, type WorkspaceService } from '../services/workspaces';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getSettingsFile } from './settings';
+import { closeWorkspaceTerminals } from './terminals';
+import { removeWorkspaceUi } from './workspaceUi';
 
 let service: WorkspaceService | null = null;
 
@@ -65,18 +67,26 @@ export function registerWorkspaceHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.WORKSPACES_REMOVE, (_event, rawId: unknown): IpcResult => {
-    const id = parseWorkspaceId(rawId);
-    if (!id) return { ok: false, error: translate('common.invalidWorkspaceId') };
-    try {
-      if (!getWorkspaceService().remove(id))
-        return { ok: false, error: translate('common.workspaceNotFound') };
-      sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) };
+  ipcMain.handle(
+    IPC_CHANNELS.WORKSPACES_REMOVE,
+    async (_event, rawId: unknown): Promise<IpcResult> => {
+      const id = parseWorkspaceId(rawId);
+      if (!id) return { ok: false, error: translate('common.invalidWorkspaceId') };
+      try {
+        if (!getWorkspaceService().remove(id))
+          return { ok: false, error: translate('common.workspaceNotFound') };
+        closeWorkspaceTerminals(id);
+        try {
+          await removeWorkspaceUi(id);
+        } finally {
+          sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED);
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
     }
-  });
+  );
 }
 
 function registerWorkspaceMenuHandlers(): void {

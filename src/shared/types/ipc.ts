@@ -57,8 +57,10 @@ export const IPC_CHANNELS = {
   FILES_REVEAL: 'files:reveal',
   /** 把条目复制到系统剪贴板（Windows 为文件本体，其他平台退回路径文本） */
   FILES_COPY: 'files:copy',
-  /** 解析条目的绝对真实路径（仅用于复制路径文本） */
+  /** 解析条目绝对路径（展示或匹配本地引用，不能作为文件参数回传） */
   FILES_RESOLVE: 'files:resolve',
+  /** 仅将工作区内已签发的 HTML 文件交给默认浏览器 */
+  FILES_OPEN_HTML: 'files:open-html',
 
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
@@ -191,6 +193,13 @@ export const IPC_CHANNELS = {
   NOTIFICATIONS_SET_VIEWING: 'notifications:set-viewing',
   /** Main → Renderer：点了通知，切到该会话（`{ sessionId, workspaceId }`） */
   SESSIONS_FOCUS: 'sessions:focus',
+
+  // --- workspace UI ---
+  WORKSPACE_UI_SELECTION: 'workspaceui:selection',
+  WORKSPACE_UI_LOAD: 'workspaceui:load',
+  WORKSPACE_UI_SAVE: 'workspaceui:save',
+  WORKSPACE_UI_FLUSH: 'workspaceui:flush',
+  WORKSPACE_UI_FLUSHED: 'workspaceui:flushed',
 
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */

@@ -158,13 +158,17 @@ export interface Message {
   - worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main 登记，再发 `approval_request` 会话事件；请求等待 `allow` / `allowSession` / `deny`。Main 校验 session / request id、generation、有效期与一次响应，维持 `waiting-approval` 并推送 `sessions:approval-request`；Stop、超时、结算、销毁时撤下请求，迟到 / 重复 / 旧 generation 答复不能执行工具。OS 桌面审批通知继续遵循 `askAndApproval` 偏好并按 request id 去重，不等待启动静默期或合并窗口，聚焦当前会话也提醒一次；点击只定位会话。
   - Renderer 保留会话内审批卡和三档权限选择，只移除 App 顶部跨会话全局审批横幅及其详情弹窗（ApprovalAttention）。`tool_notice` 仅保留历史解析兼容，新执行路径不以通知替代审批。持久化 `waiting-approval` 沿用重启后归 idle 的恢复规则（原 worker 已不存在），不重放未执行的旧工具；实时等待状态保持真实审批状态。源码修改不会热更新已安装应用或原进程里的待答复调用。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
-  `dispatch_task { title, spec, role?, depends_on? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
+  `dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
+  `model` / `thinking` / `fast` 仅按用户明确要求设置，可同时指定；公开 Fast 参数为可选 boolean `fast`，归一化兼容 `fast_mode` / `fastMode`，拒绝字符串 / 数字 / null 强转。
+  内部 `DispatchTaskInput` → `Task.fastMode?: boolean`（快照可选字段，旧记录兼容）→ Main launcher 保留 true / false / 缺省：true 请求开启，false 关闭继承，缺省保持角色 / 主会话 / 默认模型的原行为。排队与恢复启动沿用 Task，打回重试沿用保存的会话模型。
+  agentHost 在显式 / 角色 / 主会话 / 默认模型落定后复用 `supportsFastMode` 过滤覆盖值，会话记录及 spawn spec 只带协议允许的 Fast；不支持时同模型正常启动，不改 provider、thinking 或审批。工具结果只展示 `fast requested`（true 为 `auto-if-supported`），不把 Task 请求冒充生效状态。
 - worker 工具：`ask_coordinator { question }`（阻塞直到 reply 或超时，返回答复文本）、`report_done { outcome: 'succeeded' | 'failed', summary, files_modified? }`。本地 guard 每个真实 agent run 只允许成功报告一次，Main 每个 Dispatch 只结算一次，重复/并发报告及已被新尝试取代的旧报告均拒绝。`reject_work` 在写入任何新尝试 / 任务 / 指令之前同步检查 worker 是否阻塞于 `ask_coordinator`；若有待答问题，立即报错，要求先 `send_to_worker` 回答、待旧 run 结束后再打回，不能伪造答复或自动停止 worker。检查到新 attempt 插入之间不让出执行。`reject_work` 显式传 Main launcher 的 `{ freshAttempt: true, signal }`，反馈等待旧 run 真正 idle 后才作为新 prompt 发出；取消信号贯穿串行排队、idle 等待与投递，排队 / idle 等待可立即取消并移除 waiter / listener，等待前及 spawn 后发送前再次核验，取消后不得迟到投递。投递前取消 / 失败清理 instruction 与 pendingDispatches，仅回滚自己仍 current 且 in-progress 的新尝试，不覆盖并发结算 / 清理；实际投递后取消不撤销已开始的尝试。普通 `send_to_worker` 指令仍及时投递并返回，不等待 idle，以便协调者能回答 worker 随后提出的问题；pi 的 streaming `followUp` 会在旧 run 内消费，不保证重跑 `before_agent_start`，不能用它开启重试。WorkerHost 在 run 首次工具调用时绑定到固定 attempt（避开初始 Dispatch 尚未落库的窗口），直到下一次真实新 run 才重新绑定，旧调用不能结算新 attempt。
 - Fast（会话级优先服务）：`SessionModelRef.fastMode` 随会话记录与 last-used 持久化，与 thinking 独立。piSession 在会话自己的
   `agent.onPayload` 上组合 `service_tier: 'priority'`（仅 `openai-responses` / `openai-completions`；保留扩展的 payload 变换），
   不改共享的 provider / model，因此并发会话互不影响；关闭或切到其他协议时不发送该字段。服务商可能拒绝或忽略该参数，标记只表示请求模式，
-  不代表已确认实际服务档位；不增加自动降级重发逻辑。
+  不代表已确认实际服务档位；模型元数据没有更细的 Fast capability，沿用上述协议守卫，不硬编码型号名单。
+  不增加自动降级重发逻辑，不吞掉服务商拒绝、凭据、网络或模型不存在等错误。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`，`tool_notice` 仅保留历史解析兼容），每条带 `seq`。SDK `agent_end` / `compaction_end` 中可恢复的错误先暂存，直到真正 `agent_settled` 才发布尚未恢复的最终错误；中间恢复成功不把 Main / Renderer 锁在错误态，显式 aborted 不误判为同轮模型失败。
 
 ## 6. 主 agent 工作循环（产品核心）
@@ -219,14 +223,18 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - `workspaces:pick-app` 由 Main 原生选择器签发自定义应用 id、路径与建议名称；`settings:update` 保存 / 移除 `preferences.openWithApps`（最多 20 项），新增或改路径须匹配本窗口已选择的应用，已存项可改名称。Renderer 通过重新选择修改路径，不传工作区路径或任意命令。Windows 仅接受自定义 `.exe`，VS Code 的 `code.cmd` 只用于定位真实 `Code.exe`；macOS `.app` 交给 `/usr/bin/open`；启动参数独立传递且禁用 shell。
 - 此功能仅改 workspace IPC / Main 应用探测启动 helper、typed preload、settings 校验、侧栏菜单 / 自定义应用对话框 / Base UI 子菜单封装、中英文字典及测试；不改会话、文件编辑或终端能力。
 
-- 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与固定的「对话」标签并列，支持多开、切换和关闭。
+- 右栏「文件」只展示目录树，与「任务 / 改动」并列；点击文件在中央工作区打开独立标签，与唯一不可关闭的「对话」标签并列，支持多开、切换和关闭。
 - `files:list` 接收 `{ workspaceId, directoryId? }`，省略目录 id 时列出工作区根目录；`files:read` 接收 `{ workspaceId, fileId }`；`files:write` 接收 `{ workspaceId, fileId, version, text }`，版本是读取时的文件内容摘要。
 - Main 根据工作区记录定位根目录，为列出的条目签发不透明 id；Renderer 只能回传这些 id，展示用相对路径不能作为访问参数。
 - 每次读取重新校验真实路径位于登记的工作区内，拒绝跨工作区 id、失效条目及越界链接；符号链接只展示，不展开或预览。
-- UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 复用 GFM 渲染组件，支持编辑 / 预览 / 双栏；文件预览可呈现经 HTML 解析后白名单过滤的语义标签与对齐，不执行脚本或文档 CSS（聊天默认不解析 HTML）。相对图片按源文件目录在 Renderer 解析，通过所属工作区的 `files:list` 查找条目 id，再经 `files:read` 获取已校验的本地栅格图像；不传路径、不放宽 CSP，引用失败显示 alt。本地文档链接复用条目解析并在本工作区打开。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。独立 HTML / SVG 文件仍仅按源码显示，不执行。
+- UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 复用 GFM 渲染组件，支持编辑 / 预览 / 双栏；文件预览可呈现经 HTML 解析后白名单过滤的语义标签与对齐，不执行脚本或文档 CSS（聊天默认不解析 HTML）。相对图片按源文件目录在 Renderer 解析，通过所属工作区的 `files:list` 查找条目 id，再经 `files:read` 获取已校验的本地栅格图像；不传路径、不放宽 CSP，引用失败显示 alt。本地文档链接复用条目解析并在本工作区打开。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。独立 HTML / SVG 文件在文件树中仍仅按源码显示，不执行。
+- 聊天 assistant 的 Markdown 链接按消息 `sessionId` 绑定 workspace / cwd；原始 href 只按 AST 节点弱关联供受控按钮解析，DOM 只放行显式 http(s)，原始 HTML 仍不执行。仅显式点击时经 `files:list` / 已签发顶层 id 的 `files:resolve` 获取实际 root 并逐级按名称解析，不用缩写的 displayPath 猜根目录；普通文件复用原工作区 tab / hydration / 草稿，Markdown 默认预览。支持相对 cwd、Windows / POSIX 绝对路径、file URL、中文与空格编码和 `:line[:column]`；纯锚点、未知/危险协议、越界和网页 query/hash 明确报双语错误，不作为 DOM 导航。
+- 聊天中的 `.html` / `.htm`（忽略大小写）走 `files:open-html`，只收 `{ workspaceId, entryId }`，Main 重新检查登记 root、realpath、文件类型与扩展名，拒绝符号链接/网络主机，再由 `pathToFileURL` 编码后交给 `shell.openExternal`。没有任意路径/URL IPC、应用内 HTML 执行或本地 HTTP server。相对链接的 session cwd 不在文件服务 root 内时（含外部 worker worktree），明确提示不支持；没有可信 cleanup 映射时绝不回退主工作区同名文件，明确指向原 workspace 的绝对链接仍可打开。此变更仅涉及聊天链接组件/helper、files shared/Main/preload、字典与回归测试，不改变持久化、worktree 生命周期或 loading。
 - Main 按文件串行保存，写前核对当前内容版本，冲突时保留磁盘与草稿；同目录临时文件写完后替换原文件。拒绝越界链接、二进制和超限写入；保留 UTF-8 BOM，编辑器沿用原文件的换行格式。
 - 未保存草稿不被目录刷新覆盖；切换对话、文件、工作区或折叠右栏不丢草稿；关闭标签及退出窗口前确认，取消退出不停止 agent 服务。保存中的新输入不能被旧保存响应覆盖。
-- 文件内容与打开标签只在内存，不写 `settings.json`；不执行文件、不切换到 worker 的 worktree。
+- 中央标签统一按工作区保存身份、类型、顺序和活动项；对话唯一不可关闭，文件 / diff / 终端可跨类型拖动混排，＋不参与排序。Main 在独立 `userData/workspace-ui/` 版本化文件中原子、串行保存，不写 `settings.json`。Renderer 完成 hydration 后才能写入，写入绑定窗口代际、租约与递增序号。
+- 文件恢复仅由 Main 将已存相对路径重新绑定到原工作区条目 id，所有后续读写仍执行真实路径校验；草稿及原内容版本分别保存（单份 UTF-8 文本至多 256 KiB，超限拒绝并提示，不截断），外部修改仍触发版本冲突。保存 / 明确放弃同步推进快照，缺失文件保留可关闭提示与可复制草稿。diff 只存原 source / path 描述，正文按原会话或 dispatch 加载；聊天只存会话选择，正文仍以 pi jsonl 为权威。
+- 正常退出在窗口销毁和 agent 停止前完成 Renderer flush / Main 落盘确认，允许保留草稿或明确放弃；取消或落盘失败不停止 agent。
 - 目录树右键支持新建、重命名、副本、复制、显示位置及确认后移入回收站；操作仍由 Main 按条目 id 校验路径。新建在目标目录下显示行内输入，名称非空时失焦自动创建，空白名称失焦取消；也支持 Enter 确认、Escape 取消，不能因按键与失焦重复创建，失败保留名称并提示；显示位置等操作失败不可静默忽略。
 - 本次文件操作修复仅涉及 Main `ipc/files.ts` 的事件/载荷签名、Renderer `FilesView.tsx` / `FileTreeContextMenu.tsx` 与文件 store 的新建目录加载，以及对应测试；沿用现有通道和 preload 类型，不引入文件管理依赖或永久删除能力。全链路回归运行 `pnpm build && node scripts/verify-files.cjs`，使用隔离 userData / 临时工作区，回收站只处理脚本生成的条目。
 
@@ -264,7 +272,8 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Windows agent 默认依次探测 Git Bash → Windows PowerShell 5.1 → PowerShell 7；未安装 Git 时以警告日志说明 PowerShell 回退，保证无 git 工作区也能启动会话。只有三者均不可用时才报错，禁止交给 pi 自动选到 WSL。手写 `shellPath` 仍优先；否则按 `agentShell` 选择，失效时按上述默认顺序回退。pi 1.4 的 bash 工具通过 `spawn(shellPath, ['-c', command])` 执行（没有 shell args 设置，`shellCommandPrefix` 仅追加命令文本），故支持 Git Bash / PowerShell 7 / Windows PowerShell，不提供 cmd / WSL；自定义须兼容 `-c`。非 bash 的语法说明经既有 role systemPrompt 追加路径传给 pi，不改 pi 内部或角色持久化。仅下次启动会话生效，非 Windows 隐藏 agent 选项。
 - `terminals:create|write|resize|close` 的入参按 unknown 校验，终端 id 绑定创建它的 WebContents；输出与退出事件 `terminals:event` 仅发给所属窗口。Renderer 输入是用户直接键入的终端数据，不经模型或 agent 执行。
 - Renderer 用 xterm.js 渲染 ANSI、输入、历史滚动和 Ctrl+C；适配区域尺寸。切换对话、文件或工作区保留终端进程和屏幕；关闭终端标签需确认并结束对应 PTY，窗口销毁、刷新或真正退出时清理，最小化不清理。
-- 终端与屏幕只驻内存，不写 settings.json；移除旧的外部终端 IPC。改动限于终端依赖及原生资源打包、Main IPC / 生命周期、shared / preload typed API、Renderer 终端 store / 面板 / 标签栏与文案，不修改 agent 执行协议。
+- 终端恢复保存有界的可读屏幕 / 回滚文本和尺寸、编号、结束状态；每标签至多 128 KiB、每工作区至多 2 MiB，全部有效 workspace-ui 快照合计至多 64 MiB（超限拒绝写入并提示；隔离的损坏文件单独保留，不占用恢复写入额度）。输出触发节流快照，不逐字符写盘；退出等待最后一次快照。恢复文本只送 xterm 显示（去除控制字符），绝不送 PTY 或重跑历史命令；活标签显示「已恢复历史，新终端会话」后在 Main 登记的 workspace cwd 启新 shell，已结束标签只读保留。旧 PTY 在关闭 / 刷新 / 销毁时清理，异步创建以窗口代际及取消标记防止复活。
+- 本次变更仅涉及中央标签 / 文件与终端 stores、Main workspace-ui 持久化与文件服务内部 id 重绑、退出接线、shared / preload typed API 和中英文案；不改 agent 协议、模型或权限配置，不保存终端环境与 provider 密钥。
 
 ### 7.5 指令文件
 

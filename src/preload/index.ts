@@ -14,6 +14,7 @@ import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
 import { createWorkspacesApi } from './domains/workspaces';
+import { createWorkspaceUiApi } from './domains/workspaceUi';
 import type { FynvraApi, Unsubscribe } from './types';
 
 /** 订阅 Main 推送。回调拿不到 IpcRendererEvent：它的 sender 能反向调用任意通道。 */
@@ -28,6 +29,7 @@ function subscribe(channel: string, listener: (...args: unknown[]) => void): Uns
 const api: FynvraApi = {
   updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: createSettingsApi(ipcRenderer, subscribe),
+  workspaceUi: createWorkspaceUiApi(ipcRenderer, subscribe),
   workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),
   files: createFilesApi(ipcRenderer),

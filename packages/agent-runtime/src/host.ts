@@ -25,6 +25,8 @@ export interface DispatchTaskInput {
   model?: string;
   /** worker 的思考档位；缺省按模型 / 角色 / 主 agent 的默认 */
   thinking?: ThinkingLevel;
+  /** Fast 请求：true 仅在协议支持时开启，false 关闭继承；缺省保持原默认 */
+  fastMode?: boolean;
 }
 export interface DispatchTaskOutput {
   task: Task;

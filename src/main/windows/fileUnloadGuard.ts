@@ -1,19 +1,12 @@
-import { type BrowserWindow, dialog } from 'electron';
-import { translate } from '../i18n';
+import type { BrowserWindow } from 'electron';
+import { prepareWorkspaceWindowClose } from '../ipc/workspaceUi';
 
+/** Normal quit is prepared by quitGuard. A reload must also wait for durable UI state. */
 export function registerFileUnloadGuard(win: BrowserWindow): void {
-  win.webContents.on('will-prevent-unload', (event) => {
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      title: translate('files.unsavedTitle'),
-      message: translate('files.unsavedMessage'),
-      detail: translate('files.unsavedDetail'),
-      buttons: [translate('common.cancel'), translate('files.discard')],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
+  win.webContents.on('will-prevent-unload', () => {
+    // Keep the original navigation canceled; retry only after the async acknowledgement.
+    void prepareWorkspaceWindowClose(win).then((ok) => {
+      if (ok && !win.isDestroyed()) win.webContents.reload();
     });
-    // 此事件中 preventDefault 表示允许离开，只有明确放弃才调用。
-    if (choice === 1) event.preventDefault();
   });
 }
