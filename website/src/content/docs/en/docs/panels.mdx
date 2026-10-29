@@ -1,0 +1,47 @@
+---
+title: "Browse files, tasks, and changes"
+description: "The right panel has three tabs: Files, Tasks, and Changes. Pick files and diff entries there; their content opens in the center. The task board lives in the right panel, and task details slide over it as a drawer."
+sidebar:
+  label: "Files & panels"
+  order: 7
+---
+
+<span id="panels" />
+
+The right panel has three tabs: Files, Tasks, and Changes. Pick files and diff entries there; their content opens in the center. The task board lives in the right panel, and task details slide over it as a drawer.
+
+<span id="panels-layout" />
+
+## The panel and its tabs
+
+The right panel starts with Files / Tasks / Changes; the Tasks tab shows the task count for the current run. Drag its left edge to resize, double-click to restore the default, or focus the separator and use <kbd>←</kbd> / <kbd>→</kbd>.
+
+Shortcuts: <kbd>Ctrl</kbd>+<kbd>B</kbd> toggles the right panel, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> toggles the sidebar. Use ⌘ instead of Ctrl on macOS.
+
+<span id="panels-files" />
+
+## Files: tree, editing, and terminals
+
+In Files, expand folders and click a name to open it in a new center tab. Refresh re-reads the tree and unmodified files. UTF-8 text is editable, Markdown offers edit / preview / split, and images preview. Limits: UTF-8 text up to 256 KiB and PNG / JPEG / GIF / WebP images up to 2 MiB.
+
+Save with the editor button or <kbd>Ctrl</kbd>+<kbd>S</kbd> (<kbd>⌘</kbd>+<kbd>S</kbd> on macOS). Unsaved tabs show a dot, and closing or reloading asks whether to save, discard, or cancel. Right-click a file or folder to create a file/folder, copy, copy path, duplicate, reveal in the file manager, rename, or delete to the system trash.
+
+The center tab strip always starts with Chat; the **+** beside it offers a new chat or terminal. Switching to a file or terminal keeps the chat mounted. Closing a terminal that is still running asks first.
+
+<span id="panels-changes" />
+
+## Changes: uncommitted, committed, and diffs
+
+With a session open, Changes reads that session’s workspace by default: the header shows branch, base commit, and stats, followed by Uncommitted changes and Committed changes trees plus a commit list. It refreshes when the window regains focus or the session settles, or use the refresh button.
+
+Click a file in either tree to open its diff in a center tab, marked added, modified, deleted, renamed, or copied. A workspace without Git shows “No git” and has no diff.
+
+View changes from task details switches this tab to that dispatch’s historical review; “View current conversation changes” returns. If the worktree was cleaned up, the view says so and shows the saved diff.
+
+<aside class="docs-callout">
+
+**Tasks tab**
+
+The task board, task details, worker output, and review flow are covered in [Task tracking](/en/docs/tasks/).
+
+</aside>

@@ -1,4 +1,4 @@
-// 在 <head> 里同步执行：首帧绘制前定下主题与语言，DOM 就绪后再绑定交互
+// 首页在 <head> 同步确定主题；语言由静态路由决定，DOM 就绪后绑定交互。
 (() => {
   const root = document.documentElement;
   const THEME_KEY = 'fynvra-site-theme';
@@ -13,6 +13,8 @@
       toggleLocale: 'Switch to English',
       openMenu: '打开菜单',
       closeMenu: '关闭菜单',
+      copy: '复制',
+      copyDone: '已复制',
       copied: '已复制到剪贴板',
       copyFailed: '复制失败，请手动选择文本',
     },
@@ -22,13 +24,14 @@
       toggleLocale: '切换到中文',
       openMenu: 'Open menu',
       closeMenu: 'Close menu',
+      copy: 'Copy',
+      copyDone: 'Copied',
       copied: 'Copied to clipboard',
       copyFailed: 'Copy failed. Select the text manually',
     },
   };
   const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const localeListeners = [];
   let statusRegion = null;
 
   function readPref(key) {
@@ -47,22 +50,10 @@
     }
   }
 
-  function toLocale(value) {
-    const tag = String(value ?? '').toLowerCase();
-    if (tag.startsWith('zh')) return 'zh';
-    if (tag.startsWith('en')) return 'en';
-    return null;
-  }
-
   function initialLocale() {
-    const fromQuery = toLocale(new URLSearchParams(window.location.search).get('lang'));
-    if (fromQuery) {
-      writePref(LOCALE_KEY, fromQuery);
-      return fromQuery;
-    }
-    const stored = toLocale(readPref(LOCALE_KEY));
-    if (stored) return stored;
-    return toLocale(navigator.languages?.[0] ?? navigator.language) === 'zh' ? 'zh' : 'en';
+    // 显式语言路径优先，查询参数、存储和浏览器语言不能覆盖服务端正文。
+    const fromPath = window.location.pathname.match(/^\/(zh|en)(?:\/|$)/)?.[1];
+    return fromPath ?? (root.dataset.locale === 'zh' ? 'zh' : 'en');
   }
 
   function initialTheme() {
@@ -71,7 +62,7 @@
     return darkScheme.matches ? 'dark' : 'light';
   }
 
-  let locale = initialLocale();
+  const locale = initialLocale();
   let theme = initialTheme();
 
   function syncControls() {
@@ -91,16 +82,6 @@
     }
   }
 
-  function applyLocale(next) {
-    locale = next;
-    root.dataset.locale = next;
-    root.lang = next === 'zh' ? 'zh-CN' : 'en';
-    const title = next === 'zh' ? root.dataset.titleZh : root.dataset.titleEn;
-    if (title) document.title = title;
-    syncControls();
-    for (const listener of localeListeners) listener();
-  }
-
   function applyTheme(next) {
     theme = next;
     root.dataset.theme = next;
@@ -109,7 +90,10 @@
   }
 
   root.classList.add('js');
-  applyLocale(locale);
+  root.dataset.locale = locale;
+  root.lang = locale === 'zh' ? 'zh-CN' : 'en';
+  // 兼容入口仍读取这个旧键；显式访问或切换语言时记住用户的选择。
+  writePref(LOCALE_KEY, locale);
   applyTheme(theme);
 
   const fonts = document.createElement('link');
@@ -155,47 +139,18 @@
       });
   }
 
-  function scrollAnchor() {
-    if (window.scrollY < 80) return null;
-    let anchor = null;
-    for (const section of document.querySelectorAll('main section[id]')) {
-      if (section.getBoundingClientRect().top > 160) break;
-      anchor = section;
-    }
-    return anchor;
-  }
-
-  function toggleLocale() {
+  function setupLocaleLinks() {
     const next = locale === 'zh' ? 'en' : 'zh';
-    const anchor = scrollAnchor();
-    const before = anchor?.getBoundingClientRect().top ?? 0;
-    applyLocale(next);
-    writePref(LOCALE_KEY, next);
-    if (anchor) {
-      window.scrollBy({ top: anchor.getBoundingClientRect().top - before, behavior: 'instant' });
+    const links = [...document.querySelectorAll('a[data-action="toggle-locale"]')];
+    const syncHash = () => {
+      for (const link of links) link.setAttribute('href', `/${next}/${window.location.hash}`);
+    };
+    syncHash();
+    window.addEventListener('hashchange', syncHash);
+    for (const link of links) {
+      // 保留普通链接的导航、键盘和新标签页行为，不拦截默认操作。
+      link.addEventListener('click', () => writePref(LOCALE_KEY, next));
     }
-    const url = new URL(window.location.href);
-    if (!url.searchParams.has('lang')) return;
-    url.searchParams.delete('lang');
-    try {
-      window.history.replaceState(null, '', url);
-    } catch {
-      // file:// 打开时部分浏览器不允许改写地址
-    }
-  }
-
-  function bilingual(zh, en) {
-    const fragment = document.createDocumentFragment();
-    for (const [lang, text] of [
-      ['zh', zh],
-      ['en', en],
-    ]) {
-      const span = document.createElement('span');
-      span.dataset.l = lang;
-      span.textContent = text;
-      fragment.append(span);
-    }
-    return fragment;
   }
 
   function announce(message) {
@@ -233,10 +188,10 @@
       button.className = 'copy-btn';
       const idle = document.createElement('span');
       idle.className = 'copy-idle';
-      idle.append(bilingual('复制', 'Copy'));
+      idle.textContent = STRINGS[locale].copy;
       const done = document.createElement('span');
       done.className = 'copy-done';
-      done.append(bilingual('已复制', 'Copied'));
+      done.textContent = STRINGS[locale].copyDone;
       button.append(idle, done);
       let timer = 0;
       button.addEventListener('click', async () => {
@@ -357,7 +312,6 @@
     };
     window.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', schedule);
-    localeListeners.push(schedule);
     update();
   }
 
@@ -388,9 +342,7 @@
     for (const button of document.querySelectorAll('[data-action="toggle-theme"]')) {
       button.addEventListener('click', toggleTheme);
     }
-    for (const button of document.querySelectorAll('[data-action="toggle-locale"]')) {
-      button.addEventListener('click', toggleLocale);
-    }
+    setupLocaleLinks();
     syncControls();
     setupMenu();
     setupHeader();
@@ -487,9 +439,6 @@
     bench.addEventListener('mouseleave', () => {
       paused = false;
       arm();
-    });
-    localeListeners.push(() => {
-      if (tabs[index]?.dataset.view === 'type') typeLine();
     });
     show(0);
     arm();

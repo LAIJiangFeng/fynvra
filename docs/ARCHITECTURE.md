@@ -38,6 +38,14 @@ fynvra/
 
 两个 `packages/*` 包各自有 `package.json`（`"type": "module"`、`main: src/index.ts`、`types: src/index.ts`），`tsconfig.json` 继承根配置，测试文件与源码同目录（`*.test.ts`）。根 `vitest.config.ts` 的 include 要覆盖 `src/**` 与 `packages/*/src/**`。
 
+### 2.1 独立静态网站
+
+- 行为差异：官网与文档从手写双语 HTML 迁移为 Astro + Starlight 静态站点；首页为 `/zh/`、`/en/`，Markdown/MDX 文档为 `/{locale}/docs/{article}/`。首页设计与演示保留，文档使用 Starlight 导航、上一页/下一页及 Pagefind 搜索。
+- 所属层及文件：`website/` 是独立网站工程，自带 `package.json`、`pnpm-workspace.yaml`、锁文件与 Astro 配置；`src/pages/` 管页面及兼容入口，`src/content/docs/{zh,en}/docs/` 管文档，`src/components/`、`src/layouts/`、`src/styles/` 与 `public/assets/` 管呈现与演示，`src/lib/` 管兼容路由。安装、开发与构建均在 `website/` 内执行，不依赖或修改根 Electron workspace。
+- 路由兼容：`/`（含原 `/index.html`）提供语言入口，显式语言路径优先；原 `/docs.html#文章或小节` 在浏览器端映射至相同语言的新文章/小节，未知锚点回概览，无 JavaScript 时仍可进入中英概览。旧兼容页不作为搜索引擎规范页面。
+- 部署为站点根路径下的静态 `website/dist/`；正式域名仅由有效 `SITE_URL` 提供，不虚构域名。规范链接、绝对语言替代链接与 sitemap 仅在配置真实站点地址时生成。
+- 明确不做：不变更桌面功能、IPC、运行时、根依赖/锁文件或打包流程，不引入网站后端，也不让网站依赖 Electron。
+
 ## 3. 进程模型
 
 ```

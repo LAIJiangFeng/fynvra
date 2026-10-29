@@ -1,0 +1,53 @@
+---
+import type { Locale } from '../../content/home/copy';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<footer class="site-footer">
+  <div class="container footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href={`/${locale}/`}>
+        <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+          <rect width="512" height="512" rx="112" />
+          <path d="M167 120h192v60H228v48h92v59h-92v104h-61z" />
+        </svg>
+        <span>Fynvra</span>
+      </a>
+      <p data-l={locale}>{locale === 'zh' ? "开源的本地多 Agent AI 编程工作台。基于 Electron 与 pi SDK 构建。" : "The open-source, local multi-agent AI coding workbench. Built on Electron and the pi SDK."}</p>
+    </div>
+    <div>
+      <p class="footer-title"><span data-l={locale}>{locale === 'zh' ? "产品" : "Product"}</span></p>
+      <ul class="footer-links">
+        <li><a href="#features"><span data-l={locale}>{locale === 'zh' ? "功能" : "Features"}</span></a></li>
+        <li><a href="#safety"><span data-l={locale}>{locale === 'zh' ? "安全边界" : "Guardrails"}</span></a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/releases"><span data-l={locale}>{locale === 'zh' ? "下载" : "Download"}</span></a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="footer-title"><span data-l={locale}>{locale === 'zh' ? "文档" : "Docs"}</span></p>
+      <ul class="footer-links">
+        <li><a href={`/${locale}/docs/overview/`}><span data-l={locale}>{locale === 'zh' ? "使用文档" : "User guide"}</span></a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/PRODUCT.md"><span data-l={locale}>{locale === 'zh' ? "产品定义" : "Product definition"}</span></a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/ARCHITECTURE.md"><span data-l={locale}>{locale === 'zh' ? "架构契约" : "Architecture"}</span></a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/blob/main/docs/RELEASE.md"><span data-l={locale}>{locale === 'zh' ? "发布说明" : "Releases & updates"}</span></a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="footer-title"><span data-l={locale}>{locale === 'zh' ? "社区" : "Community"}</span></p>
+      <ul class="footer-links">
+        <li><a href="https://github.com/LAIJiangFeng/fynvra">GitHub</a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/issues">Issues</a></li>
+        <li><a href="https://github.com/LAIJiangFeng/fynvra/releases">Releases</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <span>© 2026 Fynvra · Apache-2.0</span>
+    <span>Electron · React · pi SDK</span>
+  </div>
+</footer>

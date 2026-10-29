@@ -1,0 +1,36 @@
+---
+import HomeLayout from '../../layouts/HomeLayout.astro';
+import Header from '../../components/home/Header.astro';
+import Hero from '../../components/home/Hero.astro';
+import Providers from '../../components/home/Providers.astro';
+import Features from '../../components/home/Features.astro';
+import Safety from '../../components/home/Safety.astro';
+import GetStarted from '../../components/home/GetStarted.astro';
+import Footer from '../../components/home/Footer.astro';
+import type { Locale } from '../../content/home/copy';
+
+export function getStaticPaths() {
+  return (['zh', 'en'] as const).map((locale) => ({
+    params: { locale },
+    props: { locale },
+  }));
+}
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<HomeLayout locale={locale}>
+  <Header locale={locale} />
+  <main id="main">
+    <Hero locale={locale} />
+    <Providers locale={locale} />
+    <Features locale={locale} />
+    <Safety locale={locale} />
+    <GetStarted locale={locale} />
+  </main>
+  <Footer locale={locale} />
+</HomeLayout>

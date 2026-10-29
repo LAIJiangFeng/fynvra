@@ -1,0 +1,38 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+
+const route = Astro.locals.starlightRoute;
+const locale = route.locale === 'en' ? 'en' : 'zh';
+const hasDemos = route.id === `${locale}/docs/quickstart`;
+---
+
+<DefaultHead />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400..700&display=swap" />
+<noscript>
+  <style is:inline>
+    site-search, starlight-menu-button, starlight-theme-select, starlight-lang-select { display: none; }
+    @media (max-width: 49.999rem) {
+      .page > .sidebar { margin-top: var(--sl-nav-height); }
+      .sidebar-pane { position: static; visibility: visible; width: auto; border-bottom: 1px solid var(--fynvra-line); }
+      .sidebar-content { height: auto; }
+      .fynvra-sidebar-search { display: none; }
+      .main-frame { padding-top: 0; }
+    }
+  </style>
+</noscript>
+<script is:inline define:vars={{ locale }}>
+  document.documentElement.dataset.locale = locale;
+  try {
+    localStorage.setItem('fynvra-site-locale', locale);
+  } catch {
+    // The route still determines the language when storage is unavailable.
+  }
+</script>
+{hasDemos && (
+  <>
+    <link rel="stylesheet" href="/assets/demo.css" />
+    <script is:inline src="/assets/home.js" defer></script>
+  </>
+)}

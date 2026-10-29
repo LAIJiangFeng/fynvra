@@ -1,0 +1,45 @@
+---
+title: "Manage global instruction files"
+description: "Instruction files are local CLAUDE.md / AGENTS.md-style text injected into sessions. Only one global file is active at a time; a role can select another file or opt out."
+sidebar:
+  label: "Instructions"
+  order: 16
+---
+
+<span id="instructions" />
+
+Instruction files are local CLAUDE.md / AGENTS.md-style text injected into sessions. Only one global file is active at a time; a role can select another file or opt out.
+
+<span id="instructions-add" />
+
+## Add or import
+
+1. ### Open Instructions
+
+   Go to Settings → Instructions. The header offers Import from local apps and Add instruction.
+
+2. ### Import an existing file
+
+   Click Import from local apps; Fynvra scans known locations. Select files and import. The import is linked: the source is read when a session starts, and Fynvra never modifies it.
+
+3. ### Or create a local copy
+
+   Click Add instruction, enter a name and content, and save a local Fynvra copy. You can also load content from “Choose a .md file…”. Markdown text up to 2 MiB is supported.
+
+4. ### Enable one
+
+   The row switch enables the global file. Enabling one turns the others off because only one global file can be active.
+
+<span id="instructions-activate" />
+
+## How roles choose
+
+In the role editor, Instruction file can follow the global choice, use none, or name a specific file. A specific file overrides the global choice and is read even if its global switch is off. Changes apply when the session next starts.
+
+The list shows the active character count, source, and whether it is a local copy or a link. A missing or unreadable linked file is flagged and not injected. Removing an entry deletes only the Fynvra record; it never deletes or edits the original file.
+
+<span id="instructions-limits" />
+
+## Limits
+
+Local copies are limited to 2 MiB; large text is not stored in `settings.json`. Linked files are read at session start, so source edits apply to the next session; edit and save a local copy here instead.
