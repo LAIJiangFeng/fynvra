@@ -209,7 +209,8 @@ body {
   height: 18px;
 }
 
-.fynvra-theme-toggle:not([hidden]) {
+.fynvra-theme-toggle:not([hidden]),
+.fynvra-language-toggle {
   display: inline-grid;
   flex: none;
   place-items: center;
@@ -224,7 +225,8 @@ body {
   transition: border-color 0.2s, background-color 0.2s, color 0.2s;
 }
 
-.fynvra-theme-toggle:hover {
+.fynvra-theme-toggle:hover,
+.fynvra-language-toggle:hover {
   border-color: var(--fynvra-line);
   background: var(--fynvra-surface);
   color: var(--fynvra-ink);
@@ -255,20 +257,14 @@ body {
   z-index: 2;
 }
 
-starlight-lang-select label {
-  color: var(--fynvra-ink-2);
-}
-
-starlight-lang-select select {
-  min-height: 38px;
-  border-radius: 9px;
+.fynvra-language-toggle {
+  width: auto;
+  min-width: 38px;
+  padding: 0 11px;
   font-family: var(--__sl-font-mono);
   font-size: 12px;
-}
-
-starlight-lang-select select:hover {
-  background: var(--fynvra-hover);
-  color: var(--fynvra-ink);
+  font-weight: 600;
+  text-decoration: none;
 }
 
 /* Preserve #starlight__sidebar as the scroll container for framework persistence. */
