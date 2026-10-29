@@ -58,6 +58,7 @@ export function FileWorkspace({
   const persistenceError = useWorkspaceTabsStore(
     (state) => state.views[workspaceId]?.error ?? state.views[workspaceId]?.warning
   );
+  const tabsReady = useWorkspaceTabsStore((state) => state.views[workspaceId]?.ready ?? false);
   const selectTerminal = (id: string | null) =>
     useTerminalsStore.getState().select(workspaceId, id);
   const showChat = () => {
@@ -82,6 +83,7 @@ export function FileWorkspace({
   }, [workspaceId]);
 
   function requestClose(file: WorkspaceFileEntry) {
+    if (!tabsReady) return;
     if (!store.getState().closeFile(file.id) && !store.getState().previews[file.id]?.saving)
       setConfirm({ file, action: 'close' });
   }
@@ -145,7 +147,7 @@ export function FileWorkspace({
                   size="icon-xs"
                   variant="ghost"
                   className="mx-1 size-6"
-                  disabled={previews[file.id]?.saving}
+                  disabled={!tabsReady || previews[file.id]?.saving}
                   aria-label={t('files.closeFile', { name: file.name })}
                   onClick={() => requestClose(file)}
                 >
@@ -229,6 +231,7 @@ export function FileWorkspace({
                   {t('files.chat')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={!tabsReady}
                   onClick={() => {
                     if (workspaceTabLimitReached(workspaceId)) return;
                     markWorkspaceInteraction(workspaceId);
@@ -273,12 +276,18 @@ export function FileWorkspace({
             selectedId === file.id ? 'flex' : 'hidden'
           )}
         >
-          <FilePane
-            file={file}
-            store={store}
-            active={selectedId === file.id}
-            onReload={() => requestReload(file)}
-          />
+          {tabsReady ? (
+            <FilePane
+              file={file}
+              store={store}
+              active={selectedId === file.id}
+              onReload={() => requestReload(file)}
+            />
+          ) : (
+            <div role="status" className="m-auto p-6 text-muted-foreground text-sm">
+              {t('common.loading')}
+            </div>
+          )}
         </div>
       ))}
       {diffTabs.map((tab) => (

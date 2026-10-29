@@ -199,8 +199,15 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
 
       async restoreFile(tab) {
         const entry = tab.entry;
-        if (!entry || get().opened.some((file) => file.id === entry.id)) return;
-        set((state) => ({ opened: [...state.opened, entry] }));
+        if (!entry) return;
+        const existing = get().previews[entry.id];
+        if (existing?.saving || isFileDirty(existing)) return;
+        // A tree click can open the same id while the workspace snapshot is loading.
+        // Its disk read must not replace the restored draft when it resolves later.
+        fileRequests.delete(entry.id);
+        if (!get().opened.some((file) => file.id === entry.id)) {
+          set((state) => ({ opened: [...state.opened, entry] }));
+        }
         if (!tab.draft) {
           set((state) => ({
             previews: {

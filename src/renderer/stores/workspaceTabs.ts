@@ -38,6 +38,7 @@ interface WorkspaceRuntime {
   interaction: number;
   applying: boolean;
   removed: boolean;
+  closed: Set<string>;
   timer?: ReturnType<typeof setTimeout>;
   hydration?: Promise<void>;
   writing?: Promise<void>;
@@ -148,7 +149,7 @@ export function selectWorkspaceTab(id: string, key: string) {
   else if (key.startsWith('diff:')) diffs.getState().select(key.slice(5));
   else if (key.startsWith('terminal:')) useTerminalsStore.getState().select(id, key.slice(9));
 }
-export function ensureWorkspaceTabs(id: string): Promise<void> {
+export function ensureWorkspaceTabs(id: string, closed?: ReadonlySet<string>): Promise<void> {
   const existing = runtimes.get(id);
   if (existing?.hydration) return existing.hydration;
   const runtime: WorkspaceRuntime = {
@@ -157,6 +158,7 @@ export function ensureWorkspaceTabs(id: string): Promise<void> {
     interaction: 0,
     applying: false,
     removed: false,
+    closed: new Set(closed),
     unsubscribes: [],
   };
   runtimes.set(id, runtime);
@@ -166,9 +168,28 @@ export function ensureWorkspaceTabs(id: string): Promise<void> {
   // Coordination belongs to the workspace lifetime, including hidden workspaces.
   runtime.unsubscribes.push(bindDiffTabSelection(id, files, useTerminalsStore));
   runtime.unsubscribes.push(
-    files.subscribe(() => reconcile(id)),
-    diffs.subscribe(() => reconcile(id)),
+    files.subscribe((state, previous) => {
+      if (!useWorkspaceTabsStore.getState().views[id]?.ready)
+        for (const file of previous.opened) {
+          if (!state.opened.some((current) => current.id === file.id))
+            runtime.closed.add(`file:${file.id}`);
+        }
+      reconcile(id);
+    }),
+    diffs.subscribe((state, previous) => {
+      if (!useWorkspaceTabsStore.getState().views[id]?.ready)
+        for (const tab of previous.opened) {
+          if (!state.opened.some((current) => current.id === tab.id))
+            runtime.closed.add(`diff:${tab.id}`);
+        }
+      reconcile(id);
+    }),
     useTerminalsStore.subscribe((state, previous) => {
+      if (!useWorkspaceTabsStore.getState().views[id]?.ready)
+        for (const tab of previous.tabs) {
+          if (tab.workspaceId === id && !state.tabs.some((current) => current.id === tab.id))
+            runtime.closed.add(`terminal:${tab.id}`);
+        }
       if (state.tabs !== previous.tabs || state.selected[id] !== previous.selected[id])
         reconcile(id);
     })
@@ -184,6 +205,7 @@ export function ensureWorkspaceTabs(id: string): Promise<void> {
       runtime.applying = true;
       const fileLoads: Promise<void>[] = [];
       for (const tab of result.snapshot.tabs) {
+        if (runtime.closed.has(workspaceTabKey(tab))) continue;
         if (tab.kind === 'file') fileLoads.push(files.getState().restoreFile(tab));
         else if (
           tab.kind === 'diff' &&
@@ -205,7 +227,10 @@ export function ensureWorkspaceTabs(id: string): Promise<void> {
       runtime.applying = false;
       // The restored tab entries are visible now. Later file reads only update content.
       if (restoreSelection && runtime.interaction === interaction)
-        selectWorkspaceTab(id, result.snapshot.active);
+        selectWorkspaceTab(
+          id,
+          keys.includes(result.snapshot.active) ? result.snapshot.active : 'chat'
+        );
       await Promise.all(fileLoads);
       if (runtime.removed) return;
       updateView(id, {
@@ -213,6 +238,7 @@ export function ensureWorkspaceTabs(id: string): Promise<void> {
         warning: result.warning ? translate('workspaceTabs.corrupt') : null,
         error: null,
       });
+      runtime.closed.clear();
       reconcile(id);
     } catch (error) {
       runtime.applying = false;
@@ -299,7 +325,7 @@ export async function retryWorkspaceTabs(id: string): Promise<void> {
     for (const unsubscribe of runtime.unsubscribes) unsubscribe();
     runtimes.delete(id);
   }
-  await ensureWorkspaceTabs(id);
+  await ensureWorkspaceTabs(id, runtime?.closed);
 }
 
 export function workspaceTabLimitReached(id: string): boolean {
@@ -405,6 +431,11 @@ export function bindWorkspaceUiLifecycle(): () => void {
     })();
   });
   return () => {
+    flushGeneration++;
+    allowUnload = false;
+    setTerminalInputPaused(false);
+    useWorkspaceTabsStore.setState({ closing: false });
+    for (const id of runtimes.keys()) schedule(id);
     window.removeEventListener('beforeunload', beforeUnload);
     unlisten();
     unflush();

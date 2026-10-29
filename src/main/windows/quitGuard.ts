@@ -19,7 +19,7 @@ export function createQuitGuard({
   let requested = false;
   let stopping = false;
   let stopped = false;
-  let preparing = false;
+  let preparing: symbol | undefined;
   let prepared = false;
   return {
     isQuitRequested: () => requested,
@@ -29,10 +29,12 @@ export function createQuitGuard({
       requested = true;
       if (prepare && !prepared) {
         if (preparing) return;
-        preparing = true;
+        const request = Symbol();
+        preparing = request;
         void prepare()
           .then((ok) => {
-            preparing = false;
+            if (preparing !== request) return;
+            preparing = undefined;
             if (!ok) {
               requested = false;
               return;
@@ -41,7 +43,8 @@ export function createQuitGuard({
             quit();
           })
           .catch(() => {
-            preparing = false;
+            if (preparing !== request) return;
+            preparing = undefined;
             requested = false;
           });
         return;
@@ -62,6 +65,7 @@ export function createQuitGuard({
       if (!mac || requested) quit();
     },
     cancel() {
+      preparing = undefined;
       requested = false;
       prepared = false;
     },
