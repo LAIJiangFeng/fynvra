@@ -42,10 +42,24 @@
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
 
+  // 文档示例的提示词只以正文 codeblock 为权威源；打字内容和已提交用户消息都读同一节点。
+  // 首页仍使用上面的短句常量。
+  const docPromptCache = new Map();
+  function docPrompt(name, lang) {
+    const key = `${name}:${lang}`;
+    if (!docPromptCache.has(key)) {
+      const code = document.querySelector(
+        `code[data-demo-prompt="${name}"][data-demo-lang="${lang}"]`
+      );
+      docPromptCache.set(key, code ? code.textContent : '');
+    }
+    return docPromptCache.get(key);
+  }
+
   // 每个演示容器注册自己的同步 / 重播入口，全局事件统一派发。
   const instances = [];
 
-  function renderCollabScene(element, phase) {
+  function renderCollabScene(element, phase, docsMode) {
     const taskHome = element.querySelector('[data-task="home"]');
     const taskDocs = element.querySelector('[data-task="docs"]');
     const taskCount = element.querySelector('[data-task-count]');
@@ -58,8 +72,37 @@
     const sessionOrchestrator = element.querySelector('[data-session="orchestrator"]');
     const chatHead = element.querySelector('[data-chat-head]');
 
-    const homeState = phase >= 7 ? 'done' : phase === 6 ? 'review' : phase >= 3 ? 'run' : 'todo';
-    const docsState = phase >= 9 ? 'done' : phase === 8 ? 'review' : phase >= 4 ? 'run' : 'todo';
+    // 文档示例的两个 Worker 都回报后主 Agent 才开始审查；首页示例保持原先“首页先回来”的节奏。
+    const homeState = docsMode
+      ? phase >= 7
+        ? 'done'
+        : phase >= 6
+          ? 'review'
+          : phase >= 3
+            ? 'run'
+            : 'todo'
+      : phase >= 7
+        ? 'done'
+        : phase === 6
+          ? 'review'
+          : phase >= 3
+            ? 'run'
+            : 'todo';
+    const docsState = docsMode
+      ? phase >= 9
+        ? 'done'
+        : phase >= 5
+          ? 'review'
+          : phase >= 4
+            ? 'run'
+            : 'todo'
+      : phase >= 9
+        ? 'done'
+        : phase === 8
+          ? 'review'
+          : phase >= 4
+            ? 'run'
+            : 'todo';
     if (taskHome) taskHome.dataset.state = homeState;
     if (taskDocs) taskDocs.dataset.state = docsState;
     if (run) {
@@ -71,8 +114,8 @@
       taskCount.hidden = phase < 3;
     }
 
-    sessionHome?.classList.toggle('is-idle', phase >= 7);
-    sessionDocs?.classList.toggle('is-idle', phase >= 9);
+    sessionHome?.classList.toggle('is-idle', docsMode ? phase >= 5 : phase >= 7);
+    sessionDocs?.classList.toggle('is-idle', docsMode ? phase >= 5 : phase >= 9);
     const orchestratorActive = phase >= 2 && phase < 9;
     sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
@@ -87,17 +130,32 @@
     }
   }
 
-  function renderModelScene(element, phase) {
-    const taskImpl = element.querySelector('[data-task="model-impl"]');
-    const taskReview = element.querySelector('[data-task="model-review"]');
+  function renderModelScene(element, phase, parallel) {
+    const taskA = element.querySelector(
+      parallel ? '[data-task="model-home"]' : '[data-task="model-impl"]'
+    );
+    const taskB = element.querySelector(
+      parallel ? '[data-task="model-docs"]' : '[data-task="model-review"]'
+    );
     const taskCount = element.querySelector('[data-task-count]');
     const run = element.querySelector('[data-run]');
-    if (taskImpl)
-      taskImpl.dataset.state =
-        phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
-    if (taskReview)
-      taskReview.dataset.state =
-        phase >= 7 ? 'done' : phase >= 6 ? 'review' : phase >= 5 ? 'run' : 'todo';
+    if (parallel) {
+      // 文档示例：两个 Worker 并行，各自从派发开始运行，回报后一起进入待验收。
+      if (taskA)
+        taskA.dataset.state =
+          phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
+      if (taskB)
+        taskB.dataset.state =
+          phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 4 ? 'run' : 'todo';
+    } else {
+      // 首页示例：实现先跑，审查任务依赖实现回报。
+      if (taskA)
+        taskA.dataset.state =
+          phase >= 7 ? 'done' : phase >= 5 ? 'review' : phase >= 3 ? 'run' : 'todo';
+      if (taskB)
+        taskB.dataset.state =
+          phase >= 7 ? 'done' : phase >= 6 ? 'review' : phase >= 5 ? 'run' : 'todo';
+    }
     if (run) {
       run.dataset.done = phase >= 7 ? '2' : '0';
       run.dataset.total = phase >= 4 ? '2' : phase >= 3 ? '1' : '0';
@@ -107,13 +165,23 @@
       taskCount.hidden = phase < 3;
     }
 
+    const sessionA = element.querySelector(
+      parallel ? '[data-session="model-home"]' : '[data-session="model-impl"]'
+    );
+    const sessionB = element.querySelector(
+      parallel ? '[data-session="model-docs"]' : '[data-session="model-review"]'
+    );
     const sessionOrchestrator = element.querySelector('[data-session="model-orchestrator"]');
-    const sessionImpl = element.querySelector('[data-session="model-impl"]');
-    const sessionReview = element.querySelector('[data-session="model-review"]');
     const orchestratorActive = phase >= 2 && phase < 7;
     sessionOrchestrator?.classList.toggle('is-idle', !orchestratorActive);
-    sessionImpl?.classList.toggle('is-idle', phase < 3 || phase >= 5);
-    sessionReview?.classList.toggle('is-idle', phase < 5 || phase >= 6);
+    if (parallel) {
+      // 两个 Worker 回报后会话停止运行，任务进入待验收，等待主 Agent 审查合并。
+      sessionA?.classList.toggle('is-idle', phase < 3 || phase >= 5);
+      sessionB?.classList.toggle('is-idle', phase < 4 || phase >= 5);
+    } else {
+      sessionA?.classList.toggle('is-idle', phase < 3 || phase >= 5);
+      sessionB?.classList.toggle('is-idle', phase < 5 || phase >= 6);
+    }
 
     const chatHead = element.querySelector('[data-chat-head]');
     chatHead?.classList.toggle('is-idle', !orchestratorActive);
@@ -287,6 +355,8 @@
       if (!typed) return;
       typed.textContent = text;
       input?.classList.toggle('has-text', text.length > 0);
+      // 文档里的完整提示词可能超出输入区高度，让当前输入行始终留在可视区。
+      if (input) input.scrollTop = input.scrollHeight;
     }
 
     function tickTypewriter() {
@@ -488,6 +558,19 @@
     if (!app || root.dataset.demoReady === 'true') return;
     root.dataset.demoReady = 'true';
 
+    const docsDemo = root.classList.contains('docs-demo');
+    // 文档示例用 codeblock 原文，首页继续用模块里的短句；同一语言各自取节点，不拼双语。
+    const sceneText = (name, homeText) => (lang) =>
+      docsDemo ? docPrompt(name, lang) : homeText[lang];
+
+    // 无 JS 时静态内容仍完整可读；有 JS 时把已提交用户消息同步到同一来源，避免与提示词漂移。
+    if (docsDemo) {
+      for (const node of root.querySelectorAll('[data-demo-user]')) {
+        const text = docPrompt(node.dataset.demoUser, node.dataset.demoLang);
+        if (text) node.textContent = text;
+      }
+    }
+
     const host = { root, inView: false, activeScene: null, scenes: {} };
     const scenes = host.scenes;
     const hasObserver = 'IntersectionObserver' in window;
@@ -503,9 +586,9 @@
           keepTextUntil: 1,
           emptyUntil: 2,
           hotPhases: [1],
-          text: (lang) => collabText[lang],
+          text: sceneText('collab', collabText),
           next: 'model',
-          render: renderCollabScene,
+          render: (element, phase) => renderCollabScene(element, phase, docsDemo),
         },
       ],
       [
@@ -516,9 +599,9 @@
           keepTextUntil: 1,
           emptyUntil: 2,
           hotPhases: [1],
-          text: (lang) => modelText[lang],
+          text: sceneText('model', modelText),
           next: 'queue',
-          render: renderModelScene,
+          render: (element, phase) => renderModelScene(element, phase, docsDemo),
         },
       ],
       [
@@ -545,8 +628,8 @@
           // 减少动画时停在审查员的只读审查结果，两个会话和自定义标记仍然可见。
           staticPhase: 7,
           typing: [
-            { phase: 2, text: (lang) => roleText.worker[lang] },
-            { phase: 5, text: (lang) => roleText.review[lang] },
+            { phase: 2, text: sceneText('role-worker', roleText.worker) },
+            { phase: 5, text: sceneText('role-review', roleText.review) },
           ],
           hotPhases: [2, 5],
           emptyUntil: 3,

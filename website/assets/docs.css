@@ -1371,6 +1371,23 @@ html.docs-ready[data-theme="dark"] .docs-scrim:not([hidden]) {
   margin-top: 5px;
 }
 
+/* 完整提示词比首页短句长：输入区限高并在内部滚动当前文字；
+   用户消息只给语言节点保留换行，避免标签间的源文件缩进变成空白。 */
+.docs-demo .fd-composer-input {
+  max-height: 82px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.docs-demo .fd-msg.is-user {
+  max-width: 88%;
+}
+
+.docs-demo .fd-msg.is-user [data-l] {
+  white-space: pre-wrap;
+}
+
 .docs-article.prose .docs-demo li + li {
   margin-top: 0;
 }
