@@ -5,6 +5,7 @@ import {
   type ChatImage,
   type ChatMessage,
   type ChatToolCall,
+  type ContextRecoveryHint,
   isChatImageMimeType,
   stripImageHints,
 } from '@shared/types/chat';
@@ -25,20 +26,34 @@ export interface ProjectHistoryOptions {
   running?: boolean;
 }
 
+export interface HistoryProjection {
+  messages: ChatMessage[];
+  contextRecovery?: ContextRecoveryHint;
+}
+
 /** 读 jsonl 并投影；文件还不存在（会话还没有消息）时返回空列表 */
 export async function readHistory(
   file: string,
   sessionId: string,
   options: ProjectHistoryOptions = {}
 ): Promise<ChatMessage[]> {
+  return (await readHistoryProjection(file, sessionId, options)).messages;
+}
+
+/** One read projects both messages and the read-only recovery hint from the same branch. */
+export async function readHistoryProjection(
+  file: string,
+  sessionId: string,
+  options: ProjectHistoryOptions = {}
+): Promise<HistoryProjection> {
   let text: string;
   try {
     text = await readFile(file, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { messages: [] };
     throw error;
   }
-  return projectHistory(text, sessionId, options);
+  return projectHistoryProjection(text, sessionId, options);
 }
 
 interface Entry {
@@ -47,6 +62,8 @@ interface Entry {
   parentId?: unknown;
   timestamp?: unknown;
   message?: unknown;
+  customType?: unknown;
+  data?: unknown;
 }
 
 /**
@@ -61,9 +78,25 @@ export function projectHistory(
   sessionId: string,
   options: ProjectHistoryOptions = {}
 ): ChatMessage[] {
+  return projectHistoryProjection(jsonl, sessionId, options).messages;
+}
+
+export function projectHistoryProjection(
+  jsonl: string,
+  sessionId: string,
+  options: ProjectHistoryOptions = {}
+): HistoryProjection {
   const messages: ChatMessage[] = [];
+  let contextRecovery: ContextRecoveryHint | undefined;
   const calls = new Map<string, ChatToolCall>();
   for (const entry of currentBranch(parseEntries(jsonl))) {
+    if (entry.type === 'custom' && entry.customType === 'fynvra-context-recovery') {
+      const data = asRecord(entry.data);
+      // Match the runtime checkpoint validity gate, exposing neither input bodies nor engine data.
+      if (data && typeof data.blocked === 'boolean' && Array.isArray(data.pending)) {
+        contextRecovery = { recoveryRequired: data.blocked };
+      }
+    }
     const message = entry.type === 'message' ? asRecord(entry.message) : null;
     if (!message) continue;
     const base = {
@@ -111,7 +144,7 @@ export function projectHistory(
       if (call.status === 'running') call.status = 'error';
     }
   }
-  return messages;
+  return { messages, ...(contextRecovery ? { contextRecovery } : {}) };
 }
 
 function parseEntries(jsonl: string): Entry[] {

@@ -4,6 +4,7 @@ import type {
   ApprovalRequest,
   ChatImage,
   ChatMessage,
+  ContextRecoveryHint,
   ModelOptions,
   ReplySuggestion,
   SessionEventEnvelope,
@@ -40,7 +41,9 @@ export interface SessionsApi {
   history(sessionId: string): Promise<
     IpcResult<{
       messages: ChatMessage[];
+      contextRecovery?: ContextRecoveryHint;
       contextRuntime?: ContextRuntimeSnapshot;
+      /** Read-start watermark for disk hints (zero is valid); otherwise the live runtime seq. */
       contextRuntimeSeq?: number;
     }>
   >;

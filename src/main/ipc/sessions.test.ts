@@ -288,7 +288,14 @@ describe('sessions IPC', () => {
     expect(host.retryCompaction).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_ABORT, 's-1');
     expect(host.abort).toHaveBeenCalledWith('s-1');
-    await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');
+    const coldHistory = {
+      ok: true,
+      messages: [],
+      contextRecovery: { recoveryRequired: true },
+      contextRuntimeSeq: 0,
+    };
+    host.history.mockResolvedValueOnce(coldHistory);
+    expect(await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1')).toEqual(coldHistory);
     expect(host.history).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_REMOVE, 's-1');
     expect(host.remove).toHaveBeenCalledWith('s-1');

@@ -16,6 +16,22 @@ function fakeIpc() {
 }
 
 describe('createSessionsApi', () => {
+  it('preserves the cold recovery hint and zero read watermark without inventing runtime data', async () => {
+    const { ipc, invoke } = fakeIpc();
+    const response = {
+      ok: true,
+      messages: [],
+      contextRecovery: { recoveryRequired: true },
+      contextRuntimeSeq: 0,
+    };
+    invoke.mockResolvedValueOnce(response);
+    const result = await createSessionsApi(ipc).history('s-1');
+    expect(result).toEqual(response);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.contextRecovery?.recoveryRequired).toBe(true);
+    expect(result.contextRuntime).toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');
+  });
   it('maps every method to its channel and passes only ids, text and pasted images', async () => {
     const { ipc, invoke } = fakeIpc();
     const api = createSessionsApi(ipc);

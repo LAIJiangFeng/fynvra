@@ -9,6 +9,10 @@ import { asRecord } from '../guards';
 import type { ProviderApi } from './llm';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
+/** Read-only hint from the active jsonl branch; does not describe a loaded engine. */
+export interface ContextRecoveryHint {
+  recoveryRequired: boolean;
+}
 /**
  * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位与 Fast。
  * 档位缺省时 worker 依次取角色的 model.thinking、模型的默认档位（{@link pickThinkingLevel}）。
