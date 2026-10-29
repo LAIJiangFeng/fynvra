@@ -1,5 +1,5 @@
-// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型）。
-// 两个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
+// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型 / 输入排队）。
+// 三个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
 (() => {
   const root = document.querySelector('[data-demo]');
   if (!root) return;
@@ -18,6 +18,17 @@
   const modelText = {
     zh: '让实现侧栏折叠的 Worker 用 DeepSeek，审查改动的 Worker 用 GPT。',
     en: 'Use DeepSeek for the worker implementing sidebar collapse, and GPT for the worker reviewing the diff.',
+  };
+  // 排队场景连续输入两次，每次提交后输入框清空，当前回合结束后按顺序接续。
+  const queueText = {
+    first: {
+      zh: '补上移动端适配。',
+      en: 'Add the mobile layout.',
+    },
+    second: {
+      zh: '再补一份使用说明。',
+      en: 'Then add a short usage guide.',
+    },
   };
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
@@ -112,6 +123,38 @@
     }
   }
 
+  function renderQueueScene(element, phase) {
+    const queued = phase >= 5 ? 0 : phase >= 4 ? 1 : phase >= 3 ? 2 : phase >= 1 ? 1 : 0;
+    const queue = element.querySelector('[data-queue]');
+    const count = element.querySelector('[data-queue-count]');
+    const first = element.querySelector('[data-queue-item="1"]');
+    const second = element.querySelector('[data-queue-item="2"]');
+    if (queue) queue.hidden = queued === 0;
+    if (count) count.textContent = String(queued);
+    // 当前回合结束时第一条出队进入时间线，队列里只剩第二条。
+    if (first) first.hidden = !(phase >= 1 && phase < 4);
+    if (second) second.hidden = !(phase >= 3 && phase < 5);
+
+    const current = element.querySelector('[data-queue-current]');
+    if (current) current.dataset.done = String(phase >= 4);
+
+    const running = phase < 5;
+    const chatHead = element.querySelector('[data-chat-head]');
+    chatHead?.classList.toggle('is-idle', !running);
+    if (chatHead) chatHead.dataset.state = running ? 'run' : 'done';
+
+    const composerInput = element.querySelector('.fd-composer-input');
+    if (composerInput) composerInput.dataset.mode = running ? 'queue' : 'idle';
+
+    const send = element.querySelector('[data-send]');
+    if (send) send.dataset.mode = running ? 'queue' : 'idle';
+
+    const task = element.querySelector('[data-queue-task]');
+    if (task) task.dataset.state = running ? 'run' : 'done';
+    const session = element.querySelector('[data-session="queue-current"]');
+    session?.classList.toggle('is-idle', !running);
+  }
+
   function createScene(name, element, config) {
     const appear = [...element.querySelectorAll('[data-appear]')];
     const timeline = element.querySelector('[data-timeline]');
@@ -120,7 +163,28 @@
     const input = element.querySelector('.fd-composer-input');
     const send = element.querySelector('[data-send]');
     const LAST = config.durations.length - 1;
+    // 减少动画时停在可读的静态阶段；旧场景默认停在最终结果。
+    const STATIC = Number.isInteger(config.staticPhase)
+      ? Math.max(0, Math.min(LAST, config.staticPhase))
+      : LAST;
+    // 旧场景只有一个输入阶段；queue 用 typing 声明多个阶段，各阶段对应一段输入文本。
+    const typing = config.typing?.length
+      ? config.typing
+      : [{ phase: config.typePhase, text: config.text }];
+    const typePhases = new Set(typing.map((entry) => entry.phase));
     const state = { phase: 0, typedIndex: 0, autoTimer: 0, typeTimer: 0 };
+
+    function typedText(phase) {
+      const entry = typing.find((item) => item.phase === phase);
+      // 非输入阶段需要沿用最近一段文本（旧场景提交后保持到下一阶段）。
+      return (entry ?? typing[typing.length - 1])?.text(locale()) ?? '';
+    }
+
+    function keepsTypedText(phase) {
+      if (Array.isArray(config.keepTextPhases)) return config.keepTextPhases.includes(phase);
+      if (typeof config.keepTextUntil !== 'number') return false;
+      return phase > config.typePhase && phase <= config.keepTextUntil;
+    }
 
     function shouldRun() {
       return activeScene === api && inView && !document.hidden && !motion.matches && !appHovered;
@@ -146,7 +210,7 @@
 
     function tickTypewriter() {
       if (!shouldRun()) return;
-      const full = config.text(locale());
+      const full = typedText(state.phase);
       if (state.typedIndex >= full.length) {
         setTyped(full);
         clearTypewriter();
@@ -158,7 +222,7 @@
     }
 
     function startTypewriter(reset) {
-      const full = config.text(locale());
+      const full = typedText(state.phase);
       clearTypewriter();
       if (reset) {
         state.typedIndex = 0;
@@ -197,21 +261,21 @@
         return;
       }
 
-      const full = config.text(locale());
-      if (state.phase === config.typePhase && state.typedIndex < full.length && !state.typeTimer) {
+      const typingNow = typePhases.has(state.phase);
+      const full = typingNow ? typedText(state.phase) : '';
+      if (typingNow && state.typedIndex < full.length && !state.typeTimer) {
         startTypewriter(false);
       }
 
-      const delay =
-        state.phase === config.typePhase
-          ? typingDelay(full)
-          : state.phase === LAST
-            ? END_HOLD
-            : config.durations[state.phase];
+      const delay = typingNow
+        ? typingDelay(full)
+        : state.phase === LAST
+          ? END_HOLD
+          : config.durations[state.phase];
       state.autoTimer = window.setTimeout(() => {
         state.autoTimer = 0;
         if (!shouldRun()) return;
-        // 最后一个阶段的结果停留结束后让位给另一个场景，两个场景按顺序无限交替。
+        // 最后一个阶段的结果停留结束后让位给下一个场景，三个场景按顺序无限循环。
         if (state.phase === LAST) selectScene(config.next);
         else applyPhase(state.phase + 1);
       }, delay);
@@ -228,10 +292,10 @@
       }
       if (empty) empty.hidden = state.phase >= config.emptyUntil;
 
-      const full = config.text(locale());
-      if (state.phase === config.typePhase) {
+      const full = typedText(state.phase);
+      if (typePhases.has(state.phase)) {
         startTypewriter(true);
-      } else if (state.phase > config.typePhase && state.phase <= config.keepTextUntil) {
+      } else if (keepsTypedText(state.phase)) {
         state.typedIndex = full.length;
         setTyped(full);
       } else {
@@ -247,7 +311,7 @@
 
     function activate() {
       element.hidden = false;
-      applyPhase(motion.matches ? LAST : 0);
+      applyPhase(motion.matches ? STATIC : 0);
     }
 
     function deactivate() {
@@ -259,17 +323,20 @@
     }
 
     function localeChanged() {
-      const full = config.text(locale());
-      if (state.phase === config.typePhase) {
+      const full = typedText(state.phase);
+      if (typePhases.has(state.phase)) {
         if (shouldRun()) {
           startTypewriter(true);
         } else {
           state.typedIndex = full.length;
           setTyped(full);
         }
-      } else if (state.phase > config.typePhase && state.phase <= config.keepTextUntil) {
+      } else if (keepsTypedText(state.phase)) {
         state.typedIndex = full.length;
         setTyped(full);
+      } else {
+        state.typedIndex = 0;
+        setTyped('');
       }
       config.render(element, state.phase);
       scrollTimeline(state.phase === 0);
@@ -278,8 +345,8 @@
 
     function handleMotion() {
       if (motion.matches) {
-        applyPhase(LAST);
-      } else if (state.phase === LAST) {
+        applyPhase(STATIC);
+      } else if (state.phase === STATIC) {
         applyPhase(0);
       } else {
         sync();
@@ -308,11 +375,25 @@
     emptyUntil: 2,
     hotPhases: [1],
     text: (lang) => modelText[lang],
-    next: 'collab',
+    next: 'queue',
     render: renderModelScene,
   });
 
-  const scenes = { collab, model };
+  const queueScene = createScene('queue', root.querySelector('[data-scene="queue"]'), {
+    // 0/2 各打一段后续需求；1/3 提交后清空输入；4/5 当前回合结束并按顺序接续队列。
+    durations: [0, 1500, 0, 2300, 2400, 2600, 0],
+    // 减少动画时停在“当前回合运行 + 两条排队消息”。
+    staticPhase: 3,
+    typing: [
+      { phase: 0, text: (lang) => queueText.first[lang] },
+      { phase: 2, text: (lang) => queueText.second[lang] },
+    ],
+    hotPhases: [0, 2],
+    next: 'collab',
+    render: renderQueueScene,
+  });
+
+  const scenes = { collab, model, queue: queueScene };
   const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
   const sceneSwitch = root.querySelector('.fd-scene-switch');
 
