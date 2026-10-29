@@ -50,6 +50,7 @@ export interface SupervisedSession {
   setModel(spec: ResolvedModelSpec): Promise<void>;
   /** 换审批档位：下一次工具调用起生效；不自动答复待审批请求。 */
   setApprovalMode(mode: ApprovalMode): void;
+  retryCompaction?(): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -155,6 +156,9 @@ export class SessionSupervisor {
         return;
       case 'steer':
         void this.#run(command.identity, command.text, 'steer', command.images);
+        return;
+      case 'retry-compaction':
+        void this.#retryCompaction(command.identity);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -353,6 +357,16 @@ export class SessionSupervisor {
 
   #onEvent(managed: ManagedSession, event: FynvraSessionEvent): void {
     if (managed.closed) return;
+    // Held inputs may start another SDK turn after recovery without another IPC prompt.
+    if (
+      (event.type === 'message_end' && event.role === 'user') ||
+      (event.type === 'compaction' && ['running', 'backoff'].includes(event.state.phase))
+    ) {
+      if (managed.status === 'idle' || managed.status === 'error') {
+        managed.failed = false;
+        this.#setStatus(managed, 'running');
+      }
+    }
     if (event.type === 'error') managed.failed = true;
     if (event.type === 'agent_settled') {
       managed.approvalEpoch += 1;
@@ -569,6 +583,24 @@ export class SessionSupervisor {
       result = { ok: false, error: errorMessage(error) };
     }
     this.#post({ type: 'models-described', requestId, result });
+  }
+
+  async #retryCompaction(identity: SessionIdentity): Promise<void> {
+    const managed = this.#current(identity);
+    if (!managed) return;
+    const session = await managed.opening;
+    if (!session || managed.closed || !session.retryCompaction) return;
+    if (!session.isIdle()) return;
+    this.#cancelSuggestions(identity.sessionId);
+    managed.failed = false;
+    this.#setStatus(managed, 'running');
+    try {
+      await session.retryCompaction();
+    } catch (error) {
+      managed.failed = true;
+      managed.events?.emit({ type: 'error', source: 'compaction', message: errorMessage(error) });
+    }
+    this.#settleIfIdle(managed, session);
   }
 
   async #abort(identity: SessionIdentity): Promise<void> {

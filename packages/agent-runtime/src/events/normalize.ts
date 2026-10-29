@@ -1,8 +1,9 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
-import type { FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
+import type { CompactionState, FynvraSessionEvent, FynvraSessionEventBody } from '@fynvra/core';
 import { truncateHeadChars } from '../tools/result';
+import { createCompactionLifecycle } from './compaction';
 
 // 事件类型定义在 @fynvra/core（src/shared 只能 import core）；这里继续导出，现有 import 方不变
 export type { FynvraSessionEvent, FynvraSessionEventBody };
@@ -23,6 +24,7 @@ export interface EventNormalizer {
   push(event: AgentSessionEvent): FynvraSessionEvent[];
   /** 宿主产生的事件（如审批门的 approval_request）进入同一条 seq 序列 */
   emit(event: FynvraSessionEventBody): FynvraSessionEvent;
+  cancelCompaction(source: NonNullable<CompactionState['cancelSource']>): FynvraSessionEvent[];
   stats(): NormalizerStats;
 }
 
@@ -31,7 +33,11 @@ interface PendingErrors {
   compaction?: string;
 }
 
-export function createEventNormalizer(): EventNormalizer {
+export function createEventNormalizer(
+  compactionTimeoutMs?: number,
+  compactionMaxAttempts?: number
+): EventNormalizer {
+  const lifecycle = createCompactionLifecycle(compactionTimeoutMs, compactionMaxAttempts);
   // SDK 1.4 的 agent_end 只结束一次尝试；候选跨原生重试保留，到 agent_settled 才结算。
   const pendingErrors: PendingErrors = {};
   let seq = 0;
@@ -49,7 +55,9 @@ export function createEventNormalizer(): EventNormalizer {
     push(event) {
       let bodies: FynvraSessionEventBody[] | undefined;
       try {
-        bodies = mapEvent(event, pendingErrors);
+        const lifecycleEvents = lifecycle.push(event);
+        const mapped = mapEvent(event, pendingErrors);
+        bodies = lifecycleEvents === undefined ? mapped : [...lifecycleEvents, ...(mapped ?? [])];
       } catch {
         // 事件形状与 pi 类型不符（升级复检点）：当作未映射处理，绝不打断 pi 的事件分发
         bodies = undefined;
@@ -63,6 +71,7 @@ export function createEventNormalizer(): EventNormalizer {
       return bodies.map(stamp);
     },
     emit: stamp,
+    cancelCompaction: (source) => lifecycle.cancel(source).map(stamp),
     stats: () => ({ emitted, dropped, droppedByType: { ...droppedByType } }),
   };
 }
@@ -71,10 +80,13 @@ export interface NormalizedSubscription {
   unsubscribe(): void;
   /** 注入宿主事件（approval_request / error 等），与 pi 事件共用 seq */
   emit(event: FynvraSessionEventBody): void;
+  cancelCompaction(source: NonNullable<CompactionState['cancelSource']>): void;
   stats(): NormalizerStats;
 }
 
 export interface SubscribeNormalizedOptions {
+  compactionTimeoutMs?: number;
+  compactionMaxAttempts?: number;
   /** listener 抛出的异常；默认吞掉，因为 pi 在事件分发之后才持久化消息 */
   onListenerError?: (error: unknown) => void;
 }
@@ -85,7 +97,10 @@ export function subscribeNormalized(
   listener: (event: FynvraSessionEvent) => void,
   options: SubscribeNormalizedOptions = {}
 ): NormalizedSubscription {
-  const normalizer = createEventNormalizer();
+  const normalizer = createEventNormalizer(
+    options.compactionTimeoutMs,
+    options.compactionMaxAttempts
+  );
   const deliver = (event: FynvraSessionEvent) => {
     try {
       listener(event);
@@ -94,12 +109,39 @@ export function subscribeNormalized(
       options.onListenerError?.(error);
     }
   };
-  const unsubscribe = session.subscribe((event) => {
-    for (const normalized of normalizer.push(event)) deliver(normalized);
-  });
+  let deliveryDepth = 0;
+  const injected: FynvraSessionEventBody[] = [];
+  const cancelled: NonNullable<CompactionState['cancelSource']>[] = [];
+  const flush = () => {
+    while (injected.length) {
+      const body = injected.shift();
+      if (body) deliver(normalizer.emit(body));
+    }
+    while (cancelled.length) {
+      const source = cancelled.shift();
+      if (source) deliverBatch(normalizer.cancelCompaction(source));
+    }
+  };
+  const deliverBatch = (batch: FynvraSessionEvent[]) => {
+    deliveryDepth += 1;
+    try {
+      for (const normalized of batch) deliver(normalized);
+    } finally {
+      deliveryDepth -= 1;
+      if (deliveryDepth === 0) flush();
+    }
+  };
+  const unsubscribe = session.subscribe((event) => deliverBatch(normalizer.push(event)));
   return {
     unsubscribe,
-    emit: (event) => deliver(normalizer.emit(event)),
+    emit: (event) => {
+      if (deliveryDepth > 0) injected.push(event);
+      else deliver(normalizer.emit(event));
+    },
+    cancelCompaction: (source) => {
+      if (deliveryDepth > 0) cancelled.push(source);
+      else deliverBatch(normalizer.cancelCompaction(source));
+    },
     stats: () => normalizer.stats(),
   };
 }

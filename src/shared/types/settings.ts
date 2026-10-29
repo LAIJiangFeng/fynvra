@@ -175,6 +175,8 @@ export interface Preferences {
   // --- context ---
   /** 上下文自动压缩策略；没写过时用 pi 原生自动压缩（读取用 {@link compactionStrategyOf}） */
   compactionStrategy?: CompactionStrategy;
+  /** Native compaction total deadline, including retries and backoff; snapshotted at spawn. */
+  compactionTimeoutMs?: number;
 }
 
 /**
@@ -239,6 +241,27 @@ export function compactionStrategyOf(
   preferences: Pick<Preferences, 'compactionStrategy'>
 ): CompactionStrategy {
   return preferences.compactionStrategy ?? 'native';
+}
+
+export const DEFAULT_COMPACTION_TIMEOUT_MS = 10 * 60_000;
+export const MIN_COMPACTION_TIMEOUT_MS = 30_000;
+export const MAX_COMPACTION_TIMEOUT_MS = 30 * 60_000;
+
+export function isCompactionTimeoutMs(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= MIN_COMPACTION_TIMEOUT_MS &&
+    value <= MAX_COMPACTION_TIMEOUT_MS
+  );
+}
+
+export function compactionTimeoutMsOf(
+  preferences: Pick<Preferences, 'compactionTimeoutMs'>
+): number {
+  return isCompactionTimeoutMs(preferences.compactionTimeoutMs)
+    ? preferences.compactionTimeoutMs
+    : DEFAULT_COMPACTION_TIMEOUT_MS;
 }
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
@@ -418,6 +441,9 @@ export function parsePreferences(raw: unknown): Preferences {
     // --- language ---
     ...(isLanguage(language) ? { language } : {}),
     // --- context ---
+    ...(isCompactionTimeoutMs(record?.compactionTimeoutMs)
+      ? { compactionTimeoutMs: record.compactionTimeoutMs }
+      : {}),
     ...(isCompactionStrategy(compactionStrategy) ? { compactionStrategy } : {}),
   };
 }
@@ -523,6 +549,10 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         patch.language = value;
         break;
       // --- context ---
+      case 'compactionTimeoutMs':
+        if (!isCompactionTimeoutMs(value)) return null;
+        patch.compactionTimeoutMs = value;
+        break;
       case 'compactionStrategy':
         if (!isCompactionStrategy(value)) return null;
         patch.compactionStrategy = value;

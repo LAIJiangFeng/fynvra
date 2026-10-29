@@ -186,6 +186,44 @@ export interface Message {
 /** Magic Context 交给宿主的回退原因；只用于非阻塞提示，不把会话标记为失败。 */
 export type MagicContextFallbackReason = 'startup' | 'runtime' | 'context' | 'budget';
 
+/** Transport-only lifecycle metadata; never contains prompts, summaries or credentials. */
+export interface CompactionState {
+  operationId: string;
+  reason: 'manual' | 'threshold' | 'overflow';
+  phase: 'running' | 'backoff' | 'succeeded' | 'failed' | 'cancelled';
+  startedAt: number;
+  deadlineAt: number;
+  attempt: number;
+  maxAttempts: number;
+  endedAt?: number;
+  durationMs?: number;
+  cancelSource?: 'user' | 'timeout' | 'shutdown' | 'exception' | 'sdk';
+  errorMessage?: string;
+}
+export interface RetryState {
+  kind: 'model' | 'summarization';
+  phase: 'backoff' | 'running' | 'finished';
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  success?: boolean;
+}
+export interface ContextRuntimeSnapshot {
+  configuredStrategy: 'native' | 'magic-context' | 'off';
+  effectiveStrategy: 'native' | 'magic-context' | 'off';
+  compactionTimeoutMs: number;
+  context: {
+    tokens: number | null;
+    contextWindow: number;
+    source: 'sdk' | 'unknown';
+    compactionThresholdTokens?: number;
+  };
+  compaction?: CompactionState;
+  retry?: RetryState;
+  recoveryRequired: boolean;
+  pendingPromptCount: number;
+}
+
 /** 历史兼容的单向工具操作通知；不含原始参数、命令或路径，不代表执行授权或成功。 */
 export interface ToolOperationNotice {
   toolCallId: string;
@@ -199,6 +237,9 @@ export interface ToolOperationNotice {
  * Renderer 只持有投影，会话正文权威源是 pi jsonl。
  */
 export type FynvraSessionEventBody =
+  | { type: 'context_runtime'; snapshot: ContextRuntimeSnapshot }
+  | { type: 'compaction'; state: CompactionState }
+  | { type: 'retry'; state: RetryState }
   | { type: 'text_delta'; delta: string }
   | { type: 'thinking_delta'; delta: string }
   | {

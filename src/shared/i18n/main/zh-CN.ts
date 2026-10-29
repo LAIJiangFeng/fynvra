@@ -86,6 +86,8 @@ export const mainZhCN = {
   },
   agent: {
     workerUnavailable: 'agent worker 未就绪（正在重启或已停止），请稍后重试',
+    compactionRecoveryRequired: '需要先恢复上下文：请重试压缩，尚未消费的输入已保留。',
+    noCompactionRecovery: '此会话没有待恢复的压缩。',
     switchWhileRunning: '会话正在运行，等本轮结束再切换模型',
     roleNotFound: '角色不存在：{id}',
     startFailed: '无法启动会话：{error}',

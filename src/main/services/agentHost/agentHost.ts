@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import type {
   ApprovalMode,
+  ContextRuntimeSnapshot,
   FynvraSessionEvent,
   FynvraSessionEventBody,
   Role,
@@ -39,7 +40,7 @@ import type {
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
-import type { CompactionStrategy } from '@shared/types/settings';
+import { type CompactionStrategy, compactionTimeoutMsOf } from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
@@ -91,6 +92,7 @@ export interface AgentHostDeps {
   resolveShellPath?(): Promise<string | undefined>;
   /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 native */
   resolveCompactionStrategy?(): CompactionStrategy;
+  resolveCompactionTimeoutMs?(): number;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   workerOptions?: Pick<
     WorkerClientOptions,
@@ -153,8 +155,15 @@ export interface AgentHostService extends AgentHost {
   promptWhenIdle(sessionId: string, text: string): Promise<IpcResult<{ delivered: boolean }>>;
   /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
   steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
+  retryCompaction(sessionId: string): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
-  history(sessionId: string): Promise<IpcResult<{ messages: ChatMessage[] }>>;
+  history(sessionId: string): Promise<
+    IpcResult<{
+      messages: ChatMessage[];
+      contextRuntime?: ContextRuntimeSnapshot;
+      contextRuntimeSeq?: number;
+    }>
+  >;
   respondApproval(input: RespondApprovalInput): Promise<IpcResult>;
   /**
    * 为刚正常结束的一轮生成一条输入框灰字建议（`roundId` = settled 事件的会话级 seq）。
@@ -187,6 +196,8 @@ export interface AgentHostService extends AgentHost {
 
 /** Main 侧每个会话的运行态（不落盘） */
 interface LiveSession {
+  contextRuntime?: ContextRuntimeSnapshot;
+  contextRuntimeSeq?: number;
   /** 最近一次 spawn 用的 generation；0 表示还没 spawn 过 */
   generation: number;
   /** spawn-session 已交给当前 worker 进程，且没有关闭 / 失败 */
@@ -372,7 +383,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   /** IPC 视图：去掉内部字段，带上分支 */
   function summaryOf(stored: StoredSession): SessionSummary {
-    return withBranch(toSummary(stored));
+    const state = live.get(stored.id);
+    return withBranch({
+      ...toSummary(stored),
+      ...(state?.contextRuntime
+        ? { contextRuntime: state.contextRuntime, contextRuntimeSeq: state.contextRuntimeSeq }
+        : {}),
+    });
   }
 
   /**
@@ -421,7 +438,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   function deliver(sessionId: string, state: LiveSession, event: FynvraSessionEventBody): void {
     state.transcript?.append(event);
     state.sessionSeq += 1;
-    if (event.type !== 'warning') state.activitySeq = state.sessionSeq;
+    if (!['warning', 'context_runtime', 'compaction', 'retry'].includes(event.type))
+      state.activitySeq = state.sessionSeq;
+    if (event.type === 'context_runtime') {
+      state.contextRuntime = event.snapshot;
+      state.contextRuntimeSeq = state.sessionSeq;
+    }
     const envelope: SessionEventEnvelope = {
       sessionId,
       event: { ...event, seq: state.sessionSeq } as FynvraSessionEvent,
@@ -433,6 +455,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 会话不再在 worker 里：中止它进行中的 host 调用，作废待审批请求，丢弃建议 */
   function detach(sessionId: string, state: LiveSession): void {
     state.spawned = false;
+    state.contextRuntime = undefined;
+    state.contextRuntimeSeq = undefined;
     state.running = false;
     state.lastSettledSeq = 0;
     state.suggestedRound = 0;
@@ -527,6 +551,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
           ...(compactionStrategy !== 'native' ? { compactionStrategy } : {}),
+          compactionTimeoutMs: compactionTimeoutMsOf({
+            compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
+          }),
           ...(inPlace ? { inPlace: true } : {}),
         },
       };
@@ -931,7 +958,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   ): Promise<Result<{ delivered: boolean }>> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
-    if (stored.status !== 'idle' || stored.archivedAt !== undefined || isBusy(stored)) {
+    if (
+      stored.status !== 'idle' ||
+      stored.archivedAt !== undefined ||
+      isBusy(stored) ||
+      live.get(sessionId)?.contextRuntime?.recoveryRequired
+    ) {
       return { ok: true, delivered: false };
     }
     const state = liveOf(sessionId);
@@ -1032,6 +1064,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
     const pending = liveOf(sessionId);
+    if (pending.contextRuntime?.recoveryRequired)
+      return fail(translate('agent.compactionRecoveryRequired'));
     // 用户开始新一轮（或插话）：旧轮的建议立即作废，worker 里的在途请求也中止
     invalidateSuggestion(sessionId, pending);
     const epoch = pending.roundEpoch;
@@ -1421,6 +1455,22 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     promptWhenIdle,
     steer,
     suggestReply,
+    async retryCompaction(sessionId) {
+      const stored = deps.store.get(sessionId);
+      if (!stored) return fail(translate('common.sessionNotFound'));
+      const state = liveOf(sessionId);
+      if (isBusy(stored)) return fail(translate('agent.switchWhileRunning'));
+      if (!state.spawned || !state.contextRuntime?.recoveryRequired)
+        return fail(translate('agent.noCompactionRecovery'));
+      invalidateSuggestion(sessionId, state);
+      if (!send({ type: 'retry-compaction', identity: identityOf(sessionId, state) }))
+        return fail(translate('agent.workerUnavailable'));
+      state.running = true;
+      state.interruption = undefined;
+      state.lastError = undefined;
+      setStatus(sessionId, 'running');
+      return { ok: true };
+    },
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
       const state = liveOf(sessionId);
@@ -1445,7 +1495,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const messages = await readHistory(sessionFilePath(deps.agentDir, sessionId), sessionId, {
           running: live.get(sessionId)?.running ?? false,
         });
-        return { ok: true, messages };
+        const state = live.get(sessionId);
+        return {
+          ok: true,
+          messages,
+          ...(state?.contextRuntime
+            ? { contextRuntime: state.contextRuntime, contextRuntimeSeq: state.contextRuntimeSeq }
+            : {}),
+        };
       } catch (error) {
         return fail(translate('agent.historyFailed', { error: errorMessage(error) }));
       }

@@ -1,6 +1,7 @@
 import {
   APPROVAL_MODES,
   type ApprovalMode,
+  type ContextRuntimeSnapshot,
   type FynvraSessionEvent,
   type ThinkingLevel,
 } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
@@ -29,6 +30,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   dispatchId?: string;
   status: SessionStatus;
+  /** Present only while loaded. Compare contextRuntimeSeq with live event seq before applying. */
+  contextRuntime?: ContextRuntimeSnapshot;
+  contextRuntimeSeq?: number;
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;

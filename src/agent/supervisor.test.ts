@@ -37,6 +37,7 @@ class FakeSession implements SupervisedSession {
   steers: string[] = [];
   /** 每次 steer 带的图片，与 steers 一一对应（没带时为 undefined） */
   steerImages: (ChatImage[] | undefined)[] = [];
+  retryCompaction = vi.fn(async () => {});
   aborts = 0;
   disposals = 0;
   idle = true;
@@ -168,6 +169,35 @@ function setup(
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('SessionSupervisor compaction recovery', () => {
+  it('settles manual failures and recognizes a resumed pending user turn without another IPC prompt', async () => {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    await settle();
+    const session = env.sessions[0];
+    if (!session) throw new Error('missing session');
+    session.retryCompaction.mockRejectedValueOnce(new Error('compaction failed'));
+    env.supervisor.handle({ type: 'retry-compaction', identity: id1 });
+    await settle();
+    expect(env.of('session-status').at(-1)?.status).toBe('error');
+    expect(env.of('session-event').at(-1)?.event).toMatchObject({
+      type: 'error',
+      source: 'compaction',
+    });
+    env.supervisor.handle({ type: 'retry-compaction', identity: id1 });
+    await settle();
+    expect(env.of('session-status').at(-1)?.status).toBe('idle');
+    session.emit({ type: 'message_end', role: 'user', text: 'retained input' });
+    expect(env.of('session-status').at(-1)?.status).toBe('running');
+    session.emit({ type: 'agent_settled', aborted: false });
+    expect(env.of('session-status').at(-1)?.status).toBe('idle');
+    env.supervisor.handle({ type: 'retry-compaction', identity: { ...id1, generation: 0 } });
+    await settle();
+    expect(session.retryCompaction).toHaveBeenCalledTimes(2);
+    await env.supervisor.shutdown();
+  });
 });
 
 describe('SessionSupervisor spawn and prompt', () => {
