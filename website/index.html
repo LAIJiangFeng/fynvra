@@ -143,12 +143,17 @@
                 <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
                   <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
                   <span class="fd-scene-label-long"><span data-l="zh">指定 Worker 模型</span><span data-l="en">Assign worker models</span></span>
-                  <span class="fd-scene-label-short"><span data-l="zh">Worker 模型</span><span data-l="en">Worker models</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">模型</span><span data-l="en">Models</span></span>
                 </button>
                 <button class="fd-scene-btn" type="button" data-scene-btn="queue" aria-pressed="false" aria-controls="fd-scene-queue">
                   <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 11h8M4 17h8" /><path d="M17 12v6M14 15l3 3 3-3" /></svg>
                   <span class="fd-scene-label-long"><span data-l="zh">输入排队</span><span data-l="en">Message queue</span></span>
                   <span class="fd-scene-label-short"><span data-l="zh">排队</span><span data-l="en">Queue</span></span>
+                </button>
+                <button class="fd-scene-btn" type="button" data-scene-btn="roles" aria-pressed="false" aria-controls="fd-scene-roles">
+                  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><circle cx="10" cy="11" r="1.8" /><path d="M14 15h3.5" /></svg>
+                  <span class="fd-scene-label-long"><span data-l="zh">角色对话</span><span data-l="en">Role chat</span></span>
+                  <span class="fd-scene-label-short"><span data-l="zh">角色</span><span data-l="en">Roles</span></span>
                 </button>
               </fieldset>
             </div>
@@ -899,6 +904,238 @@
                       </div>
                     </div>
                   </aside>
+                </div>
+              </div>
+
+              <div class="fd-scene" id="fd-scene-roles" data-scene="roles" data-phase="0" hidden>
+                <div class="fd-body">
+                  <aside class="fd-side">
+                    <div class="fd-side-head">
+                      <span data-l="zh">工作区</span><span data-l="en">Workspaces</span>
+                      <span class="fd-side-actions" aria-hidden="true">
+                        <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-workspace">
+                      <div class="fd-ws-row">
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                        <span>fynvra</span><span class="fd-ws-branch">main</span>
+                      </div>
+                      <p class="fd-ws-path">D:\project\fynvra</p>
+
+                      <div class="fd-sessions-head">
+                        <span data-l="zh">会话</span><span data-l="en">Sessions</span>
+                        <span class="fd-side-actions" aria-hidden="true">
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg></span>
+                          <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="role-worker" data-appear="1">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">设置页：侧栏折叠</span><span data-l="en">Settings: sidebar collapse</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role">Worker</span>
+                            <span class="fd-model-tag">DeepSeek</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <div class="fd-session is-idle" data-session="role-review" data-appear="5">
+                        <span class="fd-dot is-run"></span>
+                        <span class="fd-session-main">
+                          <span class="fd-session-title"><span data-l="zh">审查当前改动</span><span data-l="en">Review current diff</span></span>
+                          <span class="fd-session-sub">
+                            <span class="fd-role is-custom">
+                              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                              <span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span>
+                              <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                            </span>
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div class="fd-main">
+                    <div class="fd-editor-tabs" aria-hidden="true">
+                      <span class="fd-editor-tab is-active"><span data-l="zh">对话</span><span data-l="en">Chat</span></span>
+                      <span class="fd-editor-tab">Settings.tsx</span>
+                      <span class="fd-editor-tab">settings.css</span>
+                      <span class="fd-editor-add"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+                    </div>
+
+                    <div class="fd-chat-head is-idle" data-role-head data-state="idle">
+                      <span class="fd-dot is-run"></span>
+                      <span class="fd-chat-title" data-role-title="worker" hidden><span data-l="zh">Worker · 设置页侧栏折叠</span><span data-l="en">Worker · Settings sidebar collapse</span></span>
+                      <span class="fd-chat-title" data-role-title="review" hidden><span data-l="zh">代码审查员 · 审查当前改动</span><span data-l="en">Code reviewer · Review current diff</span></span>
+                      <span class="fd-role" data-role-chip="worker" hidden>Worker</span>
+                      <span class="fd-role is-custom" data-role-chip="review" hidden>
+                        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                        <span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span>
+                        <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                      </span>
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                      <span class="fd-chat-status">
+                        <span class="fd-st-run"><span data-l="zh">运行中</span><span data-l="en">Running</span></span>
+                        <span class="fd-st-idle"><span data-l="zh">空闲</span><span data-l="en">Idle</span></span>
+                      </span>
+                    </div>
+
+                    <div class="fd-timeline" data-timeline>
+                      <div class="fd-stream" data-role-chat="worker">
+                        <div class="fd-empty" data-empty hidden>
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /></svg>
+                          <span data-l="zh">已创建 Worker 会话，直接写明需求，不需要主 Agent 转交。</span>
+                          <span data-l="en">Worker session created. Ask it directly — no main agent handoff.</span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="3">
+                          <span data-l="zh">为设置页增加侧栏折叠。</span>
+                          <span data-l="en">Add sidebar collapse to the settings page.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="3">
+                          <p data-l="zh">已加上折叠按钮：桌面端收起到图标栏，窄屏自动隐藏，折叠状态写入设置。只改了设置页，没有动其他面板。</p>
+                          <p data-l="en">Added a collapse button: it folds to an icon rail on desktop and hides on narrow screens, with the state saved to settings. Only the settings page changed.</p>
+                        </div>
+                      </div>
+
+                      <div class="fd-stream" data-role-chat="review" hidden>
+                        <div class="fd-empty" data-role-empty>
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg>
+                          <span data-l="zh">审查会话只读：列出问题与建议，不改文件。</span>
+                          <span data-l="en">Read-only review: list issues and suggestions, never edit files.</span>
+                        </div>
+
+                        <div class="fd-msg is-user" data-appear="6">
+                          <span data-l="zh">检查当前改动，只列问题与建议，不修改文件。</span>
+                          <span data-l="en">Review the current diff. List issues and suggestions only — do not edit files.</span>
+                        </div>
+
+                        <div class="fd-msg fd-agent" data-appear="6">
+                          <p data-l="zh"><strong>问题</strong></p>
+                          <p data-l="en"><strong>Issues</strong></p>
+                          <ul class="fd-role-bullets">
+                            <li><span data-l="zh"><code>Settings.tsx</code> 读取折叠状态前没有补默认值，旧配置会读到 undefined。</span><span data-l="en"><code>Settings.tsx</code> reads the collapse state without a fallback; older configs get undefined.</span></li>
+                            <li><span data-l="zh"><code>settings.css</code> 把图标栏宽度写死为 56px，窄屏展开时会和内容重叠。</span><span data-l="en"><code>settings.css</code> hard-codes a 56px icon rail, which overlaps content when expanded on narrow screens.</span></li>
+                          </ul>
+                          <p data-l="zh"><strong>建议</strong></p>
+                          <p data-l="en"><strong>Suggestions</strong></p>
+                          <ul class="fd-role-bullets">
+                            <li><span data-l="zh">读取时用默认值兜底，并为 320px 展开态补一条样式。</span><span data-l="en">Default the value on read and add a style for the 320px expanded state.</span></li>
+                            <li><span data-l="zh">折叠后用 <code>aria-expanded</code> 同步按钮状态。</span><span data-l="en">Sync the button state with <code>aria-expanded</code> after toggling.</span></li>
+                          </ul>
+                          <p class="fd-role-conclusion" data-l="zh">只读审查完成，未修改文件。</p>
+                          <p class="fd-role-conclusion" data-l="en">Read-only review done. No files were modified.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-composer">
+                      <div class="fd-composer-box">
+                        <div class="fd-composer-input">
+                          <span data-typed></span><span class="fd-caret" aria-hidden="true"></span>
+                          <span class="fd-placeholder">
+                            <span data-role-placeholder="worker"><span data-l="zh">向 Worker 发送消息，Enter 发送</span><span data-l="en">Message the Worker, Enter to send</span></span>
+                            <span data-role-placeholder="review" hidden><span data-l="zh">向代码审查员发送消息，Enter 发送</span><span data-l="en">Message the code reviewer, Enter to send</span></span>
+                          </span>
+                        </div>
+                        <div class="fd-composer-bar">
+                          <span class="fd-composer-tools">
+                            <span class="fd-mini-btn" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h6M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" /></svg></span>
+                            <span class="fd-chip fd-chip-model"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span class="fd-chip-label">deepseek-v4.1-flash · high</span></span>
+                            <span class="fd-chip fd-chip-approval"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full access</span></span>
+                          </span>
+                          <span class="fd-send" data-send><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg><span data-l="zh">发送</span><span data-l="en">Send</span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="fd-statusbar" aria-hidden="true">
+                      <span>tokens ↑8.6k ↓2.1k</span><span>$0.03</span>
+                      <span class="fd-status-right">
+                        <span class="is-amber"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /></svg><span data-l="zh">完全放行</span><span data-l="en">Full</span></span>
+                        <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+                        <span>deepseek-v4.1-flash</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <aside class="fd-panel">
+                    <div class="fd-panel-head">
+                      <div class="fd-panel-tabs">
+                        <span class="fd-panel-tab is-active">
+                          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0M16 5.5a3 3 0 0 1 0 5.6M18 14a5 5 0 0 1 3 4.6" /></svg>
+                          <span data-l="zh">角色</span><span data-l="en">Roles</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="fd-panel-body">
+                      <div class="fd-role-card" data-role-card="worker" data-state="idle">
+                        <div class="fd-role-card-head">
+                          <span class="fd-role-card-name">Worker</span>
+                          <span class="fd-role"><span data-l="zh">开发</span><span data-l="en">Build</span></span>
+                        </div>
+                        <p data-l="zh">直接实现你提出的改动，交付代码与结果。</p>
+                        <p data-l="en">Implements the change you ask for and delivers the code.</p>
+                        <span class="fd-role-card-meta"><span data-l="zh">直接对话 · 无需转交</span><span data-l="en">Direct chat · no handoff</span></span>
+                      </div>
+
+                      <div class="fd-role-card" data-role-card="review" data-state="idle">
+                        <div class="fd-role-card-head">
+                          <span class="fd-role-card-name"><span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span></span>
+                          <span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span>
+                        </div>
+                        <p data-l="zh">只读检查改动，只列问题与建议，不修改文件。</p>
+                        <p data-l="en">Reads the diff, lists issues and suggestions, and never edits files.</p>
+                        <span class="fd-role-card-meta"><span data-l="zh">只读审查 · 用户自定义</span><span data-l="en">Read-only · user-defined</span></span>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+
+                <div class="fd-newsession" data-appear="0" data-newsession>
+                  <div class="fd-newsession-card" role="group" aria-label="新建会话 / New session">
+                    <div class="fd-newsession-head">
+                      <span class="fd-newsession-title"><span data-l="zh">新建会话</span><span data-l="en">New session</span></span>
+                      <span class="fd-newsession-note"><span data-l="zh">选角色后直接对话</span><span data-l="en">Pick a role, chat directly</span></span>
+                    </div>
+                    <p class="fd-newsession-label"><span data-l="zh">选择角色</span><span data-l="en">Choose a role</span></p>
+                    <ul class="fd-role-list">
+                      <li class="fd-role-option" data-role-option="orch">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name">Orchestrator</span>
+                          <span class="fd-role-option-desc"><span data-l="zh">主 Agent · 拆解与派发</span><span data-l="en">Main agent · plan &amp; dispatch</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                      <li class="fd-role-option" data-role-option="worker">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-4 5 4 5M16 7l4 5-4 5M14 5l-4 14" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name">Worker</span>
+                          <span class="fd-role-option-desc"><span data-l="zh">开发实现 · 直接交付</span><span data-l="en">Build · ship the change</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                      <li class="fd-role-option" data-role-option="review">
+                        <span class="fd-role-option-icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /><path d="m8 11 2 2 4-4" /></svg></span>
+                        <span class="fd-role-option-main">
+                          <span class="fd-role-option-name"><span data-l="zh">代码审查员</span><span data-l="en">Code reviewer</span></span>
+                          <span class="fd-role-option-desc"><span class="fd-role-custom"><span data-l="zh">自定义</span><span data-l="en">Custom</span></span> · <span data-l="zh">只读审查</span><span data-l="en">review only</span></span>
+                        </span>
+                        <svg class="i fd-role-option-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5L20 7" /></svg>
+                      </li>
+                    </ul>
+                    <div class="fd-newsession-foot">
+                      <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>deepseek-v4.1-flash</span>
+                      <span class="fd-newsession-create"><span data-l="zh">创建</span><span data-l="en">Create</span></span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
