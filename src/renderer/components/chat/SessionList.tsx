@@ -28,12 +28,13 @@ import {
 import { formatRelativeTime } from './format';
 import { NewSessionButton } from './NewSessionButton';
 import { RoleBadge, StatusDot } from './SessionBadges';
+import { SessionModelBadge } from './SessionModelBadge';
 
 /** 虚拟列表的一行：会话，或「已归档」分组的开关 */
 type Row = { kind: 'session'; session: SessionSummary } | { kind: 'archived'; count: number };
 
 /**
- * 侧栏里某个工作区下的会话分组：角色徽标、状态点、最近更新时间；归档的会话收在底部可折叠的「已归档」里。
+ * 侧栏里某个工作区下的会话分组：角色徽标、模型、状态点、最近更新时间；归档的会话收在底部可折叠的「已归档」里。
  * 渲染为 `<li>`，挂在工作区条目之后；行用虚拟列表，滚动容器借用侧栏的 ScrollArea。
  */
 export function SessionList({ workspaceId }: { workspaceId: string }) {
@@ -151,24 +152,28 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
           aria-current={active ? 'true' : undefined}
           onClick={() => void select(session.id, session.workspaceId)}
           className={cn(
-            'flex w-full items-center gap-2 rounded-md py-1.5 pr-16 pl-2 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
             active && 'bg-sidebar-accent text-sidebar-accent-foreground'
           )}
         >
           <StatusDot status={status} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate" title={session.title}>
+            {/* Only the title reserves space for the hover actions; metadata gets the full width. */}
+            <span className="block h-7 truncate pr-14 leading-7" title={session.title}>
               {session.title}
             </span>
             <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-              <RoleBadge roleId={session.roleId} className="max-w-28 truncate" />
-              <span className="truncate">{formatRelativeTime(session.updatedAt, now, t)}</span>
+              <RoleBadge roleId={session.roleId} className="min-w-0 max-w-[60%] shrink truncate" />
+              <span className="min-w-0 flex-1 truncate text-right">
+                {formatRelativeTime(session.updatedAt, now, t)}
+              </span>
             </span>
+            <SessionModelBadge model={session.model} />
           </span>
         </button>
         {/* 运行中、等审批的会话不能归档或删除；已归档的仍可恢复。 */}
         {(archived || !busy) && (
-          <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
+          <div className="pointer-events-none absolute top-1.5 right-1 flex gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
             <Button
               variant="ghost"
               size="icon-xs"

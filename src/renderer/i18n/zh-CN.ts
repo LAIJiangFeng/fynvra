@@ -208,6 +208,7 @@ export const zhCN = {
     builtin: '内置',
     rolesLoadFailed: '读取角色失败：{error}',
     model: '模型',
+    modelNotSet: '未指定模型',
     create: '创建',
     pickOrCreate: '从左侧选择一个会话，或新建一个',
     none: '还没有会话',
