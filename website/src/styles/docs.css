@@ -222,7 +222,9 @@
 .sl-markdown-content .docs-next-card {
   position: relative;
   padding: 14px 15px;
-  transition: border-color 0.15s, background-color 0.15s;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
 }
 
 .sl-markdown-content .docs-next-card:is(:hover, :focus-within) {

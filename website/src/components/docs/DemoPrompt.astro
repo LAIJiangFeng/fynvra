@@ -1,5 +1,5 @@
 ---
-import { prompts, promptLabels, type DemoLocale, type DemoPromptName } from './prompts';
+import { type DemoLocale, type DemoPromptName, promptLabels, prompts } from './prompts';
 
 interface Props {
   name: DemoPromptName;
@@ -10,7 +10,10 @@ const { name, locale } = Astro.props;
 const labelId = `prompt-${name}`;
 const copyLabel = locale === 'zh' ? '复制' : 'Copy';
 const copySuccess = locale === 'zh' ? '已复制到剪贴板' : 'Copied to clipboard';
-const copyFailure = locale === 'zh' ? '复制失败，请手动选择并复制文本。' : 'Copy failed. Select and copy the text manually.';
+const copyFailure =
+  locale === 'zh'
+    ? '复制失败，请手动选择并复制文本。'
+    : 'Copy failed. Select and copy the text manually.';
 ---
 
 <div class="docs-prompt">

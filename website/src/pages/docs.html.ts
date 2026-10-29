@@ -4,7 +4,9 @@ import { entryRedirectScript } from '../lib/compatibility';
 // An endpoint keeps the exact legacy filename: dist/docs.html, not docs.html/index.html.
 export const prerender = true;
 
-export const GET: APIRoute = () => new Response(`<!doctype html>
+export const GET: APIRoute = () =>
+  new Response(
+    `<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -37,6 +39,8 @@ export const GET: APIRoute = () => new Response(`<!doctype html>
       </nav>
     </main>
   </body>
-</html>`, {
-  headers: { 'Content-Type': 'text/html; charset=utf-8' },
-});
+</html>`,
+    {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }
+  );

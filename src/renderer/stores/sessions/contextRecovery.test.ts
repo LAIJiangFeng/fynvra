@@ -195,12 +195,10 @@ describe('cold checkpoint recovery hydration', () => {
       .getState()
       .receiveEvent({ sessionId: id, event: { seq: 10, type: 'agent_settled', aborted: false } });
     expect(store.getState().recoveringCompaction[id]).toBe(true);
-    store
-      .getState()
-      .receiveEvent({
-        sessionId: id,
-        event: { seq: 11, type: 'context_runtime', snapshot: snapshot() },
-      });
+    store.getState().receiveEvent({
+      sessionId: id,
+      event: { seq: 11, type: 'context_runtime', snapshot: snapshot() },
+    });
     expect(store.getState().recoveringCompaction[id]).toBeUndefined();
     expect(store.getState().runtimeBySession[id].status).toBe('idle');
     expect(store.getState().runtimeBySession[id].error).toBeUndefined();

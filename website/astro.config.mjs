@@ -1,6 +1,6 @@
-import { defineConfig } from 'astro/config';
-import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
+import starlight from '@astrojs/starlight';
+import { defineConfig } from 'astro/config';
 
 function readSiteUrl(value) {
   if (!value?.trim()) return undefined;
@@ -12,9 +12,15 @@ function readSiteUrl(value) {
   }
   if (
     !['https:', 'http:'].includes(url.protocol) ||
-    url.username || url.password || url.search || url.hash || url.pathname !== '/'
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== '/'
   ) {
-    throw new Error('SITE_URL must be an HTTP(S) origin, without credentials, path, query, or hash.');
+    throw new Error(
+      'SITE_URL must be an HTTP(S) origin, without credentials, path, query, or hash.'
+    );
   }
   return url.href;
 }
@@ -35,9 +41,7 @@ export default defineConfig({
         zh: { label: '中文', lang: 'zh-CN' },
         en: { label: 'English', lang: 'en' },
       },
-      social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/LAIJiangFeng/fynvra' },
-      ],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/LAIJiangFeng/fynvra' }],
       customCss: ['./src/styles/docs-theme.css', './src/styles/docs.css'],
       // The original docs have a navigation column and a single reading column.
       tableOfContents: false,
@@ -89,8 +93,13 @@ export default defineConfig({
           label: '配置',
           translations: { en: 'Configuration' },
           items: [
-            'docs/providers', 'docs/thinking', 'docs/roles', 'docs/skills',
-            'docs/mcp', 'docs/instructions', 'docs/appearance',
+            'docs/providers',
+            'docs/thinking',
+            'docs/roles',
+            'docs/skills',
+            'docs/mcp',
+            'docs/instructions',
+            'docs/appearance',
           ],
         },
         {
@@ -102,10 +111,14 @@ export default defineConfig({
     }),
     // This replaces Starlight's built-in sitemap when a real site is configured.
     // Without site, its built-in integration skips generation as well.
-    ...(site ? [sitemap({
-      i18n: { defaultLocale: 'zh', locales: { zh: 'zh-CN', en: 'en' } },
-      // Only localized homepages and articles, never compatibility/404 entries.
-      filter: (page) => /^\/(?:zh|en)\/(?:docs\/[^/]+\/)?$/.test(new URL(page).pathname),
-    })] : []),
+    ...(site
+      ? [
+          sitemap({
+            i18n: { defaultLocale: 'zh', locales: { zh: 'zh-CN', en: 'en' } },
+            // Only localized homepages and articles, never compatibility/404 entries.
+            filter: (page) => /^\/(?:zh|en)\/(?:docs\/[^/]+\/)?$/.test(new URL(page).pathname),
+          }),
+        ]
+      : []),
   ],
 });

@@ -5,9 +5,8 @@ const targetLanguage = isEnglish ? 'zh-CN' : 'en';
 const label = isEnglish ? '切换到中文' : 'Switch to English';
 // The translated articles share their path after the fixed /zh/ or /en/ prefix.
 const translatedPath = Astro.url.pathname.replace(/^\/(?:zh|en)\//, `/${targetLocale}/`);
-const href = translatedPath === Astro.url.pathname
-  ? `/${targetLocale}/docs/overview/`
-  : translatedPath;
+const href =
+  translatedPath === Astro.url.pathname ? `/${targetLocale}/docs/overview/` : translatedPath;
 ---
 
 <a

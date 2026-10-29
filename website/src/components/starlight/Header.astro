@@ -1,9 +1,9 @@
 ---
-import LanguageSelect from './LanguageToggle.astro';
 import Search from '@astrojs/starlight/components/Search.astro';
-import ThemeSelect from './ThemeToggle.astro';
+import LanguageSelect from './LanguageToggle.astro';
 import SiteTitle from './SiteTitle.astro';
 import SocialIcons from './SocialIcons.astro';
+import ThemeSelect from './ThemeToggle.astro';
 
 const { locale, hasSidebar } = Astro.locals.starlightRoute;
 const language = locale === 'en' ? 'en' : 'zh';

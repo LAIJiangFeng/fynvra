@@ -24,9 +24,10 @@ const localeSelection = `
 `;
 
 export function entryRedirectScript(destination: 'home' | 'docs'): string {
-  const redirect = destination === 'home'
-    ? `window.location.replace('/' + locale + '/' + window.location.hash);`
-    : `
+  const redirect =
+    destination === 'home'
+      ? `window.location.replace('/' + locale + '/' + window.location.hash);`
+      : `
       var targets = ${JSON.stringify(legacyDocsTargets)};
       var anchor = '';
       try { anchor = decodeURIComponent(window.location.hash.slice(1)); } catch (_) {}

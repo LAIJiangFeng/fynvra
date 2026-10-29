@@ -31,8 +31,11 @@
   --fynvra-code-dim: #8a8a8a;
   --fynvra-shadow: 0 70px 130px -50px rgb(0 0 0 / 80%), 0 0 0 1px rgb(255 255 255 / 5%);
 
-  --sl-font: "Archivo", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", sans-serif;
-  --sl-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --sl-font:
+    "Archivo", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Source Han Sans SC", sans-serif;
+  --sl-font-mono:
+    "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --sl-nav-height: 64px;
   --sl-nav-pad-x: clamp(20px, 4vw, 40px);
   --sl-nav-pad-y: 0px;
@@ -222,7 +225,10 @@ body {
   background: transparent;
   color: var(--fynvra-ink-2);
   cursor: pointer;
-  transition: border-color 0.2s, background-color 0.2s, color 0.2s;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .fynvra-theme-toggle:hover,
@@ -342,7 +348,9 @@ body {
   color: var(--fynvra-ink-2);
   font-size: 15px;
   line-height: 1.4;
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
 
 .sidebar-content .top-level a:hover {
@@ -381,7 +389,9 @@ site-search button[data-open-modal] {
   background: var(--fynvra-surface);
   color: var(--fynvra-ink-3);
   font-size: 14px;
-  transition: border-color 0.18s, box-shadow 0.18s;
+  transition:
+    border-color 0.18s,
+    box-shadow 0.18s;
 }
 
 site-search button[data-open-modal] > svg {
@@ -456,7 +466,8 @@ site-search dialog::backdrop {
   background: var(--fynvra-surface);
 }
 
-#starlight__search :is(.pagefind-ui__result-title, .pagefind-ui__result-nested):is(:hover, :focus-within) {
+#starlight__search
+  :is(.pagefind-ui__result-title, .pagefind-ui__result-nested):is(:hover, :focus-within) {
   background: var(--fynvra-hover);
   outline-color: var(--fynvra-focus);
 }
@@ -563,7 +574,9 @@ site-search dialog::backdrop {
   font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  transition: border-color 0.15s, background-color 0.15s;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
 }
 
 .pagination-links a:hover {
@@ -594,7 +607,6 @@ site-search dialog::backdrop {
 @media screen and (min-width: 50rem) {
   :root[data-has-sidebar] body {
     height: 100vh;
-    height: 100dvh;
     overflow: hidden;
   }
 
@@ -605,7 +617,6 @@ site-search dialog::backdrop {
 
   [data-has-sidebar] .main-frame {
     height: calc(100vh - var(--sl-nav-height));
-    height: calc(100dvh - var(--sl-nav-height));
     margin-block-start: var(--sl-nav-height);
     padding-block-start: 0;
     overflow-y: auto;
@@ -613,6 +624,16 @@ site-search dialog::backdrop {
     scroll-padding-block-start: 24px;
     scrollbar-width: thin;
     scrollbar-color: var(--fynvra-line-2) transparent;
+  }
+
+  @supports (height: 100dvh) {
+    :root[data-has-sidebar] body {
+      height: 100dvh;
+    }
+
+    [data-has-sidebar] .main-frame {
+      height: calc(100dvh - var(--sl-nav-height));
+    }
   }
 
   site-search dialog {
