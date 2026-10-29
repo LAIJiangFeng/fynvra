@@ -287,6 +287,9 @@ export const en: MessagesShape<typeof zhCN> = {
     queuedImageOnly: '(images only)',
     sendNow: 'Send now ({chord})',
     removeQueued: 'Remove from queue',
+    recallQueued: 'Recall to edit',
+    recallQueuedDraftExists:
+      'Finish or clear the current draft before recalling a queued message.',
     replySuggestionHint: 'Reply suggestion: {suggestion}. Press Right Arrow to fill it in',
   },
   model: {

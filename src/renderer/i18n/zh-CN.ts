@@ -278,6 +278,8 @@ export const zhCN = {
     queuedImageOnly: '（仅图片）',
     sendNow: '立即发送（{chord}）',
     removeQueued: '从队列中移除',
+    recallQueued: '撤回编辑',
+    recallQueuedDraftExists: '请先处理输入框中的草稿，再撤回编辑',
     replySuggestionHint: '回复建议：{suggestion}。按右箭头填入输入框',
   },
   model: {
