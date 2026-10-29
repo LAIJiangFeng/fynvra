@@ -40,11 +40,38 @@ describe('preload bridge', () => {
       'updates',
       'usage',
       'window',
+      'workspaceUi',
       'workspaces',
     ]);
     const members = Object.values(api).flatMap(Object.keys);
     expect(members).not.toContain('invoke');
     expect(members).not.toContain('send');
+  });
+
+  it('workspace UI exposes typed persistence and strips Electron flush events', async () => {
+    expect(Object.keys(api.workspaceUi).sort()).toEqual([
+      'flushed',
+      'load',
+      'onFlush',
+      'save',
+      'selection',
+    ]);
+    await api.workspaceUi.selection('ws-1');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACE_UI_SELECTION, 'ws-1');
+    await api.workspaceUi.load('ws-1');
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACE_UI_LOAD, 'ws-1');
+    const callback = vi.fn();
+    const unsubscribe = api.workspaceUi.onFlush(callback);
+    const [channel, listener] = mocks.on.mock.calls.at(-1) ?? [];
+    expect(channel).toBe(IPC_CHANNELS.WORKSPACE_UI_FLUSH);
+    const request = { requestId: 'flush-1', mode: 'check' };
+    listener({ sender: {} }, request);
+    expect(callback).toHaveBeenCalledExactlyOnceWith(request);
+    unsubscribe();
+    expect(mocks.removeListener).toHaveBeenLastCalledWith(channel, listener);
+    const reply = { requestId: request.requestId, ok: false, dirty: true };
+    await api.workspaceUi.flushed(reply);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACE_UI_FLUSHED, reply);
   });
 
   it('network diagnostics expose only a draft and parameterless cancellation', async () => {

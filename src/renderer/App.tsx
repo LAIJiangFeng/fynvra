@@ -10,9 +10,9 @@ import { SettingsView } from '@/components/settings/SettingsView';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSessionsWorkspaceSync } from '@/hooks/useSessionsWorkspaceSync';
 import { KeybindingProvider } from '@/lib/keybindings';
-import { bindWorkspaceUiLifecycle, useWorkspaceTabsStore } from '@/stores/workspaceTabs';
 import { useSettingsStore } from '@/stores/settings';
 import { useUpdatesStore } from '@/stores/useUpdates';
+import { bindWorkspaceUiLifecycle, useWorkspaceTabsStore } from '@/stores/workspaceTabs';
 
 /** 应用壳：自绘标题栏 + 三栏（可收起的工作区 / 会话侧栏、主区域、可折叠右侧面板）。 */
 export function App() {

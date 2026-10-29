@@ -195,11 +195,11 @@ export const IPC_CHANNELS = {
   SESSIONS_FOCUS: 'sessions:focus',
 
   // --- workspace UI ---
-  WORKSPACE_UI_SELECTION: 'workspace-ui:selection',
-  WORKSPACE_UI_LOAD: 'workspace-ui:load',
-  WORKSPACE_UI_SAVE: 'workspace-ui:save',
-  WORKSPACE_UI_FLUSH: 'workspace-ui:flush',
-  WORKSPACE_UI_FLUSHED: 'workspace-ui:flushed',
+  WORKSPACE_UI_SELECTION: 'workspaceui:selection',
+  WORKSPACE_UI_LOAD: 'workspaceui:load',
+  WORKSPACE_UI_SAVE: 'workspaceui:save',
+  WORKSPACE_UI_FLUSH: 'workspaceui:flush',
+  WORKSPACE_UI_FLUSHED: 'workspaceui:flushed',
 
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */

@@ -17,7 +17,10 @@ export function getModelBrand(modelId: string | undefined): ModelBrand | undefin
   // Keep the model part of relay/provider paths; also accept common dotted namespaces
   // (including regional Bedrock IDs) and OpenAI's ft: prefix.
   const name = (modelId?.trim().split('/').at(-1) ?? '')
-    .replace(/^(?:(?:us|eu|apac|global)\.)?(?:anthropic|openai|xai|google|zai|z-ai|zhipuai)[.:]/i, '')
+    .replace(
+      /^(?:(?:us|eu|apac|global)\.)?(?:anthropic|openai|xai|google|zai|z-ai|zhipuai)[.:]/i,
+      ''
+    )
     .replace(/^ft:/i, '');
   return BRAND_PATTERNS.find(([, pattern]) => pattern.test(name))?.[0];
 }

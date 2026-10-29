@@ -26,9 +26,9 @@ import {
 import { readGitBranch } from '../services/sessions/branches';
 import { createWorkspaceService, type WorkspaceService } from '../services/workspaces';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { getSettingsFile } from './settings';
 import { closeWorkspaceTerminals } from './terminals';
 import { removeWorkspaceUi } from './workspaceUi';
-import { getSettingsFile } from './settings';
 
 let service: WorkspaceService | null = null;
 

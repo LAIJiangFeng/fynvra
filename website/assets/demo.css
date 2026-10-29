@@ -1436,7 +1436,6 @@
   }
 }
 
-
 /* 响应式：按窗口宽度收紧演示窗口本身；文档内嵌演示再用容器查询覆盖。 */
 
 /* 这些按窗口宽度的收紧只针对首页 hero 里的演示窗口；
@@ -1839,7 +1838,9 @@
   background: rgb(255 255 255 / 2%);
   color: var(--fd-soft);
   font-size: 11px;
-  transition: border-color 0.3s, background 0.3s;
+  transition:
+    border-color 0.3s,
+    background 0.3s;
 }
 
 #fd-scene-roles .fd-role-option.is-picked {
@@ -1958,7 +1959,9 @@
   border: 1px solid var(--fd-line);
   border-radius: 7px;
   background: rgb(255 255 255 / 2%);
-  transition: border-color 0.3s, background 0.3s;
+  transition:
+    border-color 0.3s,
+    background 0.3s;
 }
 
 #fd-scene-roles .fd-role-card + .fd-role-card {

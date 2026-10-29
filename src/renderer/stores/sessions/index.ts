@@ -3,13 +3,13 @@ import { getSessionsApi } from '../../lib/api/sessions';
 import { diffTabsStoreFor } from '../diffTabs';
 import { filesStoreFor } from '../files';
 import { useTerminalsStore } from '../terminals';
+import { useWorkspacesStore } from '../workspaces';
 import {
   ensureWorkspaceTabs,
   markWorkspaceInteraction,
   rememberWorkspaceSession,
   useWorkspaceTabsStore,
 } from '../workspaceTabs';
-import { useWorkspacesStore } from '../workspaces';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
 export type { ImageRejection, QueuedMessage, SessionsState } from './createSessionsStore';

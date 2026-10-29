@@ -328,7 +328,9 @@
 
     function shouldRun() {
       // 只在真正离屏、切走文档、页签隐藏或减少动画时停下；鼠标停在演示窗上不暂停。
-      return host.activeScene === api && host.inView && isShown() && !document.hidden && !motion.matches;
+      return (
+        host.activeScene === api && host.inView && isShown() && !document.hidden && !motion.matches
+      );
     }
 
     function clearAuto() {
@@ -656,7 +658,10 @@
       const track = sceneSwitch.getBoundingClientRect();
       const pill = pressed.getBoundingClientRect();
       const style = sceneSwitch.style;
-      style.setProperty('--fd-scene-pill-x', `${pill.left - track.left - sceneSwitch.clientLeft}px`);
+      style.setProperty(
+        '--fd-scene-pill-x',
+        `${pill.left - track.left - sceneSwitch.clientLeft}px`
+      );
       style.setProperty('--fd-scene-pill-y', `${pill.top - track.top - sceneSwitch.clientTop}px`);
       style.setProperty('--fd-scene-pill-w', `${pill.width}px`);
       style.setProperty('--fd-scene-pill-h', `${pill.height}px`);
