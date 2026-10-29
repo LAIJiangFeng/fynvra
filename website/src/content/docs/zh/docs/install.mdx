@@ -1,0 +1,69 @@
+---
+title: "安装与从源码启动"
+description: "优先用安装包。还没有发布安装包时，可以从源码运行。两种方式共用同一套本机数据规则，但开发版的数据目录和正式版分开。"
+sidebar:
+  label: "安装"
+  order: 2
+---
+
+<span id="install" />
+
+优先用安装包。还没有发布安装包时，可以从源码运行。两种方式共用同一套本机数据规则，但开发版的数据目录和正式版分开。
+
+<span id="install-download" />
+
+## 选择安装包
+
+安装包发布后从 [GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases) 下载。还没有 Release 时，按下面的步骤从源码运行。
+
+| 平台 | 安装包 | 更新 |
+| --- | --- | --- |
+| Windows x64 | NSIS `.exe` | 已接入自动更新 |
+| macOS Intel / Apple Silicon | `.dmg` / `.zip` | 签名公证后可自动更新；未签名包需手动覆盖安装 |
+| Linux | AppImage | 有构建配置，尚未纳入自动发布与更新 |
+
+<span id="install-macos" />
+
+## macOS 首次打开
+
+<aside class="docs-callout">
+
+**macOS**
+
+第一次安装先把应用从 DMG 拖进「应用程序」再打开。没有 Apple 凭证的包是临时签名，系统可能提示无法验证开发者。确认来源可信后，到「系统设置 → 隐私与安全性」里对本应用选择「仍要打开」。不需要关闭系统安全检查。
+
+</aside>
+
+<span id="install-source" />
+
+## 从源码运行
+
+需要 Node.js 22.19.0 或更高（推荐 22）、pnpm 10.26.2，以及 Git。
+
+```bash
+npm install --global pnpm@10.26.2
+git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+第一次运行要联网下载依赖和 Electron。开发版的数据目录是系统应用数据目录下的 `fynvra-dev`，和正式版分开。仓库里不需要 `.env`，模型密钥在设置界面里填写。
+
+<span id="install-check" />
+
+## 确认安装成功
+
+1. ### 启动应用
+
+   看到主窗口，左栏是「工作区」，中间是提示区，右栏是「文件 / 任务 / 改动」。
+
+2. ### 先准备一个模型服务
+
+   按 <kbd>Ctrl</kbd>+<kbd>,</kbd>（macOS 为 <kbd>⌘</kbd>+<kbd>,</kbd>）打开设置，在「模型服务」里添加并启用服务。没有可用服务时，新建会话的模型列表是空的。
+
+3. ### 确认 Git 可用
+
+   要用独立 Git worktree 派发，需要一个已有提交的 Git 仓库，以及本机 Git 用户名和邮箱。普通文件夹也能创建会话和派发 Worker，但 Worker 直接在目录里改，同一目录一次只派一个任务。Windows 上建议安装 Git for Windows；如果找不到 Bash，到「设置 → 通用」里指定 Windows 本地命令壳。
+
+> 开发版和正式安装版的数据分开。只有开发模式才认环境变量 `FYNVRA_USER_DATA_DIR`。

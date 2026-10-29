@@ -1,0 +1,106 @@
+---
+title: "First run: from a model to the first dispatch"
+description: "Five steps take you from “connect a model” to “attach a folder, create a session, send a request, and inspect the changes”. Each step names the actual control in the window."
+sidebar:
+  label: "Quick start"
+  order: 3
+---
+
+import DemoPrompt from "../../../../components/docs/DemoPrompt.astro";
+import CollaborationDemo from "../../../../components/docs/CollaborationDemo.astro";
+import WorkerModelsDemo from "../../../../components/docs/WorkerModelsDemo.astro";
+import RoleChatDemo from "../../../../components/docs/RoleChatDemo.astro";
+
+<span id="quickstart" />
+
+Five steps take you from “connect a model” to “attach a folder, create a session, send a request, and inspect the changes”. Each step names the actual control in the window.
+
+<span id="quickstart-provider" />
+
+## 1. Connect a provider
+
+Press <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>⌘</kbd>+<kbd>,</kbd> on macOS), open Settings, and choose Model providers. Click Add provider, pick a preset or a custom OpenAI-compatible endpoint, fill in the base URL and API key, fetch or type model ids, turn on Reasoning for models that should offer thinking levels, and save.
+
+Back in the main window, the model pill at the bottom-left of the composer confirms the provider is available. See [Providers](/en/docs/providers/) for every field.
+
+<span id="quickstart-workspace" />
+
+## 2. Attach a workspace
+
+Click **+** next to “Workspaces” in the left sidebar, or choose “Attach folder” in the empty state, then pick a Git repository (a plain folder works too). The workspace row shows its name and path; click the selected workspace again to expand its session list. To dispatch into separate Git worktrees, the repository must already have commits.
+
+Plain folders can also run sessions and dispatch workers, but they show “No git”; the worker edits the folder in place, no worktree is created, and only one task runs there at a time. Use a Git repository when you need parallel dispatch.
+
+<span id="quickstart-session" />
+
+## 3. Create a session and pick a role
+
+Expand the workspace and click **+** next to the “Sessions” heading, or use “New session” in the center. The dialog selects Orchestrator (marked with a crown) by default; choose Worker or a custom role if you want to work directly. Pick a model and an available thinking level, then click Create.
+
+The open session shows its status, role, and current branch in the header. The composer at the bottom is ready for your request.
+
+<span id="quickstart-first" />
+
+## 4. Send the first request
+
+Describe the goal in your own words and press <kbd>Enter</kbd> to send; use <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line. While the turn runs, the send button becomes Queue and a Stop button appears; messages and tool calls stream into the timeline.
+
+When the orchestrator dispatches, it reads code and splits the work, and the Tasks tab on the right gains a task count; open it to see task cards and progress. A direct conversation with a Worker or custom role has no dispatch step.
+
+<span id="quickstart-review" />
+
+## 5. Inspect what happened
+
+In the right panel’s Tasks tab, click a task card. Details show the brief, dependencies, attempts, messages, and worker output. When the task is In review or Completed and uses Git, click View changes to switch to the Changes tab with that dispatch’s diff.
+
+When it dispatches, the orchestrator reports review and merge results in the conversation. If the request is unclear, worker questions come back through the orchestrator; answer them in the composer.
+
+<span id="quickstart-examples" />
+
+## Three examples
+
+<span id="quickstart-example-dispatch" />
+
+### Example 1: dispatch several different tasks
+
+In a workspace attached to a Git repository, create a session and keep the default Orchestrator role, then send the text below.
+
+<DemoPrompt name="collab" locale="en" />
+
+The orchestrator reads code, splits the work into two tasks, and gives each one a worker. In a Git workspace they run in parallel on separate worktrees and two cards appear in the Tasks tab; when both finish it reports the review and merge results in the conversation. The worktree requirements are in the note below.
+
+<CollaborationDemo locale="en" />
+
+<span id="quickstart-example-models" />
+
+### Example 2: name a different model for each worker
+
+Still in the Orchestrator session, name the model for each task in the request itself. Replace the example names with the actual names or ids enabled under Settings → Model providers.
+
+<DemoPrompt name="model" locale="en" />
+
+The orchestrator starts each worker on the model you named for that task; models are set per dispatched task.
+
+<WorkerModelsDemo locale="en" />
+
+<span id="quickstart-example-role" />
+
+### Example 3: talk to a role directly
+
+First, under Settings → Roles click New, create a “Code reviewer” role with the Read-only tool policy, and save it; it applies to newly started sessions. Fynvra has only two built-in roles, Orchestrator and Worker, so a reviewer has to be created. See [Roles](/en/docs/roles/#roles-edit) for the fields.
+
+<DemoPrompt name="role-worker" locale="en" />
+
+<DemoPrompt name="role-review" locale="en" />
+
+Create a session with Worker first and send the first prompt. When that work is finished, create another session with Code reviewer and send the second prompt to check the result. The Worker session edits code and names the changed files; the reviewer session is read-only and returns a list of issues without touching files. A role is chosen when a session is created, so an existing session cannot switch roles in place — create another one. Direct conversations create no tasks, so there is no orchestrator dispatch, review, or merge, and no per-dispatch worktree or task cards.
+
+<RoleChatDemo locale="en" />
+
+<aside class="docs-callout docs-callout-warn">
+
+**Worktree dispatch requirements**
+
+To dispatch into separate Git worktrees, you need a Git repository that already has commits plus a local Git user name and email. Plain folders can still run sessions and dispatch workers, but a worker edits in place and only one task runs in that folder at a time. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.
+
+</aside>

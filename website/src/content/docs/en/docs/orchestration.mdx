@@ -1,0 +1,45 @@
+---
+title: "How the orchestrator splits, dispatches, and merges"
+description: "You talk only to the orchestrator. It reads code, splits work, gives each task its own worker, then reviews and either merges or sends the work back. Tasks and Changes are read-only views of that flow; control happens in the conversation."
+sidebar:
+  label: "Orchestration"
+  order: 8
+---
+
+<span id="orchestration" />
+
+You talk only to the orchestrator. It reads code, splits work, gives each task its own worker, then reviews and either merges or sends the work back. Tasks and Changes are read-only views of that flow; control happens in the conversation.
+
+<span id="orchestration-loop" />
+
+## One orchestration loop
+
+1. ### Split the work
+
+   The orchestrator reads just enough code to split the request into tasks with clear ownership, ideally parallel, and writes a brief each worker can follow alone. Dependencies between tasks are recorded in the dispatch.
+
+2. ### Dispatch
+
+   In a Git workspace, each task gets its own worker and Git worktree on `fynvra/<slug>`. By default that folder sits beside the repo as `<repo>-worktrees`; change the location under Settings → General. Plain folders create no worktree: the worker edits the attached folder in place, and only one task runs there at a time. Dispatch uses the default Worker role when none is named.
+
+3. ### Review
+
+   When a worker reports done, the orchestrator reads the diff and runs checks. A pass is merged with `merge --no-ff` and the worktree is cleaned up; otherwise the work is sent back, creating a new attempt.
+
+<span id="orchestration-conditions" />
+
+## Dispatch modes and default boundaries
+
+- **Git repository (worktree isolation)**: it already has a commit, and a local Git user name and email are configured. Each task runs in its own worktree. On Windows, Git for Windows is recommended; if Bash is missing, set the local agent shell under Settings → General.
+- **Plain folder (in place)**: Git is not required; the worker edits the attached folder directly. Only one task runs there at a time, and there is no worktree diff.
+- **Default Worker**: dispatch uses Worker when no role is named; Worker defaults to All tools + Auto-accept edits.
+- **The orchestrator does not edit code**: its tool policy is Orchestration — read files, read-only Git, and dispatch/review/merge tools. Even with Full approval it cannot write files or run arbitrary commands.
+- **Task status**: Not started → In progress → In review → Completed; work that cannot continue becomes failed or abandoned. Changes are grouped into uncommitted and committed in the task details.
+
+<span id="orchestration-control" />
+
+## How you steer the flow
+
+Use the orchestrator’s composer to add requirements, answer questions, request a retry, reject, or merge. The task drawer has no merge or reject buttons: it shows the brief, dependencies, attempts, messages, worker output, and diff; the orchestrator executes the decision.
+
+Tool calls that need your confirmation appear in the approval bar or the top banner. The approval mode decides whether ordinary operations ask step by step. Protected operations still need separate confirmation in every mode; see [Approvals](/en/docs/approval/).

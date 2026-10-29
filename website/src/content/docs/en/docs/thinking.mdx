@@ -1,0 +1,39 @@
+---
+title: "Choose a thinking level"
+description: "The thinking level controls how deeply a model reasons before answering. It appears only when the model supports reasoning and reasoning is enabled for it; different models may offer different levels."
+sidebar:
+  label: "Thinking"
+  order: 12
+---
+
+<span id="thinking" />
+
+The thinking level controls how deeply a model reasons before answering. It appears only when the model supports reasoning and reasoning is enabled for it; different models may offer different levels.
+
+<span id="thinking-set" />
+
+## Where to choose it
+
+Choose the same setting in three places: at the bottom of the composer’s model picker, below the model in the new-session dialog, and under Role editor → Thinking. Only levels supported by the current model are listed; if Reasoning is off for the provider/model, the choice does not appear.
+
+A change in a session applies to the next turn. Models cannot be switched while running, and the thinking controls are disabled with the model picker.
+
+<span id="thinking-levels" />
+
+## What the levels mean
+
+| Level | Meaning |
+| --- | --- |
+| off | No thinking |
+| minimal | Barely any |
+| low | Light |
+| medium | Balanced; enough for everyday edits |
+| high | Deep |
+| xhigh | Deeper |
+| max | Maximum. Slower, and uses more of your quota |
+
+<span id="thinking-source" />
+
+## When levels are unknown
+
+If a model has no level catalog, the UI marks the choice as Inferred or Fallback: inferred means it was estimated from a model in the same catalog, fallback means the model was not in the catalog and a generic set was used. Hover the badge for the exact basis.

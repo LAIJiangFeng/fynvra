@@ -1,0 +1,23 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+
+const route = Astro.locals.starlightRoute;
+const locale = route.locale === 'en' ? 'en' : 'zh';
+const hasDemos = route.id === `${locale}/docs/quickstart`;
+---
+
+<DefaultHead />
+<script is:inline define:vars={{ locale }}>
+  document.documentElement.dataset.locale = locale;
+  try {
+    localStorage.setItem('fynvra-site-locale', locale);
+  } catch {
+    // The route still determines the language when storage is unavailable.
+  }
+</script>
+{hasDemos && (
+  <>
+    <link rel="stylesheet" href="/assets/demo.css" />
+    <script is:inline src="/assets/home.js" defer></script>
+  </>
+)}

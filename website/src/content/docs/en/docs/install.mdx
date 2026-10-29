@@ -1,0 +1,69 @@
+---
+title: "Install and run from source"
+description: "Use an installer when one is available. If not, run from source. Both follow the same local-data rules, but dev builds keep a separate data directory."
+sidebar:
+  label: "Install"
+  order: 2
+---
+
+<span id="install" />
+
+Use an installer when one is available. If not, run from source. Both follow the same local-data rules, but dev builds keep a separate data directory.
+
+<span id="install-download" />
+
+## Choose an installer
+
+When installers are published, download them from [GitHub Releases](https://github.com/LAIJiangFeng/fynvra/releases). If none is available yet, run from source below.
+
+| Platform | Installer | Updates |
+| --- | --- | --- |
+| Windows x64 | NSIS `.exe` | Auto-update wired up |
+| macOS Intel / Apple Silicon | `.dmg` / `.zip` | Auto-update after signing and notarization; unsigned builds are manual |
+| Linux | AppImage | Build config exists; not in automated releases yet |
+
+<span id="install-macos" />
+
+## First launch on macOS
+
+<aside class="docs-callout">
+
+**macOS**
+
+On first install, drag the app from the DMG into Applications before launching. Builds without Apple credentials are ad-hoc signed, so macOS may say the developer cannot be verified. After you trust the source, choose Open Anyway for this app under System Settings → Privacy &amp; Security. You do not need to turn system security checks off.
+
+</aside>
+
+<span id="install-source" />
+
+## Run from source
+
+You need Node.js 22.19.0 or later (22 recommended), pnpm 10.26.2, and Git.
+
+```bash
+npm install --global pnpm@10.26.2
+git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+The first run needs network access to download dependencies and Electron. Dev builds store data in `fynvra-dev` under the system app-data directory, separate from release builds. The repo does not need a `.env`; add model keys in Settings.
+
+<span id="install-check" />
+
+## Confirm the install
+
+1. ### Launch the app
+
+   You should see the main window with Workspaces on the left, a prompt in the center, and Files / Tasks / Changes on the right.
+
+2. ### Add a provider first
+
+   Press <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>⌘</kbd>+<kbd>,</kbd> on macOS), open Model providers, and add an enabled provider. Without one, the new-session model list is empty.
+
+3. ### Check Git
+
+   To dispatch into separate Git worktrees, you need a Git repository that already has commits plus a local Git user name and email. Plain folders can also run sessions and dispatch workers, but a worker edits the folder in place and only one task runs there at a time. On Windows, Git for Windows is recommended; if Bash cannot be found, set the local agent shell under Settings → General.
+
+> Dev and installed builds keep separate data. `FYNVRA_USER_DATA_DIR` is honored only in dev mode.
