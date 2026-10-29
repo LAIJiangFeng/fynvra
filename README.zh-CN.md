@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/LAIJiangFeng/fynvra/releases"><strong>下载 Fynvra</strong></a> ·
-  <a href="#快速上手">快速上手</a> ·
+  <a href="https://jfengl.cn/zh/docs/quickstart/">快速上手</a> ·
   <a href="https://jfengl.cn/">官网首页</a> ·
   <a href="https://jfengl.cn/zh/docs/">官方文档</a>
 </p>
