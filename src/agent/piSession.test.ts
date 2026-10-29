@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Message } from '@earendil-works/pi-ai';
+import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import type {
   ApprovalGate,
   ApprovalPolicyHooks,
@@ -30,7 +31,17 @@ afterEach(() => {
  * 假的 pi AgentSession：只有工厂在打开时会碰的 agent.convertToLlm（原样返回），其余方法按用例给。
  */
 function fakePiSession<T extends object>(methods: T = {} as T) {
-  return { agent: { convertToLlm: async (messages: Message[]) => messages }, ...methods };
+  return {
+    agent: { convertToLlm: async (messages: Message[]) => messages },
+    sessionManager: SessionManager.inMemory(),
+    getContextUsage: vi.fn(() => undefined),
+    settingsManager: SettingsManager.inMemory(),
+    subscribe: () => () => {},
+    abortCompaction: vi.fn(),
+    clearQueue: vi.fn(),
+    abort: vi.fn(async () => {}),
+    ...methods,
+  };
 }
 
 describe('createPiSessionFactory', () => {
@@ -307,7 +318,11 @@ describe('createPiSessionFactory prompt', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-prompt-'));
     dirs.push(dir);
     const piSession = fakePiSession({
-      prompt: vi.fn(async (_text: string, _options?: unknown) => {}),
+      prompt: vi.fn(
+        async (_text: string, options?: { preflightResult?: (result: string) => void }) => {
+          options?.preflightResult?.('handled');
+        }
+      ),
     });
     mocks.createRoleSession.mockResolvedValue({
       session: piSession,
@@ -353,7 +368,7 @@ describe('createPiSessionFactory prompt', () => {
     await session.prompt('', [screenshot]);
     await session.prompt('text only');
     await session.prompt('an empty list is no images', []);
-    expect(piSession.prompt.mock.calls).toEqual([
+    expect(piSession.prompt.mock.calls).toMatchObject([
       [
         'What is wrong here?',
         {

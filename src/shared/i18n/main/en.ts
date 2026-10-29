@@ -95,6 +95,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   },
   agent: {
     workerUnavailable: 'Agent worker not ready (restarting or stopped); try again shortly',
+    compactionRecoveryRequired:
+      'Context recovery is required. Retry compaction to resume; your pending input is retained.',
+    noCompactionRecovery: 'This session has no pending compaction recovery.',
     switchWhileRunning: 'Session is running; switch models after this turn',
     roleNotFound: 'Role not found: {id}',
     startFailed: "Couldn't start the session: {error}",

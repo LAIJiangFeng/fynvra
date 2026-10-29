@@ -5,6 +5,9 @@ import type { FynvraSessionEvent, FynvraSessionEventBody } from './index';
 describe('session events', () => {
   it('变体与 ARCHITECTURE §5 的事件列表逐项一致', () => {
     expectTypeOf<FynvraSessionEventBody['type']>().toEqualTypeOf<
+      | 'context_runtime'
+      | 'compaction'
+      | 'retry'
       | 'text_delta'
       | 'thinking_delta'
       | 'tool_start'

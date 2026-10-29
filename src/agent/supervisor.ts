@@ -50,6 +50,7 @@ export interface SupervisedSession {
   setModel(spec: ResolvedModelSpec): Promise<void>;
   /** 换审批档位：下一次工具调用起生效；不自动答复待审批请求。 */
   setApprovalMode(mode: ApprovalMode): void;
+  retryCompaction?(): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -155,6 +156,9 @@ export class SessionSupervisor {
         return;
       case 'steer':
         void this.#run(command.identity, command.text, 'steer', command.images);
+        return;
+      case 'retry-compaction':
+        void this.#retryCompaction(command.identity, command.requestId);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -353,6 +357,16 @@ export class SessionSupervisor {
 
   #onEvent(managed: ManagedSession, event: FynvraSessionEvent): void {
     if (managed.closed) return;
+    // Held inputs may start another SDK turn after recovery without another IPC prompt.
+    if (
+      (event.type === 'message_end' && event.role === 'user') ||
+      (event.type === 'compaction' && ['running', 'backoff'].includes(event.state.phase))
+    ) {
+      if (managed.status === 'idle' || managed.status === 'error') {
+        managed.failed = false;
+        this.#setStatus(managed, 'running');
+      }
+    }
     if (event.type === 'error') managed.failed = true;
     if (event.type === 'agent_settled') {
       managed.approvalEpoch += 1;
@@ -569,6 +583,45 @@ export class SessionSupervisor {
       result = { ok: false, error: errorMessage(error) };
     }
     this.#post({ type: 'models-described', requestId, result });
+  }
+
+  async #retryCompaction(identity: SessionIdentity, requestId: string): Promise<void> {
+    const finish = (error?: string) =>
+      this.#post({
+        type: 'compaction-recovery-result',
+        identity,
+        requestId,
+        result: error ? { ok: false, error } : { ok: true },
+      });
+    const managed = this.#current(identity);
+    if (!managed) {
+      finish('The session is not loaded.');
+      return;
+    }
+    const epoch = managed.approvalEpoch;
+    const session = await managed.opening;
+    if (!session || managed.closed || managed.approvalEpoch !== epoch) {
+      finish('Compaction recovery was cancelled.');
+      return;
+    }
+    if (!session.retryCompaction || !session.isIdle()) {
+      finish('The session is not ready for compaction recovery.');
+      return;
+    }
+    this.#cancelSuggestions(identity.sessionId);
+    managed.failed = false;
+    this.#setStatus(managed, 'running');
+    let failure: string | undefined;
+    try {
+      // The restored session is authoritative: no checkpoint means no manual compaction.
+      await session.retryCompaction();
+    } catch (error) {
+      failure = errorMessage(error);
+      managed.failed = true;
+      managed.events?.emit({ type: 'error', source: 'compaction', message: failure });
+    }
+    this.#settleIfIdle(managed, session);
+    finish(failure);
   }
 
   async #abort(identity: SessionIdentity): Promise<void> {

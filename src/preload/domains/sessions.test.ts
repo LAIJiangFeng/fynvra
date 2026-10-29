@@ -16,6 +16,22 @@ function fakeIpc() {
 }
 
 describe('createSessionsApi', () => {
+  it('preserves the cold recovery hint and zero read watermark without inventing runtime data', async () => {
+    const { ipc, invoke } = fakeIpc();
+    const response = {
+      ok: true,
+      messages: [],
+      contextRecovery: { recoveryRequired: true },
+      contextRuntimeSeq: 0,
+    };
+    invoke.mockResolvedValueOnce(response);
+    const result = await createSessionsApi(ipc).history('s-1');
+    expect(result).toEqual(response);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.contextRecovery?.recoveryRequired).toBe(true);
+    expect(result.contextRuntime).toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.SESSIONS_HISTORY, 's-1');
+  });
   it('maps every method to its channel and passes only ids, text and pasted images', async () => {
     const { ipc, invoke } = fakeIpc();
     const api = createSessionsApi(ipc);
@@ -29,6 +45,7 @@ describe('createSessionsApi', () => {
       images: [{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }],
     });
     await api.steer({ sessionId: 's-1', text: 'also check docs' });
+    await api.retryCompaction('s-1');
     await api.abort('s-1');
     await api.history('s-1');
     await api.respondApproval({ sessionId: 's-1', requestId: 'r-1', decision: 'allow' });
@@ -58,6 +75,7 @@ describe('createSessionsApi', () => {
         },
       ],
       [IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: 'also check docs' }],
+      [IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, 's-1'],
       [IPC_CHANNELS.SESSIONS_ABORT, 's-1'],
       [IPC_CHANNELS.SESSIONS_HISTORY, 's-1'],
       [

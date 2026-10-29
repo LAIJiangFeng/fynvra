@@ -1,6 +1,7 @@
 import {
   APPROVAL_MODES,
   type ApprovalMode,
+  type ContextRuntimeSnapshot,
   type FynvraSessionEvent,
   type ThinkingLevel,
 } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
@@ -8,6 +9,10 @@ import { asRecord } from '../guards';
 import type { ProviderApi } from './llm';
 
 export type SessionStatus = 'idle' | 'running' | 'waiting-approval' | 'error';
+/** Read-only hint from the active jsonl branch; does not describe a loaded engine. */
+export interface ContextRecoveryHint {
+  recoveryRequired: boolean;
+}
 /**
  * 会话用的模型：「设置 → 模型服务」里的服务 id 与模型 id（只存 id 引用），加思考档位与 Fast。
  * 档位缺省时 worker 依次取角色的 model.thinking、模型的默认档位（{@link pickThinkingLevel}）。
@@ -29,6 +34,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   dispatchId?: string;
   status: SessionStatus;
+  /** Present only while loaded. Compare contextRuntimeSeq with live event seq before applying. */
+  contextRuntime?: ContextRuntimeSnapshot;
+  contextRuntimeSeq?: number;
   createdAt: number;
   updatedAt: number;
   model?: SessionModelRef;
