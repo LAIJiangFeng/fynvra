@@ -1,0 +1,20 @@
+---
+import DefaultSocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+
+const isEnglish = Astro.locals.starlightRoute.locale === 'en';
+---
+
+<DefaultSocialIcons />
+<a class="download" href="https://github.com/LAIJiangFeng/fynvra/releases">
+  {isEnglish ? 'Download' : '下载'}
+</a>
+
+<style>
+  .download {
+    color: var(--sl-color-text-accent);
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    text-underline-offset: 0.2em;
+    white-space: nowrap;
+  }
+</style>

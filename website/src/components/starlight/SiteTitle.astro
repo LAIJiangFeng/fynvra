@@ -1,0 +1,31 @@
+---
+const locale = Astro.locals.starlightRoute.locale === 'en' ? 'en' : 'zh';
+const homeLabel = locale === 'en' ? 'Product home' : '产品首页';
+---
+
+<a class="site-title" href={`/${locale}/`} aria-label={`Fynvra — ${homeLabel}`}>
+  <img src="/assets/favicon.svg" width="28" height="28" alt="" />
+  <span translate="no">Fynvra</span>
+  <span class="home-label">{homeLabel}</span>
+</a>
+
+<style>
+  .site-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--sl-color-text-accent);
+    font-size: var(--sl-text-h4);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .home-label {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-xs);
+    font-weight: 400;
+  }
+  @media (max-width: 30rem) {
+    .home-label { display: none; }
+  }
+</style>
