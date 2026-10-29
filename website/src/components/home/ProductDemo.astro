@@ -1,0 +1,69 @@
+---
+import type { Locale } from '../../content/home/copy';
+import CollaborationScene from './CollaborationScene.astro';
+import ModelScene from './ModelScene.astro';
+import QueueScene from './QueueScene.astro';
+import RolesScene from './RolesScene.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<figure class="showcase fd-showcase rise" style="--i: 3" data-demo="collab" aria-label={locale === 'zh' ? '界面演示' : 'Interface demo'}>
+  <div class="fd-scene-switch-row">
+    <fieldset class="fd-scene-switch" aria-label={locale === 'zh' ? '演示场景' : 'Demo scene'}>
+      <button class="fd-scene-btn" type="button" data-scene-btn="collab" aria-pressed="true" aria-controls="fd-scene-collab">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+        <span class="fd-scene-label-long"><span data-l={locale}>{locale === 'zh' ? "任务协作" : "Task collaboration"}</span></span>
+        <span class="fd-scene-label-short"><span data-l={locale}>{locale === 'zh' ? "协作" : "Tasks"}</span></span>
+      </button>
+      <button class="fd-scene-btn" type="button" data-scene-btn="model" aria-pressed="false" aria-controls="fd-scene-model">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg>
+        <span class="fd-scene-label-long"><span data-l={locale}>{locale === 'zh' ? "指定 Worker 模型" : "Assign worker models"}</span></span>
+        <span class="fd-scene-label-short"><span data-l={locale}>{locale === 'zh' ? "模型" : "Models"}</span></span>
+      </button>
+      <button class="fd-scene-btn" type="button" data-scene-btn="queue" aria-pressed="false" aria-controls="fd-scene-queue">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 11h8M4 17h8" /><path d="M17 12v6M14 15l3 3 3-3" /></svg>
+        <span class="fd-scene-label-long"><span data-l={locale}>{locale === 'zh' ? "输入排队" : "Message queue"}</span></span>
+        <span class="fd-scene-label-short"><span data-l={locale}>{locale === 'zh' ? "排队" : "Queue"}</span></span>
+      </button>
+      <button class="fd-scene-btn" type="button" data-scene-btn="roles" aria-pressed="false" aria-controls="fd-scene-roles">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><circle cx="10" cy="11" r="1.8" /><path d="M14 15h3.5" /></svg>
+        <span class="fd-scene-label-long"><span data-l={locale}>{locale === 'zh' ? "角色对话" : "Role chat"}</span></span>
+        <span class="fd-scene-label-short"><span data-l={locale}>{locale === 'zh' ? "角色" : "Roles"}</span></span>
+      </button>
+    </fieldset>
+  </div>
+
+  <div class="fd-app" data-demo-app>
+    <div class="fd-titlebar">
+      <div class="fd-title-left">
+        <span class="fd-tb-icon" aria-hidden="true">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 9l-3 3 3 3" /></svg>
+        </span>
+        <span class="fd-brand">Fynvra</span><span class="fd-slash">/</span><span class="fd-workspace-name">fynvra</span>
+      </div>
+      <div class="fd-title-right" aria-hidden="true">
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.6 1 .3.3.68.44 1.1.4H21v4h-.09a1.7 1.7 0 0 0-1.51.6Z" /></svg></span>
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" /></svg></span>
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16M10 9l-3 3 3 3" /></svg></span>
+        <span class="fd-window-controls">
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg></span>
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg></span>
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></span>
+        </span>
+      </div>
+    </div>
+
+    <CollaborationScene locale={locale} />
+
+    <ModelScene locale={locale} />
+
+    <QueueScene locale={locale} />
+
+    <RolesScene locale={locale} />
+  </div>
+</figure>
