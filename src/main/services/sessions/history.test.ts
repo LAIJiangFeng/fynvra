@@ -7,7 +7,14 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { FynvraSessionEvent } from '@fynvra/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPiSessionFactory } from '../../../agent/piSession';
-import { HISTORY_TOOL_OUTPUT_CHARS, projectHistory, readHistory, sessionFilePath } from './history';
+import {
+  HISTORY_TOOL_OUTPUT_CHARS,
+  projectHistory,
+  projectHistoryProjection,
+  readHistory,
+  readHistoryProjection,
+  sessionFilePath,
+} from './history';
 
 // pi 1.4.0 jsonl 的条目形状（由真实会话写出的文件整理而来）
 const header = {
@@ -258,6 +265,59 @@ describe('projectHistory', () => {
   });
 });
 
+describe('history recovery hint', () => {
+  const checkpoint = (id: string, parentId: string, blocked: unknown, pending: unknown = []) => ({
+    type: 'custom',
+    id,
+    parentId,
+    customType: 'fynvra-context-recovery',
+    data: { blocked, pending, effectiveStrategy: 'must not expose engine information' },
+  });
+  it('uses only the current branch and exposes just the recovery boolean', () => {
+    const text = jsonl(
+      header,
+      entry('root', user('visible input'), null),
+      checkpoint('active', 'root', true, [{ text: 'private held input' }]),
+      checkpoint('other-branch', 'root', false),
+      entry('leaf', assistant([{ type: 'text', text: 'current branch' }]), 'active')
+    );
+    const projected = projectHistoryProjection(text, 's');
+    expect(projected.contextRecovery).toEqual({ recoveryRequired: true });
+    expect(projected.messages.map((message) => message.text)).toEqual([
+      'visible input',
+      'current branch',
+    ]);
+    expect(JSON.stringify(projected)).not.toContain('private held input');
+    expect(JSON.stringify(projected)).not.toContain('effectiveStrategy');
+  });
+  it('does not inherit a checkpoint from another branch', () => {
+    const text = jsonl(
+      header,
+      entry('root', user('input'), null),
+      checkpoint('abandoned', 'root', true),
+      entry('leaf', assistant([{ type: 'text', text: 'ordinary conversation' }]), 'root')
+    );
+    expect(projectHistoryProjection(text, 's').contextRecovery).toBeUndefined();
+  });
+  it('uses the last valid checkpoint and reports false after recovery completes', () => {
+    const text = jsonl(
+      header,
+      entry('root', user('input'), null),
+      checkpoint('blocked', 'root', true),
+      checkpoint('completed', 'blocked', false),
+      checkpoint('invalid-boolean', 'completed', 'true'),
+      checkpoint('invalid-pending', 'invalid-boolean', true, null)
+    );
+    expect(projectHistoryProjection(text, 's').contextRecovery).toEqual({
+      recoveryRequired: false,
+    });
+    expect(
+      projectHistoryProjection(jsonl(header, entry('ordinary', user('input'), null)), 's')
+        .contextRecovery
+    ).toBeUndefined();
+  });
+});
+
 describe('readHistory', () => {
   let tmp = '';
 
@@ -273,6 +333,7 @@ describe('readHistory', () => {
     const file = sessionFilePath(join(tmp, 'agent'), 'session-9');
     expect(file).toBe(join(tmp, 'agent', 'sessions', 'session-9.jsonl'));
     await expect(readHistory(file, 'session-9')).resolves.toEqual([]);
+    await expect(readHistoryProjection(file, 'session-9')).resolves.toEqual({ messages: [] });
   });
 
   it('projects a jsonl written by a real pi session through the worker adapter', async () => {

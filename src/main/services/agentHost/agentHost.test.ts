@@ -24,6 +24,7 @@ import { createFakeExec, createFakeRoles } from '../orchestration/testing';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
 import { createModelResolver, runtimeProviderId } from '../providers/resolveModel';
 import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/branches';
+import * as historyProjection from '../sessions/history';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
@@ -51,6 +52,120 @@ describe('context runtime snapshots and recovery', () => {
     expect(env.sent('retry-compaction')).toHaveLength(0);
     expect(env.host.get(session.id)).toMatchObject({ status: 'idle' });
     expect(env.host.get(session.id)?.contextRuntime).toBeUndefined();
+  });
+
+  it('prefers new live runtime over a delayed cold checkpoint read', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const disk = Promise.withResolvers<historyProjection.HistoryProjection>();
+    const read = vi
+      .spyOn(historyProjection, 'readHistoryProjection')
+      .mockReturnValueOnce(disk.promise);
+    try {
+      const response = env.host.history(session.id);
+      await env.host.prompt(session.id, 'new live input');
+      const snapshot = {
+        configuredStrategy: 'native',
+        effectiveStrategy: 'native',
+        compactionTimeoutMs: 600000,
+        context: { tokens: null, contextWindow: 100000, source: 'unknown' },
+        recoveryRequired: false,
+        pendingPromptCount: 0,
+      } as const;
+      env.worker().emit({
+        type: 'session-event',
+        identity: { sessionId: session.id, generation: 1 },
+        seq: 1,
+        event: { type: 'context_runtime', snapshot, seq: 1 },
+      });
+      disk.resolve(
+        historyProjection.projectHistoryProjection(
+          JSON.stringify({
+            type: 'custom',
+            id: 'checkpoint',
+            parentId: null,
+            customType: 'fynvra-context-recovery',
+            data: { blocked: true, pending: [] },
+          }),
+          session.id
+        )
+      );
+      const result = await response;
+      expect(result).toMatchObject({ ok: true, contextRuntime: snapshot, contextRuntimeSeq: 1 });
+      expect(result).not.toHaveProperty('contextRecovery');
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('keeps the pre-read watermark and drops the cold hint when newer live facts arrive without a runtime snapshot', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const disk = Promise.withResolvers<historyProjection.HistoryProjection>();
+    const read = vi
+      .spyOn(historyProjection, 'readHistoryProjection')
+      .mockReturnValueOnce(disk.promise);
+    try {
+      const response = env.host.history(session.id);
+      await env.host.prompt(session.id, 'new attempt');
+      env.worker().emit({
+        type: 'session-error',
+        identity: { sessionId: session.id, generation: 1 },
+        fatal: true,
+        error: 'new loading failure',
+      });
+      expect(env.events(session.id).at(-1)?.seq).toBeGreaterThan(0);
+      disk.resolve(
+        historyProjection.projectHistoryProjection(
+          JSON.stringify({
+            type: 'custom',
+            id: 'checkpoint',
+            parentId: null,
+            customType: 'fynvra-context-recovery',
+            data: { blocked: false, pending: [] },
+          }),
+          session.id
+        )
+      );
+      expect(await response).toEqual({ ok: true, messages: [], contextRuntimeSeq: 0 });
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('does not advertise a disk recovery hint while an explicit recovery is still loading', async () => {
+    const resources = Promise.withResolvers<{
+      skills: string[];
+      mcpServers: [];
+      warnings: string[];
+    }>();
+    const env = setup({ resolveResources: () => resources.promise });
+    const session = await createSession(env);
+    mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
+    writeFileSync(
+      sessionFilePath(join(env.dir, 'agent'), session.id),
+      JSON.stringify({
+        type: 'custom',
+        id: 'checkpoint',
+        parentId: null,
+        customType: 'fynvra-context-recovery',
+        data: { blocked: true, pending: [] },
+      })
+    );
+    expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
+    expect(await env.host.history(session.id)).toEqual({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 0,
+    });
+    await env.host.abort(session.id);
+    resources.resolve({ skills: [], mcpServers: [], warnings: [] });
+    await flush();
+    expect(await env.host.history(session.id)).toMatchObject({
+      ok: true,
+      contextRuntimeSeq: 0,
+      contextRecovery: { recoveryRequired: true },
+    });
   });
 
   it('holds the recovery mutex until the matching worker result, even across intermediate idle status', async () => {
@@ -1289,7 +1404,11 @@ describe('createAgentHost sessions', () => {
       { type: 'abort', identity: { sessionId: session.id, generation: 1 } },
     ]);
 
-    expect(await env.host.history(session.id)).toEqual({ ok: true, messages: [] });
+    expect(await env.host.history(session.id)).toEqual({
+      ok: true,
+      messages: [],
+      contextRuntimeSeq: 0,
+    });
     const file = sessionFilePath(join(env.dir, 'agent'), session.id);
     mkdirSync(join(env.dir, 'agent', 'sessions'), { recursive: true });
     writeFileSync(

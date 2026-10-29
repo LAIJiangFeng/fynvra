@@ -46,39 +46,41 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
     skillIds: [],
     mcpServerIds: [],
   };
-  const host = createAgentHost({
-    agentDir,
-    store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
-    workspaces: {
-      get: () => ({ id: 'ws1', name: 'repo', repoPath: dir, vcs: 'git', defaultBranch: 'main' }),
-    },
-    roles: { get: async () => role, list: async () => [role] },
-    models: {
-      resolve: async () => ({
-        ok: true,
-        model: { providerId: 'recovery-test', api: faux.api, modelId: 'model' },
-        ref: { providerId: 'recovery-test', modelId: 'model' },
-      }),
-    },
-    fork: () => {
-      class Worker extends InMemoryWorker {
-        override postMessage(raw: unknown) {
-          const command = parseAgentCommand(raw);
-          if (command) commands.push(command);
-          super.postMessage(raw);
+  const createHost = () =>
+    createAgentHost({
+      agentDir,
+      store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
+      workspaces: {
+        get: () => ({ id: 'ws1', name: 'repo', repoPath: dir, vcs: 'git', defaultBranch: 'main' }),
+      },
+      roles: { get: async () => role, list: async () => [role] },
+      models: {
+        resolve: async () => ({
+          ok: true,
+          model: { providerId: 'recovery-test', api: faux.api, modelId: 'model' },
+          ref: { providerId: 'recovery-test', modelId: 'model' },
+        }),
+      },
+      fork: () => {
+        class Worker extends InMemoryWorker {
+          override postMessage(raw: unknown) {
+            const command = parseAgentCommand(raw);
+            if (command) commands.push(command);
+            super.postMessage(raw);
+          }
         }
-      }
-      const worker = new Worker(async (input) => {
-        await options.beforeOpen?.();
-        return open(input);
-      });
-      workers.push(worker);
-      return worker;
-    },
-    broadcast: () => {},
-    log: () => {},
-    workerOptions: { maxRestarts: 0 },
-  });
+        const worker = new Worker(async (input) => {
+          await options.beforeOpen?.();
+          return open(input);
+        });
+        workers.push(worker);
+        return worker;
+      },
+      broadcast: () => {},
+      log: () => {},
+      workerOptions: { maxRestarts: 0 },
+    });
+  let host = createHost();
   cleanup.push(async () => {
     await host.shutdown(1000);
     await Promise.all(workers.map((worker) => worker.supervisor.shutdown()));
@@ -125,8 +127,62 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
     faux.setResponses(
       Array.from({ length: 5 }, () => fauxAssistantMessage('valid summary or answer'))
     );
-  return { host, id, file, faux, workers, commands, events, recovered, users, validResponses };
+  const restartMain = async () => {
+    await host.shutdown(1000);
+    host = createHost();
+    host.observe({ event: (event) => events.push(event) });
+    host.start();
+    return host;
+  };
+  return {
+    get host() {
+      return host;
+    },
+    id,
+    file,
+    faux,
+    workers,
+    commands,
+    events,
+    recovered,
+    users,
+    validResponses,
+    restartMain,
+  };
 }
+
+it('discovers a persistent checkpoint after a complete Main restart and recovers by id without any live snapshot', async () => {
+  const env = await setup();
+  await env.restartMain();
+  expect(env.host.get(env.id)?.contextRuntime).toBeUndefined();
+  expect(env.host.list('ws1')[0]?.contextRuntime).toBeUndefined();
+  const original = await readFile(env.file, 'utf8');
+  const history = await env.host.history(env.id);
+  if (!history.ok) throw new Error(history.error);
+  expect(history.contextRecovery).toEqual({ recoveryRequired: true });
+  expect(history.contextRuntimeSeq).toBe(0);
+  expect(history.contextRuntime).toBeUndefined();
+  expect(history.messages.some((message) => message.text === 'held original input')).toBe(false);
+  expect(await readFile(env.file, 'utf8')).toBe(original);
+  expect(env.faux.state.callCount).toBe(0);
+  expect(env.commands.some((command) => command.type === 'spawn-session')).toBe(false);
+  env.validResponses();
+  expect(await env.host.retryCompaction(env.id)).toEqual({ ok: true });
+  await env.recovered();
+  const users = await env.users();
+  expect(users.filter((text) => text === 'already written input')).toHaveLength(1);
+  expect(users.filter((text) => text === 'held original input')).toHaveLength(1);
+  expect(env.commands.filter((command) => command.type === 'prompt')).toHaveLength(0);
+  const calls = env.faux.state.callCount;
+  await env.restartMain();
+  expect(await env.host.history(env.id)).toMatchObject({
+    ok: true,
+    contextRecovery: { recoveryRequired: false },
+    contextRuntimeSeq: 0,
+  });
+  expect(env.host.get(env.id)?.contextRuntime).toBeUndefined();
+  expect(env.faux.state.callCount).toBe(calls);
+});
 
 it('reloads the original checkpoint after worker exit using only explicit recovery, without resending either input', async () => {
   const env = await setup();
@@ -172,6 +228,8 @@ it('reloads the original checkpoint after worker exit using only explicit recove
 it('does not compact an unloaded ordinary idle session without a recovery checkpoint', async () => {
   const env = await setup({ seed: false });
   expect(env.host.get(env.id)?.contextRuntime).toBeUndefined();
+  expect(await env.host.history(env.id)).toEqual({ ok: true, messages: [], contextRuntimeSeq: 0 });
+  expect(env.faux.state.callCount).toBe(0);
   expect(await env.host.retryCompaction(env.id)).toEqual({ ok: true });
   await vi.waitFor(() => expect(env.host.get(env.id)?.status).toBe('error'));
   expect(env.host.get(env.id)?.contextRuntime).toMatchObject({

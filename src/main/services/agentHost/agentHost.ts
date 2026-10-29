@@ -29,6 +29,7 @@ import type {
   ApprovalRequest,
   ChatImage,
   ChatMessage,
+  ContextRecoveryHint,
   ModelOptions,
   ModelThinkingCapability,
   ReplySuggestion,
@@ -44,7 +45,7 @@ import { type CompactionStrategy, compactionTimeoutMsOf } from '@shared/types/se
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
-import { readHistory, sessionFilePath } from '../sessions/history';
+import { readHistory, readHistoryProjection, sessionFilePath } from '../sessions/history';
 import type { LastModelStore } from '../sessions/lastModels';
 import { type SessionStore, type StoredSession, toSummary } from '../sessions/sessionStore';
 import { invokeOrchestrationHost, invokeWorkerHost } from './hostDispatch';
@@ -160,7 +161,9 @@ export interface AgentHostService extends AgentHost {
   history(sessionId: string): Promise<
     IpcResult<{
       messages: ChatMessage[];
+      contextRecovery?: ContextRecoveryHint;
       contextRuntime?: ContextRuntimeSnapshot;
+      /** Read-start watermark for disk hints; actual runtime snapshots retain their live seq. */
       contextRuntimeSeq?: number;
     }>
   >;
@@ -1600,17 +1603,43 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const stored = deps.store.get(sessionId);
       if (!stored) return fail(translate('common.sessionNotFound'));
       rereadBranches([stored.cwd]);
+      const before = live.get(sessionId);
+      const readSeq = before?.sessionSeq ?? 0;
+      const readGeneration = before?.generation ?? 0;
+      const readActivity = before?.activity ?? 0;
+      const wasActive = !!(before?.spawned || before?.recovery || before?.prompting);
       try {
-        const messages = await readHistory(sessionFilePath(deps.agentDir, sessionId), sessionId, {
-          running: live.get(sessionId)?.running ?? false,
-        });
+        const projection = await readHistoryProjection(
+          sessionFilePath(deps.agentDir, sessionId),
+          sessionId,
+          {
+            running: before?.running ?? false,
+          }
+        );
         const state = live.get(sessionId);
+        const stableCold =
+          !wasActive &&
+          !state?.spawned &&
+          !state?.recovery &&
+          !state?.prompting &&
+          (state?.sessionSeq ?? 0) === readSeq &&
+          (state?.generation ?? 0) === readGeneration &&
+          (state?.activity ?? 0) === readActivity;
         return {
           ok: true,
-          messages,
+          messages: projection.messages,
           ...(state?.contextRuntime
-            ? { contextRuntime: state.contextRuntime, contextRuntimeSeq: state.contextRuntimeSeq }
-            : {}),
+            ? {
+                contextRuntime: state.contextRuntime,
+                contextRuntimeSeq: state.contextRuntimeSeq ?? readSeq,
+              }
+            : {
+                // Never label an older disk read with a newer live sequence, including while loading.
+                contextRuntimeSeq: readSeq,
+                ...(stableCold && projection.contextRecovery
+                  ? { contextRecovery: projection.contextRecovery }
+                  : {}),
+              }),
         };
       } catch (error) {
         return fail(translate('agent.historyFailed', { error: errorMessage(error) }));
