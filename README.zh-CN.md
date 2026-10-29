@@ -20,7 +20,8 @@
 <p align="center">
   <a href="https://github.com/LAIJiangFeng/fynvra/releases"><strong>下载 Fynvra</strong></a> ·
   <a href="#快速上手">快速上手</a> ·
-  <a href="#文档">文档</a>
+  <a href="https://jfengl.cn/">官网首页</a> ·
+  <a href="https://jfengl.cn/zh/docs/">官方文档</a>
 </p>
 
 Fynvra 将 AI 对话、代码编辑、终端和多 Agent 协作整合到桌面中。向主 Agent 描述目标，跟进 Worker 的实现过程，再通过审查与合并把改动带回项目。
@@ -109,7 +110,9 @@ Agent 与 MCP 工具可以执行命令和访问外部服务。请按项目需要
 
 ## 文档
 
-以下指南目前以中文编写：
+Fynvra 的使用方法请参阅[官方使用文档](https://jfengl.cn/zh/docs/)。
+
+以下开发者指南目前以中文编写：
 
 - [产品定义](docs/PRODUCT.md) — 工作流程、角色与产品范围。
 - [架构](docs/ARCHITECTURE.md) — 进程边界、持久化与跨层契约。
