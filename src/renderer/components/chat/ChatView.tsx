@@ -11,8 +11,8 @@ import {
 } from '@/stores/sessions';
 import { useGeneralPreferencesStore } from '@/stores/settings';
 import { ApprovalBar } from './ApprovalBar';
-import { strategyLabel, strategyNotice } from './contextDisplay';
 import { Composer } from './Composer';
+import { strategyLabel, strategyNotice } from './contextDisplay';
 import { NewSessionButton } from './NewSessionButton';
 import { RoleBadge, StatusDot, useSessionBranch } from './SessionBadges';
 import { StatusBar } from './StatusBar';

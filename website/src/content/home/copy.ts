@@ -15,9 +15,12 @@ export const homeCopy = {
     ogDescription: 'Talk to one agent. A whole team ships.',
     skipLink: 'Skip to content',
   },
-} satisfies Record<Locale, {
-  title: string;
-  description: string;
-  ogDescription: string;
-  skipLink: string;
-}>;
+} satisfies Record<
+  Locale,
+  {
+    title: string;
+    description: string;
+    ogDescription: string;
+    skipLink: string;
+  }
+>;

@@ -2,10 +2,10 @@ import type { CompactionState, ContextRuntimeSnapshot, FynvraSessionEventBody } 
 import { describe, expect, it } from 'vitest';
 import {
   applyContextRuntime,
+  type ChatProjection,
   emptyProjection,
   reduceSessionEvent,
   syncSessionStatuses,
-  type ChatProjection,
 } from './reducer';
 
 const operation: CompactionState = {
