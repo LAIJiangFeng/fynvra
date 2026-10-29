@@ -121,6 +121,12 @@ The following developer guides are currently written in Chinese:
 
 Package guides: [Core domain](packages/core/README.md) · [Agent runtime](packages/agent-runtime/README.md).
 
+## Community
+
+Scan the QR code below with WeChat to join the Fynvra user group.
+
+<img src="docs/assets/wechat-group-qr.png" alt="QR code for the Fynvra WeChat user group" width="320" />
+
 ## Links
 
 - [Linux DO](https://linux.do/)
