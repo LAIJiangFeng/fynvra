@@ -182,6 +182,7 @@ describe('preload bridge', () => {
       'create',
       'duplicate',
       'list',
+      'openHtml',
       'read',
       'remove',
       'rename',
@@ -197,6 +198,12 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_READ, {
       workspaceId: 'ws-1',
       fileId: 'file-1',
+    });
+    const html = { workspaceId: 'ws-1', entryId: 'html-1', url: 'file:///outside.html' };
+    await api.files.openHtml(html);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.FILES_OPEN_HTML, {
+      workspaceId: 'ws-1',
+      entryId: 'html-1',
     });
   });
 
