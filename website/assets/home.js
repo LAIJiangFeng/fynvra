@@ -1,11 +1,8 @@
-// 首页专属：顶部产品流程演示（任务协作 / 指定 Worker 模型 / 输入排队 / 角色对话）。
-// 四个场景各自持有计时器与状态；只操作 data-* 和 class，语言跟随 <html data-locale>。
+// 首页与文档共用的产品流程演示控制器（任务协作 / 指定 Worker 模型 / 输入排队 / 角色对话）。
+// 每个 [data-demo] 容器互相隔离：只注册容器里真实存在的场景，各自持有计时器与可见性状态；
+// 只有一个场景时原地重播，有多个场景（首页）时按 next 轮播。只操作 data-* 和 class，
+// 语言跟随 <html data-locale>。
 (() => {
-  const root = document.querySelector('[data-demo]');
-  if (!root) return;
-  const app = root.querySelector('[data-demo-app]');
-  if (!app) return;
-
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const TYPE_INTERVAL = 20;
   // 打完最后一个字符后短暂停留即可提交，不再白等固定 2 秒起。
@@ -45,8 +42,8 @@
 
   const locale = () => (document.documentElement.dataset.locale === 'en' ? 'en' : 'zh');
 
-  let inView = true;
-  let activeScene = null;
+  // 每个演示容器注册自己的同步 / 重播入口，全局事件统一派发。
+  const instances = [];
 
   function renderCollabScene(element, phase) {
     const taskHome = element.querySelector('[data-task="home"]');
@@ -216,7 +213,7 @@
     session?.classList.toggle('is-idle', !running);
   }
 
-  function createScene(name, element, config) {
+  function createScene(host, name, element, config) {
     const appear = [...element.querySelectorAll('[data-appear]')];
     const timeline = element.querySelector('[data-timeline]');
     const empty = element.querySelector('[data-empty]');
@@ -256,9 +253,14 @@
       return phase > config.typePhase && phase <= config.keepTextUntil;
     }
 
+    function isShown() {
+      // 文档用 hidden 切换正文：祖先不可见时容器没有布局盒，必须一起停。
+      return host.root.getClientRects().length > 0;
+    }
+
     function shouldRun() {
-      // 只在真正离屏、页签隐藏或减少动画时停下；鼠标停在演示窗上不暂停。
-      return activeScene === api && inView && !document.hidden && !motion.matches;
+      // 只在真正离屏、切走文档、页签隐藏或减少动画时停下；鼠标停在演示窗上不暂停。
+      return host.activeScene === api && host.inView && isShown() && !document.hidden && !motion.matches;
     }
 
     function clearAuto() {
@@ -353,16 +355,22 @@
           scheduleNext();
           return;
         }
-        // 最后一个阶段的结果停留结束后让位给下一个场景，四个场景按顺序无限循环。
-        if (state.phase === LAST) selectScene(config.next);
-        else applyPhase(state.phase + 1);
+        // 最后一个阶段的结果停留结束后让位给下一个场景；单场景容器则原地重播。
+        if (state.phase !== LAST) {
+          applyPhase(state.phase + 1);
+          return;
+        }
+        // 切场景的回调由 initDemo 在激活前挂到 host 上：createScene 不引用它的词法作用域。
+        const nextScene = host.scenes[config.next];
+        if (nextScene && nextScene !== api) host.selectScene(config.next);
+        else activate();
       }, delay);
     }
 
     function sync() {
       const run = shouldRun();
       element.dataset.active = String(run);
-      root.dataset.active = String(run);
+      host.root.dataset.active = String(run);
       if (!run) {
         pauseAuto();
         clearTypewriter();
@@ -424,7 +432,7 @@
       clearTypewriter();
       state.running = false;
       element.dataset.active = 'false';
-      root.dataset.active = 'false';
+      host.root.dataset.active = 'false';
       element.hidden = true;
     }
 
@@ -474,135 +482,194 @@
     return api;
   }
 
-  const collab = createScene('collab', root.querySelector('[data-scene="collab"]'), {
-    durations: [0, 900, 750, 800, 750, 1000, 900, 950, 1100, 0],
-    typePhase: 0,
-    keepTextUntil: 1,
-    emptyUntil: 2,
-    hotPhases: [1],
-    text: (lang) => collabText[lang],
-    next: 'model',
-    render: renderCollabScene,
-  });
+  // 一个 [data-demo] 容器 = 一套独立的场景状态、计时器与可见性观察。
+  function initDemo(root) {
+    const app = root.querySelector('[data-demo-app]');
+    if (!app || root.dataset.demoReady === 'true') return;
+    root.dataset.demoReady = 'true';
 
-  const model = createScene('model', root.querySelector('[data-scene="model"]'), {
-    durations: [0, 850, 800, 800, 950, 900, 1100, 0],
-    typePhase: 0,
-    keepTextUntil: 1,
-    emptyUntil: 2,
-    hotPhases: [1],
-    text: (lang) => modelText[lang],
-    next: 'queue',
-    render: renderModelScene,
-  });
+    const host = { root, inView: false, activeScene: null, scenes: {} };
+    const scenes = host.scenes;
+    const hasObserver = 'IntersectionObserver' in window;
+    // 交给 IntersectionObserver 的首次回调决定是否开始，避免加载瞬间先跑几帧。
+    host.inView = !hasObserver;
 
-  const queueScene = createScene('queue', root.querySelector('[data-scene="queue"]'), {
-    // 0/2 各打一段后续需求；1/3 提交后清空输入；4/5 当前回合结束并按顺序接续队列。
-    durations: [0, 800, 0, 750, 900, 600, 0],
-    // 减少动画时停在“当前回合运行 + 两条排队消息”。
-    staticPhase: 3,
-    typing: [
-      { phase: 0, text: (lang) => queueText.first[lang] },
-      { phase: 2, text: (lang) => queueText.second[lang] },
-    ],
-    hotPhases: [0, 2],
-    next: 'roles',
-    render: renderQueueScene,
-  });
+    const sceneConfigs = [
+      [
+        'collab',
+        {
+          durations: [0, 900, 750, 800, 750, 1000, 900, 950, 1100, 0],
+          typePhase: 0,
+          keepTextUntil: 1,
+          emptyUntil: 2,
+          hotPhases: [1],
+          text: (lang) => collabText[lang],
+          next: 'model',
+          render: renderCollabScene,
+        },
+      ],
+      [
+        'model',
+        {
+          durations: [0, 850, 800, 800, 950, 900, 1100, 0],
+          typePhase: 0,
+          keepTextUntil: 1,
+          emptyUntil: 2,
+          hotPhases: [1],
+          text: (lang) => modelText[lang],
+          next: 'queue',
+          render: renderModelScene,
+        },
+      ],
+      [
+        'queue',
+        {
+          // 0/2 各打一段后续需求；1/3 提交后清空输入；4/5 当前回合结束并按顺序接续队列。
+          durations: [0, 800, 0, 750, 900, 600, 0],
+          // 减少动画时停在“当前回合运行 + 两条排队消息”。
+          staticPhase: 3,
+          typing: [
+            { phase: 0, text: (lang) => queueText.first[lang] },
+            { phase: 2, text: (lang) => queueText.second[lang] },
+          ],
+          hotPhases: [0, 2],
+          next: 'roles',
+          render: renderQueueScene,
+        },
+      ],
+      [
+        'roles',
+        {
+          // 0/4 新建会话选角色；2/5 直接向该会话输入；3/6/7 保留该角色的回复结果。
+          durations: [550, 160, 0, 1300, 550, 0, 1500, 0],
+          // 减少动画时停在审查员的只读审查结果，两个会话和自定义标记仍然可见。
+          staticPhase: 7,
+          typing: [
+            { phase: 2, text: (lang) => roleText.worker[lang] },
+            { phase: 5, text: (lang) => roleText.review[lang] },
+          ],
+          hotPhases: [2, 5],
+          emptyUntil: 3,
+          next: 'collab',
+          render: renderRoleScene,
+        },
+      ],
+    ];
 
-  const roleScene = createScene('roles', root.querySelector('[data-scene="roles"]'), {
-    // 0/4 新建会话选角色；2/5 直接向该会话输入；3/6/7 保留该角色的回复结果。
-    durations: [550, 160, 0, 1300, 550, 0, 1500, 0],
-    // 减少动画时停在审查员的只读审查结果，两个会话和自定义标记仍然可见。
-    staticPhase: 7,
-    typing: [
-      { phase: 2, text: (lang) => roleText.worker[lang] },
-      { phase: 5, text: (lang) => roleText.review[lang] },
-    ],
-    hotPhases: [2, 5],
-    emptyUntil: 3,
-    next: 'collab',
-    render: renderRoleScene,
-  });
-
-  const scenes = { collab, model, queue: queueScene, roles: roleScene };
-  const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
-  const sceneSwitch = root.querySelector('.fd-scene-switch');
-
-  // 滑块按当前按钮的实测位置对齐，换语言、字体或窗口宽度变化后重新测量。
-  function moveScenePill() {
-    if (!sceneSwitch) return;
-    const pressed = sceneSwitch.querySelector('.fd-scene-btn[aria-pressed="true"]');
-    if (!pressed) return;
-    const track = sceneSwitch.getBoundingClientRect();
-    const pill = pressed.getBoundingClientRect();
-    const style = sceneSwitch.style;
-    style.setProperty('--fd-scene-pill-x', `${pill.left - track.left - sceneSwitch.clientLeft}px`);
-    style.setProperty('--fd-scene-pill-y', `${pill.top - track.top - sceneSwitch.clientTop}px`);
-    style.setProperty('--fd-scene-pill-w', `${pill.width}px`);
-    style.setProperty('--fd-scene-pill-h', `${pill.height}px`);
-  }
-
-  // 自动轮播只传场景名；手动点击带 restart，当前 tab 再点一次会从头重播。
-  function selectScene(name, restart) {
-    const next = scenes[name];
-    if (!next) return;
-    if (next === activeScene) {
-      if (restart) next.restart();
-      return;
+    // 只注册当前容器里真实存在的场景：首页四个 tab，文档每个示例只放一个场景。
+    for (const [name, config] of sceneConfigs) {
+      const element = root.querySelector(`[data-scene="${name}"]`);
+      if (element) scenes[name] = createScene(host, name, element, config);
     }
-    activeScene?.deactivate();
-    activeScene = next;
+
+    const sceneButtons = [...root.querySelectorAll('[data-scene-btn]')];
+    const sceneSwitch = root.querySelector('.fd-scene-switch');
+
+    // 滑块按当前按钮的实测位置对齐，换语言、字体或窗口宽度变化后重新测量。
+    function moveScenePill() {
+      if (!sceneSwitch) return;
+      const pressed = sceneSwitch.querySelector('.fd-scene-btn[aria-pressed="true"]');
+      if (!pressed) return;
+      const track = sceneSwitch.getBoundingClientRect();
+      const pill = pressed.getBoundingClientRect();
+      const style = sceneSwitch.style;
+      style.setProperty('--fd-scene-pill-x', `${pill.left - track.left - sceneSwitch.clientLeft}px`);
+      style.setProperty('--fd-scene-pill-y', `${pill.top - track.top - sceneSwitch.clientTop}px`);
+      style.setProperty('--fd-scene-pill-w', `${pill.width}px`);
+      style.setProperty('--fd-scene-pill-h', `${pill.height}px`);
+    }
+
+    // 自动轮播只传场景名；手动点击带 restart，当前 tab 再点一次会从头重播。
+    function selectScene(name, restart) {
+      const next = scenes[name];
+      if (!next) return;
+      if (next === host.activeScene) {
+        if (restart) next.restart();
+        return;
+      }
+      host.activeScene?.deactivate();
+      host.activeScene = next;
+      for (const button of sceneButtons) {
+        button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === name));
+      }
+      moveScenePill();
+      next.activate();
+    }
+
+    // 供 createScene 的阶段计时器调用，保持每个容器自己的切场景实现。
+    host.selectScene = selectScene;
+
     for (const button of sceneButtons) {
-      button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === name));
+      button.addEventListener('click', () => selectScene(button.dataset.sceneBtn, true));
+    }
+
+    if (sceneSwitch && 'ResizeObserver' in window) {
+      new ResizeObserver(moveScenePill).observe(sceneSwitch);
+    }
+
+    if (hasObserver) {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          host.inView = entries.some((entry) => entry.isIntersecting);
+          host.activeScene?.sync();
+        },
+        { threshold: 0.08 }
+      );
+      observer.observe(root);
+    }
+
+    root.dataset.enhanced = 'true';
+
+    // data-demo="roles" 之类的默认场景；没写或写错时用容器里注册的第一个场景。
+    const initialName = scenes[root.dataset.demo] ? root.dataset.demo : Object.keys(scenes)[0];
+    if (!initialName) return;
+    host.activeScene = scenes[initialName];
+    for (const button of sceneButtons) {
+      button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === initialName));
     }
     moveScenePill();
-    next.activate();
-  }
+    window.requestAnimationFrame(() => {
+      if (sceneSwitch) sceneSwitch.dataset.ready = 'true';
+    });
 
-  for (const button of sceneButtons) {
-    button.addEventListener('click', () => selectScene(button.dataset.sceneBtn, true));
-  }
+    // 文档里的单场景演示用小按钮重播；首页仍用四个 tab（再点当前 tab 也会重播）。
+    root.querySelector('[data-demo-replay]')?.addEventListener('click', () => {
+      host.activeScene?.restart();
+    });
 
-  if (sceneSwitch && 'ResizeObserver' in window) {
-    new ResizeObserver(moveScenePill).observe(sceneSwitch);
-  }
-
-  if ('IntersectionObserver' in window) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        inView = entries.some((entry) => entry.isIntersecting);
-        activeScene?.sync();
+    instances.push({
+      sync: () => host.activeScene?.sync(),
+      handleMotion: () => host.activeScene?.handleMotion(),
+      localeChanged: () => {
+        moveScenePill();
+        host.activeScene?.localeChanged();
       },
-      { threshold: 0.08 }
-    );
-    observer.observe(root);
+    });
+
+    host.activeScene.activate();
   }
 
-  document.addEventListener('visibilitychange', () => activeScene?.sync());
+  for (const root of document.querySelectorAll('[data-demo]')) initDemo(root);
 
-  const handleMotionChange = () => activeScene?.handleMotion();
+  const syncAll = () => {
+    for (const instance of instances) instance.sync();
+  };
+  document.addEventListener('visibilitychange', syncAll);
+  // 文档切换正文时补一次同步，避免离屏演示留下隐形计时器。
+  document.addEventListener('fynvra:demos-visibility', syncAll);
+
+  const handleMotionChange = () => {
+    for (const instance of instances) instance.handleMotion();
+  };
   if (typeof motion.addEventListener === 'function')
     motion.addEventListener('change', handleMotionChange);
   else motion.addListener(handleMotionChange);
 
   // 语言切换不重启动画：输入阶段重打当前语言，其余阶段沿用已显示的流程状态。
   new MutationObserver(() => {
-    moveScenePill();
-    activeScene?.localeChanged();
+    for (const instance of instances) instance.localeChanged();
   }).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-locale'],
   });
-
-  root.dataset.enhanced = 'true';
-  activeScene = scenes.collab;
-  for (const button of sceneButtons) {
-    button.setAttribute('aria-pressed', String(button.dataset.sceneBtn === 'collab'));
-  }
-  moveScenePill();
-  window.requestAnimationFrame(() => {
-    if (sceneSwitch) sceneSwitch.dataset.ready = 'true';
-  });
-  activeScene.activate();
 })();
