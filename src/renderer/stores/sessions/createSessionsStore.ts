@@ -24,6 +24,7 @@ import {
   applyContextRuntime,
   applyHistory,
   compactionActive,
+  compactionNeedsRecovery,
   isContextMetadata,
   type ChatProjection,
   dequeueApproval,
@@ -470,8 +471,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           holdQueue(sessionId);
         if (
           event.type === 'compaction' &&
-          !compactionActive(event.state) &&
-          event.state.phase !== 'succeeded'
+          compactionNeedsRecovery(
+            event.state,
+            get().runtimeBySession[sessionId]?.contextRuntime?.effectiveStrategy
+          )
         )
           holdQueue(sessionId);
         if (

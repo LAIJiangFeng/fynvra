@@ -204,6 +204,35 @@ describe('context recovery and renderer queue ownership', () => {
     await store.getState().retryCompaction(id);
     expect(retry).toHaveBeenCalledTimes(2);
   });
+  it('does not pause the queue when Magic Context cancels the native SDK hook', async () => {
+    const { store, id, emit, prompt, queue } = await setup();
+    await store.getState().send('original');
+    emit({
+      type: 'context_runtime',
+      snapshot: snapshot({
+        configuredStrategy: 'magic-context',
+        effectiveStrategy: 'magic-context',
+      }),
+    });
+    await store.getState().send('queued');
+    emit({ type: 'compaction', state: operation() });
+    const cancelled = operation({ phase: 'cancelled', cancelSource: 'sdk' });
+    emit({ type: 'compaction', state: cancelled });
+    expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
+    expect(store.getState().pausedQueues[id]).toBeUndefined();
+    emit({
+      type: 'context_runtime',
+      snapshot: snapshot({
+        configuredStrategy: 'magic-context',
+        effectiveStrategy: 'magic-context',
+        compaction: cancelled,
+      }),
+    });
+    emit({ type: 'agent_settled', aborted: false });
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(queue()).toEqual([]);
+  });
+
   it('keeps queued/draft steers out of the SDK during compaction', async () => {
     const { store, id, emit, prompt, steer, queue } = await setup();
     await store.getState().send('original');

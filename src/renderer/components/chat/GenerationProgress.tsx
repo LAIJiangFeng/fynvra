@@ -29,7 +29,7 @@ export function GenerationProgress({
   const retryCompaction = useSessionsStore((state) => state.retryCompaction);
   const t = useT();
   const compacting = compactionActive(compaction);
-  const failure = compactionFailure(compaction, t);
+  const failure = recoveryRequired ? compactionFailure(compaction, t) : undefined;
   const retrying = retry && retry.phase !== 'finished';
   const label =
     status === 'waiting-approval'

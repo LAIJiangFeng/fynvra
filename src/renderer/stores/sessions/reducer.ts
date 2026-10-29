@@ -173,6 +173,16 @@ export function compactionActive(state: CompactionState | undefined): boolean {
   return state?.phase === 'running' || state?.phase === 'backoff';
 }
 
+export function compactionNeedsRecovery(
+  state: CompactionState | undefined,
+  effectiveStrategy?: ContextRuntimeSnapshot['effectiveStrategy']
+): boolean {
+  return (
+    (state?.phase === 'failed' || state?.phase === 'cancelled') &&
+    !(effectiveStrategy === 'magic-context' && state.cancelSource === 'sdk')
+  );
+}
+
 function withCompaction(runtime: SessionRuntime, state: CompactionState): SessionRuntime {
   if (compactionActive(state) && runtime.closedCompactionId === state.operationId) return runtime;
   if (runtime.compaction && state.startedAt < runtime.compaction.startedAt) return runtime;
@@ -188,7 +198,9 @@ function withCompaction(runtime: SessionRuntime, state: CompactionState): Sessio
           error: undefined,
         }
       : {}),
-    ...(state.phase === 'failed' || state.phase === 'cancelled' ? { recoveryRequired: true } : {}),
+    ...(compactionNeedsRecovery(state, runtime.contextRuntime?.effectiveStrategy)
+      ? { recoveryRequired: true }
+      : {}),
     retry: compactionActive(state) ? runtime.retry : undefined,
     ...(state.phase === 'succeeded' && runtime.contextRuntime
       ? {

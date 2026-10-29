@@ -109,6 +109,21 @@ describe('generation progress presentation', () => {
     expect(html).not.toContain('animate-spin');
   });
 
+  it('does not display a failure for an SDK hook cancellation that needs no recovery', () => {
+    state();
+    data.state.runtimeBySession.s.compaction = {
+      ...compaction,
+      phase: 'cancelled',
+      cancelSource: 'sdk',
+    };
+    data.state.runtimeBySession.s.recoveryRequired = false;
+    const html = renderToStaticMarkup(
+      <GenerationProgress sessionId="s" status="idle" showWorking={false} error={undefined} />
+    );
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain('重试历史压缩');
+  });
+
   it('keeps approvals visible and keeps ordinary short idle sessions quiet', () => {
     state();
     data.state.runtimeBySession.s.compaction = undefined;
