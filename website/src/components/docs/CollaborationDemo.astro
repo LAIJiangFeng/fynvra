@@ -1,0 +1,317 @@
+---
+import { prompts, type DemoLocale } from "./prompts";
+
+interface Props {
+  locale: DemoLocale;
+}
+
+const { locale } = Astro.props;
+---
+
+<figure
+  class="docs-demo not-content"
+  data-demo="collab"
+  aria-label={locale === "zh" ? "界面演示：同一个会话里分派两个任务" : "Interface demo: dispatch two tasks from one session"}
+>
+  <div class="fd-app" data-demo-app>
+    <div class="fd-titlebar">
+      <div class="fd-title-left">
+        <span class="fd-tb-icon" aria-hidden="true">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 9l-3 3 3 3" /></svg>
+        </span>
+        <span class="fd-brand">Fynvra</span><span class="fd-slash">/</span><span class="fd-workspace-name">fynvra</span>
+      </div>
+      <div class="fd-title-right" aria-hidden="true">
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.15.38.36.72.6 1 .3.3.68.44 1.1.4H21v4h-.09a1.7 1.7 0 0 0-1.51.6Z" /></svg></span>
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" /></svg></span>
+        <span class="fd-tb-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16M10 9l-3 3 3 3" /></svg></span>
+        <span class="fd-window-controls">
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg></span>
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" /></svg></span>
+          <span class="fd-wc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></span>
+        </span>
+      </div>
+    </div>
+    <div class="fd-scene" id="fd-scene-collab" data-scene="collab" data-phase="0">
+    <div class="fd-body">
+      <aside class="fd-side">
+        <div class="fd-side-head">
+          {locale === "zh" && (<span>工作区</span>)}{locale === "en" && (<span>Workspaces</span>)}
+          <span class="fd-side-actions" aria-hidden="true">
+            <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+          </span>
+        </div>
+
+        <div class="fd-workspace">
+          <div class="fd-ws-row">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+            <span>fynvra</span><span class="fd-ws-branch">main</span>
+          </div>
+          <p class="fd-ws-path">D:\project\fynvra</p>
+
+          <div class="fd-sessions-head">
+            {locale === "zh" && (<span>会话</span>)}{locale === "en" && (<span>Sessions</span>)}
+            <span class="fd-side-actions" aria-hidden="true">
+              <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m20 20-4-4" /></svg></span>
+              <span class="fd-mini-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+            </span>
+          </div>
+
+          <div class="fd-session is-active is-idle" data-session="orchestrator">
+            <span class="fd-dot is-run"></span>
+            <span class="fd-session-main">
+              <span class="fd-session-title">{locale === "zh" && (<span>首页排版与文档整理</span>)}{locale === "en" && (<span>Home layout &amp; docs</span>)}</span>
+              <span class="fd-session-sub">
+                <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+                <span class="fd-session-time">{locale === "zh" && (<span>刚刚</span>)}{locale === "en" && (<span>now</span>)}</span>
+              </span>
+            </span>
+          </div>
+
+          <div class="fd-session is-idle" data-session="home" data-appear="3">
+            <span class="fd-dot is-run"></span>
+            <span class="fd-session-main">
+              <span class="fd-session-title">{locale === "zh" && (<span>首页：统一间距和字号</span>)}{locale === "en" && (<span>Home: spacing &amp; type sizes</span>)}</span>
+              <span class="fd-session-sub">
+                <span class="fd-role">Worker</span>
+                <span class="fd-session-time">{locale === "zh" && (<span>刚刚</span>)}{locale === "en" && (<span>now</span>)}</span>
+              </span>
+            </span>
+          </div>
+
+          <div class="fd-session is-idle" data-session="docs" data-appear="4">
+            <span class="fd-dot is-run"></span>
+            <span class="fd-session-main">
+              <span class="fd-session-title">{locale === "zh" && (<span>文档：补齐操作步骤</span>)}{locale === "en" && (<span>Docs: fill in the missing steps</span>)}</span>
+              <span class="fd-session-sub">
+                <span class="fd-role">Worker</span>
+                <span class="fd-session-time">{locale === "zh" && (<span>刚刚</span>)}{locale === "en" && (<span>now</span>)}</span>
+              </span>
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="fd-main">
+        <div class="fd-editor-tabs" aria-hidden="true">
+          <span class="fd-editor-tab is-active">{locale === "zh" && (<span>对话</span>)}{locale === "en" && (<span>Chat</span>)}</span>
+          <span class="fd-editor-tab">home.css</span>
+          <span class="fd-editor-tab">docs.html</span>
+          <span class="fd-editor-add"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+        </div>
+
+        <div class="fd-chat-head is-idle" data-chat-head data-state="done">
+          <span class="fd-dot is-run"></span>
+          <span class="fd-chat-title">{locale === "zh" && (<span>首页排版与文档整理</span>)}{locale === "en" && (<span>Home layout &amp; docs</span>)}</span>
+          <span class="fd-role is-orch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 4 3 5-6 5 6 4-3-2 11H5Z" /></svg>Orchestrator</span>
+          <span class="fd-chip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+          <span class="fd-chat-status">
+            <span class="fd-st-run">{locale === "zh" && (<span>运行中</span>)}{locale === "en" && (<span>Running</span>)}</span>
+            <span class="fd-st-idle">{locale === "zh" && (<span>空闲</span>)}{locale === "en" && (<span>Idle</span>)}</span>
+          </span>
+        </div>
+
+        <div class="fd-timeline" data-timeline>
+          <div class="fd-stream">
+            <div class="fd-empty" data-empty hidden>
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z" /><path d="M8 11h8M8 15h5" /></svg>
+              {locale === "zh" && (<span>说清楚目标，主 Agent 会拆分、派发并验收。</span>)}
+              {locale === "en" && (<span>Describe the goal. The orchestrator splits, dispatches, and reviews.</span>)}
+            </div>
+
+            <div class="fd-msg is-user" data-appear="2">
+              <span data-demo-user="collab" data-demo-lang={locale}>{prompts["collab"][locale]}</span>
+
+            </div>
+
+            <div class="fd-msg fd-agent" data-appear="2">
+              {locale === "zh" && (<p>收到。两个任务互不相关：首页只调整间距和字号，不改文案；文档补齐缺失的操作步骤。两个任务并行派发，有拿不准的我会先来问你，都完成后由我审查合并。</p>)}
+              {locale === "en" && (<p>On it. The two tasks are independent: the home page only gets consistent spacing and type sizes without copy changes, and the docs get the missing steps. I'll dispatch them in parallel, ask you first if anything is unclear, and review and merge both when they finish.</p>)}
+            </div>
+
+            <div class="fd-tool" data-appear="3">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>派发任务</span>)}{locale === "en" && (<span>Dispatch task</span>)}</span>
+              <span class="fd-tool-title">{locale === "zh" && (<span>首页：统一间距和字号</span>)}{locale === "en" && (<span>Home: spacing &amp; type sizes</span>)}</span>
+              <span class="fd-role">Worker</span>
+              <code class="fd-tool-branch">fynvra/home-spacing</code>
+              <span class="fd-tool-meta"><span>0.4s</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg></span>
+            </div>
+
+            <div class="fd-tool" data-appear="4">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>派发任务</span>)}{locale === "en" && (<span>Dispatch task</span>)}</span>
+              <span class="fd-tool-title">{locale === "zh" && (<span>文档：补齐缺失的操作步骤</span>)}{locale === "en" && (<span>Docs: fill in the missing steps</span>)}</span>
+              <span class="fd-role">Worker</span>
+              <code class="fd-tool-branch">fynvra/docs-steps</code>
+              <span class="fd-tool-meta"><span>0.5s</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg></span>
+            </div>
+
+            <div class="fd-msg fd-agent" data-appear="5">
+              {locale === "zh" && (<p>两个 Worker 都回报完成，各自的分支互不踩踏：首页只改了间距和字号，文档补齐了缺失的操作步骤。现在开始审查。</p>)}
+              {locale === "en" && (<p>Both workers reported back without touching each other's branch: the home page only changed spacing and type sizes, and the docs gained the missing steps. I'll review both now.</p>)}
+            </div>
+
+            <div class="fd-tool" data-appear="6">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 15 3 3-3 3M20 18h-7" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>审查改动</span>)}{locale === "en" && (<span>Review diff</span>)}</span>
+              <span class="fd-tool-title">{locale === "zh" && (<span>首页排版 · 3 个文件</span>)}{locale === "en" && (<span>Home layout · 3 files</span>)}</span>
+              <code>+86 −54</code>
+              <span class="fd-tool-meta"><span>1.1s</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg></span>
+            </div>
+
+            <div class="fd-tool" data-appear="7">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m8 12 2.5 2.5L16 9" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>运行检查</span>)}{locale === "en" && (<span>Run checks</span>)}</span>
+              <span class="fd-tool-title"><code>git diff --check · node --check</code></span>
+              <span class="fd-tool-meta"><span>2.4s</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg></span>
+            </div>
+
+            <div class="fd-tool" data-appear="7">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>合并分支</span>)}{locale === "en" && (<span>Merge branch</span>)}</span>
+              <span class="fd-tool-title"><code>fynvra/home-spacing → main</code></span>
+              <span class="fd-tool-meta"><span class="fd-ok">{locale === "zh" && (<span>已合并</span>)}{locale === "en" && (<span>Merged</span>)}</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg></span>
+            </div>
+
+            <div class="fd-tool" data-appear="8">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7" /><path d="m17 15 3 3-3 3M20 18h-7" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>审查改动</span>)}{locale === "en" && (<span>Review diff</span>)}</span>
+              <span class="fd-tool-title">{locale === "zh" && (<span>文档步骤 · 3 个文件</span>)}{locale === "en" && (<span>Docs steps · 3 files</span>)}</span>
+              <code>+128 −39</code>
+              <span class="fd-tool-meta"><span>1.3s</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg><svg class="i is-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg></span>
+            </div>
+
+            <div class="fd-tool" data-appear="9">
+              <svg class="i fd-tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M12 12v5" /></svg>
+              <span class="fd-tool-label">{locale === "zh" && (<span>合并分支</span>)}{locale === "en" && (<span>Merge branch</span>)}</span>
+              <span class="fd-tool-title"><code>fynvra/docs-steps → main</code></span>
+              <span class="fd-tool-meta"><span class="fd-ok">{locale === "zh" && (<span>已合并</span>)}{locale === "en" && (<span>Merged</span>)}</span><svg class="i is-ok" viewBox="0 0 24 24"><title>{locale === "zh" ? "已完成" : "Completed"}</title><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16 9" /></svg></span>
+            </div>
+
+            <div class="fd-msg fd-agent" data-appear="9">
+              {locale === "zh" && (<p>两个任务都通过审查并合并。<code>main</code> 上是两条 <code>--no-ff</code> 提交：首页统一了间距和字号（文案未改），文档补齐了缺失的操作步骤。</p>)}
+              {locale === "en" && (<p>Both tasks passed review and merged. <code>main</code> has two <code>--no-ff</code> commits: the home page now has consistent spacing and type sizes without copy changes, and the docs have the missing steps.</p>)}
+            </div>
+          </div>
+        </div>
+
+        <div class="fd-composer">
+          <div class="fd-composer-box">
+            <div class="fd-composer-input"><span data-typed></span><span class="fd-caret" aria-hidden="true"></span><span class="fd-placeholder">{locale === "zh" && (<span>输入消息，Enter 发送</span>)}{locale === "en" && (<span>Message Fynvra…</span>)}</span></div>
+            <div class="fd-composer-bar">
+              <span class="fd-composer-tools">
+                <span class="fd-mini-btn" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h6M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" /></svg></span>
+                <span class="fd-chip fd-chip-model"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></svg><span class="fd-chip-label">deepseek-v4.1-flash · high</span></span>
+                <span class="fd-chip fd-chip-approval"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /><path d="m8 12 3 3 5-5" /></svg>{locale === "zh" && (<span>完全放行</span>)}{locale === "en" && (<span>Full access</span>)}</span>
+              </span>
+              <span class="fd-send" data-send><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg>{locale === "zh" && (<span>发送</span>)}{locale === "en" && (<span>Send</span>)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="fd-statusbar" aria-hidden="true">
+          <span>tokens ↑18.6k ↓4.2k</span><span>$0.06</span>
+          <span class="fd-status-right">
+            <span class="is-amber"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z" /></svg>{locale === "zh" && (<span>完全放行</span>)}{locale === "en" && (<span>Full</span>)}</span>
+            <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>main</span>
+            <span>deepseek-v4.1-flash</span>
+          </span>
+        </div>
+      </div>
+
+      <aside class="fd-panel">
+        <div class="fd-panel-head">
+          <div class="fd-panel-tabs">
+            <span class="fd-panel-tab" data-panel-tab="files">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+              {locale === "zh" && (<span>文件</span>)}{locale === "en" && (<span>Files</span>)}
+            </span>
+            <span class="fd-panel-tab is-active" data-panel-tab="tasks">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></svg>
+              {locale === "zh" && (<span>任务</span>)}{locale === "en" && (<span>Tasks</span>)}
+              <span class="fd-panel-count" data-task-count>2</span>
+            </span>
+            <span class="fd-panel-tab">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v12M7 16l-3-3M7 16l3-3M17 20V8M17 8l-3 3M17 8l3 3" /></svg>
+              {locale === "zh" && (<span>改动</span>)}{locale === "en" && (<span>Changes</span>)}
+            </span>
+          </div>
+          <span class="fd-panel-refresh" aria-hidden="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 5.3M20 4v7h-7" /></svg></span>
+        </div>
+
+        <div class="fd-panel-body" data-panel-view="files" hidden>
+          <p class="fd-tree-group">fynvra</p>
+          <div class="fd-tree-row is-folder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg><span class="fd-tree-folder">website</span></div>
+          <div class="fd-tree-row is-active" style="padding-left: 20px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">index.html</span></div>
+          <div class="fd-tree-row" style="padding-left: 20px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">docs.html</span></div>
+          <div class="fd-tree-row is-folder" style="padding-left: 20px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg><span class="fd-tree-folder">assets</span></div>
+          <div class="fd-tree-row" style="padding-left: 36px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">site.css</span></div>
+          <div class="fd-tree-row" style="padding-left: 36px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">home.css</span></div>
+          <div class="fd-tree-row" style="padding-left: 36px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">home.js</span></div>
+          <div class="fd-tree-row is-folder"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg><span class="fd-tree-folder">src</span></div>
+          <div class="fd-tree-row"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6" /></svg><span class="fd-tree-folder">package.json</span></div>
+        </div>
+
+        <div class="fd-panel-body" data-panel-view="tasks">
+          <div class="fd-run" data-run data-done="2" data-total="2">
+            <div class="fd-run-head">
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></svg>
+              <span class="fd-run-title">{locale === "zh" && (<span>首页排版与文档整理</span>)}{locale === "en" && (<span>Home layout &amp; docs</span>)}</span>
+              <span class="fd-run-time">{locale === "zh" && (<span>刚刚</span>)}{locale === "en" && (<span>now</span>)}</span>
+            </div>
+            <div class="fd-progress-row">
+              <span class="pg pg-0-1">{locale === "zh" && (<span>已完成 0 / 1</span>)}{locale === "en" && (<span>0 / 1 done</span>)}</span>
+              <span class="pg pg-0">{locale === "zh" && (<span>已完成 0 / 2</span>)}{locale === "en" && (<span>0 / 2 done</span>)}</span>
+              <span class="pg pg-1">{locale === "zh" && (<span>已完成 1 / 2</span>)}{locale === "en" && (<span>1 / 2 done</span>)}</span>
+              <span class="pg pg-2">{locale === "zh" && (<span>已完成 2 / 2</span>)}{locale === "en" && (<span>2 / 2 done</span>)}</span>
+              <span class="fd-progress"><i></i></span>
+            </div>
+          </div>
+
+          <div class="fd-task" data-task="home" data-state="done" data-appear="3">
+            <div class="fd-task-head">
+              <span class="fd-task-title">{locale === "zh" && (<span>首页：统一间距和字号</span>)}{locale === "en" && (<span>Home: spacing &amp; type sizes</span>)}</span>
+              <span class="fd-role">Worker</span>
+            </div>
+            <div class="fd-task-meta">
+              <svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>
+              <code>fynvra/home-spacing</code>
+              <span class="fd-status st-todo">{locale === "zh" && (<span>待开始</span>)}{locale === "en" && (<span>To do</span>)}</span>
+              <span class="fd-status st-run">{locale === "zh" && (<span>进行中</span>)}{locale === "en" && (<span>Running</span>)}</span>
+              <span class="fd-status st-review">{locale === "zh" && (<span>待验收</span>)}{locale === "en" && (<span>In review</span>)}</span>
+              <span class="fd-status st-done">{locale === "zh" && (<span>已完成</span>)}{locale === "en" && (<span>Completed</span>)}</span>
+            </div>
+          </div>
+
+          <div class="fd-task" data-task="docs" data-state="done" data-appear="4">
+            <div class="fd-task-head">
+              <span class="fd-task-title">{locale === "zh" && (<span>文档：补齐缺失的操作步骤</span>)}{locale === "en" && (<span>Docs: fill in the missing steps</span>)}</span>
+              <span class="fd-role">Worker</span>
+            </div>
+            <div class="fd-task-meta">
+              <svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px" aria-hidden="true"><path d="M6 4v10a3 3 0 0 0 3 3h9M15 14l3 3-3 3M6 4v4" /></svg>
+              <code>fynvra/docs-steps</code>
+              <span class="fd-status st-todo">{locale === "zh" && (<span>待开始</span>)}{locale === "en" && (<span>To do</span>)}</span>
+              <span class="fd-status st-run">{locale === "zh" && (<span>进行中</span>)}{locale === "en" && (<span>Running</span>)}</span>
+              <span class="fd-status st-review">{locale === "zh" && (<span>待验收</span>)}{locale === "en" && (<span>In review</span>)}</span>
+              <span class="fd-status st-done">{locale === "zh" && (<span>已完成</span>)}{locale === "en" && (<span>Completed</span>)}</span>
+            </div>
+          </div>
+
+          <p class="fd-tasks-note" data-appear="4">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+            {locale === "zh" && (<span>两个任务各自使用独立的 worktree</span>)}
+            {locale === "en" && (<span>Two tasks, two isolated worktrees</span>)}
+          </p>
+        </div>
+      </aside>
+    </div>
+    </div>
+  </div>
+  <div class="docs-demo-actions">
+    <button class="docs-demo-replay" type="button" data-demo-replay>
+      {locale === "zh" && (<span>重播</span>)}{locale === "en" && (<span>Replay</span>)}
+    </button>
+  </div>
+</figure>

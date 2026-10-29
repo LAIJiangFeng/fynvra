@@ -1,0 +1,16 @@
+---
+import { prompts, promptLabels, type DemoLocale, type DemoPromptName } from './prompts';
+
+interface Props {
+  name: DemoPromptName;
+  locale: DemoLocale;
+}
+
+const { name, locale } = Astro.props;
+const labelId = `prompt-${name}`;
+---
+
+<div class="docs-prompt">
+  <div class="docs-prompt-label" id={labelId}>{promptLabels[name][locale]}</div>
+  <pre aria-labelledby={labelId}><code data-demo-prompt={name} data-demo-lang={locale}>{prompts[name][locale]}</code></pre>
+</div>

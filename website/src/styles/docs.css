@@ -1,0 +1,235 @@
+/* Content additions only. Starlight owns the page layout, navigation, search,
+   typography, theme, and language controls. */
+.sl-markdown-content span[id]:empty {
+  display: block;
+  scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem);
+}
+
+.sl-markdown-content kbd {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 0.25rem;
+  background: var(--sl-color-bg-inline-code);
+  color: var(--sl-color-text);
+  font-family: var(--__sl-font-mono);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.sl-markdown-content :is(.docs-area-grid, .docs-next-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.75rem;
+}
+
+.sl-markdown-content :is(.docs-area-card, .docs-next-card) {
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 0.65rem;
+  background: var(--sl-color-bg-sidebar);
+}
+
+.sl-markdown-content .docs-area-card h3 {
+  font-size: var(--sl-text-lg);
+}
+
+.sl-markdown-content .docs-area-card > :first-child {
+  color: var(--sl-color-gray-2);
+  font-size: var(--sl-text-sm);
+}
+
+.sl-markdown-content .docs-next-card p + p {
+  margin-top: 0.5rem;
+  font-size: var(--sl-text-sm);
+}
+
+.sl-markdown-content .docs-callout {
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--sl-color-hairline-light);
+  border-inline-start: 3px solid var(--sl-color-accent);
+  border-radius: 0.5rem;
+  background: var(--sl-color-bg-sidebar);
+}
+
+.sl-markdown-content .docs-callout-warn {
+  border-inline-start-color: var(--sl-color-orange);
+}
+
+.sl-markdown-content .docs-callout > :first-child {
+  margin-top: 0;
+}
+
+.sl-markdown-content .docs-callout p + p {
+  margin-top: 0.5rem;
+}
+
+.sl-markdown-content table {
+  max-width: 100%;
+  font-size: var(--sl-text-sm);
+}
+
+/* Plain code nodes retain exact newlines for the shared demo controller. */
+.sl-markdown-content .docs-prompt {
+  overflow: hidden;
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 0.65rem;
+  background: var(--sl-color-bg-sidebar);
+}
+
+.docs-prompt-label {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--sl-color-hairline-light);
+  color: var(--sl-color-gray-2);
+  font-family: var(--__sl-font-mono);
+  font-size: var(--sl-text-xs);
+}
+
+.sl-markdown-content .docs-prompt pre {
+  margin: 0;
+  padding: 1rem;
+  border: 0;
+  background: transparent;
+  font-size: var(--sl-text-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sl-markdown-content .docs-prompt code {
+  white-space: inherit;
+}
+
+/* demo.css is shared with the homepage. Supply its few page-level tokens here,
+   without loading the homepage reset or language/theme controller. */
+.docs-demo {
+  --line: var(--sl-color-hairline-light);
+  --line-2: var(--sl-color-gray-4);
+  --surface: var(--sl-color-bg-sidebar);
+  --ink: var(--sl-color-white);
+  --ink-2: var(--sl-color-text);
+  --accent: var(--sl-color-accent);
+  --font-mono: var(--__sl-font-mono);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  margin: 1.5rem 0 2rem;
+  container-type: inline-size;
+}
+
+.docs-demo [hidden] {
+  display: none !important;
+}
+
+.docs-demo .fd-app {
+  border-radius: 0.75rem;
+}
+
+.docs-demo .fd-body {
+  grid-template-columns: minmax(0, 16%) minmax(0, 1fr) minmax(0, 26%);
+  grid-template-rows: minmax(0, 1fr);
+  height: 440px;
+}
+
+.docs-demo .fd-side {
+  flex-direction: column;
+}
+
+.docs-demo .fd-main {
+  grid-column: auto;
+  grid-row: auto;
+  height: auto;
+}
+
+.docs-demo .fd-panel {
+  grid-column: auto;
+  grid-row: auto;
+  border-top: 0;
+  border-left: 1px solid var(--fd-line);
+}
+
+.docs-demo .fd-panel-body {
+  min-height: 0;
+  max-height: none;
+}
+
+.docs-demo .fd-composer-input {
+  max-height: 82px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.docs-demo .fd-msg.is-user {
+  max-width: 88%;
+}
+
+.docs-demo [data-demo-user] {
+  white-space: pre-wrap;
+}
+
+.docs-demo strong {
+  color: inherit;
+}
+
+.docs-demo-actions {
+  display: none;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.docs-demo[data-enhanced="true"] .docs-demo-actions {
+  display: flex;
+}
+
+.docs-demo-replay {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--sl-text-sm);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.docs-demo-replay:hover {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.docs-demo-replay:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@container (max-width: 680px) {
+  .docs-demo .fd-body {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 190px);
+  }
+
+  .docs-demo .fd-side {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .docs-demo .fd-body {
+    display: flex;
+    height: auto;
+    flex-direction: column;
+  }
+
+  .docs-demo .fd-main {
+    height: 400px;
+  }
+
+  .docs-demo .fd-panel {
+    border-top: 1px solid var(--fd-line);
+    border-left: 0;
+  }
+
+  .docs-demo .fd-panel-body {
+    max-height: 190px;
+  }
+}
