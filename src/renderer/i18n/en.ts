@@ -217,6 +217,7 @@ export const en: MessagesShape<typeof zhCN> = {
     builtin: 'Built-in',
     rolesLoadFailed: 'Failed to load roles: {error}',
     model: 'Model',
+    modelNotSet: 'Model not set',
     create: 'Create',
     pickOrCreate: 'Pick a session on the left, or start a new one',
     none: 'No sessions yet',
