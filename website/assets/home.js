@@ -151,12 +151,13 @@
     const sessionWorker = element.querySelector('[data-session="role-worker"]');
     const sessionReview = element.querySelector('[data-session="role-review"]');
     sessionWorker?.classList.toggle('is-active', workerLive);
-    sessionWorker?.classList.toggle('is-idle', !workerLive);
+    sessionWorker?.classList.toggle('is-idle', !(running && workerLive));
     sessionReview?.classList.toggle('is-active', reviewLive);
-    sessionReview?.classList.toggle('is-idle', !reviewLive);
+    sessionReview?.classList.toggle('is-idle', !(running && reviewLive));
 
     const head = element.querySelector('[data-role-head]');
-    head?.classList.toggle('is-idle', !activeRole || phase === 1);
+    // 运行点只看当前阶段是否真的在跑；已完成但选中的会话仍保持 idle。
+    head?.classList.toggle('is-idle', !running);
     if (head) head.dataset.state = !activeRole ? 'idle' : running ? 'run' : 'done';
     for (const title of element.querySelectorAll('[data-role-title]')) {
       title.hidden = title.dataset.roleTitle !== activeRole;

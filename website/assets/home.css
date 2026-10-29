@@ -2683,6 +2683,17 @@
   font-size: 9px;
 }
 
+/* 中等宽度先换短标签：四个 nowrap 按钮的固有宽度不会再撑出容器。 */
+@media (max-width: 760px) {
+  .fd-scene-label-long {
+    display: none;
+  }
+
+  .fd-scene-label-short {
+    display: inline;
+  }
+}
+
 /* 四项在手机上收紧间距，短标签放得下，不缩小演示窗口也不横向溢出。 */
 @media (max-width: 520px) {
   .fd-scene-switch {
