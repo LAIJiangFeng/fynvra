@@ -576,21 +576,97 @@ pnpm dev</code></pre>
               <h2 id="quickstart-first"><span data-l="zh">4. 发出第一条需求</span><span data-l="en">4. Send the first request</span></h2>
               <div class="docs-lang" data-l="zh">
                 <p>用平时的语言写清楚目标，按 <kbd>Enter</kbd> 发送，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行。运行中按钮会变成「排队」，同时出现「停止」；消息和工具调用会依次出现在时间线上。</p>
-                <p>第一次派发时，主 Agent 会读代码、拆任务。右栏「任务」标签上出现任务数量，点进去可以看到任务卡片和进度。</p>
+                <p>使用主 Agent 派发时，它会读代码、拆任务，右栏「任务」标签上出现任务数量，点进去可以看到任务卡片和进度。直接和 Worker 或自定义角色对话时没有派发这一步。</p>
               </div>
               <div class="docs-lang" data-l="en">
                 <p>Describe the goal in your own words and press <kbd>Enter</kbd> to send; use <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line. While the turn runs, the send button becomes Queue and a Stop button appears; messages and tool calls stream into the timeline.</p>
-                <p>On the first dispatch the orchestrator reads code and splits the work. The Tasks tab on the right gains a task count; open it to see task cards and progress.</p>
+                <p>When the orchestrator dispatches, it reads code and splits the work, and the Tasks tab on the right gains a task count; open it to see task cards and progress. A direct conversation with a Worker or custom role has no dispatch step.</p>
               </div>
 
               <h2 id="quickstart-review"><span data-l="zh">5. 查看它做了什么</span><span data-l="en">5. Inspect what happened</span></h2>
               <div class="docs-lang" data-l="zh">
                 <p>在右栏「任务」里点一张任务卡片，任务详情会显示任务书、依赖、尝试、消息和 Worker 输出。任务处于「待验收」或「已完成」且有 git 时，点「查看改动」会切到「改动」标签并打开这次任务的 diff。</p>
-                <p>主 Agent 会在对话里汇报审查和合并结果。如果需求不清楚，Worker 的提问会由主 Agent 带回对话；直接在输入框回答即可。</p>
+                <p>派发任务时，主 Agent 会在对话里汇报审查和合并结果。如果需求不清楚，Worker 的提问会由主 Agent 带回对话；直接在输入框回答即可。</p>
               </div>
               <div class="docs-lang" data-l="en">
                 <p>In the right panel’s Tasks tab, click a task card. Details show the brief, dependencies, attempts, messages, and worker output. When the task is In review or Completed and uses Git, click View changes to switch to the Changes tab with that dispatch’s diff.</p>
-                <p>The orchestrator reports review and merge results in the conversation. If the request is unclear, worker questions come back through the orchestrator; answer them in the composer.</p>
+                <p>When it dispatches, the orchestrator reports review and merge results in the conversation. If the request is unclear, worker questions come back through the orchestrator; answer them in the composer.</p>
+              </div>
+
+              <h2 id="quickstart-examples"><span data-l="zh">3 个使用示例</span><span data-l="en">Three examples</span></h2>
+
+              <h3 id="quickstart-example-dispatch"><span data-l="zh">示例 1：让主 Agent 分派几个不同任务</span><span data-l="en">Example 1: dispatch several different tasks</span></h3>
+              <div class="docs-lang" data-l="zh">
+                <p>在已挂入 Git 仓库的工作区里新建会话，角色保持默认的 Orchestrator，把下面这段话发出去。</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>提示词</div>
+                  <pre><code>这个仓库里有两个互不相关的任务，请分别派给两个 Worker 并行做：
+1. 优化首页排版，统一间距和字号，不改文案；
+2. 整理使用文档，补上缺失的操作步骤。
+都做完后由你审查并合并；有拿不准的地方先来问我。</code></pre>
+                </div>
+                <p>主 Agent 读代码、拆成两个任务，各派一个 Worker。Git 工作区里两个任务在独立 worktree 上并行，右栏「任务」出现两张卡片；完成后它在对话里汇报审查和合并结果。并行 worktree 的前提见下面的提示。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>In a workspace attached to a Git repository, create a session and keep the default Orchestrator role, then send the text below.</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>prompt</div>
+                  <pre><code>The repo has two unrelated tasks. Dispatch each to a separate worker and run them in parallel:
+1. Tighten the home page layout — consistent spacing and type sizes, no copy changes.
+2. Rework the user docs and fill in the missing steps.
+Review and merge both when they finish; ask me first if anything is unclear.</code></pre>
+                </div>
+                <p>The orchestrator reads code, splits the work into two tasks, and gives each one a worker. In a Git workspace they run in parallel on separate worktrees and two cards appear in the Tasks tab; when both finish it reports the review and merge results in the conversation. The worktree requirements are in the note below.</p>
+              </div>
+
+              <h3 id="quickstart-example-models"><span data-l="zh">示例 2：派发时给不同 Worker 指定不同模型</span><span data-l="en">Example 2: name a different model for each worker</span></h3>
+              <div class="docs-lang" data-l="zh">
+                <p>仍在 Orchestrator 会话里，直接在需求里点名每个任务用哪个模型。把示例里的模型名换成「设置 → 模型服务」里已启用的实际名称或 ID。</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>提示词</div>
+                  <pre><code>分派两个任务：
+- 首页实现交给一个 Worker，用 DeepSeek 的 deepseek-chat；
+- 文档整理交给另一个 Worker，用 GPT 的 gpt-5.5。
+两个任务都完成后由你审查合并。如果其中某个模型没配置好，直接告诉我，不要换别的模型顶替。</code></pre>
+                </div>
+                <p>主 Agent 会按你点名的模型启动对应的 Worker；模型是在每个派发任务上指定的。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>Still in the Orchestrator session, name the model for each task in the request itself. Replace the example names with the actual names or ids enabled under Settings → Model providers.</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>prompt</div>
+                  <pre><code>Dispatch two tasks:
+- Home page implementation goes to one worker on DeepSeek deepseek-chat.
+- Docs cleanup goes to another worker on GPT gpt-5.5.
+Review and merge both when they finish. If one of those models is not configured, tell me instead of substituting another one.</code></pre>
+                </div>
+                <p>The orchestrator starts each worker on the model you named for that task; models are set per dispatched task.</p>
+              </div>
+
+              <h3 id="quickstart-example-role"><span data-l="zh">示例 3：选定角色，直接和它对话</span><span data-l="en">Example 3: talk to a role directly</span></h3>
+              <div class="docs-lang" data-l="zh">
+                <p>先在「设置 → 角色」里点「新建」，建一个「代码审查员」角色，工具策略选「只读」，保存后用于新启动的会话。Fynvra 只有 Orchestrator 和 Worker 两个内置角色，审查角色需要自己建；字段说明见 <a href="#roles-edit">角色</a>。</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>提示词 · Worker 会话</div>
+                  <pre><code>为设置页增加侧栏折叠：折叠后只保留图标，状态记在本地，并说明你改了哪些文件。</code></pre>
+                </div>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>提示词 · 代码审查员会话</div>
+                  <pre><code>检查刚才的侧栏折叠实现：键盘操作、折叠状态持久化和布局是否符合预期，只列出问题和改进建议，不要修改文件，也不要提交。</code></pre>
+                </div>
+                <p>新建会话时选 Worker，创建后发第一段；等它完成后，再新建一个会话选「代码审查员」，发第二段检查这次实现。Worker 直接改代码并说明改了哪些文件；审查会话是只读的，返回问题清单，不动文件。角色在新建会话时选定，已经建好的会话不能就地换角色，要另建会话。这类直接对话不产生任务，所以没有主 Agent 的派发、验收和合并流程，也没有派发时的独立 worktree 和任务卡片。</p>
+              </div>
+              <div class="docs-lang" data-l="en">
+                <p>First, under Settings → Roles click New, create a “Code reviewer” role with the Read-only tool policy, and save it; it applies to newly started sessions. Fynvra has only two built-in roles, Orchestrator and Worker, so a reviewer has to be created. See <a href="#roles-edit">Roles</a> for the fields.</p>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>prompt · Worker session</div>
+                  <pre><code>Add a collapsible sidebar to the settings page: when collapsed only icons remain, remember the state locally, and list the files you changed.</code></pre>
+                </div>
+                <div class="codeblock">
+                  <div class="codeblock-bar"><i></i><i></i><i></i>prompt · Code reviewer session</div>
+                  <pre><code>Review the sidebar-collapse implementation you just made: keyboard operation, persisted collapse state, and layout. List only problems and suggestions; do not edit files and do not commit.</code></pre>
+                </div>
+                <p>Create a session with Worker first and send the first prompt. When that work is finished, create another session with Code reviewer and send the second prompt to check the result. The Worker session edits code and names the changed files; the reviewer session is read-only and returns a list of issues without touching files. A role is chosen when a session is created, so an existing session cannot switch roles in place — create another one. Direct conversations create no tasks, so there is no orchestrator dispatch, review, or merge, and no per-dispatch worktree or task cards.</p>
               </div>
 
               <aside class="callout callout-warn">
