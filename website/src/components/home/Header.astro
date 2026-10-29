@@ -1,0 +1,59 @@
+---
+import type { Locale } from '../../content/home/copy';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const alternateLocale = locale === 'zh' ? 'en' : 'zh';
+const localeLabel = locale === 'zh' ? 'Switch to English' : '切换到中文';
+---
+
+<header class="site-header">
+  <div class="nav container">
+    <a class="brand" href={`/${locale}/`}>
+      <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" />
+        <path d="M167 120h192v60H228v48h92v59h-92v104h-61z" />
+      </svg>
+      <span>Fynvra</span>
+    </a>
+    <nav class="nav-links" id="site-menu">
+      <a href="#features"><span data-l={locale}>{locale === 'zh' ? "功能" : "Features"}</span></a>
+      <a href="#safety"><span data-l={locale}>{locale === 'zh' ? "安全" : "Safety"}</span></a>
+      <a href={`/${locale}/docs/overview/`}><span data-l={locale}>{locale === 'zh' ? "使用文档" : "Docs"}</span></a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-btn" href="https://github.com/LAIJiangFeng/fynvra" aria-label="GitHub" title="GitHub">
+        <span class="sr-only">GitHub</span>
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+          />
+        </svg>
+      </a>
+      <a class="icon-btn lang-btn" href={`/${alternateLocale}/`} hreflang={alternateLocale === 'zh' ? 'zh-CN' : 'en'} data-action="toggle-locale" aria-label={localeLabel} title={localeLabel}>
+        {locale === 'zh' ? (<span data-l="zh" lang="en">EN</span>) : (<span data-l="en" lang="zh-CN">中文</span>)}
+      </a>
+      <button class="icon-btn" type="button" data-action="toggle-theme" aria-label={locale === 'zh' ? '切换到暗色主题' : 'Switch to dark theme'}>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        </svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+      </button>
+      <a class="btn btn-primary btn-sm nav-download" href="https://github.com/LAIJiangFeng/fynvra/releases">
+        <svg class="i i-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+        <span data-l={locale}>{locale === 'zh' ? "下载" : "Download"}</span></a
+      >
+      <button class="icon-btn menu-btn" type="button" data-action="toggle-menu" aria-controls="site-menu" aria-expanded="false" aria-label={locale === 'zh' ? '打开菜单' : 'Open menu'}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>

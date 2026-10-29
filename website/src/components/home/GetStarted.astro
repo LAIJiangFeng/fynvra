@@ -1,0 +1,43 @@
+---
+import type { Locale } from '../../content/home/copy';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+---
+
+<section class="section" id="start">
+  <div class="container">
+    <div class="cta reveal">
+      <div class="section-head">
+        <p class="eyebrow"><b>03</b><span data-l={locale}>{locale === 'zh' ? "开始使用" : "Get started"}</span></p>
+        <h2 class="section-title">
+          <span data-l={locale}>{locale === 'zh' ? "把下一个需求，交给主 Agent。" : "Hand your next task to the orchestrator."}</span>
+        </h2>
+        <p class="section-lead" data-l={locale}>{locale === 'zh' ? "下载安装包就能开始。想从源码运行，需要 Node.js 22.19+、pnpm 10.26.2 和 Git。" : "Grab an installer and go. To run from source you'll need Node.js 22.19+, pnpm 10.26.2, and Git."}</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/LAIJiangFeng/fynvra/releases">
+            <svg class="i i-download" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+            <span data-l={locale}>{locale === 'zh' ? "前往 Releases 下载" : "Download from Releases"}</span>
+          </a>
+          <a class="btn btn-ghost" href={`/${locale}/docs/quickstart/`}>
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 5.5A2.5 2.5 0 0 1 6 3h5v16H6a2.5 2.5 0 0 0-2.5 2Z" />
+              <path d="M20.5 5.5A2.5 2.5 0 0 0 18 3h-5v16h5a2.5 2.5 0 0 1 2.5 2Z" />
+            </svg>
+            <span data-l={locale}>{locale === 'zh' ? "快速开始" : "Quick start"}</span>
+          </a>
+        </div>
+      </div>
+      <div class="codeblock">
+        <div class="codeblock-bar"><i></i><i></i><i></i>bash</div>
+        <pre><code>git clone https://github.com/LAIJiangFeng/fynvra.git
+cd fynvra
+pnpm install --frozen-lockfile
+pnpm dev</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
