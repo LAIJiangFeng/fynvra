@@ -76,7 +76,7 @@ async function failed(patch: Partial<CompactionState> = {}) {
     snapshot: snapshot({ compaction: cancelled, pendingPromptCount: 1, recoveryRequired: true }),
   });
   emit({ type: 'agent_settled', aborted: true });
-  expect(store.getState().pausedQueues[id]).toBe(true);
+  expect(store.getState().pausedQueues[id]).toBeUndefined();
   return env;
 }
 
@@ -200,14 +200,14 @@ describe('cold checkpoint recovery hydration', () => {
       event: { seq: 11, type: 'context_runtime', snapshot: snapshot() },
     });
     expect(store.getState().recoveringCompaction[id]).toBeUndefined();
-    expect(store.getState().runtimeBySession[id].status).toBe('idle');
+    expect(store.getState().runtimeBySession[id].status).toBe('running');
     expect(store.getState().runtimeBySession[id].error).toBeUndefined();
-    expect(store.getState().pausedQueues[id]).toBe(true);
-    expect(prompt).not.toHaveBeenCalled();
+    expect(store.getState().pausedQueues[id]).toBeUndefined();
+    expect(prompt).toHaveBeenCalledExactlyOnceWith({ sessionId: id, text: 'new local message' });
   });
 
   it.each(['success', 'load-error', 'status-error'] as const)(
-    'settles recovery without a compaction_start on %s and keeps the local queue held',
+    'settles recovery without a compaction_start on %s and drains only after success',
     async (result) => {
       const { store, id, api, retry, prompt } = await coldRecovery(true);
       await store.getState().send('new local message');
@@ -216,11 +216,11 @@ describe('cold checkpoint recovery hydration', () => {
       if (result === 'success') {
         store.getState().receiveEvent({
           sessionId: id,
-          event: { seq: 8, type: 'context_runtime', snapshot: snapshot() },
+          event: { seq: 8, type: 'agent_settled', aborted: false },
         });
         store.getState().receiveEvent({
           sessionId: id,
-          event: { seq: 9, type: 'agent_settled', aborted: false },
+          event: { seq: 9, type: 'context_runtime', snapshot: snapshot() },
         });
         expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
       } else if (result === 'load-error') {
@@ -246,12 +246,12 @@ describe('cold checkpoint recovery hydration', () => {
       }
       expect(store.getState().recoveringCompaction[id]).toBeUndefined();
       expect(store.getState().runtimeBySession[id].compaction).toBeUndefined();
-      expect(store.getState().pausedQueues[id]).toBe(true);
-      expect(store.getState().queuedBySession[id]?.map((item) => item.text)).toEqual([
-        'new local message',
-      ]);
+      expect(store.getState().pausedQueues[id]).toBeUndefined();
+      expect(store.getState().queuedBySession[id]?.map((item) => item.text) ?? []).toEqual(
+        result === 'success' ? [] : ['new local message']
+      );
       expect(retry).toHaveBeenCalledExactlyOnceWith(id);
-      expect(prompt).not.toHaveBeenCalled();
+      expect(prompt).toHaveBeenCalledTimes(result === 'success' ? 1 : 0);
     }
   );
 });
@@ -386,7 +386,7 @@ describe('context recovery and renderer queue ownership', () => {
   });
 
   it.each(['stop', 'compaction'] as const)(
-    'a successful model retry cannot release an existing %s hold',
+    'a successful model retry respects Stop but waits only for context readiness after %s',
     async (reason) => {
       const { store, id, emit, prompt, queue } = await setup();
       await store.getState().send('original');
@@ -411,9 +411,9 @@ describe('context recovery and renderer queue ownership', () => {
       });
       emit({ type: 'message_end', role: 'assistant', text: 'recovered', stopReason: 'stop' });
       emit({ type: 'agent_settled', aborted: false });
-      expect(store.getState().pausedQueues[id]).toBe(true);
-      expect(prompt).toHaveBeenCalledTimes(1);
-      expect(queue()).toEqual(['queued']);
+      expect(store.getState().pausedQueues[id]).toBe(reason === 'stop' ? true : undefined);
+      expect(prompt).toHaveBeenCalledTimes(reason === 'stop' ? 1 : 2);
+      expect(queue()).toEqual(reason === 'stop' ? ['queued'] : []);
     }
   );
 
@@ -670,13 +670,12 @@ describe('context recovery and renderer queue ownership', () => {
     emit({ type: 'message_end', role: 'assistant', text: 'done', stopReason: 'stop' });
     emit({ type: 'context_runtime', snapshot: snapshot() });
     emit({ type: 'agent_settled', aborted: false });
-    expect(prompt).toHaveBeenCalledTimes(1);
-    expect(queue()).toEqual(['queued']);
-    store.getState().resumeQueue(id);
-    store.getState().resumeQueue(id);
     expect(prompt).toHaveBeenCalledTimes(2);
     expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
     expect(queue()).toEqual([]);
+    store.getState().resumeQueue(id);
+    store.getState().resumeQueue(id);
+    expect(prompt).toHaveBeenCalledTimes(2);
   });
 
   it('failed recovery ACK and a second Stop retain failure information and the local queue', async () => {
@@ -701,10 +700,9 @@ describe('context recovery and renderer queue ownership', () => {
   it('retains a failed queued delivery on partial recovery without retry loops', async () => {
     const { store, id, prompt, emit, queue } = await failed();
     await store.getState().retryCompaction(id);
-    emit({ type: 'context_runtime', snapshot: snapshot() });
-    emit({ type: 'agent_settled', aborted: false });
     prompt.mockResolvedValueOnce({ ok: false, error: 'not accepted' });
-    store.getState().resumeQueue(id);
+    emit({ type: 'agent_settled', aborted: false });
+    emit({ type: 'context_runtime', snapshot: snapshot() });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(queue()).toEqual(['queued']);
     expect(store.getState().pausedQueues[id]).toBe(true);
