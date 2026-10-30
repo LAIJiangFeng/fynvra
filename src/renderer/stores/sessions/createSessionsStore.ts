@@ -25,7 +25,6 @@ import {
   applyHistory,
   type ChatProjection,
   compactionActive,
-  compactionNeedsRecovery,
   dequeueApproval,
   emptyProjection,
   enqueueApproval,
@@ -70,11 +69,11 @@ export interface SessionsState extends ChatProjection {
   /** 刚结束一轮生成的灰字建议；只在内存，与草稿分开，切换会话 / 新轮 / 换模型时清掉 */
   replySuggestions: Record<string, ReplySuggestion>;
   /**
-   * Messages queued while the session was running, oldest first. Sent one at a time as prompts when
-   * the turn settles to idle; kept (not sent) after a stop or an error until explicit resume.
+   * Messages queued while the session was running, oldest first. Running/compaction/recovery only
+   * delay delivery; a stop or an independent failure keeps them until explicit resume.
    */
   queuedBySession: Record<string, QueuedMessage[]>;
-  /** Stopped/failed queues only continue after an explicit resume. */
+  /** Stops, independent run failures and unconfirmed prompt failures require explicit resume. */
   pausedQueues: Record<string, true>;
   resumeQueue(sessionId: string): void;
   recoveringCompaction: Record<string, true>;
@@ -436,6 +435,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       pending = [];
       const batch: SessionEventEnvelope[] = [];
       const failedSettlements = new Set<SessionEventEnvelope>();
+      const queueFailures = new Set<string>();
       set((state) => {
         let next = state;
         for (const envelope of received) {
@@ -449,6 +449,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               (envelope.event.aborted || runtime?.error || runtime?.pendingAssistantFailure)
             )
               failedSettlements.add(envelope);
+            // Classify at this event, not at the end of the batch: recovery may unlock later
+            // in this same batch. Its companion errors/aborts wait on the recovery gate only.
+            if (
+              !runtime?.recoveryRequired &&
+              ((envelope.event.type === 'error' && envelope.event.source !== 'compaction') ||
+                failedSettlements.has(envelope))
+            )
+              queueFailures.add(envelope.sessionId);
           }
           next = reduced;
         }
@@ -463,26 +471,13 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (event.type === 'warning') continue;
         clearSuggestion(sessionId);
       }
-      // A settled turn drains the queue: only when it ended normally (stop / error keep it for the user)
+      // Only independent failures create a manual pause. Recovery never releases an existing
+      // pause, so a late successful snapshot cannot undo Stop or a rejected prompt.
+      for (const sessionId of queueFailures) holdQueue(sessionId);
       const settled = new Set<string>();
       const normal = new Map<string, number>();
       for (const envelope of batch) {
         const { sessionId, event } = envelope;
-        if (
-          event.type === 'error' ||
-          failedSettlements.has(envelope) ||
-          (event.type === 'context_runtime' && event.snapshot.recoveryRequired) ||
-          get().runtimeBySession[sessionId]?.recoveryRequired
-        )
-          holdQueue(sessionId);
-        if (
-          event.type === 'compaction' &&
-          compactionNeedsRecovery(
-            event.state,
-            get().runtimeBySession[sessionId]?.contextRuntime?.effectiveStrategy
-          )
-        )
-          holdQueue(sessionId);
         if (
           (event.type === 'agent_settled' &&
             (event.aborted || !get().runtimeBySession[sessionId]?.recoveryRequired)) ||
@@ -519,6 +514,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const runtime = get().runtimeBySession[sessionId];
       return Boolean(
         get().recoveringCompaction[sessionId] ||
+          recoveryRequests.has(sessionId) ||
           compactionActive(runtime?.compaction) ||
           runtime?.recoveryRequired ||
           runtime?.pendingPromptCount
@@ -590,6 +586,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       if (
         get().pausedQueues[sessionId] ||
         get().stopping[sessionId] ||
+        (get().pendingApprovals[sessionId]?.length ?? 0) > 0 ||
         sending.has(sessionId) ||
         recoveryBlocked(sessionId)
       )
@@ -759,7 +756,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           };
         });
         for (const session of sessions) {
-          if (get().runtimeBySession[session.id]?.recoveryRequired) holdQueue(session.id);
           if (
             synchronized.has(session.id) &&
             !recoveryRequests.has(session.id) &&
@@ -769,6 +765,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               recoveringCompaction: omitKey(state.recoveringCompaction, session.id),
             }));
           }
+          if (synchronized.has(session.id)) drainQueue(session.id);
         }
       },
 
@@ -853,14 +850,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               result.contextRecovery?.recoveryRequired
             );
           }
-          return {
-            ...next,
-            loadingHistory,
-            ...(next.runtimeBySession[sessionId]?.recoveryRequired
-              ? { pausedQueues: { ...next.pausedQueues, [sessionId]: true as const } }
-              : {}),
-          };
+          return { ...next, loadingHistory };
         });
+        if (result.ok) drainQueue(sessionId);
       },
 
       async send(text) {
@@ -1012,7 +1004,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         )
           return;
         clearSuggestion(sessionId);
-        holdQueue(sessionId);
         set((state) => ({
           recoveringCompaction: { ...state.recoveringCompaction, [sessionId]: true },
           runtimeBySession: {
@@ -1032,7 +1023,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               ? { notice: translate('chat.compactionRetryFailed', { error: result.error }) }
               : {}),
           }));
-        // An ACK is only acceptance. Events/settled own completion; queued messages stay held.
+        // ACK only accepts the request. If completion events arrived first, re-check now
+        // that request exclusion is gone; otherwise the runtime gate still blocks delivery.
+        drainQueue(sessionId);
       },
 
       removeQueued(sessionId, queuedId) {
