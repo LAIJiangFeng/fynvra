@@ -561,8 +561,7 @@ export const en: MessagesShape<typeof zhCN> = {
     discardFile: 'Discard changes',
     stageAll: 'Stage all changes',
     discardAll: 'Discard all changes',
-    discardFileConfirm:
-      'Discard changes to “{name}”? New untracked files will also be deleted. This cannot be undone.',
+    discardFileConfirm: 'Discard changes to “{name}”? This cannot be undone.',
     discardAllConfirm:
       'Discard all uncommitted changes? New untracked files will also be deleted. This cannot be undone.',
     changesActionFailed: 'Changes action failed: {message}',

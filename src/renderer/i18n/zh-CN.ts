@@ -537,7 +537,7 @@ export const zhCN = {
     discardFile: '丢弃更改',
     stageAll: '全部暂存',
     discardAll: '全部丢弃',
-    discardFileConfirm: '确定丢弃「{name}」的更改吗？未跟踪的新文件也会被删除，此操作不可撤销。',
+    discardFileConfirm: '确定丢弃「{name}」的更改吗？此操作不可撤销。',
     discardAllConfirm: '确定丢弃全部未提交的更改吗？未跟踪的新文件也会被删除，此操作不可撤销。',
     changesActionFailed: '改动操作失败：{message}',
     committedChanges: '已提交的更改',

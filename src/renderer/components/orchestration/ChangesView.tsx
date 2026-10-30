@@ -353,9 +353,7 @@ function ChangeSet({
               paths: [
                 ...new Set([
                   file.path,
-                  ...(action === 'discard' && file.status === 'renamed' && file.oldPath
-                    ? [file.oldPath]
-                    : []),
+                  ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
                 ]),
               ],
             }
@@ -396,7 +394,7 @@ function ChangeSet({
       }
     >
       {error && (
-        <p className="text-destructive text-xs" role="status">
+        <p className="text-destructive text-xs" role="alert">
           {error}
         </p>
       )}
