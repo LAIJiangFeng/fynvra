@@ -30948,7 +30948,7 @@ function loadFynvraConfig() {
   const path = process.env.MAGIC_CONTEXT_CONFIG_FILE?.trim();
   if (!path || !isAbsolute(path)) throw new Error("Fynvra Magic Context config is unavailable");
   const raw = JSON.parse(readFileSync2(path, "utf8"));
-  if (raw.enabled !== true || raw.compaction?.enabled !== true || raw.fail_closed_blocking !== false ||
+  if (raw.enabled !== true || raw.compaction?.enabled !== true || raw.fail_closed_blocking !== true ||
       raw.dreamer?.disable !== true || raw.sidekick?.disable !== true || raw.memory?.enabled !== false ||
       raw.embedding?.provider !== "off" || raw.todowrite?.enabled !== false) {
     throw new Error("Fynvra Magic Context config violates the compression-only policy");
