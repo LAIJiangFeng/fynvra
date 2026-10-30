@@ -327,7 +327,7 @@ export const en: MessagesShape<typeof zhCN> = {
     tokensHint: 'Historical input / output tokens (not current context usage)',
     usageTotal: 'Historical total',
     magicContextFallback:
-      'Magic Context paused; history and inputs are preserved, without native fallback. Select “Retry context recovery”. If it still fails, restart the app or change models and retry.',
+      'Magic Context paused; history and inputs are preserved, without native fallback. Select “Retry context recovery”. If it still fails, restart the app or change models and retry',
     costHint: 'Historical total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
@@ -740,7 +740,7 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionMagic: 'Magic Context (default)',
       compactionOff: 'Turn off auto-compaction',
       compactionHint:
-        'Applies to newly loaded sessions. Magic Context uses the current model in the background, which may add model requests. Failures pause the session and preserve inputs for explicit recovery, without native fallback.',
+        'Applies to newly loaded sessions. Magic Context uses the current model in the background, which may add model requests. Failures pause the session and preserve inputs for explicit recovery, without native fallback',
       off: 'Off',
       never: 'Never',
       days: '{days} {days|day|days}',

@@ -308,7 +308,7 @@ export const zhCN = {
     tokensHint: '历史累计输入 / 输出 tokens（不是当前上下文占用）',
     usageTotal: '历史累计',
     magicContextFallback:
-      'Magic Context 已暂停，历史与输入已保留，不会转用原生压缩。点击“重试上下文恢复”；若仍失败，可重启应用或更换模型后重试。',
+      'Magic Context 已暂停，历史与输入已保留，不会转用原生压缩。点击“重试上下文恢复”；若仍失败，可重启应用或更换模型后重试',
     costHint: '历史累计费用',
     branchHint: '当前分支（{cwd}）',
     image: '图片 {index}',
@@ -711,7 +711,7 @@ export const zhCN = {
       compactionMagic: 'Magic Context（默认）',
       compactionOff: '关闭自动压缩',
       compactionHint:
-        '新加载会话生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求。失败时暂停并保留输入，需显式恢复，不会自动转用原生压缩。',
+        '新加载会话生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求。失败时暂停并保留输入，需显式恢复，不会自动转用原生压缩',
       off: '关闭',
       never: '永不',
       days: '{days} 天',
