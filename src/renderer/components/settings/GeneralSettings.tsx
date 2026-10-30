@@ -534,8 +534,8 @@ function CompactionSection() {
   const id = useId();
   const hint = t('settings.general.compactionHint');
   const items = [
-    { value: 'native', label: t('settings.general.compactionNative') },
     { value: 'magic-context', label: t('settings.general.compactionMagic') },
+    { value: 'native', label: t('settings.general.compactionNative') },
     { value: 'off', label: t('settings.general.compactionOff') },
   ];
   return (

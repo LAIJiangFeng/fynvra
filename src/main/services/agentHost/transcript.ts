@@ -75,7 +75,7 @@ export class Transcript {
         this.#line(`[error] ${event.message}`);
         return;
       case 'warning':
-        this.#line('[warning] magic-context fallback to native compaction');
+        this.#line('[warning] magic-context paused; context recovery required');
         return;
       case 'agent_settled':
         this.#line(event.aborted ? '[aborted]' : '[settled]');

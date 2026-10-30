@@ -105,7 +105,7 @@ describe('generation progress presentation', () => {
       <GenerationProgress sessionId="s" status="idle" showWorking={false} error={undefined} />
     );
     expect(html).toContain('历史压缩超时，原会话已保留，可重试');
-    expect(html).toContain('重试历史压缩');
+    expect(html).toContain('重试上下文恢复');
     expect(html).not.toContain('animate-spin');
   });
 
@@ -119,7 +119,7 @@ describe('generation progress presentation', () => {
       const html = renderToStaticMarkup(
         <GenerationProgress sessionId="s" status="idle" showWorking={false} error={undefined} />
       );
-      expect(html.includes('重试历史压缩')).toBe(blocked);
+      expect(html.includes('重试上下文恢复')).toBe(blocked);
       expect(html).not.toContain('animate-spin');
     }
   );
@@ -136,7 +136,7 @@ describe('generation progress presentation', () => {
       <GenerationProgress sessionId="s" status="idle" showWorking={false} error={undefined} />
     );
     expect(html).not.toContain('role="alert"');
-    expect(html).not.toContain('重试历史压缩');
+    expect(html).not.toContain('重试上下文恢复');
   });
 
   it('keeps approvals visible and keeps ordinary short idle sessions quiet', () => {

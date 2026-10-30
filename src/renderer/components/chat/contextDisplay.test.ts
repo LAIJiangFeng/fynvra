@@ -5,15 +5,14 @@ import { compactionFailure, contextLabel, strategyLabel, strategyNotice } from '
 
 const runtime: ContextRuntimeSnapshot = {
   configuredStrategy: 'magic-context',
-  effectiveStrategy: 'native',
+  effectiveStrategy: 'magic-context',
   compactionTimeoutMs: 600_000,
   context: {
     tokens: 41_000,
     contextWindow: 128_000,
     source: 'sdk',
-    compactionThresholdTokens: 112_000,
   },
-  recoveryRequired: false,
+  recoveryRequired: true,
   pendingPromptCount: 0,
 };
 const failed: CompactionState = {
@@ -29,16 +28,16 @@ const failed: CompactionState = {
 
 describe('runtime strategy and current-context copy', () => {
   it.each(['zh-CN', 'en'] as const)(
-    'distinguishes selected, effective fallback, and not-yet-applied strategies (%s)',
+    'distinguishes Magic recovery from a not-yet-applied strategy (%s)',
     (locale) => {
       const t = translatorOf(locale);
       expect(strategyLabel(undefined, t)).toBe(t('chat.engineUnknown'));
-      expect(strategyLabel(runtime.effectiveStrategy, t)).toBe(t('chat.engineNative'));
+      expect(strategyLabel(runtime.effectiveStrategy, t)).toBe('Magic Context');
       expect(strategyNotice(runtime, 'magic-context', t)).toBe(t('chat.magicContextFallback'));
       expect(strategyNotice(runtime, 'off', t)).toBe(t('chat.strategyPending'));
       expect(strategyNotice(undefined, 'off', t)).toBeUndefined();
       expect(
-        strategyNotice({ ...runtime, effectiveStrategy: 'magic-context' }, 'magic-context', t)
+        strategyNotice({ ...runtime, recoveryRequired: false }, 'magic-context', t)
       ).toBeUndefined();
     }
   );
@@ -56,7 +55,12 @@ describe('runtime strategy and current-context copy', () => {
     expect(contextLabel(large, t).nearThreshold).toBe(false); // no guessed percentage / 272k limit
     expect(
       contextLabel(
-        { ...large, context: { ...large.context, compactionThresholdTokens: 112_000 } },
+        {
+          ...large,
+          configuredStrategy: 'native',
+          effectiveStrategy: 'native',
+          context: { ...large.context, compactionThresholdTokens: 112_000 },
+        },
         t
       ).nearThreshold
     ).toBe(true);
