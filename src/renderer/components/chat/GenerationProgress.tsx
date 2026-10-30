@@ -25,7 +25,8 @@ export function GenerationProgress({
     (state) => state.runtimeBySession[sessionId]?.recoveryRequired
   );
   const magic = useSessionsStore(
-    (state) => state.runtimeBySession[sessionId]?.contextRuntime?.configuredStrategy === 'magic-context'
+    (state) =>
+      state.runtimeBySession[sessionId]?.contextRuntime?.configuredStrategy === 'magic-context'
   );
   const recovering = useSessionsStore((state) => state.recoveringCompaction[sessionId] === true);
   const stopping = useSessionsStore((state) => state.stopping[sessionId] === true);
