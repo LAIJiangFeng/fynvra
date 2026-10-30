@@ -118,6 +118,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   },
   orchestration: {
     invalidOutputInput: 'Invalid dispatch id or cursor',
+    invalidChangesAction: 'Invalid changes action request',
     dispatchNotFound: 'Dispatch not found',
     invalidDispatchId: 'Invalid dispatch id',
   },

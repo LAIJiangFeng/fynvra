@@ -106,6 +106,7 @@ export const mainZhCN = {
   },
   orchestration: {
     invalidOutputInput: '无效的 dispatch id 或 cursor',
+    invalidChangesAction: '无效的改动操作请求',
     dispatchNotFound: 'dispatch 不存在',
     invalidDispatchId: '无效的 dispatch id',
   },
