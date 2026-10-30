@@ -34,8 +34,8 @@ export function prepareMagicContextHost(): Record<string, string> {
     }
     writeFileSync(configFile, `${JSON.stringify(HOST_CONFIG, null, 2)}\n`, 'utf8');
   } catch (error) {
-    // The worker checks for the config file and falls back to native compaction
-    // with a session warning; do not take the whole app down for this.
+    // The worker blocks Magic requests and reports a recoverable session warning;
+    // failure here must not take the whole app down.
     console.warn(`[magic-context] could not prepare host files: ${String(error)}`);
   }
 
@@ -66,8 +66,8 @@ const HOST_CONFIG = {
   enabled: true,
   // No npm self-update/network checks in the desktop app.
   auto_update: false,
-  // Storage failure must leave pi native compaction in charge.
-  fail_closed_blocking: false,
+  // Storage failures block requests; the worker owns cancellation and durable recovery.
+  fail_closed_blocking: true,
   compaction: { enabled: true },
   // Placeholder only: the Fynvra runner always uses the session's current model.
   historian: { pi: { model: 'fynvra/historian' } },

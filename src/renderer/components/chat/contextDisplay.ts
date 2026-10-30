@@ -31,7 +31,7 @@ export function strategyNotice(
 ): string | undefined {
   if (!snapshot) return undefined;
   if (snapshot.configuredStrategy !== selected) return t('chat.strategyPending');
-  if (snapshot.effectiveStrategy !== snapshot.configuredStrategy)
+  if (snapshot.configuredStrategy === 'magic-context' && snapshot.recoveryRequired)
     return t('chat.magicContextFallback');
   return undefined;
 }

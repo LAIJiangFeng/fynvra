@@ -128,7 +128,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     approvalTitle: '{title} · Approval needed',
     compactionWarningTitle: '{title} · Context compaction',
     compactionWarningBody:
-      'Magic Context could not run or continue managing this session; pi native auto-compaction is active.',
+      'Magic Context paused the session; history and inputs are preserved. Fix the issue or switch models, then select “Retry context recovery” in the session. Native compaction will not take over.',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}: {detail}',
     done: 'Done',

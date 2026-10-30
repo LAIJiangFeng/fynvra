@@ -32,13 +32,17 @@ describe('createSessionSettings', () => {
     expect(settings.getGlobalSettings()).toEqual({
       enableInstallTelemetry: false,
       shellPath: 'D:\\Software\\Git\\bin\\bash.exe',
+      compaction: { enabled: false },
     });
   });
 
-  it('leaves the shell to pi without one and otherwise matches the agent-runtime default', () => {
+  it('leaves the shell to pi and disables native compaction for the default Magic policy', () => {
     const settings = createSessionSettings(undefined);
     expect(settings.getShellPath()).toBeUndefined();
     expect(settings.getEnableInstallTelemetry()).toBe(false);
-    expect(settings.getGlobalSettings()).toEqual({ enableInstallTelemetry: false });
+    expect(settings.getGlobalSettings()).toEqual({
+      enableInstallTelemetry: false,
+      compaction: { enabled: false },
+    });
   });
 });

@@ -250,7 +250,7 @@ describe('context runtime snapshots and recovery', () => {
     const identity = { sessionId: session.id, generation: 1 };
     const snapshot = {
       configuredStrategy: 'magic-context' as const,
-      effectiveStrategy: 'native' as const,
+      effectiveStrategy: 'magic-context' as const,
       compactionTimeoutMs: 30_000,
       recoveryRequired: true,
       pendingPromptCount: 1,
@@ -275,10 +275,14 @@ describe('context runtime snapshots and recovery', () => {
     expect(env.sent('prompt')).toHaveLength(1);
     expect(await env.host.retryCompaction(session.id)).toEqual({ ok: true });
     expect(await env.host.retryCompaction(session.id)).toMatchObject({ ok: false });
-    expect(env.sent('retry-compaction')).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(env.sent('retry-compaction')[0]).toMatchObject({
+        identity: { sessionId: session.id, generation: 2 },
+      })
+    );
     env.worker().emit({
       type: 'session-event',
-      identity: { ...identity, generation: 0 },
+      identity, // The previous loaded generation is stale after explicit Magic recovery.
       seq: 10,
       event: {
         type: 'context_runtime',
@@ -1102,6 +1106,7 @@ describe('createAgentHost sessions', () => {
         role: getBuiltinRole('worker'),
         cwd: env.workspace.repoPath,
         sessionFile: sessionFilePath(join(env.dir, 'agent'), session.id),
+        compactionStrategy: 'magic-context',
         compactionTimeoutMs: 600_000,
         model: {
           providerId: RUNTIME_PROVIDER,

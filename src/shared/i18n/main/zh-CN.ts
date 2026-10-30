@@ -115,7 +115,8 @@ export const mainZhCN = {
     errorTitle: '{title} · 出错',
     approvalTitle: '{title} · 待审批',
     compactionWarningTitle: '{title} · 上下文压缩',
-    compactionWarningBody: 'Magic Context 未能在当前会话启用或继续管理，已改用 pi 原生自动压缩。',
+    compactionWarningBody:
+      'Magic Context 已暂停会话，历史与输入已保留。修复问题或更换模型后，在会话中点击“重试上下文恢复”；不会转用原生压缩。',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}：{detail}',
     done: '完成',

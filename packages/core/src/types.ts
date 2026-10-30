@@ -183,7 +183,7 @@ export interface Message {
   ackedAt?: number;
 }
 
-/** Magic Context 交给宿主的回退原因；只用于非阻塞提示，不把会话标记为失败。 */
+/** Magic Context 暂停原因；沿用既有事件枚举，供固定恢复提示使用，不包含 provider 原文。 */
 export type MagicContextFallbackReason = 'startup' | 'runtime' | 'context' | 'budget';
 
 /** Transport-only lifecycle metadata; never contains prompts, summaries or credentials. */

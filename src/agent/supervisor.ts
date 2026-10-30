@@ -293,7 +293,7 @@ export class SessionSupervisor {
       );
       return;
     }
-    if (existing) void this.#close(existing);
+    const closing = existing ? this.#close(existing) : undefined;
     const managed: ManagedSession = {
       identity,
       opening: Promise.resolve(null),
@@ -304,7 +304,10 @@ export class SessionSupervisor {
       approvalEpoch: 0,
       settledRounds: 0,
     };
-    managed.opening = this.#openManaged(managed, spec);
+    // Recovery reopens the same jsonl and Magic route: finish disposal/checkpointing first.
+    managed.opening = closing
+      ? closing.then(() => this.#openManaged(managed, spec))
+      : this.#openManaged(managed, spec);
     this.#sessions.set(identity.sessionId, managed);
   }
 
@@ -313,6 +316,7 @@ export class SessionSupervisor {
     spec: SpawnSessionSpec
   ): Promise<SupervisedSession | null> {
     const { identity } = managed;
+    if (managed.closed) return null;
     const call =
       (kind: HostKind): HostCall =>
       (method, input, signal) =>
@@ -373,6 +377,11 @@ export class SessionSupervisor {
       this.#approvals.cancelSession(managed.identity.sessionId);
     }
     this.#post({ type: 'session-event', identity: managed.identity, seq: event.seq, event });
+    // Startup/background Magic failure can happen without an active SDK run to settle.
+    if (event.type === 'warning' && event.source === 'magic-context' && managed.status === 'idle') {
+      managed.failed = true;
+      this.#setStatus(managed, 'error');
+    }
     if (event.type === 'agent_settled') {
       if (!event.aborted) managed.settledRounds += 1;
       this.#setStatus(managed, managed.failed ? 'error' : 'idle');

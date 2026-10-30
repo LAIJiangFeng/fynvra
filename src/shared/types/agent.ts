@@ -114,9 +114,9 @@ export interface SpawnSessionSpec {
    */
   shellPath?: string;
   /**
-   * 上下文自动压缩策略：缺省为 pi 原生自动压缩。`off` 关掉自动压缩；`magic-context`
-   * 加载内置的 Magic Context 插件（原生压缩在插件就绪前/失败时仍作为回退）。
-   * Main 在新会话或应用重启后恢复会话时读取已保存的设置；运行中的会话不热切换
+   * 上下文自动压缩策略：缺省为 Magic Context，禁用 pi 原生自动压缩及隐式回退。
+   * 显式 `native` 使用原生压缩，`off` 关闭自动压缩；Magic 失败后保留输入并等待显式恢复。
+   * Main 在加载（包括显式恢复重载）时读取已保存的设置；运行中的会话不热切换
    */
   compactionStrategy?: CompactionStrategy;
   compactionTimeoutMs?: number;
