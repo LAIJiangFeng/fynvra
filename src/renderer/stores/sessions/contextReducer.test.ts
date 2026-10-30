@@ -18,7 +18,7 @@ const operation: CompactionState = {
   maxAttempts: 3,
 };
 const snapshot: ContextRuntimeSnapshot = {
-  configuredStrategy: 'magic-context',
+  configuredStrategy: 'native',
   effectiveStrategy: 'native',
   compactionTimeoutMs: 600_000,
   context: { tokens: 200_000, contextWindow: 256_000, source: 'sdk' },

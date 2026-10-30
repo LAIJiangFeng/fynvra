@@ -27000,10 +27000,10 @@ function registerPiContextHandler(pi, baseOptions) {
       }
       return { messages: outputMessages };
     } catch (err) {
-      // Fynvra patch 12: a runtime context failure hands the session back to native compaction immediately.
+      // Fynvra: a runtime context failure pauses this session for explicit recovery.
       if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && sessionIdForError) {
         if (fynvraOperationActive()) fynvraSuspendSession(sessionIdForError, "context");
-        log(`[magic-context][${sessionIdForError}] context handler failed; native compaction takes over: ${err instanceof Error ? err.message : String(err)}`);
+        log(`[magic-context][${sessionIdForError}] context handler failed; session paused: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
       if (isFailClosedBlockingError(err) && !baseOptions.compactionOff)
@@ -31992,7 +31992,7 @@ function registerPiFailClosedSurface(pi, args) {
   });
   report(`${PREFIX} fail-closed blocking surface registered (${args.reason.kind}); primary turns will error until storage recovers or the build is upgraded`);
   return {
-    adoptRecovered: (db) => recoverWith(async () => db)
+    adoptRecovered: (db) => process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" ? Promise.resolve(false) : recoverWith(async () => db)
   };
 }
 
@@ -32168,6 +32168,9 @@ function fynvraSuspendedSessions() {
   }
   return sessions;
 }
+function fynvraIsSessionReady(sessionId) {
+  return fynvraReadySessions().has(sessionId) && !fynvraSuspendedSessions().has(sessionId);
+}
 function fynvraInterruptSession(sessionId) {
   const cleanup = fynvraHistorianCleanups.get(sessionId);
   fynvraHistorianCleanups.delete(sessionId);
@@ -32232,7 +32235,7 @@ function fynvraMarkSessionClosed(ctx) {
   } catch {}
 }
 async function handlePiSessionBeforeCompact(args) {
-  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1" && (!fynvraOperationActive() || !fynvraHostSessionReady(args.ctx) || fynvraHostSessionSuspended(args.ctx))) return;
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return { cancel: true };
   try {
     const sessionId = args.ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId === "string" && sessionId.length > 0) {
@@ -32242,19 +32245,6 @@ async function handlePiSessionBeforeCompact(args) {
   if (args.compactionOff) {
     info("session_before_compact: native Pi compaction proceeds (compaction-off mode)");
     return;
-  }
-  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
-    let ready = false;
-    let suspended = false;
-    try {
-      const sessionId = args.ctx.sessionManager?.getSessionId?.();
-      ready = typeof sessionId === "string" && fynvraReadySessions().has(sessionId);
-      suspended = typeof sessionId === "string" && fynvraSuspendedSessions().has(sessionId);
-    } catch {}
-    if (!ready || suspended) {
-      info("session_before_compact: native Pi compaction proceeds (Fynvra Magic Context is not active)");
-      return;
-    }
   }
   info("session_before_compact: cancelling — magic-context owns compaction");
   return { cancel: true };
@@ -32609,7 +32599,7 @@ async function src_default(pi) {
     },
     report: log
   });
-  // Fynvra patch 9: let the host decide whether to keep native compaction.
+  // Fynvra: the host gates requests on storage boot and session readiness.
   try {
     pi[Symbol.for("fynvra.magic-context.report-boot")]?.(bootResult.status);
   } catch {}
@@ -33454,6 +33444,7 @@ export {
   resolveHistorianFromConfig,
   resolveSidekickFromConfig,
   signalPiDeferredCompactionMarkerDrain,
+  fynvraIsSessionReady,
   fynvraSuspendSession,
   fynvraInterruptSession,
   fynvraCloseSession

@@ -57,8 +57,10 @@ export function fynvraBindSession(pi, sessionId, capture) {
     const shutdown = event === "session_shutdown";
     if (bindings.get(sessionId) !== binding) return;
     const bootReady = pi[Symbol.for("fynvra.magic-context.boot-ok")] === true;
+    // Never allow a native summary, including inactive/partially booted bindings.
+    if (event === "session_before_compact") return { cancel: true };
     if (!shutdown && (!bootReady || !operation.isCurrent())) {
-      if (isTool) throw new Error("Magic Context is inactive; native compaction is active");
+      if (isTool) throw new Error("Magic Context is inactive; retry context recovery");
       return;
     }
     const contextIndex = isTool ? 4 : 1;
@@ -84,11 +86,15 @@ export function fynvraBindSession(pi, sessionId, capture) {
           args[0] = { ...args[0], messages: structuredClone(args[0].messages) };
         }
         const result = await handler(...args);
+        if (event === "context" && scoped.isCurrent() && !Array.isArray(result?.messages)) {
+          operation.onFailure("context");
+          return;
+        }
         return scoped.isCurrent() ? result : undefined;
       } catch (error) {
         if (!shutdown && scoped.isCurrent()) operation.onFailure(event === "session_start" ? "startup" : "context");
         if (isTool) throw error;
-        // Native compaction / unmodified context remains available.
+        // The host aborts the run and checks readiness after the SDK context transform.
         return;
       } finally {
         if (shutdown && --shutdownHandlers === 0 && bindings.get(sessionId) === binding) bindings.delete(sessionId);

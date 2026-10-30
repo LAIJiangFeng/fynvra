@@ -43,7 +43,7 @@ const HISTORIAN_AGENTS = new Set([
 const MAX_HISTORIAN_PROMPT_CHARS = 2_000_000;
 /** Hard local cap in addition to the plugin's configured historian timeout. */
 const MAX_HISTORIAN_TIMEOUT_MS = 5 * 60_000;
-/** Consecutive transient failures before handing this session back to native compaction. */
+/** Consecutive transient failures before suspending this session for explicit recovery. */
 const TRANSIENT_FAILURE_LIMIT = 3;
 /** Token headroom for message framing / provider overhead. */
 const CONTEXT_SAFETY_TOKENS = 2_048;
@@ -85,7 +85,8 @@ interface MagicOperation {
 
 interface MagicContextModule {
   default(pi: ExtensionAPI): void | Promise<void>;
-  /** Added by vendor patch: invalidate this session's Magic takeover. */
+  /** Added by vendor patch: inspect or invalidate this session's Magic binding. */
+  fynvraIsSessionReady(sessionId: string): boolean;
   fynvraSuspendSession(sessionId: string, reason?: string): void;
   fynvraInterruptSession(sessionId: string): void;
   fynvraCloseSession(sessionId: string): void;
@@ -124,6 +125,10 @@ export interface MagicContextCompaction {
   readonly warnings: string[];
   /** Register the Pi session id before the extension is bound. */
   attach(piSessionId: string): void;
+  /** Reject requests until the plugin is ready; return the current cancellation generation. */
+  assertReady(): AbortSignal;
+  /** Stop unsafe requests and retain this session for explicit recovery. */
+  suspend(reason: MagicContextFallbackReason): void;
   /** Stop/model changes invalidate current operations without treating cancellation as failure. */
   interrupt(): void;
   /** Abort an in-flight historian and drop the routing entry. */
@@ -131,7 +136,7 @@ export interface MagicContextCompaction {
 }
 
 export interface MagicContextCompactionOptions {
-  /** Called once when this session must hand context back to native compaction. */
+  /** Called once when this session must stop for explicit Magic recovery (never native fallback). */
   onFallback?: (reason: MagicContextFallbackReason) => void;
 }
 
@@ -157,6 +162,8 @@ export function createMagicContextCompaction(
     name: 'fynvra-magic-context',
     hidden: true,
     factory: async (pi) => {
+      // Defense for manual SDK compaction as well as startup failure before vendor hooks exist.
+      pi.on('session_before_compact', async () => ({ cancel: true }));
       const host = prepareHost();
       if (!host.ok) {
         warnings.push(host.warning);
@@ -168,7 +175,7 @@ export function createMagicContextCompaction(
         module = await loadPlugin(host.pluginDir);
       } catch (error) {
         warnings.push(
-          `Magic Context plugin could not be loaded (${errorMessage(error)}); pi native compaction stays active.`
+          `Magic Context plugin could not be loaded (${errorMessage(error)}); session paused for recovery.`
         );
         notifyFallback('startup');
         return;
@@ -177,8 +184,8 @@ export function createMagicContextCompaction(
       let bootStatus: string | undefined;
       // A host-owned wrapper, not a mutation of Pi's ExtensionAPI object. The
       // vendored plugin reads boot status / boot readiness through these
-      // symbols; a non-extensible API or a missing report leaves native
-      // compaction in charge and still produces a visible warning.
+      // symbols; a non-extensible API or a missing report blocks requests and
+      // produces a visible recovery warning.
       const pluginApi = new Proxy({} as ExtensionAPI, {
         get(_target, property) {
           if (property === BOOT_SYMBOL) {
@@ -211,17 +218,17 @@ export function createMagicContextCompaction(
         await module.fynvraRunSessionOperation(capture, () => module.default(guardedApi));
       } catch (error) {
         warnings.push(
-          `Magic Context failed to start (${errorMessage(error)}); pi native compaction stays active.`
+          `Magic Context failed to start (${errorMessage(error)}); session paused for recovery.`
         );
         notifyFallback('startup');
         return;
       }
       if (bootStatus === undefined) {
-        warnings.push('Magic Context did not report startup; pi native compaction stays active.');
+        warnings.push('Magic Context did not report startup; session paused for recovery.');
         notifyFallback('startup');
       } else if (bootStatus !== 'ready') {
         warnings.push(
-          `Magic Context storage did not initialize (${bootStatus}); pi native compaction stays active.`
+          `Magic Context storage did not initialize (${bootStatus}); session paused for recovery.`
         );
         notifyFallback('startup');
       }
@@ -247,6 +254,22 @@ export function createMagicContextCompaction(
         sessionRunners.set(id, runner);
       }
     },
+    assertReady() {
+      if (
+        !runner ||
+        runner.disposed ||
+        runner.suspended ||
+        !piSessionId ||
+        !loadedPluginModule?.fynvraIsSessionReady(piSessionId)
+      ) {
+        notifyFallback('startup');
+        throw new Error(
+          'Magic Context is unavailable. Retry context recovery after fixing the cause.'
+        );
+      }
+      return runner.abort.signal;
+    },
+    suspend: notifyFallback,
     interrupt() {
       if (!runner || runner.disposed || runner.suspended) return;
       if (piSessionId) loadedPluginModule?.fynvraInterruptSession(piSessionId);
@@ -279,7 +302,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
   if (process.env.MAGIC_CONTEXT_FYNVRA_HOST !== '1') {
     return {
       ok: false,
-      warning: 'Magic Context host marker is missing; pi native compaction stays active.',
+      warning: 'Magic Context host marker is missing; session paused for recovery.',
     };
   }
   const pluginDir = process.env.MAGIC_CONTEXT_PLUGIN_DIR?.trim() ?? '';
@@ -288,20 +311,20 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
   if (!pluginDir || !isAbsolute(pluginDir) || !existsSync(join(pluginDir, 'dist', 'index.js'))) {
     return {
       ok: false,
-      warning: `Magic Context plugin files are missing at ${pluginDir || '(unset)'}; pi native compaction stays active.`,
+      warning: `Magic Context plugin files are missing at ${pluginDir || '(unset)'}; session paused for recovery.`,
     };
   }
   if (!storageDir || !isAbsolute(storageDir)) {
     return {
       ok: false,
       warning:
-        'Magic Context storage directory is missing or not absolute; pi native compaction stays active.',
+        'Magic Context storage directory is missing or not absolute; session paused for recovery.',
     };
   }
   if (!configFile || !isAbsolute(configFile) || !existsSync(configFile)) {
     return {
       ok: false,
-      warning: 'Magic Context host config is missing; pi native compaction stays active.',
+      warning: 'Magic Context host config is missing; session paused for recovery.',
     };
   }
   try {
@@ -315,7 +338,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
       todowrite?: { enabled?: unknown };
     };
     if (
-      config.fail_closed_blocking !== false ||
+      config.fail_closed_blocking !== true ||
       config.compaction?.enabled !== true ||
       config.dreamer?.disable !== true ||
       config.sidekick?.disable !== true ||
@@ -328,7 +351,7 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
   } catch (error) {
     return {
       ok: false,
-      warning: `Magic Context host config is invalid (${errorMessage(error)}); pi native compaction stays active.`,
+      warning: `Magic Context host config is invalid (${errorMessage(error)}); session paused for recovery.`,
     };
   }
   return { ok: true, pluginDir };
@@ -337,13 +360,14 @@ function prepareHost(): { ok: true; pluginDir: string } | { ok: false; warning: 
 async function loadPlugin(pluginDir: string): Promise<MagicContextModule> {
   if (!pluginModule) {
     pluginModule = (async () => {
-      // Electron 45 runs Node 24, so node:sqlite exists. Check explicitly to
-      // keep native compaction on an older/incompatible runtime.
+      // Electron 45 runs Node 24, so node:sqlite exists. Reject incompatible
+      // runtimes before allowing any Magic-managed request.
       await import('node:sqlite');
       const entry = pathToFileURL(join(pluginDir, 'dist', 'index.js')).href;
       const module = (await import(entry)) as MagicContextModule;
       if (
         typeof module.default !== 'function' ||
+        typeof module.fynvraIsSessionReady !== 'function' ||
         typeof module.fynvraBindSession !== 'function' ||
         typeof module.fynvraSuspendSession !== 'function' ||
         typeof module.fynvraInterruptSession !== 'function' ||
@@ -356,6 +380,7 @@ async function loadPlugin(pluginDir: string): Promise<MagicContextModule> {
       return module;
     })().catch((error) => {
       pluginModuleError = error;
+      pluginModule = null;
       throw error;
     });
   }
@@ -509,7 +534,7 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
     return fail(
       startedAt,
       'spawn_failed',
-      'Magic Context handed this session back to native compaction.'
+      'Magic Context is suspended; explicit context recovery is required.'
     );
   }
   if (runner.inFlight) {

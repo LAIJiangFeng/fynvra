@@ -91,7 +91,7 @@ export interface AgentHostDeps {
   resolveResources?(role: Role): Promise<RoleResources>;
   /** 会话 bash 工具用的 shell（生产为 createShellPathResolver）；缺省或返回 undefined 时由 pi 自己找 */
   resolveShellPath?(): Promise<string | undefined>;
-  /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 native */
+  /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 Magic Context */
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
@@ -294,7 +294,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.resolveResources ??
     (async (): Promise<RoleResources> => ({ skills: [], mcpServers: [], warnings: [] }));
   const resolveShellPath = deps.resolveShellPath ?? (async () => undefined);
-  const resolveCompactionStrategy = deps.resolveCompactionStrategy ?? (() => 'native' as const);
+  const resolveCompactionStrategy =
+    deps.resolveCompactionStrategy ?? (() => 'magic-context' as const);
   const describeTimeoutMs = deps.describeTimeoutMs ?? DESCRIBE_TIMEOUT_MS;
   const live = new Map<string, LiveSession>();
   const approvals = new Map<string, PendingApproval>();
@@ -564,7 +565,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           roles,
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
-          ...(compactionStrategy !== 'native' ? { compactionStrategy } : {}),
+          compactionStrategy,
           compactionTimeoutMs: compactionTimeoutMsOf({
             compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
           }),
@@ -736,10 +737,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 会话首次使用（或 worker 丢了它）时在 worker 里创建；transcript 先从 jsonl 初始化，再接实时事件 */
   async function ensureSpawned(
     stored: StoredSession,
-    wanted: () => boolean = () => true
+    wanted: () => boolean = () => true,
+    reload = false
   ): Promise<Result> {
     const state = liveOf(stored.id);
-    if (state.spawned) return { ok: true };
+    if (state.spawned && !reload) return { ok: true };
     if (client.state === 'stopped') client.start();
     if (client.state !== 'starting' && client.state !== 'ready')
       return fail(translate('agent.workerUnavailable'));
@@ -748,7 +750,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     await ensureTranscript(stored, state);
     if (!deps.store.get(stored.id)) return fail(translate('common.sessionNotFound'));
     if (!wanted()) return fail('The session operation was cancelled.');
-    if (state.spawned) return { ok: true };
+    if (state.spawned && !reload) return { ok: true };
     return spawnWith(stored.id, state, built.spec)
       ? { ok: true }
       : fail(translate('agent.workerUnavailable'));
@@ -788,7 +790,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const wanted = () => state.recovery === operation && !operation.cancelled;
     try {
       if (client.state === 'restarting') client.start();
-      const spawned = await ensureSpawned(stored, wanted);
+      // Explicit recovery reloads a suspended Magic binding using the same jsonl/DB.
+      // The worker closes the previous generation before opening its replacement.
+      const reload =
+        resolveCompactionStrategy() === 'magic-context' ||
+        state.spec?.compactionStrategy === 'magic-context';
+      const spawned = await ensureSpawned(stored, wanted, reload);
       if (!wanted()) return;
       if (!spawned.ok) {
         finishRecovery(stored.id, state, operation, spawned);

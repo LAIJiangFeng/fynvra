@@ -470,22 +470,23 @@ describe('native compaction recovery with the installed SDK and an offline provi
     expect(env.events.slice(eventCount).some((e) => e.type === 'context_runtime')).toBe(false);
   });
 
-  it('reports configured policy separately from Magic runtime fallback', async () => {
+  it('keeps Magic as the configured engine and requires recovery after failure', async () => {
     const env = await setup(false, 0, 'magic-context');
     expect(env.latest()).toMatchObject({
       configuredStrategy: 'magic-context',
       effectiveStrategy: 'magic-context',
     });
     expect(env.latest().context.compactionThresholdTokens).toBeUndefined();
-    env.recovery.fallback();
+    env.recovery.failMagic();
     expect(env.latest()).toMatchObject({
       configuredStrategy: 'magic-context',
-      effectiveStrategy: 'native',
+      effectiveStrategy: 'magic-context',
+      recoveryRequired: true,
       compactionTimeoutMs: 30_000,
     });
   });
 
-  it('preserves short turns, actual context window, and Magic fallback snapshots', async () => {
+  it('preserves short turns and the actual context window with explicit native compaction', async () => {
     const env = await setup(false);
     env.faux.setResponses([fauxAssistantMessage('short answer')]);
     await env.recovery.prompt('short input');

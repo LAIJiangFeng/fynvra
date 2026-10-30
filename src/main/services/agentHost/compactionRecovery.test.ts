@@ -49,6 +49,7 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
   const createHost = () =>
     createAgentHost({
       agentDir,
+      resolveCompactionStrategy: () => 'native',
       store: createSessionStore({ filePath: join(dir, 'sessions.json') }),
       workspaces: {
         get: () => ({ id: 'ws1', name: 'repo', repoPath: dir, vcs: 'git', defaultBranch: 'main' }),

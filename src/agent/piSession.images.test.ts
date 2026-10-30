@@ -60,6 +60,7 @@ describe('createPiSessionFactory images', () => {
         },
         cwd: join(tmp, 'repo'),
         sessionFile: join(tmp, 'agent', 'sessions', `${sessionId}.jsonl`),
+        compactionStrategy: 'native',
         model: { providerId: 'fynvra-faux', api: faux.api, modelId: 'faux-vision' },
         skills: [],
         mcpServers: [],

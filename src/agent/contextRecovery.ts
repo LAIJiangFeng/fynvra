@@ -8,7 +8,7 @@ import { parseChatImages, stripImageHints } from '@shared/types/chat';
 import type { CompactionStrategy } from '@shared/types/settings';
 
 const CHECKPOINT = 'fynvra-context-recovery';
-const BLOCKED = 'Context recovery required. Retry compaction before continuing.';
+const BLOCKED = 'Context recovery required. Retry context recovery before continuing.';
 interface PendingInput {
   text: string;
   images?: ChatImage[];
@@ -20,6 +20,8 @@ interface Options {
   timeoutMs: number;
   contextWindow(): number;
   log(message: string): void;
+  /** Readiness plus the Magic cancellation generation; never authorizes native compaction. */
+  magicReady?(): AbortSignal;
 }
 
 /** Host-owned gate around public SDK APIs. No listener throws and no private SDK state is mutated. */
@@ -29,9 +31,11 @@ export function createContextRecovery({
   timeoutMs,
   contextWindow,
   log,
+  magicReady,
 }: Options) {
   let events: Pick<NormalizedSubscription, 'emit' | 'cancelCompaction'> | undefined;
-  let effective = strategy;
+  const effective = strategy;
+  const usesMagic = strategy === 'magic-context';
   let compaction: CompactionState | undefined;
   let retry: ContextRuntimeSnapshot['retry'];
   let blocked = false;
@@ -39,6 +43,10 @@ export function createContextRecovery({
   let stopSource: NonNullable<CompactionState['cancelSource']> = 'user';
   let disposed = false;
   let recovering = false;
+  let recoveryFailed = false;
+  let lastAssistantAborted = false;
+  let recoveryAbort: AbortController | undefined;
+  let magicPrepared = false;
   let running = false;
   let resume = false;
   let resumeCompactionId: string | undefined;
@@ -141,18 +149,36 @@ export function createContextRecovery({
     stopped = true;
     stopSource = source;
     clearTimer();
+    recoveryAbort?.abort();
     // Cancel the downstream request/backoff first. SDK checks this same signal before appendCompaction.
     session.abortCompaction();
     session.clearQueue();
     void session.abort().catch(() => undefined);
     events?.cancelCompaction(source);
   }
+  function requestBlocked() {
+    return disposed || stopped || (blocked && !(usesMagic && recovering && !recoveryFailed));
+  }
+  if (usesMagic) {
+    const transform = session.agent.transformContext;
+    session.agent.transformContext = async (messages, signal) => {
+      if (requestBlocked() || !magicReady || !transform) throw new Error(BLOCKED);
+      const generation = magicReady();
+      const result = await transform(messages, signal);
+      // SDK extension errors can be swallowed. The vendor reports them to our gate;
+      // check again after hooks, and reject transformations from an interrupted generation.
+      if (generation.aborted || signal?.aborted || requestBlocked()) throw new Error(BLOCKED);
+      magicReady();
+      if (recovering) magicPrepared = true;
+      return result;
+    };
+  }
   const prepare = session.agent.prepareRequest;
   session.agent.prepareRequest = async (request, signal) => {
-    if (disposed || stopped || blocked) throw new Error(BLOCKED);
+    if (requestBlocked()) throw new Error(BLOCKED);
     const result = await prepare?.(request, signal);
     // prepareRequest/prepareNextTurn may have attempted compaction and returned the old projection.
-    if (disposed || stopped || blocked || signal?.aborted) throw new Error(BLOCKED);
+    if (requestBlocked() || signal?.aborted) throw new Error(BLOCKED);
     return result || undefined;
   };
 
@@ -162,6 +188,15 @@ export function createContextRecovery({
       cancel(stopSource);
     }
     if (disposed) return;
+    if (usesMagic && recovering) {
+      // Normalized provider errors are final: transient attempts settle only after SDK retries.
+      if (
+        event.type === 'error' ||
+        (event.type === 'agent_settled' && (event.aborted || lastAssistantAborted))
+      ) {
+        recoveryFailed = true;
+      }
+    }
     if (event.type === 'compaction') {
       compaction = event.state;
       if (compaction.phase === 'running' || compaction.phase === 'backoff') {
@@ -225,6 +260,10 @@ export function createContextRecovery({
           }
         });
       } else {
+        if (usesMagic && recovering) {
+          // Observe cancellation here, but let the SDK finish retries before deciding the outcome.
+          lastAssistantAborted = event.stopReason === 'aborted';
+        }
         queueMicrotask(publish);
       }
     }
@@ -252,17 +291,18 @@ export function createContextRecovery({
     });
   }
   async function drain(duringRecovery = false) {
-    if (running || (recovering && !duringRecovery) || blocked || stopped || disposed) return;
+    const allowed = () => !blocked || (duringRecovery && usesMagic && !recoveryFailed);
+    if (running || (recovering && !duringRecovery) || !allowed() || stopped || disposed) return;
     running = true;
     try {
-      while (pending.length && !blocked && !stopped && !disposed) {
+      while (pending.length && allowed() && !stopped && !disposed) {
         const input = pending[0];
         if (!input) break;
         await submit(input);
         // A rejected preflight must not silently consume an acknowledged input.
         if (pending.includes(input)) break;
       }
-      if (!blocked && !stopped) resume = false;
+      if (allowed() && !stopped && !recoveryFailed) resume = false;
     } catch (error) {
       if (compaction?.phase === 'running' || compaction?.phase === 'backoff') cancel('exception');
       throw error;
@@ -280,9 +320,19 @@ export function createContextRecovery({
     },
     onEvent,
     publish,
-    fallback() {
-      effective = 'native';
+    failMagic() {
+      if (disposed || !usesMagic) return;
+      blocked = true;
+      recoveryFailed = true;
+      resume ||= running || !session.isIdle;
+      try {
+        checkpoint();
+      } catch {
+        writeLog('Magic recovery checkpoint could not be written; requests remain blocked.');
+      }
+      cancel('exception');
       publish();
+      events?.emit({ type: 'error', source: 'compaction', message: BLOCKED });
     },
     async prompt(text: string, images?: ChatImage[], steer = false) {
       const input: PendingInput = { text, ...(images?.length ? { images } : {}), submitted: false };
@@ -298,41 +348,69 @@ export function createContextRecovery({
       if (recovering || running || !session.isIdle) throw new Error('The session is busy.');
       if (!blocked) throw new Error('No compaction recovery is required.');
       recovering = true;
+      recoveryFailed = false;
+      lastAssistantAborted = false;
+      const controller = new AbortController();
+      recoveryAbort = controller;
+      magicPrepared = false;
       stopped = false;
       let completed = false;
       publish();
       try {
         // A previous attempt may have committed the summary before exit/Stop. Reuse that boundary;
         // compacting the already compacted projection again can fail with "session too small".
-        if (!resumeCompactionId) {
+        if (usesMagic) {
+          // Main reloads the plugin before this explicit operation. Do not treat an old
+          // native checkpoint (or plugin readiness alone) as successful compaction.
+          if (!magicReady) throw new Error(BLOCKED);
+          magicReady();
+        } else if (!resumeCompactionId) {
           await session.compact();
           if (compaction?.phase !== 'succeeded') return;
         }
         if (stopped || disposed) return;
-        // Only a committed compaction unlocks provider requests. Keep durable recovery until resumption ends.
-        blocked = false;
+        // Native needs a committed summary. Magic validates context before any provider request;
+        // its durable lock remains set through validation and any interrupted run's resumption.
+        if (!usesMagic) blocked = false;
         checkpoint();
-        if (pending.length === 0 && resume) {
+        if (usesMagic && pending.length === 0 && !resume) {
+          // An idle/startup failure has no interrupted task to resume. Validate the actual
+          // projection (even when empty) through the same guarded hooks, without inventing
+          // an input, replacing agent history, or starting a provider turn.
+          const transform = session.agent.transformContext;
+          if (!transform) throw new Error(BLOCKED);
+          await transform(session.messages, controller.signal);
+        } else if (pending.length === 0 && resume) {
           await session.sendCustomMessage(
             {
               customType: 'fynvra-compaction-resume',
-              content:
-                'Context compaction completed. Resume the interrupted turn from the existing conversation.',
+              content: usesMagic
+                ? 'Resume the interrupted turn from the existing conversation using Magic Context. Do not repeat completed work.'
+                : 'Context compaction completed. Resume the interrupted turn from the existing conversation.',
               display: false,
             },
             { triggerTurn: true }
           );
-          if (!blocked && !stopped) resume = false;
+          if (!stopped && !recoveryFailed && (!blocked || (usesMagic && magicPrepared))) {
+            resume = false;
+          }
         }
         await drain(true);
-        completed = !blocked && !stopped && !disposed && pending.length === 0 && !resume;
+        completed =
+          (!blocked || (usesMagic && magicPrepared)) &&
+          !recoveryFailed &&
+          !stopped &&
+          !disposed &&
+          pending.length === 0 &&
+          !resume;
       } catch {
         blocked = true;
         if (compaction?.phase === 'running' || compaction?.phase === 'backoff') cancel('exception');
         throw new Error(BLOCKED);
       } finally {
-        if (!completed) blocked = true;
-        else resumeCompactionId = undefined;
+        blocked = !completed;
+        if (completed) resumeCompactionId = undefined;
+        recoveryAbort = undefined;
         recovering = false;
         checkpoint();
         publish();

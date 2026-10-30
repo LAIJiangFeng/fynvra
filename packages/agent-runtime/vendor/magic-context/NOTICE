@@ -45,18 +45,19 @@ use fynvra-prefixed helpers and MAGIC_CONTEXT_FYNVRA_HOST checks):
       wrapper also exposes boot-ready, so a failed/partial/missing report never
       marks the session as a Magic owner.
   10. historian/dreamer/sidekick reduce nudges are disabled in the Fynvra host.
-  11. session_before_compact only cancels native compaction after that session's
-      boot-ready runtime finished registering and session_start marked it ready;
-      session_shutdown clears the mark.
+  11. Fynvra always cancels session_before_compact, including unready/suspended
+      bindings. The worker also disables SDK automatic native compaction and
+      installs its own cancel hook before attempting plugin startup.
   12. Per-session invalidation: context/session_start/before_agent_start failures
       and exhausted historian retries mark the session suspended, stop context
-      transforms/history injection/historian triggers/marker writes, and let
-      native compaction proceed. Another session is unaffected. The adapter also
-      forwards a one-shot warning event to the host.
+      transforms/history injection/historian triggers/marker writes, and pause
+      the run for explicit recovery. Another session is unaffected. The adapter
+      forwards a one-shot warning and aborts unsafe requests; it never enables
+      native compaction.
   13. Historian budgets come from the routed current model, using conservative
       UTF-8 byte estimates for text plus framing/output reserves. Whole formatted
       blocks are selected and the complete prompt is checked before sending.
-      No XML slicing; unsupported/tiny windows fall back. Upstream scheduler and
+      No XML slicing; unsupported/tiny windows pause for recovery. Upstream scheduler and
       history-decay estimates remain heuristic, not universal token guarantees.
   14. Only validated, committed historian publication reports success to the host.
       Final validation/no-progress/storage failures suspend the session; transient
@@ -75,6 +76,13 @@ use fynvra-prefixed helpers and MAGIC_CONTEXT_FYNVRA_HOST checks):
       DBs never migrate terminal data; tokenizer/cache/overlay/wake-plane discovery
       and unrelated startup backfills are disabled. Optional memory/embedding/git
       search flags are explicit. Schema fencing stays pinned to this vendor version.
+  17. Export fynvraIsSessionReady for the host request gate. A context hook must
+      return transformed messages; missing results suspend the session rather
+      than silently sending raw history. The host rechecks readiness/cancellation
+      after SDK context hooks. Explicit recovery reloads the same persisted session
+      and runs Magic hooks before resuming; no native compact() unlock is used.
+      Fail-closed storage boot also rejects late adoption in the Fynvra host;
+      only explicit recovery creates a fresh binding.
 
 When upgrading, re-copy the pinned upstream files and re-apply these hosted
 changes, including fynvra-host.js. The compaction, validation, tag/drop, SQLite

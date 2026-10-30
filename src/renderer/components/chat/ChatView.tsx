@@ -101,13 +101,17 @@ function ChatNotice() {
 }
 
 /**
- * 非阻塞服务告警：目前用于 Magic Context 把会话交回原生压缩。琥珀色、可关闭，
- * 不改变会话状态、不等待确认，也不显示 provider 原始错误或 prompt。
+ * Magic Context 暂停原因提示：可关闭，但关闭不解除恢复锁。
+ * 不等待确认，也不显示 provider 原始错误或 prompt。
  */
 function ChatWarning({ sessionId }: { sessionId: string }) {
   const visible = useSessionsStore((state) => {
     const runtime = state.runtimeBySession[sessionId];
-    return runtime?.warning && runtime.warningSeq !== runtime.dismissedWarningSeq;
+    return (
+      runtime?.recoveryRequired &&
+      runtime.warning &&
+      runtime.warningSeq !== runtime.dismissedWarningSeq
+    );
   });
   const dismiss = useSessionsStore((state) => state.dismissWarning);
   const t = useT();
@@ -118,7 +122,7 @@ function ChatWarning({ sessionId }: { sessionId: string }) {
       aria-live="polite"
       className="flex shrink-0 items-center gap-2 border-amber-500/30 border-b bg-amber-500/10 py-1.5 pr-2 pl-4 text-amber-800 text-sm dark:text-amber-200"
     >
-      <span className="min-w-0 flex-1 truncate" title={t('chat.magicContextFallback')}>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap" title={t('chat.magicContextFallback')}>
         {t('chat.magicContextFallback')}
       </span>
       <Button

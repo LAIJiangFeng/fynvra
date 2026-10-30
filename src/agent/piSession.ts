@@ -1,5 +1,5 @@
 import { dirname } from 'node:path';
-import type { Message } from '@earendil-works/pi-ai';
+import { isContextOverflow, type Message } from '@earendil-works/pi-ai';
 import { type AgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 import {
   type ApprovalGate,
@@ -13,7 +13,7 @@ import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
 import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
 import { normalizeReplySuggestion } from '@shared/types/chat';
-import { compactionTimeoutMsOf } from '@shared/types/settings';
+import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/settings';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
@@ -81,12 +81,15 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     // Create the Magic routing entry before bindExtensions: the plugin may
     // recover a deferred historian run during session_start.
     let activeModel = model;
+    const strategy = compactionStrategyOf(spec);
+    let magicFailed = false;
     let pendingFallback: MagicContextFallbackReason | undefined;
     let emitFallback: ((reason: MagicContextFallbackReason) => void) | undefined;
     const magic =
-      spec.compactionStrategy === 'magic-context'
+      strategy === 'magic-context'
         ? createMagicContextCompaction(() => activeModel, {
             onFallback: (reason) => {
+              magicFailed = true;
               if (emitFallback) emitFallback(reason);
               else pendingFallback ??= reason;
             },
@@ -124,7 +127,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         roles: spec.roles,
         ...(spec.inPlace ? { inPlace: true } : {}),
         ...(magic ? { extensions: [magic.extension] } : {}),
-        settingsManager: createSessionSettings(spec.shellPath, spec.compactionStrategy),
+        settingsManager: createSessionSettings(spec.shellPath, strategy),
         ...(spec.networkProxy
           ? {
               commandEnv: (env: NodeJS.ProcessEnv) =>
@@ -140,7 +143,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     const timeoutMs = compactionTimeoutMsOf(spec);
     const recovery = createContextRecovery({
       session,
-      strategy: spec.compactionStrategy ?? 'native',
+      strategy,
+      ...(magic ? { magicReady: () => magic.assertReady() } : {}),
       timeoutMs,
       contextWindow: () => activeModel.model?.contextWindow ?? 0,
       log: (message) =>
@@ -148,7 +152,19 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
           `session=${identity.sessionId} generation=${identity.generation} ${message}`
         ),
     });
-    if (pendingFallback) recovery.fallback();
+    // SDK automatic overflow compaction is disabled for Magic. Preserve its failed turn
+    // and require explicit recovery; never ask pi for a replacement native summary.
+    const unsubscribeMagicOverflow = magic
+      ? session.subscribe((event) => {
+          if (
+            event.type === 'message_end' &&
+            event.message.role === 'assistant' &&
+            isContextOverflow(event.message, activeModel.model?.contextWindow)
+          ) {
+            magic.suspend('context');
+          }
+        })
+      : undefined;
     dropEmptyUserText(session);
     const setFastMode = installFastMode(session, spec.model.fastMode === true);
     // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
@@ -157,7 +173,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     const retrySettings = session.settingsManager.getRetrySettings();
     const subscription = subscribeNormalized(
       session,
-      (event) => {
+      (incoming) => {
+        // Magic failures cross the UI boundary only as controlled reasons/fixed recovery text.
+        const event =
+          magicFailed && incoming.type === 'error'
+            ? { ...incoming, message: 'Magic Context paused this session. Retry context recovery.' }
+            : incoming;
         try {
           listener?.(event);
         } finally {
@@ -177,7 +198,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         listener = nextListener;
         recovery.publish();
         const emitWarning = (reason: MagicContextFallbackReason) => {
-          recovery.fallback();
+          recovery.failMagic();
           subscription.emit({ type: 'warning', source: 'magic-context', reason });
         };
         emitFallback = emitWarning;
@@ -228,6 +249,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
           if (!session.isIdle) await withTimeout(session.abort(), ABORT_BEFORE_DISPOSE_MS);
           await created.dispose();
         } finally {
+          unsubscribeMagicOverflow?.();
           subscription.unsubscribe();
         }
       },

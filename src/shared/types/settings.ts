@@ -173,7 +173,7 @@ export interface Preferences {
   /** 界面语言（Renderer 与 Main 的文案）；没写过时跟随系统（读取用 {@link languageOf}） */
   language?: Language;
   // --- context ---
-  /** 上下文自动压缩策略；没写过时用 pi 原生自动压缩（读取用 {@link compactionStrategyOf}） */
+  /** 上下文自动压缩策略；没写过时用 Magic Context（读取用 {@link compactionStrategyOf}） */
   compactionStrategy?: CompactionStrategy;
   /** Native compaction total deadline, including retries and backoff; snapshotted at spawn. */
   compactionTimeoutMs?: number;
@@ -236,11 +236,13 @@ export function isCompactionStrategy(value: unknown): value is CompactionStrateg
   return typeof value === 'string' && (COMPACTION_STRATEGIES as readonly string[]).includes(value);
 }
 
-/** 生效的压缩策略：没写过或磁盘上的值不合法时沿用 pi 原生自动压缩 */
+/** 生效的压缩策略：没写过或磁盘上的值不合法时使用 Magic Context */
 export function compactionStrategyOf(
   preferences: Pick<Preferences, 'compactionStrategy'>
 ): CompactionStrategy {
-  return preferences.compactionStrategy ?? 'native';
+  return isCompactionStrategy(preferences.compactionStrategy)
+    ? preferences.compactionStrategy
+    : 'magic-context';
 }
 
 export const DEFAULT_COMPACTION_TIMEOUT_MS = 10 * 60_000;
