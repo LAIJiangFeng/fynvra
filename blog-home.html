@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>林间笔记 · 一个后端工程师的写作空间</title>
+<meta name="description" content="林间笔记：记录分布式系统、开发者工具与日常阅读的个人技术博客。">
+<style>
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+    --font-serif: Georgia, "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+    --max-width: 1120px;
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --transition: 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+
+  html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f4ef;
+    --bg-soft: #eeeae1;
+    --surface: #fffefb;
+    --surface-alt: #f8f6f1;
+    --text: #1e2329;
+    --text-soft: #464e59;
+    --text-muted: #6d7683;
+    --border: #e0dbd0;
+    --border-strong: #cdc6b8;
+    --accent: #1f6f63;
+    --accent-hover: #17554c;
+    --accent-soft: #e2efe9;
+    --accent-contrast: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(35, 30, 20, 0.05);
+    --shadow-md: 0 10px 26px -12px rgba(35, 30, 20, 0.22);
+    --hero-bg: linear-gradient(135deg, #fdfbf6 0%, #eee9dd 100%);
+    --subscribe-bg: linear-gradient(140deg, #205f55 0%, #17453f 100%);
+    --subscribe-text: #f1f8f5;
+    --subscribe-muted: rgba(241, 248, 245, 0.78);
+    --subscribe-field: rgba(255, 255, 255, 0.14);
+    --header-bg: rgba(246, 244, 239, 0.86);
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12151a;
+    --bg-soft: #191d24;
+    --surface: #1b2028;
+    --surface-alt: #20262f;
+    --text: #e8eaee;
+    --text-soft: #c3c9d3;
+    --text-muted: #98a1af;
+    --border: #2c333d;
+    --border-strong: #3b434f;
+    --accent: #6fd3b6;
+    --accent-hover: #8ae3ca;
+    --accent-soft: #1d3a35;
+    --accent-contrast: #0d211d;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 12px 28px -14px rgba(0, 0, 0, 0.65);
+    --hero-bg: linear-gradient(135deg, #1d232b 0%, #171b22 100%);
+    --subscribe-bg: linear-gradient(140deg, #1f3b36 0%, #16241f 100%);
+    --subscribe-text: #e6f6f1;
+    --subscribe-muted: rgba(230, 246, 241, 0.74);
+    --subscribe-field: rgba(255, 255, 255, 0.1);
+    --header-bg: rgba(18, 21, 26, 0.86);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.75;
+    letter-spacing: 0.01em;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color var(--transition), color var(--transition);
+  }
+
+  body,
+  button,
+  input {
+    font-family: inherit;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: color var(--transition);
+  }
+
+  a:hover {
+    color: var(--accent-hover);
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  ul,
+  ol,
+  figure {
+    margin: 0;
+  }
+
+  ul,
+  ol {
+    padding: 0;
+    list-style: none;
+  }
+
+  button {
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .icon {
+    width: 1em;
+    height: 1em;
+    display: block;
+    flex: none;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: var(--max-width);
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -4rem;
+    z-index: 40;
+    padding: 0.5rem 0.9rem;
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    transition: top var(--transition);
+  }
+
+  .skip-link:focus-visible {
+    top: 1rem;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- header ---------- */
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--header-bg);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding-block: 0.85rem;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-right: auto;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    display: grid;
+    place-items: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    flex: none;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font-family: var(--font-serif);
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+
+  .brand-name {
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .brand-desc {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .site-nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .site-nav a {
+    display: inline-block;
+    padding: 0.3rem 0.68rem;
+    border-radius: 999px;
+    color: var(--text-soft);
+    font-size: 0.9rem;
+    transition: background-color var(--transition), color var(--transition);
+  }
+
+  .site-nav a:hover {
+    background: var(--accent-soft);
+    color: var(--accent-hover);
+  }
+
+  .site-nav a[aria-current="page"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 0.82rem;
+    line-height: 1.4;
+    transition: border-color var(--transition), color var(--transition), background-color var(--transition);
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .theme-toggle .icon {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  .theme-toggle .icon-sun {
+    display: none;
+  }
+
+  html[data-theme="dark"] .theme-toggle .icon-sun {
+    display: block;
+  }
+
+  html[data-theme="dark"] .theme-toggle .icon-moon {
+    display: none;
+  }
+
+  /* ---------- hero ---------- */
+
+  .hero {
+    margin-top: 2.25rem;
+  }
+
+  .hero-inner {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.9rem;
+    padding: 2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--hero-bg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .avatar {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 5.5rem;
+    height: 5.5rem;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--accent);
+    font-family: var(--font-serif);
+    font-size: 2.1rem;
+    line-height: 1;
+    box-shadow: 0 0 0 1px var(--border), 0 8px 20px -12px rgba(0, 0, 0, 0.4);
+  }
+
+  .avatar::after {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 50%;
+  }
+
+  .hero-body {
+    min-width: 0;
+  }
+
+  .hero-eyebrow {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .hero h1 {
+    margin-top: 0.15rem;
+    font-family: var(--font-serif);
+    font-size: clamp(1.7rem, 4vw, 2.15rem);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+  }
+
+  .hero-role {
+    margin-top: 0.35rem;
+    color: var(--text-soft);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .hero-bio {
+    margin-top: 0.7rem;
+    max-width: 44rem;
+    color: var(--text-soft);
+    font-size: 0.95rem;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.9rem;
+    margin-top: 1.15rem;
+  }
+
+  .socials {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .socials a {
+    display: grid;
+    place-items: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 1.05rem;
+    transition: transform var(--transition), color var(--transition), border-color var(--transition), background-color var(--transition);
+  }
+
+  .socials a:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 1rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.5;
+    transition: transform var(--transition), background-color var(--transition), color var(--transition), border-color var(--transition);
+  }
+
+  .btn .icon {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    color: var(--accent-contrast);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    border-color: var(--border-strong);
+    background: var(--surface);
+    color: var(--text-soft);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ---------- layout ---------- */
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 310px;
+    align-items: start;
+    gap: 2.5rem;
+    margin-top: 2.75rem;
+    padding-bottom: 3.5rem;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.4rem;
+  }
+
+  .section-head h2 {
+    font-family: var(--font-serif);
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  .post-count {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  /* ---------- post list ---------- */
+
+  .post-list {
+    display: grid;
+    gap: 1.1rem;
+  }
+
+  .post-card {
+    position: relative;
+    padding: 1.4rem 1.5rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition), background-color var(--transition);
+  }
+
+  .post-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+
+  .post-card:hover .post-title a {
+    color: var(--accent);
+  }
+
+  .post-card--featured {
+    border-color: var(--accent);
+    background: var(--surface-alt);
+    border-left-width: 4px;
+    padding-block: 1.6rem;
+  }
+
+  .post-card--featured::before {
+    content: "置顶";
+    position: absolute;
+    top: -0.72rem;
+    left: 1.5rem;
+    padding: 0.05rem 0.6rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+  }
+
+  .post-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+
+  .post-meta > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  .post-meta > span + span::before {
+    content: "·";
+    color: var(--border-strong);
+  }
+
+  .post-category {
+    padding: 0.05rem 0.62rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    transition: background-color var(--transition), color var(--transition), border-color var(--transition);
+  }
+
+  button.post-category:hover {
+    border-color: var(--accent);
+  }
+
+  button.post-category.is-active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .post-title {
+    margin-top: 0.55rem;
+    font-family: var(--font-serif);
+    font-size: 1.24rem;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: 0.015em;
+    overflow-wrap: anywhere;
+  }
+
+  .post-card--featured .post-title {
+    font-size: 1.42rem;
+  }
+
+  .post-title a {
+    color: var(--text);
+  }
+
+  .post-excerpt {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    margin-top: 0.5rem;
+    color: var(--text-soft);
+    font-size: 0.92rem;
+  }
+
+  .post-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.9rem;
+  }
+
+  .chip {
+    padding: 0.1rem 0.62rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+    transition: transform var(--transition), background-color var(--transition), color var(--transition), border-color var(--transition);
+  }
+
+  .chip:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .chip.is-active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .empty-state {
+    padding: 2.5rem 1.5rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 0.92rem;
+  }
+
+  .empty-state strong {
+    display: block;
+    margin-bottom: 0.3rem;
+    color: var(--text);
+    font-size: 1rem;
+  }
+
+  /* ---------- pagination ---------- */
+
+  .pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 1.8rem;
+  }
+
+  .pagination a,
+  .pagination span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.3rem;
+    padding: 0.28rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    transition: border-color var(--transition), color var(--transition), background-color var(--transition);
+  }
+
+  .pagination a:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .pagination .is-current {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 600;
+  }
+
+  .pagination .is-disabled {
+    color: var(--text-muted);
+    opacity: 0.55;
+  }
+
+  /* ---------- sidebar ---------- */
+
+  .sidebar {
+    display: grid;
+    gap: 1.1rem;
+  }
+
+  .widget {
+    padding: 1.25rem 1.3rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .widget-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .widget-title::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .search-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-alt);
+    transition: border-color var(--transition), box-shadow var(--transition);
+  }
+
+  .search-field:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .search-field .icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    color: var(--text-muted);
+  }
+
+  .search-field input {
+    width: 100%;
+    min-width: 0;
+    padding: 0.15rem 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .search-field input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .search-field input:focus {
+    outline: none;
+  }
+
+  .search-hint {
+    margin-top: 0.6rem;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.6;
+  }
+
+  .picked-list {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .picked-list li {
+    display: flex;
+    gap: 0.7rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px dashed var(--border);
+  }
+
+  .picked-list li:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .picked-index {
+    flex: none;
+    width: 1.5rem;
+    color: var(--accent);
+    font-family: var(--font-serif);
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+
+  .picked-title {
+    display: block;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .picked-title:hover {
+    color: var(--accent);
+  }
+
+  .picked-meta {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+  }
+
+  .tag-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .tag-cloud .chip {
+    font-size: 0.78rem;
+  }
+
+  .tag-cloud .tag-lg {
+    font-size: 0.92rem;
+    font-weight: 600;
+  }
+
+  .tag-cloud .tag-sm {
+    font-size: 0.72rem;
+    opacity: 0.9;
+  }
+
+  .subscribe {
+    border-color: transparent;
+    background: var(--subscribe-bg);
+    color: var(--subscribe-text);
+  }
+
+  .subscribe-title {
+    font-family: var(--font-serif);
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--subscribe-text);
+  }
+
+  #subscribe {
+    scroll-margin-top: 6rem;
+  }
+
+  .subscribe-desc {
+    margin-top: 0.35rem;
+    color: var(--subscribe-muted);
+    font-size: 0.82rem;
+  }
+
+  .subscribe-form {
+    display: flex;
+    gap: 0.45rem;
+    margin-top: 0.9rem;
+  }
+
+  .subscribe-form input {
+    width: 100%;
+    min-width: 0;
+    padding: 0.4rem 0.65rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: var(--subscribe-field);
+    color: var(--subscribe-text);
+    font-size: 0.84rem;
+  }
+
+  .subscribe-form input::placeholder {
+    color: var(--subscribe-muted);
+  }
+
+  .subscribe-form input:focus {
+    outline: none;
+    border-color: var(--subscribe-text);
+  }
+
+  .subscribe-form button {
+    flex: none;
+    padding: 0.4rem 0.85rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--subscribe-text);
+    color: #16332d;
+    font-size: 0.82rem;
+    font-weight: 700;
+    transition: opacity var(--transition);
+  }
+
+  .subscribe-form button:hover {
+    opacity: 0.86;
+  }
+
+  .subscribe-note {
+    margin-top: 0.6rem;
+    min-height: 1.1rem;
+    color: var(--subscribe-muted);
+    font-size: 0.74rem;
+  }
+
+  /* ---------- footer ---------- */
+
+  .site-footer {
+    border-top: 1px solid var(--border);
+    background: var(--bg-soft);
+  }
+
+  .footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    padding-block: 1.6rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
+
+  .footer-inner p {
+    line-height: 1.7;
+  }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem;
+  }
+
+  .back-to-top {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--text-soft);
+    font-size: 0.8rem;
+    transition: border-color var(--transition), color var(--transition), transform var(--transition);
+  }
+
+  .back-to-top:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .back-to-top .icon {
+    width: 0.95rem;
+    height: 0.95rem;
+  }
+
+  /* ---------- responsive ---------- */
+
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2rem;
+    }
+
+    .header-inner {
+      gap: 0.75rem;
+    }
+
+    .site-nav {
+      order: 3;
+      width: 100%;
+    }
+
+    .site-nav ul {
+      gap: 0.25rem;
+    }
+
+    .site-nav a {
+      padding-inline: 0.55rem;
+      font-size: 0.86rem;
+    }
+
+    .hero-inner {
+      padding: 1.6rem;
+      gap: 1.4rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .wrap {
+      padding-inline: 1.1rem;
+    }
+
+    .hero-inner {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1.15rem;
+    }
+
+    .hero {
+      margin-top: 1.5rem;
+    }
+
+    .post-card {
+      padding: 1.2rem 1.15rem 1.1rem;
+    }
+
+    .post-card--featured {
+      padding-block: 1.45rem 1.2rem;
+    }
+
+    .post-card--featured::before {
+      left: 1.15rem;
+    }
+
+    .post-card--featured .post-title {
+      font-size: 1.22rem;
+    }
+
+    .footer-inner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
+
+  @media (max-width: 480px) {
+    body {
+      font-size: 15.5px;
+    }
+
+    .brand-desc {
+      display: none;
+    }
+
+    .theme-toggle-label {
+      display: none;
+    }
+
+    .theme-toggle {
+      padding: 0.45rem;
+    }
+
+    .section-head {
+      flex-wrap: wrap;
+      gap: 0.2rem;
+    }
+
+    .subscribe-form {
+      flex-direction: column;
+    }
+
+    .subscribe-form button {
+      padding-block: 0.5rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+
+    .post-card:hover,
+    .socials a:hover,
+    .chip:hover,
+    .btn-primary:hover,
+    .back-to-top:hover {
+      transform: none;
+    }
+  }
+</style>
+</head>
+<body id="top">
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">林</span>
+        <div>
+          <p class="brand-name">林间笔记</p>
+          <p class="brand-desc">在代码与文字之间散步</p>
+        </div>
+      </div>
+
+      <nav class="site-nav" aria-label="主导航">
+        <ul>
+          <li><a href="#" aria-current="page">首页</a></li>
+          <li><a href="#">文章归档</a></li>
+          <li><a href="#">分类</a></li>
+          <li><a href="#">标签</a></li>
+          <li><a href="#">关于我</a></li>
+        </ul>
+      </nav>
+
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false" aria-label="切换到深色主题">
+        <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"></path>
+        </svg>
+        <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"></path>
+        </svg>
+        <span class="theme-toggle-label" id="theme-label">浅色</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-inner">
+        <div class="avatar" aria-hidden="true">林</div>
+        <div class="hero-body">
+          <p class="hero-eyebrow">Hello, 我是</p>
+          <h1 id="hero-title">林知远</h1>
+          <p class="hero-role">后端工程师 · 分布式系统与开发者工具</p>
+          <p class="hero-bio">
+            在杭州写代码，也写字。关注系统设计、可观测性与工程效率，
+            偶尔聊聊读书和手工。这里是我整理思路的地方，文章大多来自真实项目里的疑问。
+          </p>
+          <div class="hero-actions">
+            <ul class="socials">
+              <li>
+                <a href="#" aria-label="GitHub 主页">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                    <path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-1.04-.01-1.89-2.78.62-3.37-1.2-3.37-1.2-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 2.5-.34c.85 0 1.7.12 2.5.34 1.9-1.32 2.74-1.05 2.74-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.35 4.8-4.58 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z"></path>
+                  </svg>
+                </a>
+              </li>
+              <li>
+                <a href="#" aria-label="社交账号">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                    <path d="M17.6 3h3.1l-6.8 7.8L22 21h-6.3l-4.9-6.4L5.2 21H2.1l7.3-8.3L2 3h6.5l4.4 5.9L17.6 3Zm-1.1 16.1h1.7L7.6 4.8H5.8l10.7 14.3Z"></path>
+                  </svg>
+                </a>
+              </li>
+              <li>
+                <a href="#" aria-label="邮件联系">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <rect x="3" y="5" width="18" height="14" rx="2.5"></rect>
+                    <path d="m3.5 7 8.5 5.8L20.5 7"></path>
+                  </svg>
+                </a>
+              </li>
+              <li>
+                <a href="#" aria-label="RSS 订阅">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <circle cx="5.5" cy="18.5" r="1.3" fill="currentColor" stroke="none"></circle>
+                    <path d="M4.5 11a8.5 8.5 0 0 1 8.5 8.5"></path>
+                    <path d="M4.5 5.5A14 14 0 0 1 18.5 19.5"></path>
+                  </svg>
+                </a>
+              </li>
+            </ul>
+            <a class="btn btn-primary" href="#subscribe">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M4.5 11a8.5 8.5 0 0 1 8.5 8.5"></path>
+                <path d="M4.5 5.5A14 14 0 0 1 18.5 19.5"></path>
+                <circle cx="5.5" cy="18.5" r="1.3" fill="currentColor" stroke="none"></circle>
+              </svg>
+              RSS 订阅
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="wrap layout">
+      <section class="posts" aria-labelledby="posts-title">
+        <div class="section-head">
+          <h2 id="posts-title">最新文章</h2>
+          <p class="post-count" id="post-count" aria-live="polite">共 7 篇文章</p>
+        </div>
+
+        <div class="post-list" id="post-list">
+          <article class="post-card post-card--featured" data-title="把 sqlite 当作消息队列，我们踩过的五个坑">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">架构</button>
+              <span>2024-11-18</span>
+              <span>约 12 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">把 SQLite 当作消息队列，我们踩过的五个坑</a></h3>
+            <p class="post-excerpt">
+              一个日处理百万条任务的旁路系统，用 SQLite 排队跑了两年。这篇文章记录锁竞争、WAL 膨胀、
+              事务边界和可见性延迟这四个反直觉的细节，以及我们最终保留的那套最小实现。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">SQLite</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">队列</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">性能</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="typescript 里那些看起来聪明、其实难维护的写法">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">工程实践</button>
+              <span>2024-11-05</span>
+              <span>约 8 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">TypeScript 里那些看起来聪明、其实难维护的写法</a></h3>
+            <p class="post-excerpt">
+              类型体操写到第三层，同事的 PR 评审就变成了考古。从条件类型的滥用，到过度精确的泛型约束，
+              这里列了几条我们希望早点立下的团队约定。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">TypeScript</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">团队协作</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="一次线上 502 的排查记录">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">故障复盘</button>
+              <span>2024-10-22</span>
+              <span>约 10 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">一次线上 502 的排查记录</a></h3>
+            <p class="post-excerpt">
+              监控显示网关在整点前后批量返回 502，但后端日志干净得像什么都没发生。真正的线索藏在
+              连接池的等待队列里，以及一条被忽略的内核参数。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">故障排查</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">网络</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="读《数据密集型应用系统设计》第三遍">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">读书笔记</button>
+              <span>2024-10-09</span>
+              <span>约 15 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">读《数据密集型应用系统设计》第三遍</a></h3>
+            <p class="post-excerpt">
+              第一遍记住了名词，第二遍看懂了权衡，第三遍才意识到作者反复强调的其实是「减少协调」。
+              这次整理的是复制、分区与一致性模型之间的取舍地图。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">分布式</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">读书笔记</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="从单体到模块化：一份渐进式拆分清单">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">架构</button>
+              <span>2024-09-26</span>
+              <span>约 11 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">从单体到模块化：一份渐进式拆分清单</a></h3>
+            <p class="post-excerpt">
+              不急着上微服务，先把模块边界画清楚。这份清单按依赖方向、数据归属和发布节奏三个维度排序，
+              并附上每个阶段可以用来验证拆分是否奏效的观测指标。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">架构</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">重构</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="给命令行工具写文档的笨办法">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">开发者体验</button>
+              <span>2024-09-12</span>
+              <span>约 6 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">给命令行工具写文档的笨办法</a></h3>
+            <p class="post-excerpt">
+              先写一条你希望用户复制粘贴就能跑通的命令，再倒推需要哪些参数和默认值。
+              这个顺序看似笨拙，却让我们的帮助文本减少了三分之一的长度。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">工具链</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">文档</button>
+            </div>
+          </article>
+
+          <article class="post-card" data-title="周末做了一块木头键盘托">
+            <div class="post-meta">
+              <button class="post-category" type="button" data-chip aria-pressed="false">生活</button>
+              <span>2024-08-30</span>
+              <span>约 5 分钟阅读</span>
+            </div>
+            <h3 class="post-title"><a href="#">周末做了一块木头键盘托</a></h3>
+            <p class="post-excerpt">
+              一块边角胡桃木、两张砂纸和一下午的时间。做的过程比结果更有意思：量尺寸、试角度、
+              把不平的地方一点点磨平，很像在修一个缠了很久的 bug。
+            </p>
+            <div class="post-tags">
+              <button class="chip" type="button" data-chip aria-pressed="false">手工</button>
+              <button class="chip" type="button" data-chip aria-pressed="false">生活</button>
+            </div>
+          </article>
+        </div>
+
+        <p class="empty-state" id="empty-state" hidden>
+          <strong>没有匹配的文章</strong>
+          换个关键词试试，或者清空搜索框查看全部文章。
+        </p>
+
+        <nav class="pagination" id="pagination" aria-label="文章分页">
+          <span class="is-disabled" aria-disabled="true">上一页</span>
+          <span class="is-current" aria-current="page">1</span>
+          <a href="#">2</a>
+          <a href="#">3</a>
+          <a href="#">下一页</a>
+        </nav>
+      </section>
+
+      <aside class="sidebar" aria-label="侧边栏">
+        <section class="widget" aria-labelledby="search-title">
+          <h2 class="widget-title" id="search-title">搜索文章</h2>
+          <div class="search-field">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="11" cy="11" r="6.5"></circle>
+              <path d="m16 16 4 4"></path>
+            </svg>
+            <input id="search-input" type="search" placeholder="按标题搜索…" aria-label="按标题搜索文章" autocomplete="off">
+          </div>
+          <p class="search-hint">输入关键词即可实时过滤左侧文章列表。</p>
+        </section>
+
+        <section class="widget" aria-labelledby="picked-title">
+          <h2 class="widget-title" id="picked-title">精选文章</h2>
+          <ol class="picked-list">
+            <li>
+              <span class="picked-index" aria-hidden="true">01</span>
+              <div>
+                <a class="picked-title" href="#">把 SQLite 当作消息队列，我们踩过的五个坑</a>
+                <p class="picked-meta">架构 · 12 分钟</p>
+              </div>
+            </li>
+            <li>
+              <span class="picked-index" aria-hidden="true">02</span>
+              <div>
+                <a class="picked-title" href="#">读《数据密集型应用系统设计》第三遍</a>
+                <p class="picked-meta">读书笔记 · 15 分钟</p>
+              </div>
+            </li>
+            <li>
+              <span class="picked-index" aria-hidden="true">03</span>
+              <div>
+                <a class="picked-title" href="#">从单体到模块化：一份渐进式拆分清单</a>
+                <p class="picked-meta">架构 · 11 分钟</p>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="widget" aria-labelledby="tags-title">
+          <h2 class="widget-title" id="tags-title">标签云</h2>
+          <div class="tag-cloud">
+            <button class="chip tag-lg" type="button" data-chip aria-pressed="false">架构</button>
+            <button class="chip" type="button" data-chip aria-pressed="false">分布式</button>
+            <button class="chip tag-sm" type="button" data-chip aria-pressed="false">TypeScript</button>
+            <button class="chip" type="button" data-chip aria-pressed="false">SQLite</button>
+            <button class="chip tag-lg" type="button" data-chip aria-pressed="false">读书笔记</button>
+            <button class="chip tag-sm" type="button" data-chip aria-pressed="false">故障排查</button>
+            <button class="chip" type="button" data-chip aria-pressed="false">性能</button>
+            <button class="chip tag-sm" type="button" data-chip aria-pressed="false">工具链</button>
+            <button class="chip" type="button" data-chip aria-pressed="false">生活</button>
+          </div>
+        </section>
+
+        <section class="widget subscribe" id="subscribe" aria-labelledby="subscribe-title">
+          <h2 class="widget-title subscribe-title" id="subscribe-title">订阅更新</h2>
+          <p class="subscribe-desc">每月一到两封，分享近期文章与零散笔记，随时可以退订。</p>
+          <form class="subscribe-form" id="subscribe-form">
+            <input type="email" id="subscribe-email" placeholder="you@example.com" aria-label="邮箱地址" required>
+            <button type="submit">订阅</button>
+          </form>
+          <p class="subscribe-note" id="subscribe-note">本页面为静态原型，不会真正发送邮件。</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <p>© 2024 林间笔记 · 内容采用 CC BY-NC-SA 4.0 协议授权</p>
+      <div class="footer-links">
+        <p>Powered by 手写 HTML 与一杯冷掉的咖啡</p>
+        <a class="back-to-top" href="#top" id="back-to-top">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M12 19V5"></path>
+            <path d="m5.5 11.5 6.5-6.5 6.5 6.5"></path>
+          </svg>
+          返回顶部
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var root = document.documentElement;
+      var toggle = document.getElementById("theme-toggle");
+      var themeLabel = document.getElementById("theme-label");
+
+      function applyTheme(theme) {
+        root.setAttribute("data-theme", theme);
+        var isDark = theme === "dark";
+        toggle.setAttribute("aria-pressed", String(isDark));
+        toggle.setAttribute("aria-label", isDark ? "切换到浅色主题" : "切换到深色主题");
+        themeLabel.textContent = isDark ? "深色" : "浅色";
+      }
+
+      toggle.addEventListener("click", function () {
+        applyTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+      });
+
+      var searchInput = document.getElementById("search-input");
+      var cards = Array.prototype.slice.call(document.querySelectorAll(".post-card"));
+      var countEl = document.getElementById("post-count");
+      var emptyState = document.getElementById("empty-state");
+      var pagination = document.getElementById("pagination");
+      var total = cards.length;
+
+      function filterPosts() {
+        var query = searchInput.value.trim().toLowerCase();
+        var visible = 0;
+
+        cards.forEach(function (card) {
+          var title = card.getAttribute("data-title") || "";
+          var matched = query === "" || title.indexOf(query) !== -1;
+          card.hidden = !matched;
+          if (matched) {
+            visible += 1;
+          }
+        });
+
+        emptyState.hidden = visible !== 0;
+        pagination.hidden = query !== "";
+        countEl.textContent = query === ""
+          ? "共 " + total + " 篇文章"
+          : "找到 " + visible + " 篇匹配文章";
+      }
+
+      searchInput.addEventListener("input", filterPosts);
+
+      Array.prototype.forEach.call(document.querySelectorAll("[data-chip]"), function (chip) {
+        chip.addEventListener("click", function () {
+          var active = chip.classList.toggle("is-active");
+          chip.setAttribute("aria-pressed", String(active));
+        });
+      });
+
+      document.getElementById("back-to-top").addEventListener("click", function (event) {
+        event.preventDefault();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+
+      document.getElementById("subscribe-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var note = document.getElementById("subscribe-note");
+        note.textContent = "已记录（演示用）：订阅表单不会连接任何服务。";
+      });
+
+      applyTheme("light");
+    })();
+  </script>
+</body>
+</html>
