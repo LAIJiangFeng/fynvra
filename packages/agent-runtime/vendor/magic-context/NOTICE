@@ -76,6 +76,11 @@ use fynvra-prefixed helpers and MAGIC_CONTEXT_FYNVRA_HOST checks):
       DBs never migrate terminal data; tokenizer/cache/overlay/wake-plane discovery
       and unrelated startup backfills are disabled. Optional memory/embedding/git
       search flags are explicit. Schema fencing stays pinned to this vendor version.
+      The generated host config, worker adapter and vendor parser all require
+      fail_closed_blocking=true; false and incompatible schemas are rejected.
+      src/agent/magicContext.integration.test.ts exercises both resource layouts
+      through the real host, SDK, vendor and SQLite using Electron's Node runtime
+      and an offline provider, including the first context transform/request.
   17. Export fynvraIsSessionReady for the host request gate. A context hook must
       return transformed messages; missing results suspend the session rather
       than silently sending raw history. The host rechecks readiness/cancellation
