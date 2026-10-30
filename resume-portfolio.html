@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>陈知远 · 前端工程师 · 简历与作品集</title>
+<meta name="description" content="陈知远的个人简历与作品集：6 年前端工程经验，B 端中后台与数据产品方向，可直接打印为 A4 简历。">
+<style>
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --surface-soft: #eeece7;
+    --text: #1a1d21;
+    --text-soft: #41474f;
+    --text-muted: #6b7280;
+    --border: #e2e0da;
+    --border-strong: #cbc7be;
+    --accent: #1f5f52;
+    --accent-soft: #e5efeb;
+    --radius: 10px;
+    --shadow-card: 0 1px 2px rgba(20, 25, 30, 0.05);
+    --max-width: 1180px;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.65;
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.3;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0 0 10px;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  ul,
+  ol {
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ---------- 名片区 ---------- */
+
+  .hero {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 32px 34px;
+  }
+
+  .hero-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 28px;
+  }
+
+  .identity {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    min-width: 0;
+  }
+
+  .avatar {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .hero h1 {
+    margin: 0 0 2px;
+    font-size: clamp(1.75rem, 3.2vw, 2.35rem);
+    letter-spacing: 0.01em;
+  }
+
+  .role {
+    margin: 0 0 6px;
+    color: var(--accent);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .tagline {
+    margin: 0 0 12px;
+    max-width: 46ch;
+    color: var(--text-soft);
+    font-size: 0.95rem;
+  }
+
+  .meta {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 0;
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .meta li {
+    display: flex;
+    align-items: center;
+  }
+
+  .meta li + li::before {
+    content: "/";
+    margin: 0 10px;
+    color: var(--border-strong);
+  }
+
+  .meta a {
+    color: var(--text-soft);
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .meta a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    text-decoration: none;
+  }
+
+  .hero-actions {
+    flex: 0 0 auto;
+    padding-top: 6px;
+  }
+
+  .btn {
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 9px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 180ms ease, border-color 180ms ease;
+  }
+
+  .btn:hover {
+    background: #17473e;
+    border-color: #17473e;
+  }
+
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ---------- 布局 ---------- */
+
+  .layout {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 32px;
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    align-items: start;
+    gap: 40px;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    scrollbar-width: thin;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 3px;
+  }
+
+  /* ---------- 目录 ---------- */
+
+  .toc-title {
+    margin: 0 0 8px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+  }
+
+  .toc-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .toc-list a {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: var(--text-soft);
+    font-size: 0.875rem;
+    transition: background-color 160ms ease, color 160ms ease;
+  }
+
+  .toc-list a:hover {
+    background: var(--surface-soft);
+    text-decoration: none;
+  }
+
+  .toc-list a[aria-current="location"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .toc-index {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
+
+  .toc-list a[aria-current="location"] .toc-index {
+    color: var(--accent);
+  }
+
+  /* ---------- 侧栏面板 ---------- */
+
+  .panel {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+
+  .panel > h2 {
+    margin: 0 0 10px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+  }
+
+  .skill-group + .skill-group {
+    margin-top: 12px;
+  }
+
+  .skill-group h3 {
+    margin: 0 0 7px;
+    color: var(--text-soft);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .skill-list {
+    list-style: none;
+  }
+
+  .skill {
+    margin-bottom: 9px;
+  }
+
+  .skill:last-child {
+    margin-bottom: 0;
+  }
+
+  .skill-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-soft);
+  }
+
+  .skill-pct {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
+
+  .skill-bar {
+    display: block;
+    height: 4px;
+    margin-top: 5px;
+    border-radius: 2px;
+    background: var(--surface-soft);
+    overflow: hidden;
+  }
+
+  .skill-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  .plain-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: var(--text-soft);
+  }
+
+  .plain-list li {
+    padding-left: 12px;
+    position: relative;
+  }
+
+  .plain-list li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.62em;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--border-strong);
+  }
+
+  .plain-list .note {
+    color: var(--text-muted);
+  }
+
+  /* ---------- 正文列 ---------- */
+
+  .content {
+    display: flex;
+    flex-direction: column;
+    gap: 34px;
+    min-width: 0;
+  }
+
+  .content section {
+    scroll-margin-top: 24px;
+  }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 14px;
+    font-size: 1.18rem;
+    letter-spacing: 0.01em;
+  }
+
+  .section-title::before {
+    content: "";
+    width: 4px;
+    height: 1.05em;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  .section-title .count {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .lede {
+    color: var(--text-soft);
+    font-size: 0.98rem;
+    line-height: 1.78;
+  }
+
+  .lede + .lede {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  /* ---------- 时间线 ---------- */
+
+  .timeline {
+    list-style: none;
+  }
+
+  .timeline > li {
+    position: relative;
+    padding: 0 0 22px 22px;
+    border-left: 1px solid var(--border);
+  }
+
+  .timeline > li:last-child {
+    padding-bottom: 0;
+  }
+
+  .timeline > li::before {
+    content: "";
+    position: absolute;
+    left: -5px;
+    top: 8px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+
+  .entry-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 14px;
+    margin-bottom: 2px;
+  }
+
+  .entry-head h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .entry-date {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .entry-role {
+    margin: 0 0 8px;
+    color: var(--accent);
+    font-size: 0.86rem;
+    font-weight: 600;
+  }
+
+  .bullets {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    color: var(--text-soft);
+    font-size: 0.9rem;
+  }
+
+  .bullets li {
+    position: relative;
+    padding-left: 14px;
+  }
+
+  .bullets li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.66em;
+    width: 5px;
+    height: 1px;
+    background: var(--border-strong);
+  }
+
+  .bullets strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* ---------- 项目卡片 ---------- */
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .card h3 {
+    margin: 0 0 3px;
+    font-size: 1rem;
+  }
+
+  .card-role {
+    margin: 0 0 9px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  .tags {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .tag {
+    padding: 1px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.6;
+  }
+
+  .card-result {
+    margin: 0 0 10px;
+    color: var(--text-soft);
+    font-size: 0.87rem;
+  }
+
+  .card details {
+    margin-top: auto;
+    padding-top: 9px;
+    border-top: 1px dashed var(--border);
+  }
+
+  .card summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 600;
+    list-style: none;
+  }
+
+  .card summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .card summary::after {
+    content: "＋";
+    font-size: 0.9rem;
+    line-height: 1;
+  }
+
+  .card details[open] summary::after {
+    content: "－";
+  }
+
+  .card summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .detail-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
+
+  .detail-list li {
+    position: relative;
+    padding-left: 12px;
+  }
+
+  .detail-list li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 0.66em;
+    width: 5px;
+    height: 1px;
+    background: var(--border-strong);
+  }
+
+  /* ---------- 教育背景 ---------- */
+
+  .edu {
+    border-left: 1px solid var(--border);
+    padding: 0 0 0 22px;
+    position: relative;
+  }
+
+  .edu::before {
+    content: "";
+    position: absolute;
+    left: -5px;
+    top: 8px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+    background: var(--surface);
+  }
+
+  .edu h3 {
+    margin: 0;
+    font-size: 0.98rem;
+  }
+
+  .edu p {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 0.86rem;
+  }
+
+  /* ---------- 页脚 ---------- */
+
+  .site-footer {
+    scroll-margin-top: 24px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 26px 32px;
+    margin-top: 10px;
+  }
+
+  .footer-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .footer-inner h2 {
+    margin: 0 0 6px;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+
+  .footer-contact {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 0;
+  }
+
+  .footer-contact li + li::before {
+    content: "/";
+    margin: 0 10px;
+    color: var(--border-strong);
+  }
+
+  .copyright {
+    margin: 0;
+    font-size: 0.78rem;
+  }
+
+  /* ---------- 回到顶部 / 提示条 ---------- */
+
+  .to-top {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease;
+  }
+
+  .to-top.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+  }
+
+  .to-top:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 26px;
+    transform: translateX(-50%) translateY(6px);
+    margin: 0;
+    max-width: min(90vw, 420px);
+    padding: 10px 18px;
+    border-radius: 8px;
+    background: #1f2328;
+    color: #f5f4f1;
+    font-size: 0.85rem;
+    text-align: center;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease;
+  }
+
+  .toast[data-visible="true"] {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* ---------- 响应式 ---------- */
+
+  @media screen and (max-width: 900px) {
+    .layout {
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+      padding: 24px 20px;
+    }
+
+    .sidebar {
+      display: contents;
+    }
+
+    .toc {
+      order: 0;
+    }
+
+    .content {
+      order: 1;
+      gap: 28px;
+    }
+
+    .sidebar .panel {
+      order: 2;
+    }
+
+    .hero {
+      padding: 28px 20px;
+    }
+  }
+
+  @media screen and (max-width: 720px) {
+    .hero-inner {
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .hero-actions {
+      padding-top: 0;
+    }
+
+    .btn {
+      width: 100%;
+    }
+
+    .cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .entry-date {
+      white-space: normal;
+    }
+  }
+
+  @media screen and (max-width: 400px) {
+    body {
+      font-size: 14.5px;
+    }
+
+    .layout,
+    .hero,
+    .site-footer {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .identity {
+      gap: 14px;
+    }
+
+    .avatar {
+      width: 52px;
+      height: 52px;
+      font-size: 22px;
+    }
+
+    .meta {
+      font-size: 0.8rem;
+    }
+
+    .meta li + li::before {
+      margin: 0 7px;
+    }
+
+    .timeline > li {
+      padding-left: 16px;
+    }
+
+    .card {
+      padding: 14px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+  }
+
+  /* ---------- 打印：A4 简历 ---------- */
+
+  @media print {
+    @page {
+      size: A4;
+      margin: 12mm 14mm;
+    }
+
+    :root {
+      --bg: #fff;
+      --surface: #fff;
+      --surface-soft: #fff;
+      --text: #000;
+      --text-soft: #111;
+      --text-muted: #333;
+      --border: #bbb;
+      --border-strong: #888;
+      --accent: #000;
+      --accent-soft: #fff;
+      --shadow-card: none;
+    }
+
+    html,
+    body {
+      background: #fff !important;
+      color: #000 !important;
+      font-size: 10.4pt;
+      line-height: 1.45;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-shadow: none !important;
+      background-image: none !important;
+      transition: none !important;
+      animation: none !important;
+    }
+
+    .btn,
+    .toc,
+    .to-top,
+    .toast,
+    .avatar {
+      display: none !important;
+    }
+
+    .hero {
+      padding: 0 0 7pt;
+      border-bottom: 1pt solid #000;
+      background: #fff;
+    }
+
+    .hero-inner {
+      max-width: none;
+      display: block;
+    }
+
+    .hero h1 {
+      font-size: 19pt;
+      margin-bottom: 1pt;
+    }
+
+    .role {
+      font-size: 10pt;
+      margin-bottom: 3pt;
+    }
+
+    .tagline {
+      max-width: none;
+      font-size: 9.8pt;
+      margin-bottom: 5pt;
+    }
+
+    .meta {
+      font-size: 8.8pt;
+      gap: 2px 0;
+    }
+
+    .layout {
+      display: flex;
+      flex-direction: column;
+      max-width: none;
+      padding: 9pt 0 0;
+      gap: 9pt;
+    }
+
+    .content {
+      order: 1;
+      gap: 9pt;
+    }
+
+    .sidebar {
+      order: 2;
+      position: static;
+      display: flex;
+      flex-direction: column;
+      max-height: none;
+      overflow: visible;
+      gap: 8pt;
+    }
+
+    .site-footer {
+      order: 3;
+      margin-top: 0;
+      padding: 7pt 0 0;
+      border-top: 1pt solid #000;
+      background: #fff;
+    }
+
+    .footer-inner {
+      max-width: none;
+      display: block;
+      font-size: 8.8pt;
+    }
+
+    .section-title {
+      margin: 0 0 5pt;
+      font-size: 12pt;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .section-title::before {
+      width: 3pt;
+      height: 11pt;
+      background: #000;
+    }
+
+    .panel {
+      border-top: 1pt solid #ccc;
+      padding-top: 5pt;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .panel > h2 {
+      margin-bottom: 4pt;
+      font-size: 8.6pt;
+      color: #000;
+    }
+
+    .skill-group {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .skill-group + .skill-group {
+      margin-top: 5pt;
+    }
+
+    .skill-group h3 {
+      margin-bottom: 3pt;
+      font-size: 9pt;
+    }
+
+    .skill {
+      margin-bottom: 3pt;
+    }
+
+    .skill-head {
+      font-size: 8.8pt;
+    }
+
+    .skill-bar {
+      display: none !important;
+    }
+
+    .plain-list {
+      font-size: 8.8pt;
+      gap: 2pt;
+    }
+
+    .timeline > li,
+    .card,
+    .edu {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .timeline > li {
+      padding-bottom: 8pt;
+    }
+
+    .timeline > li::before {
+      background: #000;
+      box-shadow: none;
+      width: 7px;
+      height: 7px;
+      left: -4px;
+      top: 5pt;
+    }
+
+    .entry-head h3 {
+      font-size: 10.4pt;
+    }
+
+    .entry-role {
+      margin-bottom: 3pt;
+      font-size: 9.2pt;
+    }
+
+    .entry-date {
+      font-size: 8.4pt;
+    }
+
+    .bullets {
+      font-size: 9.2pt;
+      gap: 2pt;
+    }
+
+    .cards {
+      display: block;
+    }
+
+    .card {
+      padding: 6pt 8pt;
+      margin-bottom: 6pt;
+      border: 1pt solid #bbb;
+      border-radius: 0;
+    }
+
+    .card h3 {
+      font-size: 10.2pt;
+    }
+
+    .card-role,
+    .card-result,
+    .detail-list {
+      font-size: 8.8pt;
+    }
+
+    .tags {
+      gap: 4pt;
+      margin-bottom: 4pt;
+    }
+
+    .tag {
+      padding: 0 5pt;
+      border: 1pt solid #999;
+      border-radius: 0;
+      font-size: 8pt;
+    }
+
+    .card details {
+      padding-top: 4pt;
+      border-top: 1pt dashed #bbb;
+    }
+
+    .card summary {
+      display: none;
+    }
+
+    .card details > div {
+      display: block !important;
+    }
+
+    .detail-list {
+      margin-top: 3pt;
+    }
+
+    .edu h3 {
+      font-size: 10pt;
+    }
+
+    .edu p {
+      font-size: 8.8pt;
+    }
+
+    a {
+      color: #000;
+      border-bottom: 0;
+      text-decoration: none;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="identity">
+      <div class="avatar" aria-hidden="true">陈</div>
+      <div>
+        <h1>陈知远</h1>
+        <p class="role">前端工程师 · 6 年经验 · B 端中后台与数据产品</p>
+        <p class="tagline">把模糊的业务需求拆成清晰的组件边界，也把首屏从 4.2s 拉回 1.1s。</p>
+        <ul class="meta">
+          <li>杭州</li>
+          <li><a href="mailto:zhiyuan.chen@example.com">zhiyuan.chen@example.com</a></li>
+          <li><a href="#contact">GitHub</a></li>
+          <li><a href="#contact">个人站点</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="hero-actions">
+      <button type="button" class="btn" id="download-btn">下载简历</button>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside class="sidebar">
+    <nav class="toc" aria-label="页面目录">
+      <p class="toc-title">目录</p>
+      <ol class="toc-list">
+        <li><a href="#overview" data-toc-link="overview"><span class="toc-index">01</span>概览</a></li>
+        <li><a href="#experience" data-toc-link="experience"><span class="toc-index">02</span>经历</a></li>
+        <li><a href="#projects" data-toc-link="projects"><span class="toc-index">03</span>项目</a></li>
+        <li><a href="#skills" data-toc-link="skills"><span class="toc-index">04</span>技能</a></li>
+        <li><a href="#contact" data-toc-link="contact"><span class="toc-index">05</span>联系</a></li>
+      </ol>
+    </nav>
+
+    <section class="panel" id="skills" aria-labelledby="skills-title">
+      <h2 id="skills-title">技能栈</h2>
+
+      <div class="skill-group">
+        <h3>语言</h3>
+        <ul class="skill-list">
+          <li class="skill">
+            <p class="skill-head"><span>TypeScript</span><span class="skill-pct">90%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:90%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>JavaScript</span><span class="skill-pct">92%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:92%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>HTML / CSS</span><span class="skill-pct">90%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:90%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Python</span><span class="skill-pct">60%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:60%"></span></span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="skill-group">
+        <h3>框架</h3>
+        <ul class="skill-list">
+          <li class="skill">
+            <p class="skill-head"><span>Vue 3</span><span class="skill-pct">90%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:90%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>React</span><span class="skill-pct">80%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:80%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Node.js / Express</span><span class="skill-pct">75%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:75%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Vite</span><span class="skill-pct">85%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:85%"></span></span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="skill-group">
+        <h3>工程化</h3>
+        <ul class="skill-list">
+          <li class="skill">
+            <p class="skill-head"><span>性能优化</span><span class="skill-pct">88%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:88%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>CI / CD</span><span class="skill-pct">78%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:78%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Vitest / Playwright</span><span class="skill-pct">82%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:82%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Git 协作流程</span><span class="skill-pct">90%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:90%"></span></span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="skill-group">
+        <h3>其他</h3>
+        <ul class="skill-list">
+          <li class="skill">
+            <p class="skill-head"><span>数据可视化 ECharts</span><span class="skill-pct">80%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:80%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>Figma 设计协作</span><span class="skill-pct">72%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:72%"></span></span>
+          </li>
+          <li class="skill">
+            <p class="skill-head"><span>可访问性 a11y</span><span class="skill-pct">70%</span></p>
+            <span class="skill-bar" aria-hidden="true"><span style="width:70%"></span></span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="language-title">
+      <h2 id="language-title">语言能力</h2>
+      <ul class="plain-list">
+        <li>中文 · 母语</li>
+        <li>英语 · CET-6<span class="note">，可读写英文技术文档、参与英文需求评审</span></li>
+        <li>日语 · JLPT N3<span class="note">，可阅读技术资料</span></li>
+      </ul>
+    </section>
+
+    <section class="panel" aria-labelledby="award-title">
+      <h2 id="award-title">证书与荣誉</h2>
+      <ul class="plain-list">
+        <li>2023 · 公司年度技术影响力奖</li>
+        <li>2022 · 阿里云 ACP 云计算专业认证</li>
+        <li>2021 · 开源组件库 nebula-ui 维护者<span class="note">，1.4k stars</span></li>
+        <li>2016 · 校级优秀毕业设计</li>
+      </ul>
+    </section>
+  </aside>
+
+  <div class="content">
+
+    <section id="overview" data-nav-section aria-labelledby="overview-title">
+      <h2 class="section-title" id="overview-title">个人简介</h2>
+      <p class="lede">6 年前端开发经验，长期在 B 端中后台与数据产品一线：擅长把模糊的业务需求拆成可迭代的组件与接口约定，主导过从 Vue 2 到 Vue 3 + TypeScript 的整体迁移，也维护过被 7 条业务线复用的内部组件库。</p>
+      <p class="lede">关注性能与工程质量，习惯用指标说话（LCP、错误率、构建耗时）：推动过移动端首屏体积下降 66%、线上 JS 错误率下降 63% 的改造。带过 3 人前端小组，负责代码评审规范与新人 onboarding，评审平均响应时间控制在 4 小时内。</p>
+    </section>
+
+    <section id="experience" data-nav-section aria-labelledby="experience-title">
+      <h2 class="section-title" id="experience-title">工作经历</h2>
+      <ol class="timeline">
+        <li>
+          <article>
+            <div class="entry-head">
+              <h3>杭州云枢科技有限公司</h3>
+              <p class="entry-date"><time datetime="2021-03">2021.03</time> – 至今</p>
+            </div>
+            <p class="entry-role">高级前端工程师 · 数据平台组</p>
+            <ul class="bullets">
+              <li>主导管理后台从 Vue 2 迁移到 Vue 3 + TypeScript，覆盖 <strong>46 个页面</strong>，构建耗时从 210s 降到 <strong>58s</strong>，迁移期间业务零停机。</li>
+              <li>从零设计内部组件库（<strong>32 个组件</strong>，接入 7 条业务线），重复开发工时每月减少约 <strong>120 小时</strong>。</li>
+              <li>搭建前端监控与错误看板，线上 JS 错误率下降 <strong>63%</strong>，核心看板首屏 LCP 由 4.2s 优化到 <strong>1.1s</strong>。</li>
+            </ul>
+          </article>
+        </li>
+        <li>
+          <article>
+            <div class="entry-head">
+              <h3>上海禾一网络科技有限公司</h3>
+              <p class="entry-date"><time datetime="2018-07">2018.07</time> – 2021.02</p>
+            </div>
+            <p class="entry-role">前端工程师 · 电商业务线</p>
+            <ul class="bullets">
+              <li>负责商城 H5 与小程序首页，大促峰值 <strong>3.2k QPS</strong> 下页面可用性保持 <strong>99.95%</strong>。</li>
+              <li>推动路由级代码分割与图片策略改造，移动端首屏体积由 1.9MB 降到 <strong>640KB</strong>，4G 首屏时间缩短 <strong>1.8s</strong>。</li>
+              <li>落地前端自动化测试（Jest + Playwright），核心下单链路回归时间从 2 天压缩到 <strong>40 分钟</strong>。</li>
+            </ul>
+          </article>
+        </li>
+        <li>
+          <article>
+            <div class="entry-head">
+              <h3>南京星尘软件有限公司</h3>
+              <p class="entry-date"><time datetime="2017-09">2017.09</time> – 2018.06</p>
+            </div>
+            <p class="entry-role">前端开发（实习转正）</p>
+            <ul class="bullets">
+              <li>独立完成 <strong>12 个</strong>营销落地页，平均加载时间控制在 <strong>1.4s</strong> 以内。</li>
+              <li>抽出表单校验与埋点公共模块，被 <strong>5 个</strong>在研项目复用，单个页面接入成本从 2 天降到 3 小时。</li>
+            </ul>
+          </article>
+        </li>
+      </ol>
+    </section>
+
+    <section id="projects" data-nav-section aria-labelledby="projects-title">
+      <h2 class="section-title" id="projects-title">项目作品 <span class="count">4 项</span></h2>
+      <div class="cards">
+
+        <article class="card">
+          <h3>「星轨」实时数据看板</h3>
+          <p class="card-role">角色：前端负责人 · 2023</p>
+          <ul class="tags">
+            <li class="tag">Vue 3</li>
+            <li class="tag">ECharts</li>
+            <li class="tag">Web Worker</li>
+          </ul>
+          <p class="card-result">单页承载 12 万数据点，连续交互下帧率稳定在 55fps 以上。</p>
+          <details>
+            <summary>查看详情</summary>
+            <div>
+              <ul class="detail-list">
+                <li>把聚合与差值计算下沉到 Web Worker，主线程长任务从 320ms 降到 40ms。</li>
+                <li>自研视口裁剪 + 分层绘制，首次渲染的图表实例从 96 个减到 14 个。</li>
+                <li>基于 requestIdleCallback 做增量更新，弱网重连时不会阻塞输入。</li>
+              </ul>
+            </div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h3>Nebula UI 组件库</h3>
+          <p class="card-role">角色：主导者 · 维护 2 年</p>
+          <ul class="tags">
+            <li class="tag">TypeScript</li>
+            <li class="tag">Vite</li>
+            <li class="tag">Vitest</li>
+          </ul>
+          <p class="card-result">32 个组件被 7 条业务线接入，单元测试覆盖率 86%。</p>
+          <details>
+            <summary>查看详情</summary>
+            <div>
+              <ul class="detail-list">
+                <li>按「行为 + 主题变量」分层，样式与逻辑解耦，换肤无需改动组件代码。</li>
+                <li>Vite 库模式产出 ESM 与 CJS 双产物，按需引入后业务包体减少 180KB。</li>
+                <li>约定式提交 + 自动生成 changelog，每月发版从 1 次提升到 4 次。</li>
+              </ul>
+            </div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h3>FormFlow 低代码表单引擎</h3>
+          <p class="card-role">角色：核心开发 · 2022</p>
+          <ul class="tags">
+            <li class="tag">React</li>
+            <li class="tag">JSON Schema</li>
+            <li class="tag">Zustand</li>
+          </ul>
+          <p class="card-result">表单交付周期从 3 天缩短到 4 小时，覆盖 120+ 张业务表单。</p>
+          <details>
+            <summary>查看详情</summary>
+            <div>
+              <ul class="detail-list">
+                <li>用 JSON Schema 描述字段与联动规则，复杂条件显示通过表达式求值，无实例级代码。</li>
+                <li>渲染层与状态层分离，切换渲染器（表单 / 只读详情）不改动 schema。</li>
+                <li>提供 schema 版本迁移函数，历史表单在升级后仍可编辑与提交。</li>
+              </ul>
+            </div>
+          </details>
+        </article>
+
+        <article class="card">
+          <h3>离线优先的 Markdown 笔记</h3>
+          <p class="card-role">角色：独立开发 · 个人项目</p>
+          <ul class="tags">
+            <li class="tag">Service Worker</li>
+            <li class="tag">IndexedDB</li>
+            <li class="tag">CodeMirror</li>
+          </ul>
+          <p class="card-result">断网可继续编辑，冷启动时间 800ms 以内，冲突合并零丢失。</p>
+          <details>
+            <summary>查看详情</summary>
+            <div>
+              <ul class="detail-list">
+                <li>写操作先落 IndexedDB，再由后台同步队列串行回放，避免重复提交。</li>
+                <li>以「操作日志 + 版本号」做冲突合并，多端同时编辑时保留双方改动。</li>
+                <li>预缓存应用外壳，二次访问完全离线可用，首屏无网络请求。</li>
+              </ul>
+            </div>
+          </details>
+        </article>
+
+      </div>
+    </section>
+
+    <section id="education" aria-labelledby="education-title">
+      <h2 class="section-title" id="education-title">教育背景</h2>
+      <article class="edu">
+        <h3>南京理工大学 · 软件工程（本科）</h3>
+        <p><time datetime="2013-09">2013.09</time> – <time datetime="2017-06">2017.06</time> · GPA 3.6/4.0 · 两次校级奖学金（2015、2016）</p>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer" id="contact" data-nav-section>
+  <div class="footer-inner">
+    <div>
+      <h2>保持联系</h2>
+      <ul class="footer-contact">
+        <li>杭州 · 可远程</li>
+        <li><a href="mailto:zhiyuan.chen@example.com">zhiyuan.chen@example.com</a></li>
+        <li><a href="#contact">GitHub</a></li>
+        <li><a href="#contact">个人站点</a></li>
+      </ul>
+    </div>
+    <p class="copyright">© 2025 陈知远 · 本页面为演示作品，人物与数据均为虚构。</p>
+  </div>
+</footer>
+
+<button type="button" class="to-top" id="to-top" aria-label="回到顶部" aria-hidden="true" tabindex="-1">↑</button>
+<p class="toast" id="toast" role="status" aria-live="polite"></p>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotionQuery = typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : null;
+
+  function prefersReducedMotion() {
+    return !!(reduceMotionQuery && reduceMotionQuery.matches);
+  }
+
+  var requestFrame = typeof window.requestAnimationFrame === "function"
+    ? function (callback) { return window.requestAnimationFrame(callback); }
+    : function (callback) { return window.setTimeout(callback, 16); };
+
+  /* ---------- 下载简历提示 ---------- */
+
+  var downloadBtn = document.getElementById("download-btn");
+  var toast = document.getElementById("toast");
+  var toastTimer = null;
+
+  function showToast(message) {
+    if (!toast) {
+      return;
+    }
+    toast.textContent = message;
+    toast.setAttribute("data-visible", "true");
+    if (toastTimer !== null) {
+      window.clearTimeout(toastTimer);
+    }
+    toastTimer = window.setTimeout(function () {
+      toast.removeAttribute("data-visible");
+      toastTimer = null;
+    }, 4000);
+  }
+
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", function () {
+      showToast("演示页面，请用浏览器打印为 PDF");
+    });
+  }
+
+  /* ---------- 目录高亮 ---------- */
+
+  var tocLinks = Array.prototype.slice.call(document.querySelectorAll("[data-toc-link]"));
+  var navSections = Array.prototype.slice.call(document.querySelectorAll("[data-nav-section]"));
+
+  function setActiveSection(id) {
+    if (!id) {
+      return;
+    }
+    for (var i = 0; i < tocLinks.length; i++) {
+      var link = tocLinks[i];
+      if (link.getAttribute("data-toc-link") === id) {
+        link.setAttribute("aria-current", "location");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    }
+  }
+
+  var clickLockUntil = 0;
+
+  for (var i = 0; i < tocLinks.length; i++) {
+    (function (link) {
+      link.addEventListener("click", function () {
+        clickLockUntil = Date.now() + 900;
+        setActiveSection(link.getAttribute("data-toc-link"));
+      });
+    })(tocLinks[i]);
+  }
+
+  var observerSections = navSections;
+  if (typeof window.matchMedia === "function" && window.matchMedia("(min-width: 901px)").matches) {
+    /* 桌面端侧栏技能块常驻视口，不参与滚动高亮，避免目录一直停在「技能」。 */
+    observerSections = navSections.filter(function (section) {
+      return section.id !== "skills";
+    });
+  }
+
+  var supportsObserver = typeof window.IntersectionObserver === "function";
+
+  if (supportsObserver) {
+    var visibility = {};
+
+    var observer = new window.IntersectionObserver(function (entries) {
+      for (var k = 0; k < entries.length; k++) {
+        visibility[entries[k].target.id] = entries[k].isIntersecting;
+      }
+      if (Date.now() < clickLockUntil) {
+        return;
+      }
+      for (var m = 0; m < observerSections.length; m++) {
+        if (visibility[observerSections[m].id]) {
+          setActiveSection(observerSections[m].id);
+          return;
+        }
+      }
+    }, { rootMargin: "-25% 0px -55% 0px", threshold: 0 });
+
+    for (var n = 0; n < observerSections.length; n++) {
+      observer.observe(observerSections[n]);
+    }
+  } else {
+    /* 降级：目录保持静态链接，点击仍可依靠锚点定位。 */
+    document.documentElement.setAttribute("data-toc-fallback", "true");
+  }
+
+  if (supportsObserver && !window.location.hash && document.getElementById("overview")) {
+    setActiveSection("overview");
+  }
+
+  /* ---------- 回到顶部 ---------- */
+
+  var toTop = document.getElementById("to-top");
+  var scrollScheduled = false;
+
+  function updateScrollState() {
+    var scrollTop = window.pageYOffset || document.documentElement.scrollTop || 0;
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 600;
+    var atBottom = scrollTop + viewportHeight >= (document.documentElement.scrollHeight - 8);
+
+    if (toTop) {
+      var visible = scrollTop > viewportHeight;
+      if (visible) {
+        toTop.classList.add("is-visible");
+        toTop.setAttribute("aria-hidden", "false");
+        toTop.tabIndex = 0;
+      } else {
+        toTop.classList.remove("is-visible");
+        toTop.setAttribute("aria-hidden", "true");
+        toTop.tabIndex = -1;
+      }
+    }
+
+    if (supportsObserver && atBottom && Date.now() >= clickLockUntil) {
+      setActiveSection("contact");
+    }
+  }
+
+  window.addEventListener("scroll", function () {
+    if (scrollScheduled) {
+      return;
+    }
+    scrollScheduled = true;
+    requestFrame(function () {
+      scrollScheduled = false;
+      updateScrollState();
+    });
+  }, { passive: true });
+
+  window.addEventListener("resize", updateScrollState);
+
+  if (toTop) {
+    toTop.addEventListener("click", function () {
+      clickLockUntil = Date.now() + 900;
+      setActiveSection("overview");
+      try {
+        window.scrollTo({ top: 0, left: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      } catch (error) {
+        window.scrollTo(0, 0);
+      }
+    });
+  }
+
+  updateScrollState();
+})();
+</script>
+</body>
+</html>
