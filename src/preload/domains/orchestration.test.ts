@@ -17,6 +17,7 @@ describe('window.fynvra.orchestration', () => {
     const api = createOrchestrationApi(ipc);
     expect(Object.keys(api).sort()).toEqual([
       'changes',
+      'changesAction',
       'onChanged',
       'readWorkerOutput',
       'reviewDiff',

@@ -13,6 +13,15 @@ export interface SessionChangesInput {
   sessionId?: string;
 }
 
+export type ChangesAction = 'stage' | 'discard';
+
+export interface ChangesActionInput extends SessionChangesInput {
+  action: ChangesAction;
+  scope: 'file' | 'all';
+  /** scope='file' 时 1~2 个仓库相对路径（新路径 + 重命名前的旧路径） */
+  paths?: string[];
+}
+
 export interface SessionChanges {
   availability: 'available' | 'worktree-removed' | 'no-git';
   /** Actual checkout, empty when detached or unavailable. */

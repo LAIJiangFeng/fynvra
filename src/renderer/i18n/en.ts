@@ -557,6 +557,15 @@ export const en: MessagesShape<typeof zhCN> = {
     noTextDiff: '(no text diff)',
     changedFiles: 'Changed files',
     uncommittedChanges: 'Uncommitted changes',
+    stageFile: 'Stage changes',
+    discardFile: 'Discard changes',
+    stageAll: 'Stage all changes',
+    discardAll: 'Discard all changes',
+    discardFileConfirm:
+      'Discard changes to “{name}”? New untracked files will also be deleted. This cannot be undone.',
+    discardAllConfirm:
+      'Discard all uncommitted changes? New untracked files will also be deleted. This cannot be undone.',
+    changesActionFailed: 'Changes action failed: {message}',
     committedChanges: 'Committed changes',
     commitsSection: 'Commits',
     noUncommitted: 'No uncommitted changes',

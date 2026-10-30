@@ -1,5 +1,6 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type {
+  ChangesActionInput,
   OrchestrationSnapshotView,
   SessionChanges,
   SessionChangesInput,
@@ -8,6 +9,7 @@ import type { Unsubscribe } from '../types';
 
 export interface OrchestrationApi {
   changes(input: SessionChangesInput): Promise<IpcResult<SessionChanges>>;
+  changesAction(input: ChangesActionInput): Promise<IpcResult<{ files: string[] }>>;
   snapshot(workspaceId: string): Promise<IpcResult<OrchestrationSnapshotView>>;
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: {
@@ -40,7 +42,7 @@ export interface PreloadIpc {
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
 }
 
-/** `window.fynvra.orchestration`（ARCHITECTURE §9.4）：只传 id / cursor，推送回调拿不到 IpcRendererEvent。 */
+/** `window.fynvra.orchestration`（ARCHITECTURE §9.4）：只传 id / cursor / action / 相对路径，推送回调拿不到 IpcRendererEvent。 */
 export function createOrchestrationApi(ipc: PreloadIpc): OrchestrationApi {
   const call = <T>(channel: string, ...args: unknown[]) =>
     ipc.invoke(channel, ...args) as Promise<T>;
@@ -49,6 +51,14 @@ export function createOrchestrationApi(ipc: PreloadIpc): OrchestrationApi {
       call(IPC_CHANNELS.ORCHESTRATION_CHANGES, {
         workspaceId: input.workspaceId,
         ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      }),
+    changesAction: ({ workspaceId, sessionId, action, scope, paths }) =>
+      call(IPC_CHANNELS.ORCHESTRATION_CHANGES_ACTION, {
+        workspaceId,
+        ...(sessionId === undefined ? {} : { sessionId }),
+        action,
+        scope,
+        ...(paths ? { paths } : {}),
       }),
     snapshot: (workspaceId) => call(IPC_CHANNELS.ORCHESTRATION_SNAPSHOT, workspaceId),
     readWorkerOutput: (input) =>
