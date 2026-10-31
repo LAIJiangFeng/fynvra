@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import type { ExecFn, Workspace, Worktree } from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import type { SessionSummary } from '@shared/types/chat';
 import type {
+  ChangesActionInput,
+  ChangesActionResult,
   OrchestrationSnapshotView,
   SessionChanges,
   SessionChangesInput,
@@ -31,6 +33,46 @@ export function parseSessionChangesInput(raw: unknown): SessionChangesInput | nu
   return sessionId ? { workspaceId, sessionId } : null;
 }
 
+export function parseChangesActionInput(raw: unknown): ChangesActionInput | null {
+  const record = asRecord(raw);
+  if (
+    !record ||
+    Object.keys(record).some(
+      (key) => !['workspaceId', 'sessionId', 'action', 'scope', 'paths'].includes(key)
+    )
+  )
+    return null;
+  const ids = parseSessionChangesInput({
+    workspaceId: record.workspaceId,
+    ...(Object.hasOwn(record, 'sessionId') ? { sessionId: record.sessionId } : {}),
+  });
+  if (!ids) return null;
+  if (record.action !== 'stage' && record.action !== 'discard') return null;
+  const action = record.action;
+  if (record.scope === 'all')
+    return Object.hasOwn(record, 'paths') ? null : { ...ids, action, scope: 'all' };
+  if (record.scope !== 'file' || !Array.isArray(record.paths)) return null;
+  const paths: string[] = [];
+  if (record.paths.length < 1 || record.paths.length > 2) return null;
+  for (const path of record.paths) {
+    if (
+      typeof path !== 'string' ||
+      path.length === 0 ||
+      path.length > 4096 ||
+      path.startsWith('-') ||
+      path.includes('\\') ||
+      path.includes('\0') ||
+      isAbsolute(path) ||
+      /^[a-z]:/i.test(path) ||
+      path.split('/').includes('..') ||
+      path.startsWith('.git')
+    )
+      return null;
+    paths.push(path);
+  }
+  return { ...ids, action, scope: 'file', paths };
+}
+
 interface Dependencies {
   workspace: (id: string) => Workspace | undefined;
   session: (id: string) => SessionSummary | undefined;
@@ -55,17 +97,14 @@ function unavailable(availability: SessionChanges['availability']): SessionChang
 
 const splitNul = (text: string) => text.split('\0').filter(Boolean);
 
-/** A read-only query: registry lookup never opens an orchestration service or starts a session. */
-export async function readSessionChanges(
-  deps: Dependencies,
-  input: SessionChangesInput
-): Promise<SessionChanges> {
+/** Resolve only registered directories, shared by the read-only query and mutations. */
+async function resolveSessionChangesRoot(deps: Dependencies, input: SessionChangesInput) {
   const workspace = deps.workspace(input.workspaceId);
   if (!workspace) throw new Error('Workspace not found');
   const session = input.sessionId ? deps.session(input.sessionId) : undefined;
   if (input.sessionId && (!session || session.workspaceId !== workspace.id))
     throw new Error('Session does not belong to this workspace');
-  if (workspace.vcs === 'none') return unavailable('no-git');
+  if (workspace.vcs === 'none') return { availability: 'no-git' as const };
 
   let worktree: Worktree | undefined;
   if (session?.dispatchId || session?.worktreeId || session?.parentSessionId) {
@@ -81,7 +120,7 @@ export async function readSessionChanges(
     )
       throw new Error('Worker session registration does not match its dispatch');
     worktree = snapshot?.worktrees.find((entry) => entry.id === dispatch.worktreeId);
-    if (!worktree) return unavailable('worktree-removed');
+    if (!worktree) return { availability: 'worktree-removed' as const };
     if (
       worktree.workspaceId !== workspace.id ||
       worktree.branch !== dispatch.branch ||
@@ -95,7 +134,7 @@ export async function readSessionChanges(
     root = await realpath(worktree?.path ?? workspace.repoPath);
   } catch (error) {
     if (worktree && (error as NodeJS.ErrnoException).code === 'ENOENT')
-      return unavailable('worktree-removed');
+      return { availability: 'worktree-removed' as const };
     throw error;
   }
   const exec = deps.exec ?? nodeExec;
@@ -131,6 +170,103 @@ export async function readSessionChanges(
       throw new Error('Directory is not a registered Git worktree');
   }
 
+  return { root, workspace, worktree, exec, git, required };
+}
+
+export async function applySessionChangesAction(
+  deps: Dependencies,
+  input: ChangesActionInput
+): Promise<ChangesActionResult> {
+  const resolved = await resolveSessionChangesRoot(deps, input);
+  if (resolved.availability !== undefined)
+    throw new Error(
+      resolved.availability === 'no-git' ? 'Workspace has no Git repository' : 'Worktree removed'
+    );
+  const { root, exec, git, required } = resolved;
+  const [staged, unstaged, others] = await Promise.all([
+    // --cached without a revision also supports an unborn HEAD. Include both sides of the
+    // index: a staged edit may be reversed in the worktree and disappear from diff HEAD.
+    required([...DIFF, '--cached', '--name-only', '-z', '--no-renames', '--']),
+    required([...DIFF, '--name-only', '-z', '--no-renames', '--']),
+    required(['ls-files', '--others', '--exclude-standard', '-z']),
+  ]);
+  const files = [...new Set([...splitNul(staged), ...splitNul(unstaged), ...splitNul(others)])];
+  const paths = input.scope === 'all' ? files : input.paths;
+  if (input.scope === 'file' && (paths.length === 0 || paths.some((path) => !files.includes(path))))
+    throw new Error('路径不在未提交改动中');
+  if (files.length === 0) return { outcome: 'no-changes' };
+  // Git can enumerate children of directory junctions on Windows. Never mutate through one,
+  // even when its child paths appeared in the fresh Git list.
+  for (const path of paths) {
+    let parent = root;
+    for (const segment of path.split('/').slice(0, -1)) {
+      parent = resolve(parent, segment);
+      try {
+        if ((await lstat(parent)).isSymbolicLink())
+          throw new Error('Changed path traverses a symbolic link or junction');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+        throw error;
+      }
+    }
+  }
+
+  const write = async (args: string[]) => {
+    // Treat repository paths literally, never as glob/magic pathspecs; writes need index locks.
+    const result = await exec(
+      'git',
+      ['--literal-pathspecs', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', ...args],
+      root
+    );
+    if (result.code !== 0)
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `Git ${args[0]} failed`);
+  };
+  if (input.action === 'stage') {
+    await write(['add', '-A', '--', ...(input.scope === 'all' ? ['.'] : paths)]);
+  } else if (input.scope === 'all') {
+    await write(['restore', '--source=HEAD', '--staged', '--worktree', '--', '.']);
+    await write(['clean', '-f', '-d', '--', '.']);
+  } else {
+    for (const path of paths) {
+      const inHead = await required([
+        '--literal-pathspecs',
+        'ls-tree',
+        '-r',
+        '--name-only',
+        'HEAD',
+        '--',
+        path,
+      ]);
+      if (inHead) {
+        await write(['restore', '--source=HEAD', '--staged', '--worktree', '--', path]);
+      } else {
+        const indexed = await git([
+          '--literal-pathspecs',
+          'ls-files',
+          '--error-unmatch',
+          '--',
+          path,
+        ]);
+        if (indexed.code !== 0 && indexed.code !== 1)
+          throw new Error(indexed.stderr.trim() || 'Git ls-files failed');
+        // A staged addition (also a rename destination) is tracked, so clean alone cannot remove it.
+        if (indexed.code === 0) await write(['rm', '--cached', '--', path]);
+        await write(['clean', '-f', '-d', '--', path]);
+      }
+    }
+  }
+  // Do not read after writing: preview errors belong to the separate changes query.
+  return { outcome: 'applied' };
+}
+
+/** A read-only query: registry lookup never opens an orchestration service or starts a session. */
+export async function readSessionChanges(
+  deps: Dependencies,
+  input: SessionChangesInput
+): Promise<SessionChanges> {
+  const resolved = await resolveSessionChangesRoot(deps, input);
+  if (resolved.availability !== undefined) return unavailable(resolved.availability);
+  const { root, workspace, worktree, git, required } = resolved;
   const branchResult = await git(['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (branchResult.code !== 0 && branchResult.code !== 1)
     throw new Error(branchResult.stderr.trim() || 'Cannot read the current branch');
@@ -192,8 +328,10 @@ export async function readSessionChanges(
     }
   }
 
-  const [names, tracked, others] = await Promise.all([
+  const [names, stagedNames, unstagedNames, tracked, others] = await Promise.all([
     required([...DIFF, '--name-only', '-z', head ?? emptyTree, '--']),
+    required([...DIFF, '--cached', '--name-only', '-z', '--']),
+    required([...DIFF, '--name-only', '-z', '--']),
     required([...DIFF, head ?? emptyTree, '--']),
     required(['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
@@ -256,7 +394,14 @@ export async function readSessionChanges(
     commits,
     uncommitted: {
       available: true,
-      files: [...new Set([...splitNul(names), ...untracked])],
+      files: [
+        ...new Set([
+          ...splitNul(names),
+          ...splitNul(stagedNames),
+          ...splitNul(unstagedNames),
+          ...untracked,
+        ]),
+      ],
       diff: workingPatch,
     },
   };

@@ -13,6 +13,23 @@ export interface SessionChangesInput {
   sessionId?: string;
 }
 
+export type ChangesAction = 'stage' | 'discard';
+
+export type ChangesActionInput = SessionChangesInput &
+  (
+    | { action: 'stage' | 'discard'; scope: 'all' }
+    /** 1~2 个仓库相对路径（新路径 + 重命名前的旧路径）。 */
+    | { action: 'stage' | 'discard'; scope: 'file'; paths: string[] }
+  );
+
+/**
+ * Current writes report their outcome without a fallible follow-up preview.
+ * Keep the earlier files response assignable for existing API consumers.
+ */
+export type ChangesActionResult =
+  | { outcome: 'applied' | 'no-changes' }
+  | { outcome?: never; files: string[] };
+
 export interface SessionChanges {
   availability: 'available' | 'worktree-removed' | 'no-git';
   /** Actual checkout, empty when detached or unavailable. */

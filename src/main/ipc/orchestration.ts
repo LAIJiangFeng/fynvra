@@ -1,6 +1,10 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { OrchestrationSnapshotView, SessionChanges } from '@shared/types/orchestration';
+import type {
+  ChangesActionResult,
+  OrchestrationSnapshotView,
+  SessionChanges,
+} from '@shared/types/orchestration';
 import { parseWorkspaceId, type Workspace } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
@@ -8,7 +12,12 @@ import {
   createOrchestrationRegistry,
   type OrchestrationRegistry,
 } from '../services/orchestration/registry';
-import { parseSessionChangesInput, readSessionChanges } from '../services/sessionChanges';
+import {
+  applySessionChangesAction,
+  parseChangesActionInput,
+  parseSessionChangesInput,
+  readSessionChanges,
+} from '../services/sessionChanges';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -79,6 +88,30 @@ export function registerOrchestrationHandlers(): void {
           input
         );
         return { ok: true, ...data };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.ORCHESTRATION_CHANGES_ACTION,
+    async (_event, raw: unknown): Promise<IpcResult<ChangesActionResult>> => {
+      const input = parseChangesActionInput(raw);
+      if (!input) return { ok: false, error: translate('orchestration.invalidChangesAction') };
+      try {
+        const sessions = input.sessionId
+          ? (await import('./sessions')).getSessionStore()
+          : undefined;
+        const result = await applySessionChangesAction(
+          {
+            workspace: (id) => getWorkspaceService().get(id),
+            session: (id) => sessions?.get(id),
+            snapshot: (id) => getOrchestrationRegistry().readSnapshot(id),
+          },
+          input
+        );
+        return { ok: true, ...result };
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
       }

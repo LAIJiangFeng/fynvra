@@ -17,6 +17,7 @@ afterEach(() => {
 function fakeBridge(): OrchestrationApi {
   return {
     changes: vi.fn(),
+    changesAction: vi.fn(async () => ({ ok: true as const, files: [] })),
     snapshot: vi.fn(),
     readWorkerOutput: vi.fn(),
     reviewDiff: vi.fn(),

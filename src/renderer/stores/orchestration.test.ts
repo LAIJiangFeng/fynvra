@@ -75,6 +75,7 @@ function fakeApi(initial: OrchestrationSnapshotView = view()) {
   const state = { view: initial };
   const api = {
     changes: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+    changesAction: vi.fn(async () => ({ ok: true as const, files: [] })),
     snapshot: vi.fn(async (_workspaceId: string) => ({
       ok: true as const,
       ...overIpc(state.view),

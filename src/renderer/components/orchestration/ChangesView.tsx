@@ -1,4 +1,10 @@
-import type { SessionChanges } from '@shared/types/orchestration';
+import { errorMessage } from '@shared/guards';
+import type {
+  ChangesAction,
+  ChangesActionInput,
+  ChangesActionResult,
+  SessionChanges,
+} from '@shared/types/orchestration';
 import {
   ChevronRight,
   CircleAlert,
@@ -9,12 +15,15 @@ import {
   GitCommitHorizontal,
   GitCompareArrows,
   Loader2,
+  Plus,
   RefreshCw,
+  Undo2,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useT } from '@/i18n/I18nProvider';
+import { getOrchestrationApi } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import {
   type DiffSection,
@@ -25,7 +34,9 @@ import {
 import type { ReviewDiffData } from '@/stores/orchestration';
 import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
 import { useSessionsStore } from '@/stores/sessions';
-import { statusOf } from '@/stores/sessions/selectors';
+import { findSession, statusOf } from '@/stores/sessions/selectors';
+import { useWorkspacesStore } from '@/stores/workspaces';
+import { ChangesActionDialog } from './ChangesActionDialog';
 import { PanelMessage } from './common';
 import { type DiffFile, parseUnifiedDiff, statSummary } from './diff';
 import { LineCounts, STATUS_MARK } from './diffView';
@@ -34,8 +45,143 @@ import { formatRelative, shortSha } from './format';
 
 /** Current conversation by default; historical task review has an explicit, separate source. */
 export function ChangesView({ source }: { source: DiffSource }) {
+  return <SourceChangesView key={diffSourceKey(source)} source={source} />;
+}
+
+interface ChangeControls {
+  busy: boolean;
+  request: (action: ChangesAction, file?: ChangeFile) => void;
+}
+
+function SourceChangesView({ source }: { source: DiffSource }) {
   const entry = useSourceDiff(source);
   const t = useT();
+  const workspace = useWorkspacesStore((state) =>
+    state.workspaces.find((item) => item.id === source.workspaceId)
+  );
+  const session = useSessionsStore((state) =>
+    source.kind === 'session' && source.sessionId ? findSession(state, source.sessionId) : undefined
+  );
+  const directory =
+    session?.worktreeId || session?.dispatchId || session?.parentSessionId
+      ? session.cwd
+      : source.kind === 'session' && source.sessionId && !session
+        ? t('orchestration.changesSessionSource', { id: source.sessionId })
+        : (workspace?.displayPath ?? source.workspaceId);
+  const [pending, setPending] = useState<{
+    file?: ChangeFile;
+    branch: string;
+    directory: string;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const running = useRef(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    text: string;
+    error?: boolean;
+    completed?: boolean;
+  } | null>(null);
+
+  const applyAction = async (action: ChangesAction, file?: ChangeFile) => {
+    if (source.kind !== 'session' || running.current) return;
+    const ids = {
+      workspaceId: source.workspaceId,
+      ...(source.sessionId === undefined ? {} : { sessionId: source.sessionId }),
+    };
+    const input: ChangesActionInput = file
+      ? {
+          ...ids,
+          action,
+          scope: 'file',
+          paths: [
+            ...new Set([
+              file.path,
+              ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
+            ]),
+          ],
+        }
+      : { ...ids, action, scope: 'all' };
+    running.current = true;
+    setBusy(true);
+    setDialogError(null);
+    setFeedback({
+      text: t(action === 'stage' ? 'orchestration.staging' : 'orchestration.discarding'),
+    });
+    let result: ChangesActionResult;
+    try {
+      const response = await getOrchestrationApi().changesAction(input);
+      if (!response.ok) throw new Error(response.error);
+      result = response;
+    } catch (error) {
+      const text = t('orchestration.changesActionFailed', { message: errorMessage(error) });
+      setDialogError(text);
+      setFeedback({ text, error: true });
+      return;
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+    setPending(null);
+    setFeedback({
+      text: t(
+        result.outcome === 'no-changes'
+          ? 'orchestration.noUncommitted'
+          : action === 'stage'
+            ? 'orchestration.stagedChanges'
+            : 'orchestration.discardedChanges'
+      ),
+      completed: true,
+    });
+    // Refresh has its own error state; it cannot change the successful write outcome above.
+    void loadSourceDiff(source, true);
+  };
+
+  const controls: ChangeControls = {
+    busy: busy || pending !== null || (entry?.status === 'ready' && entry.refreshing),
+    request: (action, file) => {
+      if (source.kind !== 'session' || running.current || pending || entry?.status !== 'ready')
+        return;
+      if (action === 'stage') void applyAction(action, file);
+      else {
+        setDialogError(null);
+        setPending({ file, branch: entry.data.branch, directory });
+      }
+    },
+  };
+  const wrap = (content: ReactNode) => (
+    <>
+      {feedback && (
+        <div className="px-3 pt-3">
+          <p
+            role={feedback.error ? 'alert' : 'status'}
+            className={cn(
+              'whitespace-pre-wrap break-words text-xs',
+              feedback.error && 'text-destructive'
+            )}
+          >
+            {feedback.text}
+          </p>
+          {feedback.completed && entry?.status === 'error' && (
+            <p role="alert" className="mt-1 text-destructive text-xs">
+              {t('orchestration.changesRefreshFailed')}
+            </p>
+          )}
+        </div>
+      )}
+      {content}
+      {pending && (
+        <ChangesActionDialog
+          target={pending.file?.path}
+          branch={entry?.status === 'ready' ? entry.data.branch : pending.branch}
+          directory={pending.directory}
+          busy={busy}
+          error={dialogError}
+          onCancel={() => !running.current && setPending(null)}
+          onConfirm={() => void applyAction('discard', pending.file)}
+        />
+      )}
+    </>
+  );
 
   useEffect(() => {
     void loadSourceDiff(source, true);
@@ -56,10 +202,10 @@ export function ChangesView({ source }: { source: DiffSource }) {
     };
   }, [source]);
   if (!entry || entry.status === 'loading') {
-    return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
+    return wrap(<PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />);
   }
   if (entry.status === 'error') {
-    return (
+    return wrap(
       <PanelMessage
         icon={CircleAlert}
         title={t('orchestration.diffFailed')}
@@ -73,7 +219,7 @@ export function ChangesView({ source }: { source: DiffSource }) {
     );
   }
   if ('availability' in entry.data && entry.data.availability !== 'available') {
-    return (
+    return wrap(
       <PanelMessage
         icon={GitCompareArrows}
         title={t(
@@ -84,11 +230,12 @@ export function ChangesView({ source }: { source: DiffSource }) {
       />
     );
   }
-  return (
+  return wrap(
     <div className="p-3">
       <DiffContent
         source={source}
         data={entry.data}
+        controls={source.kind === 'session' ? controls : undefined}
         refreshing={entry.refreshing}
         onRefresh={() => void loadSourceDiff(source, true)}
       />
@@ -99,11 +246,13 @@ export function ChangesView({ source }: { source: DiffSource }) {
 function DiffContent({
   source,
   data,
+  controls,
   refreshing,
   onRefresh,
 }: {
   source: DiffSource;
   data: ReviewDiffData | SessionChanges;
+  controls?: ChangeControls;
   refreshing: boolean;
   onRefresh: (() => void) | undefined;
 }) {
@@ -172,6 +321,7 @@ function DiffContent({
         <ChangeSet
           source={source}
           section="uncommitted"
+          controls={controls}
           title={t('orchestration.uncommittedChanges')}
           files={data.uncommitted.files}
           diff={data.uncommitted.diff}
@@ -205,24 +355,29 @@ function DiffContent({
 function SectionBox({
   title,
   count,
+  actions,
   children,
 }: {
   title: string;
   count?: number;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section aria-label={title}>
       <Collapsible defaultOpen>
-        <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded py-0.5 text-left font-semibold text-[11px] text-muted-foreground uppercase tracking-wide outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
-          <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
-          <span className="min-w-0 flex-1 truncate">{title}</span>
-          {count !== undefined && (
-            <span className="shrink-0 rounded-full bg-muted px-1.5 font-mono font-normal tabular-nums">
-              {count}
-            </span>
-          )}
-        </CollapsibleTrigger>
+        <div className="group flex items-center gap-1">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-1 rounded py-0.5 text-left font-semibold text-[11px] text-muted-foreground uppercase tracking-wide outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
+            <span className="min-w-0 flex-1 truncate">{title}</span>
+            {count !== undefined && (
+              <span className="shrink-0 rounded-full bg-muted px-1.5 font-mono font-normal tabular-nums">
+                {count}
+              </span>
+            )}
+          </CollapsibleTrigger>
+          {actions && <div className="shrink-0">{actions}</div>}
+        </div>
         <CollapsibleContent>
           <div className="mt-1.5 flex flex-col gap-2">{children}</div>
         </CollapsibleContent>
@@ -235,6 +390,50 @@ function SectionNote({ children }: { children: ReactNode }) {
   return <p className="py-3 text-center text-muted-foreground text-xs">{children}</p>;
 }
 
+function ChangesActions({
+  scope,
+  busy,
+  onAction,
+}: {
+  scope: 'file' | 'all';
+  busy: boolean;
+  onAction: (action: 'stage' | 'discard') => void;
+}) {
+  const t = useT();
+  const discardLabel = t(
+    scope === 'all' ? 'orchestration.discardAll' : 'orchestration.discardFile'
+  );
+  const stageLabel = t(scope === 'all' ? 'orchestration.stageAll' : 'orchestration.stageFile');
+  return (
+    <div className="flex shrink-0 items-center">
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="size-5 rounded-sm"
+        aria-label={discardLabel}
+        title={discardLabel}
+        disabled={busy}
+        onClick={() => onAction('discard')}
+      >
+        <Undo2 className="size-3.5" />
+      </Button>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="size-5 rounded-sm"
+        aria-label={stageLabel}
+        title={stageLabel}
+        disabled={busy}
+        onClick={() => onAction('stage')}
+      >
+        <Plus className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+type ChangeFile = Pick<DiffFile, 'path' | 'oldPath' | 'status'>;
+
 /** 一组改动（未提交 / 已提交）：文件树，点击后在中央工作区打开 diff。 */
 function ChangeSet({
   source,
@@ -243,6 +442,7 @@ function ChangeSet({
   files: names,
   diff,
   empty,
+  controls,
 }: {
   source: DiffSource;
   section: DiffSection;
@@ -250,6 +450,7 @@ function ChangeSet({
   files: string[];
   diff: string;
   empty: string;
+  controls?: ChangeControls;
 }) {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
   // `files` 里有、patch 里没有文本 diff 的条目（理论上不会出现，防御一下）
@@ -267,33 +468,67 @@ function ChangeSet({
       ? selected.path
       : null;
   const t = useT();
+  const canAct = source.kind === 'session' && section === 'uncommitted' && controls;
+  const fileActions =
+    canAct && names.length > 0
+      ? (file: ChangeFile) => (
+          <div className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover/li:opacity-100">
+            <ChangesActions
+              scope="file"
+              busy={canAct.busy}
+              onAction={(action) => canAct.request(action, file)}
+            />
+          </div>
+        )
+      : undefined;
 
-  const openFile = ({ path, oldPath, status }: Pick<DiffFile, 'path' | 'oldPath' | 'status'>) =>
+  const openFile = ({ path, oldPath, status }: ChangeFile) =>
     diffTabs.getState().open({ source, section, path, oldPath, status });
 
   return (
-    <SectionBox title={title} count={files.length + extra.length}>
+    <SectionBox
+      title={title}
+      count={files.length + extra.length}
+      actions={
+        canAct ? (
+          <ChangesActions
+            scope="all"
+            busy={canAct.busy || names.length === 0}
+            onAction={(action) => canAct.request(action)}
+          />
+        ) : undefined
+      }
+    >
       {files.length === 0 && extra.length === 0 ? (
         <SectionNote>{empty}</SectionNote>
       ) : (
         <>
-          {files.length > 0 && <FileTree nodes={tree} activePath={activePath} onOpen={openFile} />}
+          {files.length > 0 && (
+            <FileTree
+              nodes={tree}
+              activePath={activePath}
+              onOpen={openFile}
+              fileActions={fileActions}
+            />
+          )}
           {extra.map((path) => (
-            <button
-              key={path}
-              type="button"
-              aria-pressed={activePath === path}
-              className={cn(
-                'rounded-md border px-2 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
-                activePath === path && 'bg-accent'
-              )}
-              onClick={() => openFile({ path, status: 'modified' })}
-            >
-              {path}{' '}
-              <span className="font-sans text-muted-foreground">
-                {t('orchestration.noTextDiff')}
-              </span>
-            </button>
+            <div key={path} className="group/li flex items-center">
+              <button
+                type="button"
+                aria-pressed={activePath === path}
+                className={cn(
+                  'min-w-0 flex-1 rounded-md border px-2 py-1.5 text-left font-mono text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
+                  activePath === path && 'bg-accent'
+                )}
+                onClick={() => openFile({ path, status: 'modified' })}
+              >
+                {path}{' '}
+                <span className="font-sans text-muted-foreground">
+                  {t('orchestration.noTextDiff')}
+                </span>
+              </button>
+              {fileActions?.({ path, status: 'modified' })}
+            </div>
           ))}
         </>
       )}
@@ -308,10 +543,12 @@ function FileTree({
   nodes,
   activePath,
   onOpen,
+  fileActions,
 }: {
   nodes: FileTreeNode[];
   activePath: string | null;
   onOpen: (file: DiffFile) => void;
+  fileActions?: (file: ChangeFile) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const t = useT();
@@ -361,12 +598,15 @@ function FileTree({
       const mark = STATUS_MARK[file.status];
       rows.push(
         // 同一路径可能出现两次（类型变更 = 删除 + 新增），按状态 + 路径区分。
-        <li key={`f:${file.status}:${file.oldPath ?? ''}:${file.path}`}>
+        <li
+          key={`f:${file.status}:${file.oldPath ?? ''}:${file.path}`}
+          className="group/li flex items-center"
+        >
           <button
             type="button"
             aria-pressed={activePath === file.path}
             className={cn(
-              'flex w-full items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
+              'flex w-full min-w-0 flex-1 items-center gap-1 py-0.5 pr-2 text-left text-[11px] outline-none hover:bg-accent focus-visible:bg-accent',
               activePath === file.path && 'bg-accent'
             )}
             // 与目录行的 chevron（size-3 + gap）对齐
@@ -391,6 +631,7 @@ function FileTree({
               <span className="sr-only">{t(`orchestration.fileStatus.${file.status}`)}</span>
             </span>
           </button>
+          {fileActions?.(file)}
         </li>
       );
     }

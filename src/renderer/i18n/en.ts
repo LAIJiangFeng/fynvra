@@ -557,6 +557,26 @@ export const en: MessagesShape<typeof zhCN> = {
     noTextDiff: '(no text diff)',
     changedFiles: 'Changed files',
     uncommittedChanges: 'Uncommitted changes',
+    stageFile: 'Stage changes',
+    discardFile: 'Discard changes',
+    stageAll: 'Stage all changes',
+    discardAll: 'Discard all changes',
+    discardFileConfirm:
+      'Discard all staged and unstaged changes to “{name}”? New files will be deleted. This cannot be undone',
+    discardAllConfirm:
+      'Discard all staged and unstaged changes in this source directory? New untracked files will also be deleted. This cannot be undone',
+    changesActionFailed: 'Changes action failed: {message}',
+    changesSource: 'Source: {directory}',
+    changesBranch: 'Branch: {branch}',
+    changesSessionSource: 'Registered directory for session {id}',
+    staging: 'Staging changes…',
+    stagedChanges: 'Changes staged; not yet committed locally',
+    discarding: 'Discarding changes…',
+    discardedChanges: 'Selected changes discarded',
+    changesRefreshFailed:
+      'The operation completed, but refreshing changes failed. Reload the list; you do not need to repeat the operation',
+    changesDemoUnavailable:
+      'Demo mode does not write to Git. Use a local workspace to make changes',
     committedChanges: 'Committed changes',
     commitsSection: 'Commits',
     noUncommitted: 'No uncommitted changes',

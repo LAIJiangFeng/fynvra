@@ -80,6 +80,8 @@ export const IPC_CHANNELS = {
   ORCHESTRATION_READ_WORKER_OUTPUT: 'orchestration:read-worker-output',
   /** 当前会话登记目录的改动；无会话时读工作区主目录 */
   ORCHESTRATION_CHANGES: 'orchestration:changes',
+  /** Renderer 只传 id / action / 仓库相对路径，绝对路径与 ref 由 Main 从工作区记录推导。 */
+  ORCHESTRATION_CHANGES_ACTION: 'orchestration:changes-action',
   /** 按 dispatch id 取 worker 分支相对基准提交的历史改动 */
   ORCHESTRATION_REVIEW_DIFF: 'orchestration:review-diff',
   /** Main → Renderer：某工作区的编排状态已变更（参数：workspaceId） */
