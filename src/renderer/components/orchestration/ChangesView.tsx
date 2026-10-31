@@ -1,10 +1,9 @@
 import { errorMessage } from '@shared/guards';
-import {
-  type ChangesAction,
-  type ChangesActionInput,
-  type ChangesActionResult,
-  MAX_COMMIT_MESSAGE_LENGTH,
-  type SessionChanges,
+import type {
+  ChangesAction,
+  ChangesActionInput,
+  ChangesActionResult,
+  SessionChanges,
 } from '@shared/types/orchestration';
 import {
   ChevronRight,
@@ -70,12 +69,10 @@ function SourceChangesView({ source }: { source: DiffSource }) {
         ? t('orchestration.changesSessionSource', { id: source.sessionId })
         : (workspace?.displayPath ?? source.workspaceId);
   const [pending, setPending] = useState<{
-    action: 'discard' | 'commit';
     file?: ChangeFile;
     branch: string;
     directory: string;
   } | null>(null);
-  const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -87,42 +84,28 @@ function SourceChangesView({ source }: { source: DiffSource }) {
 
   const applyAction = async (action: ChangesAction, file?: ChangeFile) => {
     if (source.kind !== 'session' || running.current) return;
-    if (
-      action === 'commit' &&
-      (!message.trim() || message.length > MAX_COMMIT_MESSAGE_LENGTH || message.includes('\0'))
-    )
-      return;
     const ids = {
       workspaceId: source.workspaceId,
       ...(source.sessionId === undefined ? {} : { sessionId: source.sessionId }),
     };
-    const input: ChangesActionInput =
-      action === 'commit'
-        ? { ...ids, action, scope: 'all', message: message.trim() }
-        : file
-          ? {
-              ...ids,
-              action,
-              scope: 'file',
-              paths: [
-                ...new Set([
-                  file.path,
-                  ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
-                ]),
-              ],
-            }
-          : { ...ids, action, scope: 'all' };
+    const input: ChangesActionInput = file
+      ? {
+          ...ids,
+          action,
+          scope: 'file',
+          paths: [
+            ...new Set([
+              file.path,
+              ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
+            ]),
+          ],
+        }
+      : { ...ids, action, scope: 'all' };
     running.current = true;
     setBusy(true);
     setDialogError(null);
     setFeedback({
-      text: t(
-        action === 'stage'
-          ? 'orchestration.staging'
-          : action === 'commit'
-            ? 'orchestration.committing'
-            : 'orchestration.discarding'
-      ),
+      text: t(action === 'stage' ? 'orchestration.staging' : 'orchestration.discarding'),
     });
     let result: ChangesActionResult;
     try {
@@ -130,10 +113,7 @@ function SourceChangesView({ source }: { source: DiffSource }) {
       if (!response.ok) throw new Error(response.error);
       result = response;
     } catch (error) {
-      const text = t(
-        action === 'commit' ? 'orchestration.commitFailed' : 'orchestration.changesActionFailed',
-        { message: errorMessage(error) }
-      );
+      const text = t('orchestration.changesActionFailed', { message: errorMessage(error) });
       setDialogError(text);
       setFeedback({ text, error: true });
       return;
@@ -142,18 +122,13 @@ function SourceChangesView({ source }: { source: DiffSource }) {
       setBusy(false);
     }
     setPending(null);
-    setMessage('');
     setFeedback({
       text: t(
         result.outcome === 'no-changes'
-          ? action === 'commit'
-            ? 'orchestration.noChangesToCommit'
-            : 'orchestration.noUncommitted'
-          : action === 'commit'
-            ? 'orchestration.committedLocally'
-            : action === 'stage'
-              ? 'orchestration.stagedChanges'
-              : 'orchestration.discardedChanges'
+          ? 'orchestration.noUncommitted'
+          : action === 'stage'
+            ? 'orchestration.stagedChanges'
+            : 'orchestration.discardedChanges'
       ),
       completed: true,
     });
@@ -169,8 +144,7 @@ function SourceChangesView({ source }: { source: DiffSource }) {
       if (action === 'stage') void applyAction(action, file);
       else {
         setDialogError(null);
-        setMessage('');
-        setPending({ action, file, branch: entry.data.branch, directory });
+        setPending({ file, branch: entry.data.branch, directory });
       }
     },
   };
@@ -197,16 +171,13 @@ function SourceChangesView({ source }: { source: DiffSource }) {
       {content}
       {pending && (
         <ChangesActionDialog
-          action={pending.action}
           target={pending.file?.path}
           branch={entry?.status === 'ready' ? entry.data.branch : pending.branch}
           directory={pending.directory}
           busy={busy}
           error={dialogError}
-          message={message}
-          onMessage={setMessage}
           onCancel={() => !running.current && setPending(null)}
-          onConfirm={() => void applyAction(pending.action, pending.file)}
+          onConfirm={() => void applyAction('discard', pending.file)}
         />
       )}
     </>
@@ -520,22 +491,11 @@ function ChangeSet({
       count={files.length + extra.length}
       actions={
         canAct ? (
-          <div className="flex items-center gap-1">
-            <ChangesActions
-              scope="all"
-              busy={canAct.busy || names.length === 0}
-              onAction={(action) => canAct.request(action)}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 px-1.5 text-[11px]"
-              disabled={canAct.busy}
-              onClick={() => canAct.request('commit')}
-            >
-              {t('orchestration.commitAll')}
-            </Button>
-          </div>
+          <ChangesActions
+            scope="all"
+            busy={canAct.busy || names.length === 0}
+            onAction={(action) => canAct.request(action)}
+          />
         ) : undefined
       }
     >

@@ -542,11 +542,6 @@ export const zhCN = {
     discardAllConfirm:
       '确定丢弃此来源目录全部已暂存和未暂存的更改吗？未跟踪的新文件也会被删除，此操作不可撤销。',
     changesActionFailed: '改动操作失败：{message}',
-    commitAll: '全部提交到本地',
-    commitAllConfirm:
-      '将此来源目录中全部已暂存、未暂存及未跟踪的改动一并提交到本地当前分支。不会推送到远程。',
-    commitMessage: '提交说明',
-    commitMessageHint: '请填写非空提交说明，最多 {count} 个字符。',
     changesSource: '来源：{directory}',
     changesBranch: '分支：{branch}',
     changesSessionSource: '会话 {id} 的登记目录',
@@ -554,10 +549,6 @@ export const zhCN = {
     stagedChanges: '已暂存，尚未提交到本地。',
     discarding: '正在丢弃更改…',
     discardedChanges: '已丢弃所选更改。',
-    committing: '正在提交到本地…',
-    committedLocally: '已提交到本地，未推送到远程。',
-    noChangesToCommit: '当前没有可提交的改动，未创建提交。',
-    commitFailed: '本地提交失败：{message}\n改动可能已暂存，未自动回滚。请检查后重试。',
     changesRefreshFailed: '操作已完成，但刷新改动失败。请重新读取列表，无需重复执行操作。',
     changesDemoUnavailable: '演示模式不执行 Git 写操作，请在本地工作区中操作。',
     committedChanges: '已提交的更改',
