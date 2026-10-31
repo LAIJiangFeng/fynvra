@@ -12,7 +12,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  RotateCcw,
+  Undo2,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -268,22 +268,24 @@ function ChangesActions({
       <Button
         size="icon-xs"
         variant="ghost"
+        className="size-5 rounded-sm"
         aria-label={discardLabel}
         title={discardLabel}
         disabled={busy}
         onClick={() => onAction('discard')}
       >
-        <RotateCcw />
+        <Undo2 className="size-3.5" />
       </Button>
       <Button
         size="icon-xs"
         variant="ghost"
+        className="size-5 rounded-sm"
         aria-label={stageLabel}
         title={stageLabel}
         disabled={busy}
         onClick={() => onAction('stage')}
       >
-        <Plus />
+        <Plus className="size-3.5" />
       </Button>
     </div>
   );
