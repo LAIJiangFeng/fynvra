@@ -4,13 +4,12 @@ import { isAbsolute, resolve } from 'node:path';
 import type { ExecFn, Workspace, Worktree } from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import type { SessionSummary } from '@shared/types/chat';
-import {
-  type ChangesActionInput,
-  type ChangesActionResult,
-  MAX_COMMIT_MESSAGE_LENGTH,
-  type OrchestrationSnapshotView,
-  type SessionChanges,
-  type SessionChangesInput,
+import type {
+  ChangesActionInput,
+  ChangesActionResult,
+  OrchestrationSnapshotView,
+  SessionChanges,
+  SessionChangesInput,
 } from '@shared/types/orchestration';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { nodeExec } from './orchestration/nodeExec';
@@ -39,7 +38,7 @@ export function parseChangesActionInput(raw: unknown): ChangesActionInput | null
   if (
     !record ||
     Object.keys(record).some(
-      (key) => !['workspaceId', 'sessionId', 'action', 'scope', 'paths', 'message'].includes(key)
+      (key) => !['workspaceId', 'sessionId', 'action', 'scope', 'paths'].includes(key)
     )
   )
     return null;
@@ -48,23 +47,7 @@ export function parseChangesActionInput(raw: unknown): ChangesActionInput | null
     ...(Object.hasOwn(record, 'sessionId') ? { sessionId: record.sessionId } : {}),
   });
   if (!ids) return null;
-  if (record.action === 'commit') {
-    if (
-      record.scope !== 'all' ||
-      Object.hasOwn(record, 'paths') ||
-      typeof record.message !== 'string' ||
-      record.message.length > MAX_COMMIT_MESSAGE_LENGTH ||
-      !record.message.trim() ||
-      record.message.includes('\0')
-    )
-      return null;
-    return { ...ids, action: 'commit', scope: 'all', message: record.message.trim() };
-  }
-  if (
-    (record.action !== 'stage' && record.action !== 'discard') ||
-    Object.hasOwn(record, 'message')
-  )
-    return null;
+  if (record.action !== 'stage' && record.action !== 'discard') return null;
   const action = record.action;
   if (record.scope === 'all')
     return Object.hasOwn(record, 'paths') ? null : { ...ids, action, scope: 'all' };
@@ -238,13 +221,7 @@ export async function applySessionChangesAction(
     if (result.code !== 0)
       throw new Error(result.stderr.trim() || result.stdout.trim() || `Git ${args[0]} failed`);
   };
-  if (input.action === 'commit') {
-    await write(['add', '-A', '--', '.']);
-    const staged = await git([...DIFF, '--cached', '--quiet', '--exit-code', '--']);
-    if (staged.code === 0) return { outcome: 'no-changes' };
-    if (staged.code !== 1) throw new Error(staged.stderr.trim() || 'Git diff failed');
-    await write(['commit', '-m', input.message]);
-  } else if (input.action === 'stage') {
+  if (input.action === 'stage') {
     await write(['add', '-A', '--', ...(input.scope === 'all' ? ['.'] : paths)]);
   } else if (input.scope === 'all') {
     await write(['restore', '--source=HEAD', '--staged', '--worktree', '--', '.']);

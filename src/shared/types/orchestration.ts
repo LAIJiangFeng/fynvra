@@ -13,16 +13,13 @@ export interface SessionChangesInput {
   sessionId?: string;
 }
 
-export const MAX_COMMIT_MESSAGE_LENGTH = 2000;
-
-export type ChangesAction = 'stage' | 'discard' | 'commit';
+export type ChangesAction = 'stage' | 'discard';
 
 export type ChangesActionInput = SessionChangesInput &
   (
     | { action: 'stage' | 'discard'; scope: 'all' }
     /** 1~2 个仓库相对路径（新路径 + 重命名前的旧路径）。 */
     | { action: 'stage' | 'discard'; scope: 'file'; paths: string[] }
-    | { action: 'commit'; scope: 'all'; message: string }
   );
 
 /**

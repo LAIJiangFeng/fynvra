@@ -566,11 +566,6 @@ export const en: MessagesShape<typeof zhCN> = {
     discardAllConfirm:
       'Discard all staged and unstaged changes in this source directory? New untracked files will also be deleted. This cannot be undone.',
     changesActionFailed: 'Changes action failed: {message}',
-    commitAll: 'Commit all locally',
-    commitAllConfirm:
-      'Commit all staged, unstaged, and untracked changes in this source directory to the current local branch. Nothing will be pushed to a remote.',
-    commitMessage: 'Commit message',
-    commitMessageHint: 'Enter a non-empty commit message, up to {count} characters.',
     changesSource: 'Source: {directory}',
     changesBranch: 'Branch: {branch}',
     changesSessionSource: 'Registered directory for session {id}',
@@ -578,11 +573,6 @@ export const en: MessagesShape<typeof zhCN> = {
     stagedChanges: 'Changes staged; not yet committed locally.',
     discarding: 'Discarding changes…',
     discardedChanges: 'Selected changes discarded.',
-    committing: 'Committing locally…',
-    committedLocally: 'Committed locally. Nothing was pushed to a remote.',
-    noChangesToCommit: 'No changes to commit. No commit was created.',
-    commitFailed:
-      'Local commit failed: {message}\nChanges may already be staged; no automatic rollback was performed. Check the changes before retrying.',
     changesRefreshFailed:
       'The operation completed, but refreshing changes failed. Reload the list; you do not need to repeat the operation.',
     changesDemoUnavailable: 'Demo mode does not write to Git. Use a local workspace to make changes.',
