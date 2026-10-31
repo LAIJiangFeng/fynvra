@@ -2,18 +2,20 @@ import type { Dispatch, Message, Run, Task, Worktree } from '@fynvra/core';
 import type { IpcResult } from '@shared/types/ipc';
 import type {
   ChangesActionInput,
+  ChangesActionResult,
   OrchestrationSnapshotView,
   SessionChanges,
   SessionChangesInput,
 } from '@shared/types/orchestration';
 import type { FynvraApi, Unsubscribe } from '../../../preload/types';
+import { translate } from '../../i18n';
 
 export type { OrchestrationSnapshotView };
 
 /** `window.fynvra.orchestration`（ARCHITECTURE §9.4）。 */
 export interface OrchestrationApi {
   changes(input: SessionChangesInput): Promise<IpcResult<SessionChanges>>;
-  changesAction(input: ChangesActionInput): Promise<IpcResult<{ files: string[] }>>;
+  changesAction(input: ChangesActionInput): Promise<IpcResult<ChangesActionResult>>;
   snapshot(workspaceId: string): Promise<IpcResult<OrchestrationSnapshotView>>;
   /** 读 dispatch 对应 worker 会话的输出（与 read_worker_output 同源） */
   readWorkerOutput(input: {
@@ -219,7 +221,7 @@ export function createMockOrchestrationApi(
       });
     },
     changesAction() {
-      return respond({ ok: true, files: [] });
+      return respond({ ok: false, error: translate('orchestration.changesDemoUnavailable') });
     },
     snapshot(workspaceId) {
       workspaces.add(workspaceId);

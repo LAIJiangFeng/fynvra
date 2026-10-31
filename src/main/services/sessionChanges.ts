@@ -4,11 +4,13 @@ import { isAbsolute, resolve } from 'node:path';
 import type { ExecFn, Workspace, Worktree } from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import type { SessionSummary } from '@shared/types/chat';
-import type {
-  ChangesActionInput,
-  OrchestrationSnapshotView,
-  SessionChanges,
-  SessionChangesInput,
+import {
+  type ChangesActionInput,
+  type ChangesActionResult,
+  MAX_COMMIT_MESSAGE_LENGTH,
+  type OrchestrationSnapshotView,
+  type SessionChanges,
+  type SessionChangesInput,
 } from '@shared/types/orchestration';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { nodeExec } from './orchestration/nodeExec';
@@ -37,7 +39,7 @@ export function parseChangesActionInput(raw: unknown): ChangesActionInput | null
   if (
     !record ||
     Object.keys(record).some(
-      (key) => !['workspaceId', 'sessionId', 'action', 'scope', 'paths'].includes(key)
+      (key) => !['workspaceId', 'sessionId', 'action', 'scope', 'paths', 'message'].includes(key)
     )
   )
     return null;
@@ -45,7 +47,24 @@ export function parseChangesActionInput(raw: unknown): ChangesActionInput | null
     workspaceId: record.workspaceId,
     ...(Object.hasOwn(record, 'sessionId') ? { sessionId: record.sessionId } : {}),
   });
-  if (!ids || (record.action !== 'stage' && record.action !== 'discard')) return null;
+  if (!ids) return null;
+  if (record.action === 'commit') {
+    if (
+      record.scope !== 'all' ||
+      Object.hasOwn(record, 'paths') ||
+      typeof record.message !== 'string' ||
+      record.message.length > MAX_COMMIT_MESSAGE_LENGTH ||
+      !record.message.trim() ||
+      record.message.includes('\0')
+    )
+      return null;
+    return { ...ids, action: 'commit', scope: 'all', message: record.message.trim() };
+  }
+  if (
+    (record.action !== 'stage' && record.action !== 'discard') ||
+    Object.hasOwn(record, 'message')
+  )
+    return null;
   const action = record.action;
   if (record.scope === 'all')
     return Object.hasOwn(record, 'paths') ? null : { ...ids, action, scope: 'all' };
@@ -174,26 +193,25 @@ async function resolveSessionChangesRoot(deps: Dependencies, input: SessionChang
 export async function applySessionChangesAction(
   deps: Dependencies,
   input: ChangesActionInput
-): Promise<{ files: string[] }> {
+): Promise<ChangesActionResult> {
   const resolved = await resolveSessionChangesRoot(deps, input);
   if (resolved.availability !== undefined)
     throw new Error(
       resolved.availability === 'no-git' ? 'Workspace has no Git repository' : 'Worktree removed'
     );
   const { root, exec, git, required } = resolved;
-  const readFiles = async () => {
-    const [tracked, others] = await Promise.all([
-      // Rename detection hides old paths; both sides must be authorized before a file action.
-      required(['diff', '--name-only', '-z', '--no-renames', 'HEAD', '--']),
-      required(['ls-files', '--others', '--exclude-standard', '-z']),
-    ]);
-    return [...new Set([...splitNul(tracked), ...splitNul(others)])];
-  };
-  const files = await readFiles();
-  const paths = input.scope === 'all' ? files : (input.paths ?? []);
+  const [staged, unstaged, others] = await Promise.all([
+    // --cached without a revision also supports an unborn HEAD. Include both sides of the
+    // index: a staged edit may be reversed in the worktree and disappear from diff HEAD.
+    required([...DIFF, '--cached', '--name-only', '-z', '--no-renames', '--']),
+    required([...DIFF, '--name-only', '-z', '--no-renames', '--']),
+    required(['ls-files', '--others', '--exclude-standard', '-z']),
+  ]);
+  const files = [...new Set([...splitNul(staged), ...splitNul(unstaged), ...splitNul(others)])];
+  const paths = input.scope === 'all' ? files : input.paths;
   if (input.scope === 'file' && (paths.length === 0 || paths.some((path) => !files.includes(path))))
     throw new Error('路径不在未提交改动中');
-  if (files.length === 0) return { files };
+  if (files.length === 0) return { outcome: 'no-changes' };
   // Git can enumerate children of directory junctions on Windows. Never mutate through one,
   // even when its child paths appeared in the fresh Git list.
   for (const path of paths) {
@@ -217,9 +235,16 @@ export async function applySessionChangesAction(
       ['--literal-pathspecs', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', ...args],
       root
     );
-    if (result.code !== 0) throw new Error(result.stderr.trim() || `Git ${args[0]} failed`);
+    if (result.code !== 0)
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `Git ${args[0]} failed`);
   };
-  if (input.action === 'stage') {
+  if (input.action === 'commit') {
+    await write(['add', '-A', '--', '.']);
+    const staged = await git([...DIFF, '--cached', '--quiet', '--exit-code', '--']);
+    if (staged.code === 0) return { outcome: 'no-changes' };
+    if (staged.code !== 1) throw new Error(staged.stderr.trim() || 'Git diff failed');
+    await write(['commit', '-m', input.message]);
+  } else if (input.action === 'stage') {
     await write(['add', '-A', '--', ...(input.scope === 'all' ? ['.'] : paths)]);
   } else if (input.scope === 'all') {
     await write(['restore', '--source=HEAD', '--staged', '--worktree', '--', '.']);
@@ -253,7 +278,8 @@ export async function applySessionChangesAction(
       }
     }
   }
-  return { files: await readFiles() };
+  // Do not read after writing: preview errors belong to the separate changes query.
+  return { outcome: 'applied' };
 }
 
 /** A read-only query: registry lookup never opens an orchestration service or starts a session. */
@@ -325,8 +351,10 @@ export async function readSessionChanges(
     }
   }
 
-  const [names, tracked, others] = await Promise.all([
+  const [names, stagedNames, unstagedNames, tracked, others] = await Promise.all([
     required([...DIFF, '--name-only', '-z', head ?? emptyTree, '--']),
+    required([...DIFF, '--cached', '--name-only', '-z', '--']),
+    required([...DIFF, '--name-only', '-z', '--']),
     required([...DIFF, head ?? emptyTree, '--']),
     required(['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
@@ -389,7 +417,14 @@ export async function readSessionChanges(
     commits,
     uncommitted: {
       available: true,
-      files: [...new Set([...splitNul(names), ...untracked])],
+      files: [
+        ...new Set([
+          ...splitNul(names),
+          ...splitNul(stagedNames),
+          ...splitNul(unstagedNames),
+          ...untracked,
+        ]),
+      ],
       diff: workingPatch,
     },
   };

@@ -1,6 +1,10 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { OrchestrationSnapshotView, SessionChanges } from '@shared/types/orchestration';
+import type {
+  ChangesActionResult,
+  OrchestrationSnapshotView,
+  SessionChanges,
+} from '@shared/types/orchestration';
 import { parseWorkspaceId, type Workspace } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
@@ -92,7 +96,7 @@ export function registerOrchestrationHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.ORCHESTRATION_CHANGES_ACTION,
-    async (_event, raw: unknown): Promise<IpcResult<{ files: string[] }>> => {
+    async (_event, raw: unknown): Promise<IpcResult<ChangesActionResult>> => {
       const input = parseChangesActionInput(raw);
       if (!input) return { ok: false, error: translate('orchestration.invalidChangesAction') };
       try {
