@@ -1,5 +1,11 @@
 import { errorMessage } from '@shared/guards';
-import type { ChangesAction, SessionChanges } from '@shared/types/orchestration';
+import {
+  type ChangesAction,
+  type ChangesActionInput,
+  type ChangesActionResult,
+  MAX_COMMIT_MESSAGE_LENGTH,
+  type SessionChanges,
+} from '@shared/types/orchestration';
 import {
   ChevronRight,
   CircleAlert,
@@ -29,7 +35,9 @@ import {
 import type { ReviewDiffData } from '@/stores/orchestration';
 import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
 import { useSessionsStore } from '@/stores/sessions';
-import { statusOf } from '@/stores/sessions/selectors';
+import { findSession, statusOf } from '@/stores/sessions/selectors';
+import { useWorkspacesStore } from '@/stores/workspaces';
+import { ChangesActionDialog } from './ChangesActionDialog';
 import { PanelMessage } from './common';
 import { type DiffFile, parseUnifiedDiff, statSummary } from './diff';
 import { LineCounts, STATUS_MARK } from './diffView';
@@ -38,8 +46,171 @@ import { formatRelative, shortSha } from './format';
 
 /** Current conversation by default; historical task review has an explicit, separate source. */
 export function ChangesView({ source }: { source: DiffSource }) {
+  return <SourceChangesView key={diffSourceKey(source)} source={source} />;
+}
+
+interface ChangeControls {
+  busy: boolean;
+  request: (action: ChangesAction, file?: ChangeFile) => void;
+}
+
+function SourceChangesView({ source }: { source: DiffSource }) {
   const entry = useSourceDiff(source);
   const t = useT();
+  const workspace = useWorkspacesStore((state) =>
+    state.workspaces.find((item) => item.id === source.workspaceId)
+  );
+  const session = useSessionsStore((state) =>
+    source.kind === 'session' && source.sessionId ? findSession(state, source.sessionId) : undefined
+  );
+  const directory =
+    session?.worktreeId || session?.dispatchId || session?.parentSessionId
+      ? session.cwd
+      : source.kind === 'session' && source.sessionId && !session
+        ? t('orchestration.changesSessionSource', { id: source.sessionId })
+        : (workspace?.displayPath ?? source.workspaceId);
+  const [pending, setPending] = useState<{
+    action: 'discard' | 'commit';
+    file?: ChangeFile;
+    branch: string;
+    directory: string;
+  } | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const running = useRef(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    text: string;
+    error?: boolean;
+    completed?: boolean;
+  } | null>(null);
+
+  const applyAction = async (action: ChangesAction, file?: ChangeFile) => {
+    if (source.kind !== 'session' || running.current) return;
+    if (
+      action === 'commit' &&
+      (!message.trim() || message.length > MAX_COMMIT_MESSAGE_LENGTH || message.includes('\0'))
+    )
+      return;
+    const ids = {
+      workspaceId: source.workspaceId,
+      ...(source.sessionId === undefined ? {} : { sessionId: source.sessionId }),
+    };
+    const input: ChangesActionInput =
+      action === 'commit'
+        ? { ...ids, action, scope: 'all', message: message.trim() }
+        : file
+          ? {
+              ...ids,
+              action,
+              scope: 'file',
+              paths: [
+                ...new Set([
+                  file.path,
+                  ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
+                ]),
+              ],
+            }
+          : { ...ids, action, scope: 'all' };
+    running.current = true;
+    setBusy(true);
+    setDialogError(null);
+    setFeedback({
+      text: t(
+        action === 'stage'
+          ? 'orchestration.staging'
+          : action === 'commit'
+            ? 'orchestration.committing'
+            : 'orchestration.discarding'
+      ),
+    });
+    let result: ChangesActionResult;
+    try {
+      const response = await getOrchestrationApi().changesAction(input);
+      if (!response.ok) throw new Error(response.error);
+      result = response;
+    } catch (error) {
+      const text = t(
+        action === 'commit' ? 'orchestration.commitFailed' : 'orchestration.changesActionFailed',
+        { message: errorMessage(error) }
+      );
+      setDialogError(text);
+      setFeedback({ text, error: true });
+      return;
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+    setPending(null);
+    setMessage('');
+    setFeedback({
+      text: t(
+        result.outcome === 'no-changes'
+          ? action === 'commit'
+            ? 'orchestration.noChangesToCommit'
+            : 'orchestration.noUncommitted'
+          : action === 'commit'
+            ? 'orchestration.committedLocally'
+            : action === 'stage'
+              ? 'orchestration.stagedChanges'
+              : 'orchestration.discardedChanges'
+      ),
+      completed: true,
+    });
+    // Refresh has its own error state; it cannot change the successful write outcome above.
+    void loadSourceDiff(source, true);
+  };
+
+  const controls: ChangeControls = {
+    busy: busy || pending !== null || (entry?.status === 'ready' && entry.refreshing),
+    request: (action, file) => {
+      if (source.kind !== 'session' || running.current || pending || entry?.status !== 'ready')
+        return;
+      if (action === 'stage') void applyAction(action, file);
+      else {
+        setDialogError(null);
+        setMessage('');
+        setPending({ action, file, branch: entry.data.branch, directory });
+      }
+    },
+  };
+  const wrap = (content: ReactNode) => (
+    <>
+      {feedback && (
+        <div className="px-3 pt-3">
+          <p
+            role={feedback.error ? 'alert' : 'status'}
+            className={cn(
+              'whitespace-pre-wrap break-words text-xs',
+              feedback.error && 'text-destructive'
+            )}
+          >
+            {feedback.text}
+          </p>
+          {feedback.completed && entry?.status === 'error' && (
+            <p role="alert" className="mt-1 text-destructive text-xs">
+              {t('orchestration.changesRefreshFailed')}
+            </p>
+          )}
+        </div>
+      )}
+      {content}
+      {pending && (
+        <ChangesActionDialog
+          action={pending.action}
+          target={pending.file?.path}
+          branch={entry?.status === 'ready' ? entry.data.branch : pending.branch}
+          directory={pending.directory}
+          busy={busy}
+          error={dialogError}
+          message={message}
+          onMessage={setMessage}
+          onCancel={() => !running.current && setPending(null)}
+          onConfirm={() => void applyAction(pending.action, pending.file)}
+        />
+      )}
+    </>
+  );
 
   useEffect(() => {
     void loadSourceDiff(source, true);
@@ -60,10 +231,10 @@ export function ChangesView({ source }: { source: DiffSource }) {
     };
   }, [source]);
   if (!entry || entry.status === 'loading') {
-    return <PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />;
+    return wrap(<PanelMessage icon={Loader2} spin title={t('orchestration.loadingDiff')} />);
   }
   if (entry.status === 'error') {
-    return (
+    return wrap(
       <PanelMessage
         icon={CircleAlert}
         title={t('orchestration.diffFailed')}
@@ -77,7 +248,7 @@ export function ChangesView({ source }: { source: DiffSource }) {
     );
   }
   if ('availability' in entry.data && entry.data.availability !== 'available') {
-    return (
+    return wrap(
       <PanelMessage
         icon={GitCompareArrows}
         title={t(
@@ -88,12 +259,12 @@ export function ChangesView({ source }: { source: DiffSource }) {
       />
     );
   }
-  return (
+  return wrap(
     <div className="p-3">
       <DiffContent
-        key={diffSourceKey(source)}
         source={source}
         data={entry.data}
+        controls={source.kind === 'session' ? controls : undefined}
         refreshing={entry.refreshing}
         onRefresh={() => void loadSourceDiff(source, true)}
       />
@@ -104,11 +275,13 @@ export function ChangesView({ source }: { source: DiffSource }) {
 function DiffContent({
   source,
   data,
+  controls,
   refreshing,
   onRefresh,
 }: {
   source: DiffSource;
   data: ReviewDiffData | SessionChanges;
+  controls?: ChangeControls;
   refreshing: boolean;
   onRefresh: (() => void) | undefined;
 }) {
@@ -177,6 +350,7 @@ function DiffContent({
         <ChangeSet
           source={source}
           section="uncommitted"
+          controls={controls}
           title={t('orchestration.uncommittedChanges')}
           files={data.uncommitted.files}
           diff={data.uncommitted.diff}
@@ -231,11 +405,7 @@ function SectionBox({
               </span>
             )}
           </CollapsibleTrigger>
-          {actions && (
-            <div className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-              {actions}
-            </div>
-          )}
+          {actions && <div className="shrink-0">{actions}</div>}
         </div>
         <CollapsibleContent>
           <div className="mt-1.5 flex flex-col gap-2">{children}</div>
@@ -256,7 +426,7 @@ function ChangesActions({
 }: {
   scope: 'file' | 'all';
   busy: boolean;
-  onAction: (action: ChangesAction) => void;
+  onAction: (action: 'stage' | 'discard') => void;
 }) {
   const t = useT();
   const discardLabel = t(
@@ -301,6 +471,7 @@ function ChangeSet({
   files: names,
   diff,
   empty,
+  controls,
 }: {
   source: DiffSource;
   section: DiffSection;
@@ -308,6 +479,7 @@ function ChangeSet({
   files: string[];
   diff: string;
   empty: string;
+  controls?: ChangeControls;
 }) {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
   // `files` 里有、patch 里没有文本 diff 的条目（理论上不会出现，防御一下）
@@ -325,62 +497,19 @@ function ChangeSet({
       ? selected.path
       : null;
   const t = useT();
-  const [busy, setBusy] = useState(false);
-  const running = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const canAct = source.kind === 'session' && section === 'uncommitted' && names.length > 0;
-
-  const applyAction = async (action: ChangesAction, file?: ChangeFile) => {
-    if (!canAct || source.kind !== 'session' || running.current) return;
-    if (
-      action === 'discard' &&
-      !window.confirm(
-        file
-          ? t('orchestration.discardFileConfirm', { name: file.path })
-          : t('orchestration.discardAllConfirm')
-      )
-    )
-      return;
-    running.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await getOrchestrationApi().changesAction({
-        workspaceId: source.workspaceId,
-        ...(source.sessionId === undefined ? {} : { sessionId: source.sessionId }),
-        action,
-        ...(file
-          ? {
-              scope: 'file',
-              paths: [
-                ...new Set([
-                  file.path,
-                  ...(file.status === 'renamed' && file.oldPath ? [file.oldPath] : []),
-                ]),
-              ],
-            }
-          : { scope: 'all' }),
-      });
-      if (!result.ok) throw new Error(result.error);
-      void loadSourceDiff(source, true);
-    } catch (error) {
-      setError(t('orchestration.changesActionFailed', { message: errorMessage(error) }));
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  };
-  const fileActions = canAct
-    ? (file: ChangeFile) => (
-        <div className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover/li:opacity-100">
-          <ChangesActions
-            scope="file"
-            busy={busy}
-            onAction={(action) => void applyAction(action, file)}
-          />
-        </div>
-      )
-    : undefined;
+  const canAct = source.kind === 'session' && section === 'uncommitted' && controls;
+  const fileActions =
+    canAct && names.length > 0
+      ? (file: ChangeFile) => (
+          <div className="shrink-0 opacity-0 transition-opacity focus-within:opacity-100 group-hover/li:opacity-100">
+            <ChangesActions
+              scope="file"
+              busy={canAct.busy}
+              onAction={(action) => canAct.request(action, file)}
+            />
+          </div>
+        )
+      : undefined;
 
   const openFile = ({ path, oldPath, status }: ChangeFile) =>
     diffTabs.getState().open({ source, section, path, oldPath, status });
@@ -391,15 +520,25 @@ function ChangeSet({
       count={files.length + extra.length}
       actions={
         canAct ? (
-          <ChangesActions scope="all" busy={busy} onAction={(action) => void applyAction(action)} />
+          <div className="flex items-center gap-1">
+            <ChangesActions
+              scope="all"
+              busy={canAct.busy || names.length === 0}
+              onAction={(action) => canAct.request(action)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-1.5 text-[11px]"
+              disabled={canAct.busy}
+              onClick={() => canAct.request('commit')}
+            >
+              {t('orchestration.commitAll')}
+            </Button>
+          </div>
         ) : undefined
       }
     >
-      {error && (
-        <p className="text-destructive text-xs" role="alert">
-          {error}
-        </p>
-      )}
       {files.length === 0 && extra.length === 0 ? (
         <SectionNote>{empty}</SectionNote>
       ) : (
