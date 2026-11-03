@@ -21,7 +21,7 @@ import type { OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
 import { bindSessionExtensions, emitSessionShutdown } from '../pi/lifecycle';
 import { createRoleMcpExtensions, type McpServerConfig } from '../pi/mcp';
-import { buildRolePromptAppend } from '../prompts/orchestratorPrompt';
+import { buildRolePromptAppend, PLAN_MODE_PROMPT } from '../prompts/orchestratorPrompt';
 import { createOrchestrationTools, type RoleOption } from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
 import {
@@ -29,6 +29,7 @@ import {
   type WorkerToolset,
   type WorkerToolsOptions,
 } from '../tools/workerTools';
+import { createWritePlanTool } from '../tools/writePlanTool';
 
 /** Main 按 role.model 解析出的模型 */
 export interface ResolvedModel {
@@ -71,6 +72,12 @@ export interface CreateRoleSessionOptions {
    * worker 换成不提交的契约（见 buildRolePromptAppend）
    */
   inPlace?: boolean;
+  /**
+   * 计划模式的实时开关，宿主持有、随时可变；只对 `role.tools === 'orchestrator'` 的会话生效，其他工具策略忽略它。
+   * 每次 run 开始时读取：为 true 就在角色追加段之后追加 `PLAN_MODE_PROMPT`，关闭后从下一次 run 起这段消失；
+   * 每次 dispatch_task 调用时也读取：为 true 时拒绝派发、不调用 host。缺省视为永远关闭。
+   */
+  planMode?: () => boolean;
   /** 默认 `SettingsManager.inMemory`：不读用户的 ~/.pi 与项目 .pi 设置 */
   settingsManager?: SettingsManager;
   /**
@@ -110,10 +117,11 @@ export interface RoleSession {
 
 /**
  * 按角色创建 pi `AgentSession`（ARCHITECTURE §5）：
- * - 工具策略：`orchestrator` → 只读工具 + 编排工具；`readonly` → 只读工具；`all` → pi 默认工具。
+ * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan；`readonly` → 只读工具；`all` → pi 默认工具。
  *   传入 `workerHost` 时再加 worker 工具。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
+ * - `planMode`（只对 orchestrator 策略）：开着时每次 run 再追加 `PLAN_MODE_PROMPT`，dispatch_task 拒绝派发。
  * - role.approvalMode → 审批门（tool_call 拦截），经 `approval` 请求人工审批。
  */
 export async function createRoleSession(options: CreateRoleSessionOptions): Promise<RoleSession> {
@@ -132,6 +140,8 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
       ? { instructionFile: options.resourcePaths.instructionFile }
       : {}),
   });
+  // 计划模式只对 orchestrator 工具策略生效，其他策略忽略
+  const planMode = role.tools === 'orchestrator' ? options.planMode : undefined;
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
@@ -141,6 +151,14 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     gate.extension,
     ...mcp.extensions,
     ...(promptAppend ? [appendSystemPromptExtension('fynvra-role-prompt', promptAppend)] : []),
+    // 每次 run 重新读开关：开着才追加，关掉后从下一次 run 起不再出现（pi 每次 run 都给新的 options 副本）
+    ...(planMode
+      ? [
+          appendSystemPromptExtension('fynvra-plan-mode', () =>
+            planMode() ? PLAN_MODE_PROMPT : undefined
+          ),
+        ]
+      : []),
     ...(workerToolset ? [beforeRunExtension('fynvra-worker-round', workerToolset.startRound)] : []),
     ...(options.extensions ?? []),
   ];
@@ -225,7 +243,11 @@ function selectTools(
         noTools: 'builtin',
         customTools: [
           ...createReadonlyTools(cwd, exec ? { exec } : {}),
-          ...createOrchestrationTools(options.host, options.roles ? { roles: options.roles } : {}),
+          ...createOrchestrationTools(options.host, {
+            ...(options.roles ? { roles: options.roles } : {}),
+            ...(options.planMode ? { planMode: options.planMode } : {}),
+          }),
+          createWritePlanTool(cwd),
           ...workerTools,
         ],
       };

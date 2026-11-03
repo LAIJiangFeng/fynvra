@@ -67,6 +67,7 @@ export type { McpServerConfig } from './pi/mcp';
 export {
   buildRolePromptAppend,
   ORCHESTRATOR_PROMPT,
+  PLAN_MODE_PROMPT,
   WORKER_CONTRACT_PROMPT,
 } from './prompts/orchestratorPrompt';
 export {
@@ -103,3 +104,11 @@ export {
   type WorkerToolset,
   type WorkerToolsOptions,
 } from './tools/workerTools';
+export {
+  createWritePlanTool,
+  PLAN_CONTENT_MAX_BYTES,
+  PLAN_TITLE_MAX_CHARS,
+  PLANS_DIR,
+  WRITE_PLAN_TOOL_NAME,
+  type WritePlanDetails,
+} from './tools/writePlanTool';
