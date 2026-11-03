@@ -252,6 +252,7 @@ export const en: MessagesShape<typeof zhCN> = {
       approvalNotDelivered: 'Approval reply not delivered: {error}',
       setModelFailed: 'Failed to switch model: {error}',
       setApprovalModeFailed: 'Failed to switch approval mode: {error}',
+      setPlanModeFailed: 'Failed to switch plan mode: {error}',
       emptyMessage: 'Message is empty',
       busy: 'Session is running',
       approvalGone: 'Approval request not found or expired',
@@ -411,6 +412,10 @@ export const en: MessagesShape<typeof zhCN> = {
     allowSession: 'Allow for session',
     allow: 'Allow',
   },
+  planMode: {
+    label: 'Plan',
+    hint: 'Plan mode: the main agent writes the plan as a document (.fynvra/plans) and dispatches no tasks; turn it off after review to carry out the plan',
+  },
   tools: {
     labels: {
       read: 'Read',
@@ -422,6 +427,7 @@ export const en: MessagesShape<typeof zhCN> = {
       ls: 'List folder',
       git_readonly: 'Git',
       dispatch_task: 'Dispatch task',
+      write_plan: 'Write plan',
       list_workers: 'List workers',
       wait_for_workers: 'Wait for workers',
       read_worker_output: 'Read worker output',

@@ -60,6 +60,7 @@ import {
   up,
 } from './inputHistory';
 import { ModelPicker } from './ModelPicker';
+import { PlanModeToggle } from './PlanModeToggle';
 import { ReplySuggestionGhost } from './ReplySuggestionGhost';
 
 type Caret = 'start' | 'end';
@@ -604,6 +605,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </Tooltip>
             <ModelPicker sessionId={sessionId} />
             <ApprovalModePicker sessionId={sessionId} />
+            <PlanModeToggle sessionId={sessionId} />
             {busy && (
               <span className="shrink-0 text-muted-foreground text-xs">
                 {t(

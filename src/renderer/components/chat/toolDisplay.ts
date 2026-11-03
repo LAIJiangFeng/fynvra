@@ -29,6 +29,7 @@ const TOOLS = {
   ls: { family: 'builtin', keys: ['path'] },
   git_readonly: { family: 'builtin', keys: ['args'] },
   dispatch_task: { family: 'orchestration', keys: ['title'] },
+  write_plan: { family: 'orchestration', keys: ['title'] },
   list_workers: { family: 'orchestration', keys: [] },
   wait_for_workers: { family: 'orchestration', keys: ['until'] },
   read_worker_output: { family: 'orchestration', keys: ['dispatch_id'] },
