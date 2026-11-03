@@ -10,7 +10,8 @@
 | `src/tools/orchestrationTools.ts` | orchestrator 的 10 个编排工具，背后是 `OrchestrationHost` |
 | `src/tools/workerTools.ts` | `ask_coordinator` / `report_done`，背后是 `WorkerHost` |
 | `src/tools/readonlyTools.ts` | pi 的 read / grep / find / ls + `git_readonly`（白名单） |
-| `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`WORKER_CONTRACT_PROMPT` |
+| `src/tools/writePlanTool.ts` | orchestrator 的 `write_plan`：在 agent 进程里把计划写进 `<cwd>/.fynvra/plans/`，不经 Host |
+| `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`PLAN_MODE_PROMPT`、`WORKER_CONTRACT_PROMPT` |
 | `src/events/normalize.ts` | pi 会话事件 → `FynvraSessionEvent`（带 `seq`） |
 | `src/host.ts` | `OrchestrationHost` / `WorkerHost` 契约 |
 | `src/pi/` | pi 适配层（升级复检点，见文末） |
@@ -21,13 +22,23 @@
 
 | `role.tools` | 会话里的工具 |
 |---|---|
-| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`） |
+| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` |
 | `readonly` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` |
 | `all` | pi 默认工具（read / bash / edit / write） |
 
 传入 `workerHost` 的会话就是 worker：再加 `ask_coordinator` / `report_done`，系统提示词追加
 `WORKER_CONTRACT_PROMPT`。orchestrator 策略追加 `ORCHESTRATOR_PROMPT`。两者都排在 `role.systemPrompt` 之后，
 经 before_agent_start 扩展进入系统提示词的 addendum 段。
+
+计划模式：`planMode?: () => boolean` 是宿主持有、随时可变的开关，只对 orchestrator 策略生效，缺省视为关闭。
+每次 run 开始时为 true，就在上面的追加段之后再追加 `PLAN_MODE_PROMPT`，关闭后从下一次 run 起这段消失；
+dispatch_task 每次调用时也读取它，为 true 时直接返回错误、不调用 Host，其他编排工具照常可用。
+
+`write_plan { title, content, file? }` 与开关无关，orchestrator 策略的会话总有它。它在 agent 进程里用 node fs
+写 `<cwd>/.fynvra/plans/`：不传 `file` 时独占新建 `<YYYYMMDD-HHmm>-<slug>.md`（本地时间，重名加 `-2`、`-3`…），
+传 `file` 时先写临时文件再 rename，原子替换这份已有计划；`.fynvra` 或 `.fynvra/plans` 是符号链接 / junction / 文件，
+或 realpath 出了 cwd 时拒绝。内容以 UTF-8（无 BOM）写入，最多 256 KiB。它不经 OrchestrationHost，不在
+`ORCHESTRATION_TOOL_METHODS` 里，也不属于审批门的任何类别。
 
 所有工具都是「先归一化再校验」：`prepareArguments` 在 pi 的 schema 校验前修正参数（别名、trim、
 `timeout_ms` clamp 到 [1000, 900000]、`until` 默认 `'all'`、`role` 默认 `'worker'`），`execute` 再做语义校验。
@@ -44,7 +55,7 @@ Renderer ⇄ preload ⇄ Main ── OrchestrationService（@fynvra/core：Orche
                        └─ worker 会话 × N：createRoleSession({ workerHost: WorkerHost 代理, cwd: worktree })
 ```
 
-工具只调用注入的接口，不直接操作 git / 进程。真正的实现在 Main，
+工具只调用注入的接口，不直接操作 git / 进程（`write_plan` 例外：它只写计划目录，见上文）。真正的实现在 Main，
 worker 进程里只放一个转发代理。
 
 ### 1. Main：实现编排逻辑
@@ -133,6 +144,7 @@ const { session, warnings, dispose } = await createRoleSession({
     mcpServers: resolvedMcpServers,       // role.mcpServerIds → { name, ...pi McpServerConfig }
   },
   roles,                                  // dispatch_task 的 role 枚举与显示名匹配
+  planMode: () => planModeOn,             // orchestrator 会话：计划模式的实时开关（每次 run / dispatch_task 读取）
 });
 
 const events = subscribeNormalized(session, (event) =>
@@ -168,7 +180,9 @@ await dispose();                          // 先发 session_shutdown（关闭 MC
 
 升级 pi 时逐条复查：
 
-1. `pi/extensions.ts`：before_agent_start 事件上可变的 `systemPromptOptions.appendSystemPrompt`；该事件每个 run 恰好触发一次。
+1. `pi/extensions.ts`：before_agent_start 事件上可变的 `systemPromptOptions.appendSystemPrompt`；该事件每个 run 恰好触发一次，
+   且每个 run 拿到的是从会话 base options 新复制的副本（`normalizeBuildSystemPromptOptions`），计划模式这类按开关追加的段落
+   关闭后才不会残留。
 2. `pi/lifecycle.ts`：`AgentSession.dispose()` 不发 `session_shutdown`，经 `session.extensionRunner` 补发。
 3. `pi/mcp.ts`：`createMcpExtension({ loadConfig, updateConfig })` 与 `LoadedMcpConfig` 结构；MCP 在 session_start 连接、
    session_shutdown 关闭；exposure 语义。
