@@ -56,7 +56,7 @@ async function setup(schedule: (flush: () => void) => void = (flush) => flush())
 }
 async function failed(patch: Partial<CompactionState> = {}) {
   const env = await setup();
-  const { store, id, emit } = env;
+  const { store, emit } = env;
   await store.getState().send('original');
   emit({ type: 'compaction', state: operation() });
   emit({
@@ -76,7 +76,6 @@ async function failed(patch: Partial<CompactionState> = {}) {
     snapshot: snapshot({ compaction: cancelled, pendingPromptCount: 1, recoveryRequired: true }),
   });
   emit({ type: 'agent_settled', aborted: true });
-  expect(store.getState().pausedQueues[id]).toBeUndefined();
   return env;
 }
 
@@ -202,7 +201,6 @@ describe('cold checkpoint recovery hydration', () => {
     expect(store.getState().recoveringCompaction[id]).toBeUndefined();
     expect(store.getState().runtimeBySession[id].status).toBe('running');
     expect(store.getState().runtimeBySession[id].error).toBeUndefined();
-    expect(store.getState().pausedQueues[id]).toBeUndefined();
     expect(prompt).toHaveBeenCalledExactlyOnceWith({ sessionId: id, text: 'new local message' });
   });
 
@@ -246,7 +244,6 @@ describe('cold checkpoint recovery hydration', () => {
       }
       expect(store.getState().recoveringCompaction[id]).toBeUndefined();
       expect(store.getState().runtimeBySession[id].compaction).toBeUndefined();
-      expect(store.getState().pausedQueues[id]).toBeUndefined();
       expect(store.getState().queuedBySession[id]?.map((item) => item.text) ?? []).toEqual(
         result === 'success' ? [] : ['new local message']
       );
@@ -265,7 +262,6 @@ describe('context recovery and renderer queue ownership', () => {
     'preserves pending input and local queue after $phase / $cancelSource',
     async (patch) => {
       const { store, id, prompt, queue } = await failed(patch);
-      store.getState().resumeQueue(id);
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(queue()).toEqual(['queued']);
       expect(store.getState().runtimeBySession[id]).toMatchObject({
@@ -277,7 +273,7 @@ describe('context recovery and renderer queue ownership', () => {
   );
 
   it.each(['error', 'aborted'])(
-    'a final assistant %s pauses the queue even without a separate error event',
+    'a final assistant %s still sends the next queued message without a separate error event',
     async (stopReason) => {
       const { store, id, emit, prompt, queue } = await setup();
       await store.getState().send('original');
@@ -290,15 +286,11 @@ describe('context recovery and renderer queue ownership', () => {
         stopReason,
         errorMessage: 'safe failure',
       });
-      expect(store.getState().pausedQueues[id]).toBeUndefined();
-      emit({ type: 'agent_settled', aborted: false });
       expect(prompt).toHaveBeenCalledTimes(1);
-      expect(queue()).toEqual(['queued']);
-      expect(store.getState().pausedQueues[id]).toBe(true);
-      if (stopReason === 'error')
-        expect(store.getState().runtimeBySession[id].error).toBe('safe failure');
-      store.getState().resumeQueue(id);
+      emit({ type: 'agent_settled', aborted: false });
       expect(prompt).toHaveBeenCalledTimes(2);
+      expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
+      expect(queue()).toEqual([]);
     }
   );
 
@@ -341,7 +333,6 @@ describe('context recovery and renderer queue ownership', () => {
       emit({ type: 'message_end', role: 'assistant', text: 'recovered', stopReason: 'stop' });
       emit({ type: 'agent_settled', aborted: false });
       flush();
-      expect(store.getState().pausedQueues[id]).toBeUndefined();
       expect(store.getState().runtimeBySession[id].error).toBeUndefined();
       expect(prompt).toHaveBeenCalledTimes(2);
       expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
@@ -349,7 +340,7 @@ describe('context recovery and renderer queue ownership', () => {
     }
   );
 
-  it('holds the queue when model retries are exhausted', async () => {
+  it('sends the next queued message when model retries are exhausted', async () => {
     const { store, id, emit, prompt, queue } = await setup();
     await store.getState().send('original');
     emit({ type: 'message_end', role: 'user', text: 'original' });
@@ -378,15 +369,16 @@ describe('context recovery and renderer queue ownership', () => {
       },
     });
     emit({ type: 'error', source: 'model', message: 'final failure' });
-    emit({ type: 'agent_settled', aborted: false });
     expect(store.getState().runtimeBySession[id].error).toBe('final failure');
-    expect(store.getState().pausedQueues[id]).toBe(true);
     expect(prompt).toHaveBeenCalledTimes(1);
-    expect(queue()).toEqual(['queued']);
+    emit({ type: 'agent_settled', aborted: false });
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
+    expect(queue()).toEqual([]);
   });
 
   it.each(['stop', 'compaction'] as const)(
-    'a successful model retry respects Stop but waits only for context readiness after %s',
+    'a successful model retry sends the next queued message after %s once context is ready',
     async (reason) => {
       const { store, id, emit, prompt, queue } = await setup();
       await store.getState().send('original');
@@ -411,9 +403,9 @@ describe('context recovery and renderer queue ownership', () => {
       });
       emit({ type: 'message_end', role: 'assistant', text: 'recovered', stopReason: 'stop' });
       emit({ type: 'agent_settled', aborted: false });
-      expect(store.getState().pausedQueues[id]).toBe(reason === 'stop' ? true : undefined);
-      expect(prompt).toHaveBeenCalledTimes(reason === 'stop' ? 1 : 2);
-      expect(queue()).toEqual(reason === 'stop' ? ['queued'] : []);
+      expect(prompt).toHaveBeenCalledTimes(2);
+      expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
+      expect(queue()).toEqual([]);
     }
   );
 
@@ -443,7 +435,6 @@ describe('context recovery and renderer queue ownership', () => {
             .messagesBySession[id].some((message) => message.text === 'older pending input')
         ).toBe(true);
       expect(store.getState().runtimeBySession[id].pendingPromptCount).toBe(1);
-      expect(store.getState().pausedQueues[id]).toBe(true);
     }
   );
 
@@ -465,7 +456,6 @@ describe('context recovery and renderer queue ownership', () => {
     expect(
       store.getState().messagesBySession[id].some((message) => message.text === 'queued')
     ).toBe(false);
-    expect(store.getState().pausedQueues[id]).toBe(true);
     expect(prompt).toHaveBeenCalledTimes(2);
   });
 
@@ -526,10 +516,9 @@ describe('context recovery and renderer queue ownership', () => {
     ack.resolve({ ok: true });
     await recovering;
     expect(store.getState().recoveringCompaction[id]).toBeUndefined();
-    expect(store.getState().pausedQueues[id]).toBe(true);
   });
 
-  it('does not release a queue while Stop is still in flight', async () => {
+  it('waits for Stop to finish before sending the next queued message', async () => {
     const { store, api, id, emit, prompt, queue } = await setup();
     await store.getState().send('original');
     await store.getState().send('queued');
@@ -537,14 +526,12 @@ describe('context recovery and renderer queue ownership', () => {
     vi.mocked(api.abort).mockReturnValueOnce(ack.promise);
     const stopping = store.getState().abort();
     emit({ type: 'agent_settled', aborted: true });
-    store.getState().resumeQueue(id);
-    expect(store.getState().pausedQueues[id]).toBe(true);
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(queue()).toEqual(['queued']);
     ack.resolve({ ok: true });
     await stopping;
-    store.getState().resumeQueue(id);
     expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
   });
 
   it('a failed recovery ACK after navigation does not show an error in the other session', async () => {
@@ -610,7 +597,6 @@ describe('context recovery and renderer queue ownership', () => {
     const cancelled = operation({ phase: 'cancelled', cancelSource: 'sdk' });
     emit({ type: 'compaction', state: cancelled });
     expect(store.getState().runtimeBySession[id].recoveryRequired).toBe(false);
-    expect(store.getState().pausedQueues[id]).toBeUndefined();
     emit({
       type: 'context_runtime',
       snapshot: snapshot({
@@ -663,7 +649,6 @@ describe('context recovery and renderer queue ownership', () => {
         pendingPromptCount: 1,
       }),
     });
-    store.getState().resumeQueue(id);
     expect(prompt).toHaveBeenCalledTimes(1);
     // The backend, not Renderer, resubmits its pending original input.
     emit({ type: 'message_end', role: 'user', text: 'original' });
@@ -673,9 +658,6 @@ describe('context recovery and renderer queue ownership', () => {
     expect(prompt).toHaveBeenCalledTimes(2);
     expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
     expect(queue()).toEqual([]);
-    store.getState().resumeQueue(id);
-    store.getState().resumeQueue(id);
-    expect(prompt).toHaveBeenCalledTimes(2);
   });
 
   it('failed recovery ACK and a second Stop retain failure information and the local queue', async () => {
@@ -697,7 +679,7 @@ describe('context recovery and renderer queue ownership', () => {
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 
-  it('retains a failed queued delivery on partial recovery without retry loops', async () => {
+  it('retains a failed queued delivery on partial recovery without an immediate retry', async () => {
     const { store, id, prompt, emit, queue } = await failed();
     await store.getState().retryCompaction(id);
     prompt.mockResolvedValueOnce({ ok: false, error: 'not accepted' });
@@ -705,10 +687,12 @@ describe('context recovery and renderer queue ownership', () => {
     emit({ type: 'context_runtime', snapshot: snapshot() });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(queue()).toEqual(['queued']);
-    expect(store.getState().pausedQueues[id]).toBe(true);
     expect(prompt).toHaveBeenCalledTimes(2);
+    // The next settlement is a natural trigger: the queue continues from its head
     emit({ type: 'agent_settled', aborted: false });
-    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt).toHaveBeenCalledTimes(3);
+    expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
+    expect(queue()).toEqual([]);
   });
 
   it('worker unload forgets actual engine/context, not the recovery action or pending echo', async () => {
