@@ -257,8 +257,6 @@ export const zhCN = {
     send: '发送',
     working: '正在生成回复…',
     elapsed: '已等待 {seconds} 秒',
-    queuePaused: '队列已暂停，消息已保留',
-    resumeQueue: '恢复队列',
     stopping: '正在取消…',
     compacting: '正在压缩历史记录',
     compactionRecovering: '正在恢复上下文…',
