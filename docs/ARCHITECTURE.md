@@ -368,6 +368,23 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - Renderer `lib/api/sessions.ts`（含 mock）、`stores/sessions/createSessionsStore.ts`、`components/chat/PlanModeToggle.tsx`（挂在 `Composer.tsx` 的审批档位选择器之后）、`components/chat/toolDisplay.ts` / `ToolCallCard.tsx`、`i18n/{zh-CN,en}.ts`：输入框工具栏的开关只在主 agent 会话显示，文案中英双语；store 先乐观切换，失败时换回原状态并提示，再重拉列表；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
 - 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；worker 会话的计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）。
 
+### 7.11 外观设置
+
+- 行为差异：
+  - 设置页「外观」在「主题」之下新增「界面」「终端」两节，各有「恢复默认」；全部即时生效，不用重启。
+  - 界面：字体（CSS font-family 列表，留空用内置字体栈，占位符显示该字体栈）、字号（正文字号，整数 12–24 px，默认 14）、字重。根字号 = 16 × 字号 / 14，写在 `<html>` 上，Tailwind 的 rem 尺寸随之缩放，相当于整体缩放界面；文件编辑器字号由 `13px` 改为 `0.8125rem`，一起缩放。字体同时覆盖 `--font-sans`，`font-mono` 的代码块、diff 不受影响。字重是 `<html>` 上的默认字重，组件里显式设了字重的文字不受影响。是默认值的项不写行内样式。
+  - 终端：配色方案（默认 `fynvra`，即此前写死的颜色）、字体（留空用 `Consolas, "Cascadia Mono", Menlo, monospace`）、字号（整数 8–32 px，默认 14）、字重（默认 normal）、粗体字重（默认 bold）。新终端按当前设置创建；已打开的终端更新 xterm 的 `options`（fontFamily / fontSize / fontWeight / fontWeightBold / theme），显示中的重新 fit，新行列数沿用 `onResize → terminals:resize` 同步给 PTY；隐藏或卸下的终端量不出尺寸，切回时由 TerminalPane 再 fit。终端四周的留白也用方案的背景色。
+  - 文本框与数字框在失焦或回车（输入法选词的回车除外）时提交；不合法的值不提交并恢复原值，不会每按一次键就写一次 settings.json。
+- 持久化与校验：
+  - `Preferences` 新增可选字段 `uiFontFamily` / `uiFontSize` / `uiFontWeight` / `terminalColorScheme` / `terminalFontFamily` / `terminalFontSize` / `terminalFontWeight` / `terminalFontWeightBold`：缺省即默认值，不写进 `DEFAULT_PREFERENCES`，读取用 `appearancePreferencesOf`。
+  - 字体 trim 后不超过 200 个字符，不含控制字符与 `;{}`；字号为整数且在各自范围内；字重限 `100 / 200 / 300 / normal / 500 / 600 / bold / 800 / 900`（xterm.js 的 FontWeight 取值）；配色方案须是方案列表里的 id。`parsePreferences` 读盘遇到非法值只丢掉该字段；`settings:update` 的补丁有任一非法值就整个作废，字段给 `undefined`（字体也可给空串）表示恢复默认，即删除该字段。Renderer 另用 `CSS.supports` 拦下浏览器不认的字体写法。
+  - 沿用 `settings:update` / `settings:changed`，不新增 IPC。Renderer 只写改动的字段，不经 `useSettingsStore` 的整块落盘。
+- 必改层与文件：
+  - shared：新增纯数据模块 `terminalColorSchemes.ts`，导出方案列表（id、显示名、xterm `ITheme` 形状的颜色），Main 的校验与 Renderer 共用 id 列表；除 `fynvra` 外，颜色取自 iTerm2-Color-Schemes（MIT）的 ghostty 导出，文件里逐个注明来源。`types/settings.ts`：字段、默认值、校验，以及 `parsePreferences` 与 `parsePreferencesPatch` 的接线。
+  - Main：不用改。补丁解析与读盘、落盘时的 `parseSettings` 都在 shared，Main 没有另外的字段白名单。
+  - Renderer：`stores/settings.ts` 的 `useAppearanceStore`（仿通用偏好：只写改动的字段，先乐观更新，保存失败按 Main 重读并提示）；`lib/appearance.ts` 的 `bindDocumentAppearance`；`stores/terminals.ts` 的创建选项与 `bindTerminalAppearance`；`main.tsx` 启动时挂上这两个绑定，首帧等外观设置读回（与偏好共用 1 秒上限）；`components/terminal/TerminalPane.tsx` 的留白底色；`components/files/FileEditor.tsx` 的字号；`components/settings/AppearanceSettings.tsx`；`i18n/{zh-CN,en}.ts`。
+- 明确不做：界面配色方案（即现有的主题）、界面粗体字重、自定义配色导入、按工作区区分的设置、代码块与 diff 的独立字体设置、快捷键缩放。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
