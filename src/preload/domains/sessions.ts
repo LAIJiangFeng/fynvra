@@ -65,6 +65,14 @@ export interface SessionsApi {
     mode: ApprovalMode;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
+   * 开关主 agent 会话的计划模式：运行中也可以，即时生效；派发出的 worker 会话返回错误。
+   * 会话还没在 worker 里时下次启动用新值
+   */
+  setPlanMode(input: {
+    sessionId: string;
+    enabled: boolean;
+  }): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
    * 为刚结束的一轮（`roundId` = settled 事件的会话级 seq）生成一条输入框灰字建议。
    * Renderer 只传会话 id 与轮次 id；Main / worker 再核对空闲状态与轮次，空建议表示没有可展示的建议。
    * 不写入对话历史，不自动发送，失败静默
@@ -113,6 +121,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     setModel: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_MODEL, input),
     modelOptions: (input = {}) => ipc.invoke(IPC_CHANNELS.SESSIONS_MODEL_OPTIONS, input),
     setApprovalMode: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_APPROVAL_MODE, input),
+    setPlanMode: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SET_PLAN_MODE, input),
     suggestReply: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SUGGEST_REPLY, input),
     archive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ARCHIVE, sessionId),
     unarchive: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_UNARCHIVE, sessionId),

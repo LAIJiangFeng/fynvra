@@ -555,6 +555,16 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true, session: session.summary };
     },
 
+    async setPlanMode({ sessionId, enabled }) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      // 与 Main 相同：运行中也可以切；只在开启时带 planMode，关闭就去掉字段
+      const { planMode: _planMode, ...summary } = session.summary;
+      session.summary = enabled ? { ...summary, planMode: true } : summary;
+      changed(session);
+      return { ok: true, session: session.summary };
+    },
+
     // mock 没有真实模型，不编造建议；返回空建议保持与 Main 相同的接口与静默失败行为
     async suggestReply() {
       return { ok: true, suggestion: null };

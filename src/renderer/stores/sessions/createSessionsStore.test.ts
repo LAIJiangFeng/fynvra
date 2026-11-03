@@ -151,6 +151,19 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         return { ok: true, session };
       }
     ),
+    setPlanMode: vi.fn(
+      async (input: {
+        sessionId: string;
+        enabled: boolean;
+      }): Promise<IpcResult<{ session: SessionSummary }>> => {
+        const current = sessions.find((session) => session.id === input.sessionId);
+        if (!current) return { ok: false, error: '会话不存在' };
+        const { planMode: _planMode, ...rest } = current;
+        const session = { ...rest, ...(input.enabled ? { planMode: true } : {}), updatedAt: 20 };
+        sessions = sessions.map((item) => (item.id === session.id ? session : item));
+        return { ok: true, session };
+      }
+    ),
     archive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
       const current = sessions.find((session) => session.id === sessionId);
       if (!current) return { ok: false, error: '会话不存在' };
