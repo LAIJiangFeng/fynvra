@@ -7,6 +7,11 @@ import {
   parseKeybindingPatch,
 } from '../keybindings';
 import { type NetworkProxy, parseNetworkProxy } from '../networkProxy';
+import {
+  DEFAULT_TERMINAL_COLOR_SCHEME,
+  isTerminalColorSchemeId,
+  type TerminalColorSchemeId,
+} from '../terminalColorSchemes';
 import type { SessionModelRef } from './chat';
 import type { IpcResult } from './ipc';
 import { parseWorkspace, parseWorkspaceId, type Workspace } from './workspace';
@@ -177,6 +182,22 @@ export interface Preferences {
   compactionStrategy?: CompactionStrategy;
   /** Native compaction total deadline, including retries and backoff; snapshotted at spawn. */
   compactionTimeoutMs?: number;
+  // --- appearance ---（没写过时取 DEFAULT_APPEARANCE_PREFERENCES；读取用 appearancePreferencesOf）
+  /** 界面字体：CSS font-family 列表；没写过时用内置字体栈 */
+  uiFontFamily?: string;
+  /** 界面正文字号（px）；根字号按它与 14 的比例缩放 */
+  uiFontSize?: number;
+  /** 界面正文的默认字重；组件里显式设了字重的文字不受影响 */
+  uiFontWeight?: FontWeight;
+  /** 内嵌终端的配色方案 */
+  terminalColorScheme?: TerminalColorSchemeId;
+  /** 终端字体；没写过时用 {@link DEFAULT_TERMINAL_FONT_FAMILY} */
+  terminalFontFamily?: string;
+  /** 终端字号（px） */
+  terminalFontSize?: number;
+  terminalFontWeight?: FontWeight;
+  /** 终端粗体字重 */
+  terminalFontWeightBold?: FontWeight;
 }
 
 /**
@@ -368,6 +389,118 @@ function parseTimelinePreferences(
   return parsed;
 }
 
+// --- appearance ---
+/** 字重的可选值，与 xterm.js 的 FontWeight 一致（400 / 700 即 normal / bold） */
+export const FONT_WEIGHTS = [
+  '100',
+  '200',
+  '300',
+  'normal',
+  '500',
+  '600',
+  'bold',
+  '800',
+  '900',
+] as const;
+export type FontWeight = (typeof FONT_WEIGHTS)[number];
+
+/** 字体（CSS font-family 列表）trim 后的最大长度 */
+export const MAX_FONT_FAMILY_LENGTH = 200;
+/** 字号范围（px，整数）。界面字号指正文字号 */
+export const UI_FONT_SIZE_RANGE = Object.freeze({ min: 12, max: 24 });
+export const TERMINAL_FONT_SIZE_RANGE = Object.freeze({ min: 8, max: 32 });
+/** 终端字体留空时用的字体栈 */
+export const DEFAULT_TERMINAL_FONT_FAMILY = 'Consolas, "Cascadia Mono", Menlo, monospace';
+
+export type AppearancePreferences = Required<
+  Pick<
+    Preferences,
+    | 'uiFontFamily'
+    | 'uiFontSize'
+    | 'uiFontWeight'
+    | 'terminalColorScheme'
+    | 'terminalFontFamily'
+    | 'terminalFontSize'
+    | 'terminalFontWeight'
+    | 'terminalFontWeightBold'
+  >
+>;
+
+/** 字体为空串表示用内置字体栈（界面）或 {@link DEFAULT_TERMINAL_FONT_FAMILY}（终端） */
+export const DEFAULT_APPEARANCE_PREFERENCES: Readonly<AppearancePreferences> = Object.freeze({
+  uiFontFamily: '',
+  uiFontSize: 14,
+  uiFontWeight: 'normal',
+  terminalColorScheme: DEFAULT_TERMINAL_COLOR_SCHEME,
+  terminalFontFamily: '',
+  terminalFontSize: 14,
+  terminalFontWeight: 'normal',
+  terminalFontWeightBold: 'bold',
+});
+
+export function isFontWeight(value: unknown): value is FontWeight {
+  return typeof value === 'string' && (FONT_WEIGHTS as readonly string[]).includes(value);
+}
+
+function isFontSizeIn(value: unknown, range: { min: number; max: number }): value is number {
+  return (
+    typeof value === 'number' && Number.isInteger(value) && value >= range.min && value <= range.max
+  );
+}
+
+export function isUiFontSize(value: unknown): value is number {
+  return isFontSizeIn(value, UI_FONT_SIZE_RANGE);
+}
+
+export function isTerminalFontSize(value: unknown): value is number {
+  return isFontSizeIn(value, TERMINAL_FONT_SIZE_RANGE);
+}
+
+/**
+ * 字体（CSS font-family 列表）：trim 后不超过 {@link MAX_FONT_FAMILY_LENGTH} 个字符，
+ * 不含控制字符与 `;{}`（不能借字体带进别的 CSS 声明）。返回 trim 后的值，空串表示默认；不合法时为 null。
+ */
+export function parseFontFamily(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const family = value.trim();
+  return family.length <= MAX_FONT_FAMILY_LENGTH && !/[\p{Cc};{}]/u.test(family) ? family : null;
+}
+
+/** 生效的外观设置：没写过的（或不合法的）取默认值 */
+export function appearancePreferencesOf(
+  preferences: Partial<AppearancePreferences>
+): AppearancePreferences {
+  return { ...DEFAULT_APPEARANCE_PREFERENCES, ...parseAppearancePreferences(preferences) };
+}
+
+/** 宽松收窄：逐项取合法值，非法的丢弃；字体为空串时不写（即默认） */
+function parseAppearancePreferences(
+  record: Record<string, unknown> | null
+): Partial<AppearancePreferences> {
+  const {
+    uiFontFamily,
+    uiFontSize,
+    uiFontWeight,
+    terminalColorScheme,
+    terminalFontFamily,
+    terminalFontSize,
+    terminalFontWeight,
+    terminalFontWeightBold,
+  } = record ?? {};
+  const uiFont = parseFontFamily(uiFontFamily);
+  const terminalFont = parseFontFamily(terminalFontFamily);
+  return {
+    ...(uiFont ? { uiFontFamily: uiFont } : {}),
+    ...(isUiFontSize(uiFontSize) ? { uiFontSize } : {}),
+    ...(isFontWeight(uiFontWeight) ? { uiFontWeight } : {}),
+    ...(isTerminalColorSchemeId(terminalColorScheme) ? { terminalColorScheme } : {}),
+    ...(terminalFont ? { terminalFontFamily: terminalFont } : {}),
+    ...(isTerminalFontSize(terminalFontSize) ? { terminalFontSize } : {}),
+    ...(isFontWeight(terminalFontWeight) ? { terminalFontWeight } : {}),
+    ...(isFontWeight(terminalFontWeightBold) ? { terminalFontWeightBold } : {}),
+  };
+}
+
 /** 形如绝对路径：`/…`、`\\server\share…`、`C:\…` / `C:/…`。src/shared 不能用 node:path，只看形状。 */
 function looksAbsolute(path: string): boolean {
   return /^(?:[\\/]|[A-Za-z]:[\\/])/.test(path);
@@ -432,6 +565,7 @@ export function parsePreferences(raw: unknown): Preferences {
       : {}),
     ...parseSessionPreferences(record),
     ...parseTimelinePreferences(record),
+    ...parseAppearancePreferences(record),
     ...(shellPath ? { shellPath } : {}),
     ...(agentShell ? { agentShell } : {}),
     ...(terminalShell ? { terminalShell } : {}),
@@ -558,6 +692,32 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
       case 'compactionStrategy':
         if (!isCompactionStrategy(value)) return null;
         patch.compactionStrategy = value;
+        break;
+      // --- appearance ---：undefined 与字体的空串都是恢复默认（删掉该字段）
+      case 'uiFontFamily':
+      case 'terminalFontFamily': {
+        const family = value === undefined ? '' : parseFontFamily(value);
+        if (family === null) return null;
+        patch[key] = family || undefined;
+        break;
+      }
+      case 'uiFontSize':
+        if (value !== undefined && !isUiFontSize(value)) return null;
+        patch.uiFontSize = value;
+        break;
+      case 'terminalFontSize':
+        if (value !== undefined && !isTerminalFontSize(value)) return null;
+        patch.terminalFontSize = value;
+        break;
+      case 'uiFontWeight':
+      case 'terminalFontWeight':
+      case 'terminalFontWeightBold':
+        if (value !== undefined && !isFontWeight(value)) return null;
+        patch[key] = value;
+        break;
+      case 'terminalColorScheme':
+        if (value !== undefined && !isTerminalColorSchemeId(value)) return null;
+        patch.terminalColorScheme = value;
         break;
       default:
         return null;
