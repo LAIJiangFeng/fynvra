@@ -125,6 +125,11 @@ export interface SpawnSessionSpec {
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
    */
   inPlace?: boolean;
+  /**
+   * 计划模式：只有主 agent 会话、且会话记录里开着时才带（true），worker 会话永远不带。
+   * 开启时主 agent 只写计划文档（write_plan），dispatch_task 被拒绝；运行中由 set-plan-mode 切换
+   */
+  planMode?: boolean;
 }
 
 /** host-invoke 的目标：编排工具背后的 OrchestrationHost，或 worker 工具背后的 WorkerHost。 */
@@ -189,6 +194,10 @@ export type AgentCommand =
    * allowSession 记忆保留；从 full 切回更严档位清空，不自动答复已有请求。
    */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
+  /**
+   * 切换计划模式（只发给主 agent 会话）：worker 更新会话的开关，下一次工具调用起按新状态，运行中也可切换
+   */
+  | { type: 'set-plan-mode'; identity: SessionIdentity; enabled: boolean }
   /**
    * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
    * worker 只在会话当前空闲且 generation 未变时生成；结果必须回同一 requestId 与 roundId
@@ -310,6 +319,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
     case 'set-approval-mode':
       return isApprovalMode(record.mode)
         ? { type: 'set-approval-mode', identity, mode: record.mode }
+        : null;
+    case 'set-plan-mode':
+      return isBoolean(record.enabled)
+        ? { type: 'set-plan-mode', identity, enabled: record.enabled }
         : null;
     case 'suggest-reply': {
       const { requestId, roundId, round } = record;
@@ -635,7 +648,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const skills = parseStringList(record.skills);
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
-  const { cwd, sessionFile, worker, shellPath, inPlace } = record;
+  const { cwd, sessionFile, worker, shellPath, inPlace, planMode } = record;
   const compactionStrategy =
     record.compactionStrategy === undefined
       ? undefined
@@ -658,6 +671,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     return null;
   }
   if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
+  if (!isOptional(planMode, isBoolean)) return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     role: role.role,
@@ -682,6 +696,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       ? { compactionTimeoutMs: record.compactionTimeoutMs as number }
       : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
+    ...(planMode === true ? { planMode: true } : {}),
   };
 }
 

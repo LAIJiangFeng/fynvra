@@ -82,6 +82,7 @@ export const mainZhCN = {
     invalidApproval: '无效的审批结果',
     invalidModel: '无效的模型参数',
     invalidApprovalMode: '无效的审批档位',
+    invalidPlanMode: '无效的计划模式参数',
     archiveBusy: '会话正在运行，结束后再归档',
   },
   agent: {
@@ -89,6 +90,7 @@ export const mainZhCN = {
     compactionRecoveryRequired: '需要先恢复上下文：请重试压缩，尚未消费的输入已保留。',
     noCompactionRecovery: '此会话没有待恢复的压缩。',
     switchWhileRunning: '会话正在运行，等本轮结束再切换模型',
+    planModeWorkerSession: '计划模式只用于主 agent 会话，派发出的 worker 会话不能切换',
     roleNotFound: '角色不存在：{id}',
     startFailed: '无法启动会话：{error}',
     describeMismatch: 'agent worker 回答的模型数与查询不一致',

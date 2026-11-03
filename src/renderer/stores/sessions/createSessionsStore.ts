@@ -161,6 +161,11 @@ export interface SessionsState extends ChatProjection {
     mode: ApprovalMode
   ): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
+   * 开关主 agent 会话的计划模式：同换审批档位，先乐观更新，Main 回包后以它的记录为准；
+   * 失败时换回原来的状态、提示原因并重拉列表。运行中、等审批时也可以切。
+   */
+  setPlanMode(sessionId: string, enabled: boolean): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
    * 归档会话：先在列表里标上（乐观更新），Main 回包后以它的归档时间为准；失败时换回、提示原因并重拉列表。
    * 运行中、等审批或消息在途时直接拒绝。
    */
@@ -272,6 +277,12 @@ function withModel(session: SessionSummary, model: SessionModelRef | undefined):
   return model ? { ...rest, model } : rest;
 }
 
+/** planMode 只在开启时带（与 Main 的记录同形） */
+function withPlanMode(session: SessionSummary, enabled: boolean): SessionSummary {
+  const { planMode: _previous, ...rest } = session;
+  return enabled ? { ...rest, planMode: true } : rest;
+}
+
 function withArchivedAt(session: SessionSummary, archivedAt: number | undefined): SessionSummary {
   const { archivedAt: _previous, ...rest } = session;
   return archivedAt === undefined ? rest : { ...rest, archivedAt };
@@ -309,6 +320,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
   /** 在途的换审批档位：同上 */
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
+  /** 在途的开关计划模式：同上 */
+  const planSwitches = new Map<string, { request: number; enabled: boolean }>();
   /** 每个会话最近一次已发起建议的轮次（含空结果 / 失败）：同一轮不重复请求 */
   const suggestionTried = new Map<string, number>();
   /** 每个会话被 Esc 忽略的轮次；迟到的回包不再展示 */
@@ -707,10 +720,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           .map((session) => {
             const pending = modelSwitches.get(session.id);
             const switching = approvalSwitches.get(session.id);
+            const planning = planSwitches.get(session.id);
             const withPendingModel = pending ? withModel(session, pending.model) : session;
-            return switching
-              ? { ...withPendingModel, approvalMode: switching.mode }
+            const withPendingPlan = planning
+              ? withPlanMode(withPendingModel, planning.enabled)
               : withPendingModel;
+            return switching
+              ? { ...withPendingPlan, approvalMode: switching.mode }
+              : withPendingPlan;
           });
         const before = get();
         const active = before.activeSessionId;
@@ -1294,6 +1311,42 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return result;
       },
 
+      async setPlanMode(sessionId, enabled) {
+        const session = findSession(get(), sessionId);
+        if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
+        const request = ++requestSeq;
+        const previous = session.planMode === true;
+        planSwitches.set(sessionId, { request, enabled });
+        const switchTo = (on: boolean) =>
+          set((state) =>
+            mapLists(state, sessionId, (item) =>
+              (item.planMode === true) === on ? item : withPlanMode(item, on)
+            )
+          );
+        switchTo(enabled);
+        const result = await safely(() => api.setPlanMode({ sessionId, enabled }));
+        // 连着点了几下：只认最近一次的回包，前面的结果由它覆盖
+        if (planSwitches.get(sessionId)?.request !== request) return result;
+        planSwitches.delete(sessionId);
+        if (result.ok) {
+          const { planMode, updatedAt } = result.session;
+          set((state) =>
+            mapLists(state, sessionId, (item) => ({
+              ...withPlanMode(item, planMode === true),
+              updatedAt,
+            }))
+          );
+          return result;
+        }
+        switchTo(previous);
+        set({
+          notice: translate('sessions.errors.setPlanModeFailed', { error: result.error }),
+        });
+        // 换回的是发起前看到的状态；以 Main 的记录为准再拉一次
+        void get().loadSessions(session.workspaceId);
+        return result;
+      },
+
       archiveSession: (sessionId) => setArchived(sessionId, true),
 
       unarchiveSession: (sessionId) => setArchived(sessionId, false),
@@ -1340,6 +1393,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (result.ok) {
           modelSwitches.delete(sessionId);
           approvalSwitches.delete(sessionId);
+          planSwitches.delete(sessionId);
           suggestionTried.delete(sessionId);
           suggestionIgnored.delete(sessionId);
           return result;

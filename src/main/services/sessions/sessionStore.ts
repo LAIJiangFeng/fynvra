@@ -115,7 +115,9 @@ export function createSessionStore({
     update(id, patch) {
       const current = sessions.get(id);
       if (!current) return undefined;
-      const { archivedAt, ...rest } = { ...current, ...patch, id };
+      const { archivedAt, planMode, ...others } = { ...current, ...patch, id };
+      // 计划模式只在开启时留在记录里（落盘也只在开启时带），关掉就去掉字段
+      const rest: StoredSession = planMode === true ? { ...others, planMode: true } : others;
       const next: StoredSession =
         archivedAt === undefined || patch.status === 'running' ? rest : { ...rest, archivedAt };
       sessions.set(id, next);
@@ -182,6 +184,8 @@ function parseStoredSession(raw: unknown): StoredSession | null {
     createdAt: createdAt as number,
     updatedAt: updatedAt as number,
     approvalMode: storedApprovalMode(record.approvalMode, roleId),
+    // 计划模式只认字面量 true，其余（含读不懂的值）都按关闭
+    ...(record.planMode === true ? { planMode: true } : {}),
   };
   for (const key of ['worktreeId', 'parentSessionId', 'dispatchId'] as const) {
     const value = record[key];

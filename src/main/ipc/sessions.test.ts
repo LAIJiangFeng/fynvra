@@ -180,6 +180,7 @@ describe('sessions IPC', () => {
         'sessions:respond-approval',
         'sessions:set-model',
         'sessions:set-approval-mode',
+        'sessions:set-plan-mode',
         'sessions:steer',
         'sessions:suggest-reply',
         'sessions:sweep',

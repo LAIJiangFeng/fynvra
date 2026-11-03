@@ -241,6 +241,7 @@ export const zhCN = {
       approvalNotDelivered: '审批答复没有送达：{error}',
       setModelFailed: '切换模型失败：{error}',
       setApprovalModeFailed: '切换审批档位失败：{error}',
+      setPlanModeFailed: '切换计划模式失败：{error}',
       emptyMessage: '消息不能为空',
       busy: '会话正在运行',
       approvalGone: '审批请求不存在或已过期',
@@ -388,6 +389,10 @@ export const zhCN = {
     allowSession: '本会话都允许',
     allow: '允许',
   },
+  planMode: {
+    label: '计划',
+    hint: '计划模式：主 agent 先把计划写成文档（.fynvra/plans），不派发任务；审阅后关闭开关即可按计划执行',
+  },
   tools: {
     labels: {
       read: '读取',
@@ -399,6 +404,7 @@ export const zhCN = {
       ls: '列目录',
       git_readonly: 'Git',
       dispatch_task: '派发任务',
+      write_plan: '写计划',
       list_workers: '查看 worker',
       wait_for_workers: '等待 worker',
       read_worker_output: '读取 worker 输出',
