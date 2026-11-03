@@ -97,6 +97,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         : undefined;
     magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
+    // 计划模式的实时开关：spawn 时按 spec 初始化，运行中由 set-plan-mode 改写；createRoleSession 每次 run / dispatch_task 读取
+    let planMode = spec.planMode === true;
     let created: Awaited<ReturnType<typeof createRoleSession>>;
     try {
       created = await createRoleSession({
@@ -126,6 +128,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         agentDir: options.agentDir,
         roles: spec.roles,
         ...(spec.inPlace ? { inPlace: true } : {}),
+        planMode: () => planMode,
         ...(magic ? { extensions: [magic.extension] } : {}),
         settingsManager: createSessionSettings(spec.shellPath, strategy),
         ...(spec.networkProxy
@@ -233,6 +236,9 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       setApprovalMode: (mode) => {
         if (!gate) throw new Error('this session has no approval gate to switch');
         gate.setMode(mode);
+      },
+      setPlanMode: (enabled) => {
+        planMode = enabled;
       },
       abort: () => {
         magic?.interrupt();
