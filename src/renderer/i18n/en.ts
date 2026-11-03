@@ -268,8 +268,6 @@ export const en: MessagesShape<typeof zhCN> = {
     send: 'Send',
     working: 'Generating a reply…',
     elapsed: 'Waiting {seconds}s',
-    queuePaused: 'Queue paused; messages preserved',
-    resumeQueue: 'Resume queue',
     stopping: 'Cancelling…',
     compacting: 'Compacting conversation history',
     compactionRecovering: 'Recovering context…',
