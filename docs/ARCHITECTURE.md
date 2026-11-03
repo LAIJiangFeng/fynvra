@@ -140,6 +140,7 @@ export interface Message {
     workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
     roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
     inPlace?: boolean;                  // 工作区没有 git（§6）：orchestrator 追加非 git 模式说明，worker 换用不提交的契约
+    planMode?: () => boolean;           // 计划模式（§7.10）：每次读取实时值，缺省视为关闭；只对 orchestrator 策略生效
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
@@ -158,7 +159,7 @@ export interface Message {
   type McpServerConfig = PiMcpServerConfig & { name: string };
   ```
 
-  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具；
+  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具 + `write_plan`；
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
@@ -168,6 +169,7 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
+  `write_plan { title, content, file? }`（§7.10）同样只注册给 orchestrator 策略的会话，但不属于这组映射：它在 agent 进程内直接写 `<cwd>/.fynvra/plans/`，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。计划模式开启时（`createOrchestrationTools` 的 `planMode`）`dispatch_task` 返回错误、不调用 host，其他编排工具不变。
   `model` / `thinking` / `fast` 仅按用户明确要求设置，可同时指定；公开 Fast 参数为可选 boolean `fast`，归一化兼容 `fast_mode` / `fastMode`，拒绝字符串 / 数字 / null 强转。
   内部 `DispatchTaskInput` → `Task.fastMode?: boolean`（快照可选字段，旧记录兼容）→ Main launcher 保留 true / false / 缺省：true 请求开启，false 关闭继承，缺省保持角色 / 主会话 / 默认模型的原行为。排队与恢复启动沿用 Task，打回重试沿用保存的会话模型。
   agentHost 在显式 / 角色 / 主会话 / 默认模型落定后复用 `supportsFastMode` 过滤覆盖值，会话记录及 spawn spec 只带协议允许的 Fast；不支持时同模型正常启动，不改 provider、thinking 或审批。工具结果只展示 `fast requested`（true 为 `auto-if-supported`），不把 Task 请求冒充生效状态。
@@ -342,6 +344,28 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - Renderer 的灰字建议与 draft 分离：不进入草稿、不使发送按钮可用、不被 Enter 发送；只有建议可见、无修饰键、未组字（`isComposing` / composition / keyCode 229）、无选区且光标在末尾时，右箭头才把建议写入本会话 draft 并把光标放到末尾，不自动发送。Esc 忽略本轮且不重新出现；草稿是建议前缀时只显示剩余灰字，不匹配的普通输入立即隐藏；运行中、错误、队列、审批、图片、历史浏览时不显示。
 - 灰字层复用输入框排版与明暗主题，`pointer-events-none`、`aria-hidden`，另用简短 live region 提示右箭头采纳；长建议截断并随输入框滚动。不改正常对话 prompt / 工具 / thinking / Fast，不新增通用设置开关。
 
+### 7.10 计划模式
+
+- 行为差异：
+  - 开关：按会话的「计划模式」开关，只对主 agent 会话可用，即内置 orchestrator 或工具策略为 orchestrator 的自定义角色；派发出的 worker 会话不可用。入口在输入框工具栏、审批档位选择器旁。新会话默认关闭，状态随会话记录保存在 sessions.json，重启、归档后恢复都保持。运行中也能切换：派发拦截立即生效，提示词从下一次 run 起变化。
+  - 开启时：主 agent 专门写计划文档。先读代码，再用 `write_plan` 把一份 Markdown 计划写到工作区的 `.fynvra/plans/`，包含目标、方案、任务拆分（每个任务的角色、文件归属、验收）、顺序与依赖、风险、不做的事；在回复里给出计划文件的链接请用户审阅，按反馈更新同一份文件。`dispatch_task` 被拒绝；已在跑的 worker 照常处理：回答、审查、合并、打回、清理。
+  - 审阅与执行：用户在应用内打开计划文件，预览或直接编辑。审阅通过后关闭计划模式，主 agent 先重读计划文件（用户可能改过），再按计划派发。
+  - 计划文件与 git：计划文件不自动提交；未提交时 worker 的 worktree 里看不到它，所以任务书仍须完整自足。要不要提交，或在 `.gitignore` 里忽略 `.fynvra/`，由用户决定；没忽略时计划文件会出现在「改动」里，「全部丢弃」会删除这些未跟踪的计划文件。
+  - `write_plan` 的使用范围：只能写计划目录，所以不走文件写入审批；计划模式关闭时也能用，供用户要求书面计划时使用。
+- 必改层与文件：
+  - shared `types/{chat,agent,ipc}.ts` 与 Main 字典：`SessionSummary.planMode?: boolean`，仅开启时为 true；`SpawnSessionSpec.planMode?: boolean`；AgentCommand `{ type: 'set-plan-mode'; identity; enabled: boolean }`，unknown parser 只认布尔；IPC 通道 `sessions:set-plan-mode`，入参只有 `{ sessionId, enabled }`。
+  - preload `domains/sessions.ts`：`sessions.setPlanMode({ sessionId, enabled })`，返回 `IpcResult<{ session }>`。
+  - Main `services/sessions/sessionStore.ts`、`services/agentHost/agentHost.ts`、`ipc/sessions.ts`：会话记录是权威。`setPlanMode` 镜像 `setApprovalMode`：更新记录和缓存的 spawn spec；会话已在 worker 里时发 `set-plan-mode`，发不出去就 detach，之后按记录重新 spawn；最后广播 `sessions:changed`。派发出的 worker 会话一律拒绝；worker 会话的 spawn spec 永远不带 `planMode`，也不继承父会话。
+  - agent `supervisor.ts`、`piSession.ts`：supervisor 处理 `set-plan-mode`，接在会话的 opening 上，运行中也立即生效；piSession 持有开关的当前值，传给 createRoleSession。
+  - agent-runtime 工具文件（`tools/orchestrationTools.ts` 与 `write_plan` 工具）、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`index.ts`、`README.md`：
+    `CreateRoleSessionOptions.planMode?: () => boolean` 每次读取实时值，缺省视为关闭，只对 orchestrator 策略生效。`createOrchestrationTools` 的 options 有同名开关：开启时 `dispatch_task` 返回错误、不调用 host，其他编排工具不变。
+    `ORCHESTRATOR_PROMPT` 增加 `write_plan` 条目；新增 `PLAN_MODE_PROMPT`（标题为 `# Plan mode is on`），只在开关为真时，于每次 run 的 `before_agent_start` 追加到角色追加段之后。
+  - agent-runtime 新工具 `write_plan { title, content, file? }`：只注册给 orchestrator 策略的会话，在 agent 进程内直接写文件；不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。
+    新建的路径是 `<cwd>/.fynvra/plans/<YYYYMMDD-HHmm>-<slug>.md`：slug 保留 Unicode 字母和数字，最多 48 个字符，为空时用 `plan`；重名时依次加 `-2`、`-3`……，独占创建，不覆盖已有文件。
+    传 `file`（已有计划的纯文件名）时，先写同目录临时文件再 rename，整份替换。正文为 UTF-8，不超过 256 KiB；`.fynvra` 或 `plans` 是符号链接，或 realpath 越出 cwd 时拒绝。
+  - Renderer 的 sessions API / store、Composer 工具栏的开关组件、`toolDisplay.ts` / `ToolCallCard.tsx`、中英字典：输入框工具栏的开关只在主 agent 会话显示，切换失败弹 toast，文案中英双语；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
+- 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；worker 会话的计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
@@ -375,6 +399,7 @@ export interface SessionSummary {
   worktreeId?: string; parentSessionId?: string; dispatchId?: string;
   status: SessionStatus; createdAt: number; updatedAt: number;
   model?: SessionModelRef;
+  planMode?: boolean;    // 计划模式（§7.10）：仅开启时为 true，随会话记录保存在 sessions.json
   archivedAt?: number;   // 归档时间（Task 26）：手动归档或闲置扫描；恢复、会话再次运行时清除
 }
 export type ChatRole = 'user' | 'assistant';
@@ -427,6 +452,8 @@ export interface SessionsApi {
   /** 换模型 / 思考档位 / Fast：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
   setModel(input: { sessionId: string; model: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  /** 计划模式开关（§7.10）：派发出的 worker 会话拒绝；运行中也能切 */
+  setPlanMode(input: { sessionId: string; enabled: boolean }): Promise<IpcResult<{ session: SessionSummary }>>;
   archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;   // 运行中拒绝
   unarchive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>; // 闲置计时重新开始
   sweep(): Promise<IpcResult<{ archived: number; removed: number }>>;            // 按设置立即扫一次
@@ -435,7 +462,7 @@ export interface SessionsApi {
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
 
 - **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
   归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经
