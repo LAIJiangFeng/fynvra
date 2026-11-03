@@ -353,17 +353,19 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - 计划文件与 git：计划文件不自动提交；未提交时 worker 的 worktree 里看不到它，所以任务书仍须完整自足。要不要提交，或在 `.gitignore` 里忽略 `.fynvra/`，由用户决定；没忽略时计划文件会出现在「改动」里，「全部丢弃」会删除这些未跟踪的计划文件。
   - `write_plan` 的使用范围：只能写计划目录，所以不走文件写入审批；计划模式关闭时也能用，供用户要求书面计划时使用。
 - 必改层与文件：
-  - shared `types/{chat,agent,ipc}.ts` 与 Main 字典：`SessionSummary.planMode?: boolean`，仅开启时为 true；`SpawnSessionSpec.planMode?: boolean`；AgentCommand `{ type: 'set-plan-mode'; identity; enabled: boolean }`，unknown parser 只认布尔；IPC 通道 `sessions:set-plan-mode`，入参只有 `{ sessionId, enabled }`。
+  - shared `types/{chat,agent,ipc}.ts` 与 Main 字典 `i18n/main/{zh-CN,en}.ts`：`SessionSummary.planMode?: boolean`，仅开启时为 true；`SpawnSessionSpec.planMode?: boolean`；AgentCommand `{ type: 'set-plan-mode'; identity; enabled: boolean }`，unknown parser 只认布尔；IPC 通道 `sessions:set-plan-mode`，入参只有 `{ sessionId, enabled }`。
   - preload `domains/sessions.ts`：`sessions.setPlanMode({ sessionId, enabled })`，返回 `IpcResult<{ session }>`。
-  - Main `services/sessions/sessionStore.ts`、`services/agentHost/agentHost.ts`、`ipc/sessions.ts`：会话记录是权威。`setPlanMode` 镜像 `setApprovalMode`：更新记录和缓存的 spawn spec；会话已在 worker 里时发 `set-plan-mode`，发不出去就 detach，之后按记录重新 spawn；最后广播 `sessions:changed`。派发出的 worker 会话一律拒绝；worker 会话的 spawn spec 永远不带 `planMode`，也不继承父会话。
+  - Main `services/sessions/sessionStore.ts`、`services/agentHost/agentHost.ts`、`ipc/sessions.ts`：会话记录是权威。`setPlanMode` 镜像 `setApprovalMode`：更新记录和缓存的 spawn spec；会话已在 worker 里时发 `set-plan-mode`，发不出去就 detach，之后按记录重新 spawn；最后广播 `sessions:changed`。spawn 前按会话记录的当前值重设 `planMode`，会话启动途中切换开关也不会丢（`agentHost.ts` 的 `withPlanMode`）。派发出的 worker 会话一律拒绝；worker 会话的 spawn spec 永远不带 `planMode`，也不继承父会话。
   - agent `supervisor.ts`、`piSession.ts`：supervisor 处理 `set-plan-mode`，接在会话的 opening 上，运行中也立即生效；piSession 持有开关的当前值，传给 createRoleSession。
-  - agent-runtime 工具文件（`tools/orchestrationTools.ts` 与 `write_plan` 工具）、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`index.ts`、`README.md`：
+  - agent-runtime `tools/orchestrationTools.ts`、`tools/writePlanTool.ts`、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`index.ts`、`README.md`：
     `CreateRoleSessionOptions.planMode?: () => boolean` 每次读取实时值，缺省视为关闭，只对 orchestrator 策略生效。`createOrchestrationTools` 的 options 有同名开关：开启时 `dispatch_task` 返回错误、不调用 host，其他编排工具不变。
     `ORCHESTRATOR_PROMPT` 增加 `write_plan` 条目；新增 `PLAN_MODE_PROMPT`（标题为 `# Plan mode is on`），只在开关为真时，于每次 run 的 `before_agent_start` 追加到角色追加段之后。
+    `pi/extensions.ts` 的 `appendSystemPromptExtension` 也接受按 run 取文本的函数，返回空就不追加；pi 1.4 每个 run 都会复制一份新的 options，所以关闭计划模式后这段不会残留。
   - agent-runtime 新工具 `write_plan { title, content, file? }`：只注册给 orchestrator 策略的会话，在 agent 进程内直接写文件；不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。
     新建的路径是 `<cwd>/.fynvra/plans/<YYYYMMDD-HHmm>-<slug>.md`：slug 保留 Unicode 字母和数字，最多 48 个字符，为空时用 `plan`；重名时依次加 `-2`、`-3`……，独占创建，不覆盖已有文件。
     传 `file`（已有计划的纯文件名）时，先写同目录临时文件再 rename，整份替换。正文为 UTF-8，不超过 256 KiB；`.fynvra` 或 `plans` 是符号链接，或 realpath 越出 cwd 时拒绝。
-  - Renderer 的 sessions API / store、Composer 工具栏的开关组件、`toolDisplay.ts` / `ToolCallCard.tsx`、中英字典：输入框工具栏的开关只在主 agent 会话显示，切换失败弹 toast，文案中英双语；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
+    正文含 NUL 时拒绝，开头的 BOM 会去掉；`file` 含 Windows 保留字符（`<>:"|?*`）或控制字符时拒绝；更新已有计划时不会创建计划目录。
+  - Renderer `lib/api/sessions.ts`（含 mock）、`stores/sessions/createSessionsStore.ts`、`components/chat/PlanModeToggle.tsx`（挂在 `Composer.tsx` 的审批档位选择器之后）、`components/chat/toolDisplay.ts` / `ToolCallCard.tsx`、`i18n/{zh-CN,en}.ts`：输入框工具栏的开关只在主 agent 会话显示，文案中英双语；store 先乐观切换，失败时换回原状态并提示，再重拉列表；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
 - 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；worker 会话的计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）。
 
 ## 8. 分阶段
