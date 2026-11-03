@@ -114,16 +114,18 @@ function ArchivedToggle({
 }) {
   const t = useT();
   return (
-    <button
-      type="button"
-      aria-expanded={open}
-      onClick={onToggle}
-      className="mt-1 mb-0.5 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-    >
-      <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
-      {t('sessions.archived')}
-      <span className="tabular-nums">{count}</span>
-    </button>
+    <div className="pt-1 pb-0.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-muted-foreground text-xs outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+        {t('sessions.archived')}
+        <span className="tabular-nums">{count}</span>
+      </button>
+    </div>
   );
 }
 
@@ -146,7 +148,7 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
 
   return (
     <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-      <div className="group/session relative mb-0.5">
+      <div className="group/session relative pb-0.5">
         <button
           type="button"
           aria-current={active ? 'true' : undefined}
