@@ -6,8 +6,9 @@ import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
 
 /**
  * 输入框工具栏里、审批胶囊旁的「计划模式」开关。所有角色的会话都有，只有派发出的 worker 会话不显示。
- * 开启时先把计划写成文档，存在当前项目的 .fynvra/plans/ 下：主 agent 不派发任务，其他角色只做只读调查、
- * 不改文件；审阅后关掉再按计划执行。运行中也能切，状态随会话保存。
+ * 开启时写计划和文档：计划存在当前项目的 .fynvra/plans/ 下，也可以写 Markdown 文档（.md / .markdown）。
+ * 主 agent 用 write_plan 写计划、write_doc 写文档，不派发任务；其他角色只能写/改 Markdown 文档，
+ * 不改其他文件；审阅后关掉再按计划执行。运行中也能切，状态随会话保存。
  */
 export function PlanModeToggle({ sessionId }: { sessionId: string }) {
   const exists = useSessionsStore((state) => selectSessionOf(sessionId)(state) !== undefined);
