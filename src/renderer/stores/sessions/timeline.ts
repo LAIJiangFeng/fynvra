@@ -170,11 +170,12 @@ function textEditOf(raw: unknown): TextEdit | null {
 /**
  * pi 的 edit 参数是 `{ path, edits: [{ oldText, newText }] }`；有的模型把 edits 写成单个对象或 JSON 字符串，
  * 旧格式是顶层 oldText / newText（pi 执行前同样会规整）。读不懂时返回 null，卡片照常显示参数。
+ * write_doc（计划模式写 Markdown 文档）参数同 write，按 write 展示。
  */
 export function fileChangeOf(name: string, args: unknown): FileChange | null {
   const record = asRecord(args);
   const path = typeof record?.path === 'string' ? record.path : '';
-  if (name === 'write') {
+  if (name === 'write' || name === 'write_doc') {
     return typeof record?.content === 'string'
       ? { kind: 'write', path, content: record.content }
       : null;
