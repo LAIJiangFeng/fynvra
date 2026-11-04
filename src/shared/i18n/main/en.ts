@@ -91,6 +91,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidApproval: 'Invalid approval decision',
     invalidModel: 'Invalid model arguments',
     invalidApprovalMode: 'Invalid approval mode',
+    invalidPlanMode: 'Invalid plan mode arguments',
     archiveBusy: 'Session is running; archive it after it finishes',
   },
   agent: {
@@ -99,6 +100,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
       'Context recovery is required. Retry compaction to resume; your pending input is retained.',
     noCompactionRecovery: 'This session has no pending compaction recovery.',
     switchWhileRunning: 'Session is running; switch models after this turn',
+    planModeWorkerSession: "Dispatched worker sessions can't turn on plan mode",
     roleNotFound: 'Role not found: {id}',
     startFailed: "Couldn't start the session: {error}",
     describeMismatch: 'Agent worker returned a different number of models than asked',

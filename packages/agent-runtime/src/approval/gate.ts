@@ -14,6 +14,7 @@ import {
   modeRequiresApproval,
 } from './policy';
 import { protectedAction } from './protectedCommand';
+import { isReadOnlyCommand } from './readonlyCommand';
 
 /** 默认等待上限：10 分钟没有答复按 deny（fail-closed） */
 export const APPROVAL_TIMEOUT_DEFAULT_MS = 10 * 60_000;
@@ -60,6 +61,13 @@ export interface ApprovalPolicyHooks {
 
 export interface ApprovalGateOptions extends ApprovalPolicyHooks {
   mode: ApprovalMode;
+  /**
+   * 计划模式的实时开关（宿主持有，随时可变），每次 check 都重新读取；缺省视为关闭。为 true 时：
+   * - file-write / file-edit 直接拦截、不问人，拒绝文本让模型改用 write_plan（write_plan 不属于这两类）；
+   * - command 判定不是只读的（{@link isReadOnlyCommand}）以及所有 mcp，不论档位都要人确认，detail 末尾注明是计划模式要求的；
+   * - 只读命令与其他工具照原档位处理。保护底线照旧，allowSession 照旧按 kind + 工具名记住。
+   */
+  planMode?: () => boolean;
 }
 
 /** pi `tool_call` 事件里审批门用到的部分 */
@@ -110,6 +118,7 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；
  * - 档位可以随时用 setMode 切换（会话级设置，初始值是角色的档位）；
+ * - 计划模式（`planMode` 为 true 时）：改文件的工具直接拒绝，非只读命令与 MCP 不论档位都要人确认；
  * - fail-closed：超时、回合中止、宿主出错一律拒绝。拒绝以 block 返回可读文本，不抛异常。
  */
 export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
@@ -127,17 +136,31 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     }
     const kind = approvalKindOf(call.toolName);
     if (!kind) return undefined;
+    const planning = planModeOn();
+    if (planning && (kind === 'file-write' || kind === 'file-edit')) {
+      return { block: true, reason: planModeFileRefusal(call.toolName) };
+    }
     const command = kind === 'command' ? commandOf(call.input) : undefined;
     const floor = command === undefined ? undefined : protectedAction(command);
+    // 计划模式：MCP 与判定不了只读的命令，不论档位都要人确认
+    const planConfirm =
+      planning &&
+      (kind === 'mcp' ||
+        (kind === 'command' && (command === undefined || !isReadOnlyCommand(command))));
     const key = `${kind}:${call.toolName}`;
-    if (!floor && (!modeRequiresApproval(mode, kind) || sessionAllowed.has(key))) {
+    if (!floor && (!(planConfirm || modeRequiresApproval(mode, kind)) || sessionAllowed.has(key))) {
       return undefined;
     }
+    const description = describeToolCall(call.toolName, kind, call.input);
     const request: ApprovalGateRequest = {
       toolCallId: call.toolCallId,
       toolName: call.toolName,
       kind,
-      ...describeToolCall(call.toolName, kind, call.input),
+      title: description.title,
+      // 说明放在末尾：第一行仍是命令 / 目标（拒绝文本与通知摘要都取它）
+      detail: planConfirm
+        ? [description.detail, planModeNote(kind)].filter(Boolean).join('\n\n')
+        : description.detail,
       args: call.input,
       ...(floor ? { protectedAction: floor } : {}),
       expiresAt: now() + timeoutMs,
@@ -154,6 +177,15 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
       return undefined;
     }
     return { block: true, reason: refusal(request, outcome, timeoutMs) };
+  }
+
+  /** 开关读取失败按开着处理（fail-closed）：check 永不抛异常 */
+  function planModeOn(): boolean {
+    try {
+      return options.planMode?.() === true;
+    } catch {
+      return true;
+    }
   }
 
   function ask(request: ApprovalGateRequest, signal: AbortSignal | undefined): Promise<Outcome> {
@@ -233,6 +265,18 @@ function validTimeout(timeoutMs: number | undefined): number {
     return APPROVAL_TIMEOUT_DEFAULT_MS;
   }
   return Math.min(Math.floor(timeoutMs), MAX_TIMER_MS);
+}
+
+/** 计划模式下改文件的工具被直接拒绝时给模型的工具结果 */
+function planModeFileRefusal(toolName: string): string {
+  return `Plan mode is on, so files cannot be changed: ${toolName} was refused and not run. Save your plan with write_plan instead, and wait for the user to turn plan mode off before you change any file.`;
+}
+
+/** 计划模式要求人确认时附在 detail 末尾，说明为什么要问（这类调用在原档位下可能不用问） */
+function planModeNote(kind: ApprovalKind): string {
+  return kind === 'mcp'
+    ? 'Plan mode is on: MCP tools need your confirmation.'
+    : 'Plan mode is on: this command is not recognized as read-only, so it needs your confirmation.';
 }
 
 /** 拒绝时给模型的工具结果：说清拒绝了什么、为什么、工具没有执行、接下来怎么做 */

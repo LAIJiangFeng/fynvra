@@ -1,4 +1,10 @@
 import { errorMessage } from '@shared/guards';
+import { terminalColorSchemeOf } from '@shared/terminalColorSchemes';
+import {
+  type AppearancePreferences,
+  DEFAULT_APPEARANCE_PREFERENCES,
+  DEFAULT_TERMINAL_FONT_FAMILY,
+} from '@shared/types/settings';
 import {
   MAX_TERMINAL_BYTES,
   MAX_WORKSPACE_SCREEN_BYTES,
@@ -77,6 +83,60 @@ export function restoreTerminalNextNumber(number: number) {
   nextNumber = Math.max(nextNumber, number);
 }
 
+/** Terminal part of the appearance settings; defaults until bindTerminalAppearance runs. */
+let appearance: AppearancePreferences = DEFAULT_APPEARANCE_PREFERENCES;
+const TERMINAL_APPEARANCE_KEYS = [
+  'terminalColorScheme',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'terminalFontWeight',
+  'terminalFontWeightBold',
+] as const;
+
+function appearanceOptions() {
+  return {
+    fontFamily: appearance.terminalFontFamily || DEFAULT_TERMINAL_FONT_FAMILY,
+    fontSize: appearance.terminalFontSize,
+    fontWeight: appearance.terminalFontWeight,
+    fontWeightBold: appearance.terminalFontWeightBold,
+    theme: terminalColorSchemeOf(appearance.terminalColorScheme).colors,
+  };
+}
+
+interface AppearanceSource {
+  getState(): { appearance: AppearancePreferences };
+  subscribe(
+    listener: (
+      state: { appearance: AppearancePreferences },
+      previous: { appearance: AppearancePreferences }
+    ) => void
+  ): () => void;
+}
+
+/**
+ * New terminals are created with the current settings. Open ones get the new font and colors at
+ * once; visible ones are refitted, and a changed size reaches the PTY through onResize. Hidden
+ * or detached ones cannot be measured; TerminalPane fits them when they are shown again.
+ */
+export function bindTerminalAppearance(store: AppearanceSource): () => void {
+  const apply = () => {
+    appearance = store.getState().appearance;
+    const options = appearanceOptions();
+    for (const resource of terminalResources.values()) {
+      resource.terminal.options = options;
+      const host = resource.container.parentElement;
+      if (resource.opened && host && host.clientWidth > 0 && host.clientHeight > 0) {
+        resource.fit.fit();
+      }
+    }
+  };
+  apply();
+  return store.subscribe((state, previous) => {
+    if (TERMINAL_APPEARANCE_KEYS.some((key) => state.appearance[key] !== previous.appearance[key]))
+      apply();
+  });
+}
+
 interface TerminalsState {
   tabs: TerminalTab[];
   selected: Record<string, string | null>;
@@ -100,10 +160,8 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       rows: restored?.rows ?? 24,
       cursorBlink: true,
       disableStdin: true,
-      fontSize: 14,
-      fontFamily: 'Consolas, "Cascadia Mono", Menlo, monospace',
       scrollback: 5000,
-      theme: { background: '#18181b', foreground: '#e4e4e7', cursor: '#e4e4e7' },
+      ...appearanceOptions(),
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);

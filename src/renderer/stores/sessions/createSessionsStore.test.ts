@@ -151,6 +151,19 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
         return { ok: true, session };
       }
     ),
+    setPlanMode: vi.fn(
+      async (input: {
+        sessionId: string;
+        enabled: boolean;
+      }): Promise<IpcResult<{ session: SessionSummary }>> => {
+        const current = sessions.find((session) => session.id === input.sessionId);
+        if (!current) return { ok: false, error: '会话不存在' };
+        const { planMode: _planMode, ...rest } = current;
+        const session = { ...rest, ...(input.enabled ? { planMode: true } : {}), updatedAt: 20 };
+        sessions = sessions.map((item) => (item.id === session.id ? session : item));
+        return { ok: true, session };
+      }
+    ),
     archive: vi.fn(async (sessionId: string): Promise<IpcResult<{ session: SessionSummary }>> => {
       const current = sessions.find((session) => session.id === sessionId);
       if (!current) return { ok: false, error: '会话不存在' };
@@ -1449,23 +1462,24 @@ describe('createSessionsStore · queue while running', () => {
     expect(texts(store)).toEqual([]);
   });
 
-  it('keeps the queue after a stop or an error; a manual send does not resume it', async () => {
+  it('continues the queue after a stop or an error', async () => {
     const { store, api, emitEvent } = await running();
     await store.getState().send('second');
     await store.getState().abort();
     emitEvent(2, { type: 'agent_settled', aborted: true });
     await settle();
-    expect(api.prompt).toHaveBeenCalledTimes(1);
-    expect(texts(store)).toEqual(['second']);
+    expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual([]);
 
-    await store.getState().send('manual');
-    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'manual' });
+    await store.getState().send('third');
+    expect(texts(store)).toEqual(['third']);
     emitEvent(3, { type: 'error', source: 'host', message: 'boom' });
     emitEvent(4, { type: 'agent_settled', aborted: false });
     await settle();
-    expect(selectStatusOf('s1')(store.getState())).toBe('error');
-    expect(api.prompt).toHaveBeenCalledTimes(2);
-    expect(texts(store)).toEqual(['second']);
+    expect(api.prompt).toHaveBeenCalledTimes(3);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(texts(store)).toEqual([]);
   });
 
   it('drains exactly once when settled arrives before the prompt acknowledgement', async () => {
@@ -1488,7 +1502,7 @@ describe('createSessionsStore · queue while running', () => {
     expect(api.prompt).toHaveBeenCalledTimes(2);
   });
 
-  it('a late successful ACK cannot resume a stopped queue; explicit resume is idempotent', async () => {
+  it('a late successful ACK after Stop sends the next queued message once', async () => {
     const { store, api, emitEvent } = await setup();
     await store.getState().selectSession('s1');
     const ack = deferred<IpcResult>();
@@ -1500,15 +1514,12 @@ describe('createSessionsStore · queue while running', () => {
     emitEvent(1, { type: 'agent_settled', aborted: true });
     ack.resolve({ ok: true });
     await first;
-    expect(api.prompt).toHaveBeenCalledTimes(1);
-    expect(store.getState().pausedQueues.s1).toBe(true);
-    store.getState().resumeQueue('s1');
-    store.getState().resumeQueue('s1');
     expect(api.prompt).toHaveBeenCalledTimes(2);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
     expect(texts(store)).toEqual(['third']);
   });
 
-  it('stale aborted events cannot pause a newer active queue', async () => {
+  it('stale aborted events do not disturb a newer active queue', async () => {
     const { store, api, emitEvent } = await running();
     await store.getState().send('second');
     emitEvent(3, { type: 'text_delta', delta: 'reply' });
@@ -1516,7 +1527,6 @@ describe('createSessionsStore · queue while running', () => {
     emitEvent(4, { type: 'agent_settled', aborted: false });
     await settle();
     expect(api.prompt).toHaveBeenCalledTimes(2);
-    expect(store.getState().pausedQueues.s1).toBeUndefined();
   });
 
   it('removes a queued message', async () => {
@@ -1566,8 +1576,9 @@ describe('createSessionsStore · queue while running', () => {
   it('sends a queued message as a prompt when the session is idle', async () => {
     const { store, api, emitEvent } = await running();
     await store.getState().send('second');
-    await store.getState().abort();
-    emitEvent(2, { type: 'agent_settled', aborted: true });
+    // A rejected prompt puts it back and leaves the session idle; it is not retried by itself
+    api.prompt.mockResolvedValueOnce({ ok: false, error: 'gone' });
+    emitEvent(2, { type: 'agent_settled', aborted: false });
     await settle();
     const [second] = selectQueueOf('s1')(store.getState());
     expect(await store.getState().steer('s1', second?.id)).toBe(true);

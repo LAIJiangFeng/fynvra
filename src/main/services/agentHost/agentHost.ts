@@ -120,6 +120,11 @@ export interface SetApprovalModeInput {
   mode: ApprovalMode;
 }
 
+export interface SetPlanModeInput {
+  sessionId: string;
+  enabled: boolean;
+}
+
 export interface RespondApprovalInput {
   sessionId: string;
   requestId: string;
@@ -189,6 +194,11 @@ export interface AgentHostService extends AgentHost {
    * 运行中也可以切（即时生效，这是与换模型的区别）；会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
+   * 开关会话的计划模式（不分角色）：更新记录（落 sessions.json，只在开启时带字段），会话在 worker 里时发 set-plan-mode。
+   * 运行中也可以切；派发出的 worker 会话拒绝。会话还没在 worker 里时只改记录，下次 spawn 用新值。
+   */
+  setPlanMode(input: SetPlanModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 窗口重新获得焦点：重读读过的会话目录的分支（节流），有变化的工作区广播 sessions:changed */
   refreshBranches(): void;
   /** 会话的 IPC 视图；不存在时 undefined */
@@ -570,6 +580,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
             compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
           }),
           ...(inPlace ? { inPlace: true } : {}),
+          // 计划模式按会话记录，不分角色：派发出的 worker 会话永远不带
+          ...(stored.planMode === true && stored.dispatchId === undefined
+            ? { planMode: true }
+            : {}),
         },
       };
     } catch (error) {
@@ -748,10 +762,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     const built = await buildSpec(stored);
     if (!built.ok) return built;
     await ensureTranscript(stored, state);
-    if (!deps.store.get(stored.id)) return fail(translate('common.sessionNotFound'));
+    const current = deps.store.get(stored.id);
+    if (!current) return fail(translate('common.sessionNotFound'));
     if (!wanted()) return fail('The session operation was cancelled.');
     if (state.spawned && !reload) return { ok: true };
-    return spawnWith(stored.id, state, built.spec)
+    // 构建 spec 的这段等待里用户可能切过计划模式：以记录的当前值为准
+    return spawnWith(stored.id, state, withPlanMode(built.spec, current))
       ? { ok: true }
       : fail(translate('agent.workerUnavailable'));
   }
@@ -1309,6 +1325,31 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return { ok: true, session: summaryOf(updated) };
   }
 
+  /**
+   * 开关计划模式：同审批档位，记录（sessions.json）是权威，缓存的 spawn spec 一并改掉，
+   * 会话在 worker 里时再发 set-plan-mode，不论是否在跑。不分角色，只有派发出的 worker 会话拒绝。
+   */
+  async function setPlanMode({
+    sessionId,
+    enabled,
+  }: SetPlanModeInput): Promise<Result<{ session: SessionSummary }>> {
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail(translate('common.sessionNotFound'));
+    if (stored.dispatchId !== undefined) return fail(translate('agent.planModeWorkerSession'));
+    if ((stored.planMode === true) === enabled) return { ok: true, session: summaryOf(stored) };
+    // 记录只在开启时带这个字段（store 的 update 把 false 去掉）
+    const updated = deps.store.update(sessionId, { planMode: enabled, updatedAt: now() }) ?? stored;
+    const state = live.get(sessionId);
+    if (state?.spec) state.spec = withPlanMode(state.spec, updated);
+    if (state?.spawned) {
+      const identity = identityOf(sessionId, state);
+      // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
+      if (!send({ type: 'set-plan-mode', identity, enabled })) detach(sessionId, state);
+    }
+    changed(stored.workspaceId);
+    return { ok: true, session: summaryOf(updated) };
+  }
+
   async function modelOptions({
     workspaceId,
   }: {
@@ -1423,6 +1464,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         approvalMode:
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
           role.approvalMode,
+        // 计划模式不随主 agent：worker 会话永远没有
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -1670,6 +1712,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setModel,
     modelOptions,
     setApprovalMode,
+    setPlanMode,
     refreshBranches() {
       if (deps.branches) rereadBranches(deps.branches.known());
     },
@@ -1733,6 +1776,14 @@ function withThinking(spec: ResolvedModelSpec, thinking?: ThinkingLevel): Resolv
 
 function withReasoning(spec: ResolvedModelSpec, reasoning: boolean | undefined): ResolvedModelSpec {
   return reasoning === undefined ? spec : { ...spec, reasoning };
+}
+
+/** spec 的计划模式按会话记录：记录里开着时才带，不分角色；派发出的 worker 会话永远不带 */
+function withPlanMode(spec: SpawnSessionSpec, stored: StoredSession): SpawnSessionSpec {
+  const { planMode: _previous, ...rest } = spec;
+  return stored.planMode === true && stored.dispatchId === undefined
+    ? { ...rest, planMode: true }
+    : rest;
 }
 
 function queryOf(view: ModelProviderView, entry: ModelEntry): ModelQuery {

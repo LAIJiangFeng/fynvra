@@ -67,7 +67,16 @@ export type RoleOption = Pick<Role, 'id' | 'name' | 'description'>;
 export interface OrchestrationToolsOptions {
   /** 可派发的角色。提供时 `role` 参数是枚举，并支持按显示名（不区分大小写）匹配 */
   roles?: readonly RoleOption[];
+  /**
+   * 计划模式的实时开关（宿主持有，随时可变），每次 dispatch_task 调用时读取：为 true 时 dispatch_task
+   * 不调用 Host，直接返回错误。其他编排工具不受影响，已经在跑的 worker 照常处理。缺省视为关闭。
+   */
+  planMode?: () => boolean;
 }
+
+/** 计划模式下 dispatch_task 的拒绝文本 */
+const PLAN_MODE_DISPATCH_REFUSAL =
+  'Plan mode is on, so dispatch_task is disabled. Save or update the plan with write_plan, end your turn and ask the user to review it; the user turns plan mode off when the plan is approved.';
 
 /**
  * orchestrator 角色的编排工具，与 {@link OrchestrationHost} 方法一一对应。
@@ -80,6 +89,7 @@ export function createOrchestrationTools(
   options: OrchestrationToolsOptions = {}
 ): ToolDefinition[] {
   const roles = options.roles ?? [];
+  const planMode = options.planMode ?? (() => false);
   return [
     tool({
       name: 'dispatch_task',
@@ -99,6 +109,8 @@ export function createOrchestrationTools(
       executionMode: 'sequential',
       normalize: (raw) => normalizeDispatchArgs(raw, roles),
       run: async (params, signal) => {
+        // 计划模式：每次调用都重新读开关，开着就直接拒绝，不调用 Host
+        if (planMode()) return errorResult('dispatch_task', PLAN_MODE_DISPATCH_REFUSAL);
         const input = parseDispatchArgs(params, roles);
         if (!input.ok) return errorResult('dispatch_task', input.error);
         const result = await host.dispatchTask(input.value, signal);

@@ -69,13 +69,12 @@ export interface SessionsState extends ChatProjection {
   /** 刚结束一轮生成的灰字建议；只在内存，与草稿分开，切换会话 / 新轮 / 换模型时清掉 */
   replySuggestions: Record<string, ReplySuggestion>;
   /**
-   * Messages queued while the session was running, oldest first. Running/compaction/recovery only
-   * delay delivery; a stop or an independent failure keeps them until explicit resume.
+   * Messages queued while the session was running, oldest first. The queue never pauses: each turn's
+   * settlement (normal, failed or stopped) sends the next one. Running, Stop in flight, approvals and
+   * compaction/recovery only delay delivery; a rejected prompt goes back to the head and waits for the
+   * next settlement, send or send-now instead of retrying in a loop.
    */
   queuedBySession: Record<string, QueuedMessage[]>;
-  /** Stops, independent run failures and unconfirmed prompt failures require explicit resume. */
-  pausedQueues: Record<string, true>;
-  resumeQueue(sessionId: string): void;
   recoveringCompaction: Record<string, true>;
   stopping: Record<string, true>;
   retryCompaction(sessionId: string): Promise<void>;
@@ -108,7 +107,8 @@ export interface SessionsState extends ChatProjection {
   /** 同步选中会话及所属工作区，再拉 history；未缓存的会话可显式指定工作区 */
   selectSession(sessionId: string | null, workspaceId?: string): Promise<void>;
   /**
-   * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片、会话运行中或上一条还在途时返回 false
+   * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片时返回 false。
+   * 会话运行中、上一条还在途或队列里还有消息时排到队尾，按先进先出发出，不插队
    */
   send(text: string): Promise<boolean>;
   /**
@@ -160,6 +160,11 @@ export interface SessionsState extends ChatProjection {
     sessionId: string,
     mode: ApprovalMode
   ): Promise<IpcResult<{ session: SessionSummary }>>;
+  /**
+   * 开关会话的计划模式（不分角色，派发出的 worker 会话除外）：同换审批档位，先乐观更新，Main 回包后以它的记录为准；
+   * 失败时换回原来的状态、提示原因并重拉列表。运行中、等审批时也可以切。
+   */
+  setPlanMode(sessionId: string, enabled: boolean): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
    * 归档会话：先在列表里标上（乐观更新），Main 回包后以它的归档时间为准；失败时换回、提示原因并重拉列表。
    * 运行中、等审批或消息在途时直接拒绝。
@@ -272,6 +277,12 @@ function withModel(session: SessionSummary, model: SessionModelRef | undefined):
   return model ? { ...rest, model } : rest;
 }
 
+/** planMode 只在开启时带（与 Main 的记录同形） */
+function withPlanMode(session: SessionSummary, enabled: boolean): SessionSummary {
+  const { planMode: _previous, ...rest } = session;
+  return enabled ? { ...rest, planMode: true } : rest;
+}
+
 function withArchivedAt(session: SessionSummary, archivedAt: number | undefined): SessionSummary {
   const { archivedAt: _previous, ...rest } = session;
   return archivedAt === undefined ? rest : { ...rest, archivedAt };
@@ -309,6 +320,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   const modelSwitches = new Map<string, { request: number; model: SessionModelRef }>();
   /** 在途的换审批档位：同上 */
   const approvalSwitches = new Map<string, { request: number; mode: ApprovalMode }>();
+  /** 在途的开关计划模式：同上 */
+  const planSwitches = new Map<string, { request: number; enabled: boolean }>();
   /** 每个会话最近一次已发起建议的轮次（含空结果 / 失败）：同一轮不重复请求 */
   const suggestionTried = new Map<string, number>();
   /** 每个会话被 Esc 忽略的轮次；迟到的回包不再展示 */
@@ -328,14 +341,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   let queueSeq = 0;
 
   return create<SessionsState>()((set, get) => {
-    function holdQueue(sessionId: string): void {
-      set((state) => ({ pausedQueues: { ...state.pausedQueues, [sessionId]: true } }));
-    }
-
-    function releaseQueue(sessionId: string): void {
-      set((state) => ({ pausedQueues: omitKey(state.pausedQueues, sessionId) }));
-    }
-
     /** 推进这个会话的建议代数，并作废所有在途回包 */
     function bumpSuggestionVersion(sessionId: string): number {
       const version = (suggestionVersions.get(sessionId) ?? 0) + 1;
@@ -435,12 +440,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       pending = [];
       const batch: SessionEventEnvelope[] = [];
       const failedSettlements = new Set<SessionEventEnvelope>();
-      const queueFailures = new Set<string>();
       set((state) => {
         let next = state;
         for (const envelope of received) {
           const reduced = reduceSessionEvent(next, envelope, now());
-          // Stale events must not run side effects either (pause/drain/suggestions).
+          // Stale events must not run side effects either (drain/suggestions).
           if (reduced !== next) {
             batch.push(envelope);
             const runtime = reduced.runtimeBySession[envelope.sessionId];
@@ -449,14 +453,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               (envelope.event.aborted || runtime?.error || runtime?.pendingAssistantFailure)
             )
               failedSettlements.add(envelope);
-            // Classify at this event, not at the end of the batch: recovery may unlock later
-            // in this same batch. Its companion errors/aborts wait on the recovery gate only.
-            if (
-              !runtime?.recoveryRequired &&
-              ((envelope.event.type === 'error' && envelope.event.source !== 'compaction') ||
-                failedSettlements.has(envelope))
-            )
-              queueFailures.add(envelope.sessionId);
           }
           next = reduced;
         }
@@ -471,9 +467,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (event.type === 'warning') continue;
         clearSuggestion(sessionId);
       }
-      // Only independent failures create a manual pause. Recovery never releases an existing
-      // pause, so a late successful snapshot cannot undo Stop or a rejected prompt.
-      for (const sessionId of queueFailures) holdQueue(sessionId);
       const settled = new Set<string>();
       const normal = new Map<string, number>();
       for (const envelope of batch) {
@@ -495,7 +488,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           }));
         }
         // A final metadata snapshot can clear pending input *after* settled. Re-check the
-        // queue there as well; stopped/failed queues are still protected by their hold.
+        // queue there as well.
         if (event.type === 'context_runtime' && !recoveryBlocked(sessionId)) {
           settled.add(sessionId);
           const roundId = get().runtimeBySession[sessionId]?.settledSeq;
@@ -505,6 +498,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
+      // Normal, failed and stopped turns alike continue with the next queued message.
       for (const sessionId of settled) drainQueue(sessionId);
       // 队列真的空了、状态仍 idle 才请求；drainQueue 发了下一条时这里会看到 running
       for (const [sessionId, roundId] of normal) maybeRequestSuggestion(sessionId, roundId);
@@ -554,6 +548,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       set((state) =>
         addOptimisticMessage(state, sessionId, { id, text: body, images, createdAt: now() })
       );
+      let rejected = false;
       try {
         const result = await safely(() =>
           api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
@@ -565,7 +560,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         const current = get();
         const echo = current.messagesBySession[sessionId]?.find((message) => message.id === id);
         if (!echo?.optimistic) return true;
-        holdQueue(sessionId);
+        rejected = true;
         set((state) => ({
           ...withdrawOptimisticMessage(state, sessionId, id, {
             status: previous,
@@ -577,27 +572,30 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       } finally {
         sending.delete(sessionId);
         // settled may arrive before the prompt ACK; it could not drain while sending.
-        drainQueue(sessionId);
+        // A rejected prompt is not retried here, or a persistently failing session would loop:
+        // the queue continues on the next settlement, a new message or "send now".
+        if (!rejected) drainQueue(sessionId);
       }
     }
 
-    /** Send the oldest queued message when the session is idle and its queue is not paused */
-    function drainQueue(sessionId: string, resume = false): void {
+    /**
+     * Send the oldest queued message once the session is idle or ended with an error. Stop in flight,
+     * approvals, a prompt in flight and compaction/recovery only delay it; nothing pauses the queue
+     */
+    function drainQueue(sessionId: string): void {
       if (
-        get().pausedQueues[sessionId] ||
         get().stopping[sessionId] ||
         (get().pendingApprovals[sessionId]?.length ?? 0) > 0 ||
         sending.has(sessionId) ||
-        recoveryBlocked(sessionId)
+        recoveryBlocked(sessionId) ||
+        isBusy(statusOf(get(), sessionId))
       )
         return;
-      const status = statusOf(get(), sessionId);
-      if (status !== 'idle' && !(resume && status === 'error')) return;
       const [next] = queueOf(sessionId);
       if (!next) return;
       setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
       void deliver(sessionId, next.text, next.images, (state) => {
-        // Put it back in front and pause the queue so a broken session does not loop
+        // Put it back in front; deliver does not retry it right away so a broken session does not loop
         const queue = state.queuedBySession[sessionId] ?? [];
         return { queuedBySession: { ...state.queuedBySession, [sessionId]: [next, ...queue] } };
       });
@@ -663,7 +661,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       draftImages: {},
       replySuggestions: {},
       queuedBySession: {},
-      pausedQueues: {},
       recoveringCompaction: {},
       stopping: {},
       loadingHistory: {},
@@ -707,10 +704,14 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           .map((session) => {
             const pending = modelSwitches.get(session.id);
             const switching = approvalSwitches.get(session.id);
+            const planning = planSwitches.get(session.id);
             const withPendingModel = pending ? withModel(session, pending.model) : session;
-            return switching
-              ? { ...withPendingModel, approvalMode: switching.mode }
+            const withPendingPlan = planning
+              ? withPlanMode(withPendingModel, planning.enabled)
               : withPendingModel;
+            return switching
+              ? { ...withPendingPlan, approvalMode: switching.mode }
+              : withPendingPlan;
           });
         const before = get();
         const active = before.activeSessionId;
@@ -865,13 +866,15 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           drafts: omitKey(state.drafts, sessionId),
           draftImages: omitKey(state.draftImages, sessionId),
         });
-        // Running (or a prompt still in flight): queue it, it is sent when the turn settles
+        // Running, a prompt still in flight or older queued messages: queue it behind them (FIFO),
+        // it is sent when the turn settles
         flushEvents();
         if (
           sending.has(sessionId) ||
           get().stopping[sessionId] ||
           isBusy(statusOf(get(), sessionId)) ||
-          recoveryBlocked(sessionId)
+          recoveryBlocked(sessionId) ||
+          queueOf(sessionId).length > 0
         ) {
           const item: QueuedMessage = { id: `queued-${++queueSeq}`, text: body, images };
           set((state) => ({
@@ -881,6 +884,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               [sessionId]: [...(state.queuedBySession[sessionId] ?? []), item],
             },
           }));
+          // Idle behind older messages (e.g. after a rejected prompt): send the oldest now
+          drainQueue(sessionId);
           return true;
         }
         set(clearDraft);
@@ -977,19 +982,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return false;
       },
 
-      resumeQueue(sessionId) {
-        flushEvents();
-        if (
-          sending.has(sessionId) ||
-          get().stopping[sessionId] ||
-          isBusy(statusOf(get(), sessionId)) ||
-          recoveryBlocked(sessionId)
-        )
-          return;
-        releaseQueue(sessionId);
-        drainQueue(sessionId, true);
-      },
-
       async retryCompaction(sessionId) {
         flushEvents();
         const runtime = get().runtimeBySession[sessionId];
@@ -1077,12 +1069,13 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!sessionId || get().stopping[sessionId]) return;
         clearSuggestion(sessionId);
         set((state) => ({ stopping: { ...state.stopping, [sessionId]: true } }));
-        // Stop keeps the queue but pauses it: the user decides what to send next
-        holdQueue(sessionId);
+        // Stop ends the turn, not the queue: the next queued message follows once it settles
         const result = await safely(() => api.abort(sessionId));
         set((state) => ({ stopping: omitKey(state.stopping, sessionId) }));
         if (!result.ok)
           set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
+        // The settled event may have arrived while stopping held the drain back
+        drainQueue(sessionId);
       },
 
       async respondApproval(requestId, decision) {
@@ -1294,6 +1287,42 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return result;
       },
 
+      async setPlanMode(sessionId, enabled) {
+        const session = findSession(get(), sessionId);
+        if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
+        const request = ++requestSeq;
+        const previous = session.planMode === true;
+        planSwitches.set(sessionId, { request, enabled });
+        const switchTo = (on: boolean) =>
+          set((state) =>
+            mapLists(state, sessionId, (item) =>
+              (item.planMode === true) === on ? item : withPlanMode(item, on)
+            )
+          );
+        switchTo(enabled);
+        const result = await safely(() => api.setPlanMode({ sessionId, enabled }));
+        // 连着点了几下：只认最近一次的回包，前面的结果由它覆盖
+        if (planSwitches.get(sessionId)?.request !== request) return result;
+        planSwitches.delete(sessionId);
+        if (result.ok) {
+          const { planMode, updatedAt } = result.session;
+          set((state) =>
+            mapLists(state, sessionId, (item) => ({
+              ...withPlanMode(item, planMode === true),
+              updatedAt,
+            }))
+          );
+          return result;
+        }
+        switchTo(previous);
+        set({
+          notice: translate('sessions.errors.setPlanModeFailed', { error: result.error }),
+        });
+        // 换回的是发起前看到的状态；以 Main 的记录为准再拉一次
+        void get().loadSessions(session.workspaceId);
+        return result;
+      },
+
       archiveSession: (sessionId) => setArchived(sessionId, true),
 
       unarchiveSession: (sessionId) => setArchived(sessionId, false),
@@ -1322,7 +1351,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         historyRequests.delete(sessionId);
         set({
           ...lists,
-          pausedQueues: omitKey(before.pausedQueues, sessionId),
           recoveringCompaction: omitKey(before.recoveringCompaction, sessionId),
           stopping: omitKey(before.stopping, sessionId),
           drafts: omitKey(before.drafts, sessionId),
@@ -1340,6 +1368,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (result.ok) {
           modelSwitches.delete(sessionId);
           approvalSwitches.delete(sessionId);
+          planSwitches.delete(sessionId);
           suggestionTried.delete(sessionId);
           suggestionIgnored.delete(sessionId);
           return result;
@@ -1360,7 +1389,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           drafts: restore(state.drafts, before.drafts),
           draftImages: restore(state.draftImages, before.draftImages),
           queuedBySession: restore(state.queuedBySession, before.queuedBySession),
-          pausedQueues: restore(state.pausedQueues, before.pausedQueues),
           recoveringCompaction: restore(state.recoveringCompaction, before.recoveringCompaction),
           stopping: restore(state.stopping, before.stopping),
           messagesBySession: restore(state.messagesBySession, before.messagesBySession),

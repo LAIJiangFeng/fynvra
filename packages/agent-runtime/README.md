@@ -10,7 +10,9 @@
 | `src/tools/orchestrationTools.ts` | orchestrator 的 10 个编排工具，背后是 `OrchestrationHost` |
 | `src/tools/workerTools.ts` | `ask_coordinator` / `report_done`，背后是 `WorkerHost` |
 | `src/tools/readonlyTools.ts` | pi 的 read / grep / find / ls + `git_readonly`（白名单） |
-| `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`WORKER_CONTRACT_PROMPT` |
+| `src/tools/writePlanTool.ts` | `write_plan`（orchestrator，以及提供了 `planMode` 的非 worker 会话）：在 agent 进程里把计划写进 `<cwd>/.fynvra/plans/`，不经 Host |
+| `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`PLAN_MODE_PROMPT`、`DIRECT_PLAN_MODE_PROMPT`、`WORKER_CONTRACT_PROMPT` |
+| `src/approval/` | 审批门（`createApprovalGate`）：审批类别与档位、保护底线、计划模式下的只读命令判定（`isReadOnlyCommand`） |
 | `src/events/normalize.ts` | pi 会话事件 → `FynvraSessionEvent`（带 `seq`） |
 | `src/host.ts` | `OrchestrationHost` / `WorkerHost` 契约 |
 | `src/pi/` | pi 适配层（升级复检点，见文末） |
@@ -21,13 +23,60 @@
 
 | `role.tools` | 会话里的工具 |
 |---|---|
-| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`） |
+| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` |
 | `readonly` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` |
 | `all` | pi 默认工具（read / bash / edit / write） |
+
+`readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时再加 `write_plan`（见下文计划模式）。
 
 传入 `workerHost` 的会话就是 worker：再加 `ask_coordinator` / `report_done`，系统提示词追加
 `WORKER_CONTRACT_PROMPT`。orchestrator 策略追加 `ORCHESTRATOR_PROMPT`。两者都排在 `role.systemPrompt` 之后，
 经 before_agent_start 扩展进入系统提示词的 addendum 段。
+
+计划模式：`planMode?: () => boolean` 是宿主持有、随时可变的开关，缺省视为关闭。按会话类型生效：
+
+- orchestrator 策略：每次 run 开始时为 true，就在上面的追加段之后再追加 `PLAN_MODE_PROMPT`；dispatch_task 每次调用时
+  也读取它，为 true 时直接返回错误、不调用 Host，其他编排工具（含 run_checks）照常可用。
+- `readonly` / `all` 策略的非 worker 会话（没有 `workerHost`，如用户自己开的 Worker 会话、自定义角色）：
+  每次 run 开始时为 true 就追加 `DIRECT_PLAN_MODE_PROMPT`（先只读调查、用 write_plan 写计划，商定后再动手）。
+  审批门（`createApprovalGate` 的 `planMode`）每次工具调用时读取它，为 true 时：
+  - write / edit / apply_patch 直接拦截、不问人，拒绝文本让模型改用 write_plan、等用户关闭计划模式；
+  - bash / powershell 命令经 `isReadOnlyCommand` 判定为只读的按原档位处理（supervised 照样要审批），判定不了的
+    不论档位都要人确认；MCP 工具同样不论档位都要人确认。走现有审批通道，`detail` 末尾注明是计划模式要求的；
+    保护底线照旧，allowSession 照旧按 kind + 工具名记住；
+  - read / grep / find / ls / git_readonly / write_plan 等其他工具不受影响。
+- 其他策略的 worker 会话（有 `workerHost`）忽略开关。
+
+关闭后提示词从下一次 run 起、拦截从下一次工具调用起恢复原样。
+
+`isReadOnlyCommand(command)` 是保守的纯函数，拿不准就算非只读。bash 工具在 Windows 上也可能由 PowerShell 执行，
+所以同一条命令按 bash 和 PowerShell 两种读法各拆一遍，都只读才算只读：
+
+- 在引号外按 `;`、`&&`、`||`、`|` 和换行拆段，每段的第一个词都要在白名单里（不区分大小写、不带路径）：
+  `ls` `dir` `pwd` `cat` `head` `tail` `less` `more` `wc` `grep` `rg` `find` `fd` `tree` `file` `stat` `du` `df` `which`
+  `whereis` `type` `echo` `printf` `sort` `uniq` `cut` `diff` `cmp` `basename` `dirname` `realpath` `readlink` `date`
+  `whoami` `uname` `env` `printenv` `git`，以及 PowerShell 的 `Get-ChildItem`/`gci` `Get-Content`/`gc` `Get-Item`
+  `Get-Location` `Select-String`/`sls` `Test-Path` `Resolve-Path` `Measure-Object` `Sort-Object` `Select-Object`
+  `Format-Table` `Format-List` `Get-Command` `Get-Date`。
+- 能写文件或运行别的程序的参数算非只读：find 的 `-delete` / `-exec*` / `-ok*` / `-fprint*` / `-fls`，fd 的 `-x` / `-X` / `--exec*`，
+  rg 的 `--pre` / `--hostname-bin`，sort 的 `-o` / `--output` / `--compress-program`，tree 的 `-o` / `-R`，file 的 `-C`，
+  printf 的 `-v`，less 带任何选项，uniq 超过一个操作数或带通配符，date 的 `-s` / `--set` 与不以 `+` 开头的操作数，
+  env 带任何参数；GNU / git 长选项的缩写一并拦截。
+- git 只认 `status` `log` `diff` `show` `blame` `ls-files` `rev-parse` `describe` `grep`（不能带 `--output` /
+  `--ext-diff`，grep 不能带 `-O`）、`remote`（只能带 `-v`）、`branch`（只列出，与 `git_readonly` 同一套检查）；
+  全局选项只认 `--no-pager` / `-P` / `--no-optional-locks`。
+- 一律算非只读：输出重定向（`2>&1` 这类复制和 `>/dev/null`、`2>$null` 这类丢弃除外）、`<`（含 `<(`、here-doc）、
+  命令替换 `$(` 与反引号、引号外的 `{` `}` `(` `)` `@` `#` 和单个 `&`、变量 `$`、任何位置的
+  `Invoke-Expression` / `iex` / `Start-Process` / `Invoke-Command` 等与 `--%`；两种 shell 拆法可能不同的写法
+  （反斜杠后跟空白或特殊字符、双引号里的 `\"` 与 `""`、续行、含 `"` 的参数、PowerShell 当作引号 / 破折号 / 空白的
+  Unicode 字符、控制字符）。
+
+`write_plan { title, content, file? }` 与开关当前是否打开无关：orchestrator 策略的会话总有它，提供了 `planMode` 的
+非 worker 会话也总有它（工具描述不说「这是你唯一能写的文件」，`all` 策略还有 pi 的 write，名字不冲突）。它在 agent 进程里用 node fs
+写 `<cwd>/.fynvra/plans/`：不传 `file` 时独占新建 `<YYYYMMDD-HHmm>-<slug>.md`（本地时间，重名加 `-2`、`-3`…），
+传 `file` 时先写临时文件再 rename，原子替换这份已有计划；`.fynvra` 或 `.fynvra/plans` 是符号链接 / junction / 文件，
+或 realpath 出了 cwd 时拒绝。内容以 UTF-8（无 BOM）写入，最多 256 KiB。它不经 OrchestrationHost，不在
+`ORCHESTRATION_TOOL_METHODS` 里，也不属于审批门的任何类别。
 
 所有工具都是「先归一化再校验」：`prepareArguments` 在 pi 的 schema 校验前修正参数（别名、trim、
 `timeout_ms` clamp 到 [1000, 900000]、`until` 默认 `'all'`、`role` 默认 `'worker'`），`execute` 再做语义校验。
@@ -44,7 +93,7 @@ Renderer ⇄ preload ⇄ Main ── OrchestrationService（@fynvra/core：Orche
                        └─ worker 会话 × N：createRoleSession({ workerHost: WorkerHost 代理, cwd: worktree })
 ```
 
-工具只调用注入的接口，不直接操作 git / 进程。真正的实现在 Main，
+工具只调用注入的接口，不直接操作 git / 进程（`write_plan` 例外：它只写计划目录，见上文）。真正的实现在 Main，
 worker 进程里只放一个转发代理。
 
 ### 1. Main：实现编排逻辑
@@ -133,6 +182,7 @@ const { session, warnings, dispose } = await createRoleSession({
     mcpServers: resolvedMcpServers,       // role.mcpServerIds → { name, ...pi McpServerConfig }
   },
   roles,                                  // dispatch_task 的 role 枚举与显示名匹配
+  planMode: () => planModeOn,             // 计划模式的实时开关（每次 run / dispatch_task / 工具调用读取；worker 会话忽略）
 });
 
 const events = subscribeNormalized(session, (event) =>
@@ -168,7 +218,9 @@ await dispose();                          // 先发 session_shutdown（关闭 MC
 
 升级 pi 时逐条复查：
 
-1. `pi/extensions.ts`：before_agent_start 事件上可变的 `systemPromptOptions.appendSystemPrompt`；该事件每个 run 恰好触发一次。
+1. `pi/extensions.ts`：before_agent_start 事件上可变的 `systemPromptOptions.appendSystemPrompt`；该事件每个 run 恰好触发一次，
+   且每个 run 拿到的是从会话 base options 新复制的副本（`normalizeBuildSystemPromptOptions`），计划模式这类按开关追加的段落
+   关闭后才不会残留。
 2. `pi/lifecycle.ts`：`AgentSession.dispose()` 不发 `session_shutdown`，经 `session.extensionRunner` 补发。
 3. `pi/mcp.ts`：`createMcpExtension({ loadConfig, updateConfig })` 与 `LoadedMcpConfig` 结构；MCP 在 session_start 连接、
    session_shutdown 关闭；exposure 语义。

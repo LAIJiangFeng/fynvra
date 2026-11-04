@@ -1,5 +1,7 @@
 import { errorMessage } from '@shared/guards';
 import {
+  type AppearancePreferences,
+  appearancePreferencesOf,
   type CompactionStrategy,
   compactionStrategyOf,
   compactionTimeoutMsOf,
@@ -220,3 +222,60 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
 
 void useGeneralPreferencesStore.getState().load();
 window.fynvra.settings.onChanged(() => void useGeneralPreferencesStore.getState().load());
+
+// --- appearance ---
+export interface AppearanceState {
+  /** 生效值：没写过的取默认值；读到 Main 的值之前也是默认值 */
+  appearance: AppearancePreferences;
+  /** 读到过 Main 的值：首帧渲染等它，界面字号不先闪一下默认值 */
+  loaded: boolean;
+  /** 最近一次保存失败的原因 */
+  error: string | null;
+  load(): Promise<void>;
+  /**
+   * 先在界面上换上（即时生效），保存失败时按 Main 重读并记下原因。
+   * 字段给 undefined（字体也可给空串）是恢复默认：Main 删掉该字段。
+   */
+  update(patch: Partial<AppearancePreferences>): Promise<void>;
+}
+
+/**
+ * 外观页「界面」「终端」两组偏好：只读写自己的字段（settings:update 按字段合并），
+ * 不经 useSettingsStore 的整块落盘。<html> 的字体字号与终端各自订阅 appearance。
+ */
+export const useAppearanceStore = create<AppearanceState>()((set, get) => {
+  // 只认最新一次读取；保存开始时作废在途的读取（它读到的是改之前的值）
+  let readRequest = 0;
+  let writeRequest = 0;
+  return {
+    appearance: appearancePreferencesOf({}),
+    loaded: false,
+    error: null,
+
+    async load() {
+      const request = ++readRequest;
+      const result = await safely(() => api.get());
+      if (request === readRequest && result.ok) {
+        set({ appearance: appearancePreferencesOf(result.preferences), loaded: true });
+      }
+    },
+
+    async update(patch) {
+      const request = ++writeRequest;
+      readRequest += 1;
+      set((state) => ({ appearance: appearancePreferencesOf({ ...state.appearance, ...patch }) }));
+      const result = await safely(() => api.update(patch));
+      if (!result.ok) {
+        set({ error: translate('common.saveFailed', { error: result.error }) });
+        await get().load();
+        return;
+      }
+      if (request === writeRequest) {
+        set({ appearance: appearancePreferencesOf(result.preferences), error: null });
+      }
+    },
+  };
+});
+
+void useAppearanceStore.getState().load();
+window.fynvra.settings.onChanged(() => void useAppearanceStore.getState().load());

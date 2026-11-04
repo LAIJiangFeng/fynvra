@@ -42,6 +42,12 @@ export interface SessionSummary {
   model?: SessionModelRef;
   /** 审批档位：创建时取角色的值，之后是会话自己的设置（`sessions:set-approval-mode`，运行中也能切） */
   approvalMode: ApprovalMode;
+  /**
+   * 计划模式（`sessions:set-plan-mode`，运行中也能切）：不分角色。开启时主 agent 只写计划文档、不派发任务；
+   * 其他角色拦截改文件的工具，非只读命令和 MCP 工具要人确认。
+   * 只在开启时为 true，关闭时省略；派发出的 worker 会话永远没有
+   */
+  planMode?: boolean;
   /** cwd 当前检出的分支（Main 现读 git，不落盘）；detached 时是短 sha；不是 git 目录或还没读到时没有 */
   branch?: string;
   /** 归档时间（手动归档或闲置扫描）；恢复或会话再次运行时清除。`sessions:list` 默认不列归档的会话 */

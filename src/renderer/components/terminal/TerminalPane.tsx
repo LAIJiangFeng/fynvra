@@ -1,14 +1,20 @@
 import '@xterm/xterm/css/xterm.css';
 import { ContextMenu } from '@base-ui/react/context-menu';
+import { terminalColorSchemeOf } from '@shared/terminalColorSchemes';
 import { useEffect, useRef, useState } from 'react';
 import { DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { useT } from '@/i18n/I18nProvider';
+import { useAppearanceStore } from '@/stores/settings';
 import { clearTerminalScreen, terminalResources } from '@/stores/terminals';
 
 export function TerminalPane({ id, active }: { id: string; active: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
+  // The padding around the screen uses the color scheme's background too.
+  const background = useAppearanceStore(
+    (state) => terminalColorSchemeOf(state.appearance.terminalColorScheme).colors.background
+  );
   const t = useT();
   useEffect(() => {
     setMenuOpen(false);
@@ -49,7 +55,8 @@ export function TerminalPane({ id, active }: { id: string; active: boolean }) {
     <ContextMenu.Root open={active && menuOpen} onOpenChange={setMenuOpen}>
       <ContextMenu.Trigger
         ref={host}
-        className="min-h-0 min-w-0 flex-1 overflow-hidden bg-[#18181b] p-3"
+        className="min-h-0 min-w-0 flex-1 overflow-hidden p-3"
+        style={{ backgroundColor: background }}
       />
       <DropdownMenuContent
         sideOffset={0}

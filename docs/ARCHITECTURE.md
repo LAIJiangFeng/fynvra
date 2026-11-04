@@ -140,6 +140,7 @@ export interface Message {
     workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
     roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
     inPlace?: boolean;                  // 工作区没有 git（§6）：orchestrator 追加非 git 模式说明，worker 换用不提交的契约
+    planMode?: () => boolean;           // 计划模式（§7.10）：每次读取实时值，缺省视为关闭；worker 会话不生效，非 orchestrator 策略提供了就常驻 write_plan
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
@@ -158,8 +159,9 @@ export interface Message {
   type McpServerConfig = PiMcpServerConfig & { name: string };
   ```
 
-  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具；
+  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具 + `write_plan`；
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
+  - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门（§7.10）。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
   - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 放行普通操作。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止、通道缺失或断连按 deny，拒绝以可读文本作为工具结果返回模型。`allow` 放行一次；`allowSession` 按 kind + 工具名缓存，从 full 切回更严档位清空缓存；切档位不自动答复已有请求。
@@ -168,6 +170,7 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
+  `write_plan { title, content, file? }`（§7.10）也注册给 orchestrator 策略的会话（`readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时同样常驻），但不属于这组映射：它在 agent 进程内直接写 `<cwd>/.fynvra/plans/`，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。计划模式开启时（`createOrchestrationTools` 的 `planMode`）`dispatch_task` 返回错误、不调用 host，其他编排工具不变。
   `model` / `thinking` / `fast` 仅按用户明确要求设置，可同时指定；公开 Fast 参数为可选 boolean `fast`，归一化兼容 `fast_mode` / `fastMode`，拒绝字符串 / 数字 / null 强转。
   内部 `DispatchTaskInput` → `Task.fastMode?: boolean`（快照可选字段，旧记录兼容）→ Main launcher 保留 true / false / 缺省：true 请求开启，false 关闭继承，缺省保持角色 / 主会话 / 默认模型的原行为。排队与恢复启动沿用 Task，打回重试沿用保存的会话模型。
   agentHost 在显式 / 角色 / 主会话 / 默认模型落定后复用 `supportsFastMode` 过滤覆盖值，会话记录及 spawn spec 只带协议允许的 Fast；不支持时同模型正常启动，不改 provider、thinking 或审批。工具结果只展示 `fast requested`（true 为 `auto-if-supported`），不把 Task 请求冒充生效状态。
@@ -316,7 +319,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 分层与必改文件：core 事件类型 → agent-runtime normalize → shared unknown parser → agent piSession / supervisor → Main agentHost 快照与 sessions IPC → typed preload；Renderer 只消费快照并传 sessionId。`preferences.compactionTimeoutMs` 是原生压缩总超时，默认 10 分钟、合法范围 30 秒至 30 分钟，spawn 时取快照；策略与超时在新加载（包括显式恢复重载）/重启生效。旁路状态参与 seq 但不推进灰字建议活动轮次；四种 SessionStatus、最终 agent_settled、generation、审批/编排结算不变。当前 context 使用 resolved model 窗口与 SDK getContextUsage，压缩后 tokens:null 明确未知，不复用旧用量、不改变窗口、不与累计计费混合。不改网站、SDK/node_modules、Magic 算法，不新增普通手动压缩入口，只提供失败恢复操作。
 
 - 原生生命周期使用 `compaction` / `retry` 事件与 `context_runtime.snapshot` 旁路快照；`operationId` 是每次压缩独立生成的 UUID 标识，不因重建实例或 worker 而复用，`startedAt` 只表示时间。Main 以 sessionId/generation 丢弃旧实例事件，并将 worker 每代 seq 重写为当前 Main 生命周期内跨 generation 单调递增的会话 seq。Main 的 `SessionSummary`、get/history 返回 `contextRuntime` 及对应的 `contextRuntimeSeq`；未加载或卸载后不声明引擎已生效。列表/历史迟到响应必须按该 seq 与实时事件比较。history 另可返回 `contextRecovery?: { recoveryRequired: boolean }`：只读当前 jsonl 分支最后有效的恢复 checkpoint，不包含正文或引擎信息；无 checkpoint 省略，已完成恢复返回 false。冷 history 始终返回读取开始前捕获的 `contextRuntimeSeq` 水位（新 Main 为 0），不用读取结束后的新 seq 标注旧磁盘结果。加载中或读期间有新 live 事实时省略冷提示，存在真实 runtime 则优先返回 runtime 及其对应 seq。list 不为此读全量文件，sessions.json 不存恢复提示。快照分开记录 configured/effective 策略（Magic 故障后仍为 magic-context，以 recoveryRequired 表示暂停）、timeout、实际 contextWindow、SDK tokens 或明确 null、原生实际阈值，以及恢复锁/未消费输入数。
-- `sessions:retry-compaction` / preload `sessions.retryCompaction(sessionId)` 仅接收会话 id。Main 互斥接受后立即 ACK，压缩及恢复结果由事件结算；未加载或 worker 退出后也可仅凭 sessionId 加载原 jsonl，由真实 worker 检查 checkpoint，没有恢复锁则清晰失败、不压缩普通 idle 会话。内部 requestId 将载入与恢复完成绑定为同一个互斥操作，匹配的 worker result 才释放；Stop 作废载入令牌，并在 worker 等待 opening 的边界复验取消代际，迟到 spawn/result 不启动恢复。加载失败不改 checkpoint、历史或未消费输入，effective 引擎只由真实加载实例发布。原生压缩成功前 provider 请求被锁住；Magic 只在显式恢复期间允许进入受保护的 context 处理，未就绪或变换失败仍拒绝请求，恢复原输入期间 UI 队列只暂时等待：运行、压缩/退避、恢复锁及宿主未消费输入都阻止投递；恢复完成、pending 归零且会话 idle 后自动按 FIFO 继续，无需再点「恢复队列」。恢复失败只等待显式恢复，不自动重试；只有用户 Stop、与恢复无关的运行失败或未确认的 prompt 失败保留手动暂停，迟到成功事件不能解除这些暂停。宿主将未消费输入及恢复锁作为 `fynvra-context-recovery` custom entry 保存于 pi jsonl；持久 `blocked` 标记贯穿压缩成功后的原输入恢复阶段，只有恢复完成才清除。`resumeCompactionId` 仅用于原生模式，关联当前分支上已提交的压缩边界，重载后仅由新的显式操作继续原输入，不重复压缩已经缩短的上下文；后续压缩失败会清除此边界。Magic 恢复会重新加载同一 jsonl/SQLite，supervisor 等旧实例 dispose 完成后才打开新代。确有中断轮次或未消费输入时，由 context 钩子重新变换并校验就绪/取消状态，完整 run 成功结算后才解除持久锁；SDK transient 重试的中间错误不提前上锁，只认归一化最终 error / agent_settled，Stop 与真正 Magic 故障立即阻断。纯空闲/初始化故障没有待继续的任务时，直接通过公开、受保护的 `transformContext(session.messages, signal)` 校验当前投影（包括空历史），不造输入、不调用 `sendCustomMessage` 或触发新的对话轮次；校验成功后解锁，后续后台 Magic 故障仍会重新暂停并保留恢复锁。两条路径都不把旧 native checkpoint、插件 ready 或旧 marker 当作已完成恢复，不调用 `session.compact()`。依据 SDK user message_end（持久化之后记录消费）区分已写和未写，不依赖 Renderer 重发。已写的中断输入通过公开 `sendCustomMessage(..., { triggerTurn: true })` 发一个 `display:false` 的 `fynvra-compaction-resume` 控制标记继续完整 run；标记不是 user entry，不进入普通聊天投影或用户消息计数，原 user 不再写一次。仍未消费的原输入由后台补发一次。所有恢复只由显式操作开始，Stop 不自动继续。
+- `sessions:retry-compaction` / preload `sessions.retryCompaction(sessionId)` 仅接收会话 id。Main 互斥接受后立即 ACK，压缩及恢复结果由事件结算；未加载或 worker 退出后也可仅凭 sessionId 加载原 jsonl，由真实 worker 检查 checkpoint，没有恢复锁则清晰失败、不压缩普通 idle 会话。内部 requestId 将载入与恢复完成绑定为同一个互斥操作，匹配的 worker result 才释放；Stop 作废载入令牌，并在 worker 等待 opening 的边界复验取消代际，迟到 spawn/result 不启动恢复。加载失败不改 checkpoint、历史或未消费输入，effective 引擎只由真实加载实例发布。原生压缩成功前 provider 请求被锁住；Magic 只在显式恢复期间允许进入受保护的 context 处理，未就绪或变换失败仍拒绝请求，恢复原输入期间 UI 队列只暂时等待：运行、压缩/退避、恢复锁及宿主未消费输入都阻止投递；恢复完成、pending 归零且会话不再运行（idle 或 error）后自动按 FIFO 继续。恢复失败只等待显式恢复，不自动重试。UI 队列没有手动暂停：每轮结算后（正常结束、报错或用户 Stop）自动发出下一条，Stop 请求在途时等它返回再继续；待审批、prompt 在途同样只是暂时等待。未确认的 prompt 失败把消息放回队首并提示错误，但不立即重试，等下一次会话结算、新发消息或队列项「立即发送」再继续，避免持续失败的会话死循环；会话空闲但队列非空时，新消息排到队尾并触发发送，不插队。宿主将未消费输入及恢复锁作为 `fynvra-context-recovery` custom entry 保存于 pi jsonl；持久 `blocked` 标记贯穿压缩成功后的原输入恢复阶段，只有恢复完成才清除。`resumeCompactionId` 仅用于原生模式，关联当前分支上已提交的压缩边界，重载后仅由新的显式操作继续原输入，不重复压缩已经缩短的上下文；后续压缩失败会清除此边界。Magic 恢复会重新加载同一 jsonl/SQLite，supervisor 等旧实例 dispose 完成后才打开新代。确有中断轮次或未消费输入时，由 context 钩子重新变换并校验就绪/取消状态，完整 run 成功结算后才解除持久锁；SDK transient 重试的中间错误不提前上锁，只认归一化最终 error / agent_settled，Stop 与真正 Magic 故障立即阻断。纯空闲/初始化故障没有待继续的任务时，直接通过公开、受保护的 `transformContext(session.messages, signal)` 校验当前投影（包括空历史），不造输入、不调用 `sendCustomMessage` 或触发新的对话轮次；校验成功后解锁，后续后台 Magic 故障仍会重新暂停并保留恢复锁。两条路径都不把旧 native checkpoint、插件 ready 或旧 marker 当作已完成恢复，不调用 `session.compact()`。依据 SDK user message_end（持久化之后记录消费）区分已写和未写，不依赖 Renderer 重发。已写的中断输入通过公开 `sendCustomMessage(..., { triggerTurn: true })` 发一个 `display:false` 的 `fynvra-compaction-resume` 控制标记继续完整 run；标记不是 user entry，不进入普通聊天投影或用户消息计数，原 user 不再写一次。仍未消费的原输入由后台补发一次。所有恢复只由显式操作开始，Stop 不自动继续。
 
 本轮修复的行为差异：Magic 只在 historian 校验并发布后记录成功；超时、最终校验/无进展与存储失败按会话退役，Stop/关闭只取消。Agent host 与 vendored 插件共同为异步操作绑定会话取消代际，在 SQLite、context 返回及 marker 追加处复验，防止退役或关闭后的迟到写入。预算使用当前模型的保守 UTF-8 字节估算并按完整块切分，不截断 XML。必改范围为 `src/agent/magicContext.ts` / `piSession.ts`、vendored Magic、会话 warning / suggestion 投影及本节文档；不改变工具审批、权限、官网、Fast 或模型路由配置。
 
@@ -341,6 +344,51 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 建议结果带 `requestId`、generation、sessionId、roundId 回 Main；Main 再核对轮次 / 状态并清洗成一行至多 200 字符。`prompt` / `steer` / `setModel` / `abort` / 删除 / 归档 / worker 崩溃都会取消在途请求或丢弃迟到回包；worker 生成前后都核对 generation、回合计数与空闲状态。失败、超时、取消一律静默返回空建议，不影响主聊天状态。
 - Renderer 的灰字建议与 draft 分离：不进入草稿、不使发送按钮可用、不被 Enter 发送；只有建议可见、无修饰键、未组字（`isComposing` / composition / keyCode 229）、无选区且光标在末尾时，右箭头才把建议写入本会话 draft 并把光标放到末尾，不自动发送。Esc 忽略本轮且不重新出现；草稿是建议前缀时只显示剩余灰字，不匹配的普通输入立即隐藏；运行中、错误、队列、审批、图片、历史浏览时不显示。
 - 灰字层复用输入框排版与明暗主题，`pointer-events-none`、`aria-hidden`，另用简短 live region 提示右箭头采纳；长建议截断并随输入框滚动。不改正常对话 prompt / 工具 / thinking / Fast，不新增通用设置开关。
+
+### 7.10 计划模式
+
+- 行为差异：
+  - 开关：按会话的「计划模式」开关，所有角色的会话都可用，只有派发出的 worker 会话不可用。入口在输入框工具栏、审批档位选择器旁。新会话默认关闭，状态随会话记录保存在 sessions.json，重启、归档后恢复都保持。运行中也能切换：主 agent 的派发拦截立即生效，提示词从下一次 run 起变化。
+  - 计划目录：`<cwd>/.fynvra/plans/`。非派发会话的 cwd 是工作区仓库，即当前项目根目录，例如 `D:\project\Agent-Forge\.fynvra\plans\`，不是用户主目录；开关提示里写明「当前项目的 .fynvra/plans/」。
+  - 主 agent（orchestrator 策略）开启时：专门写计划文档。先读代码，再用 `write_plan` 把一份 Markdown 计划写到计划目录，包含目标、方案、任务拆分（每个任务的角色、文件归属、验收）、顺序与依赖、风险、不做的事；在回复里给出计划文件的链接请用户审阅，按反馈更新同一份文件。`dispatch_task` 被拒绝；已在跑的 worker 照常处理：回答、审查、合并、打回、清理。
+  - 其他角色（工具策略不是 orchestrator）开启时：只做只读调查，用 `write_plan` 写计划，不能改文件。审批门收紧：write / edit / apply_patch 直接拦截；bash / powershell 只读的命令（判定见下文 agent-runtime 一条）按原审批档位处理，其余不论档位都要人确认；MCP 工具不论档位都要人确认；保护底线不变，`allowSession` 照旧。
+  - 审阅与执行：用户在应用内打开计划文件，预览或直接编辑。审阅通过后关闭计划模式：主 agent 先重读计划文件（用户可能改过），再按计划派发；其他角色不再受计划模式限制，按原审批档位执行。
+  - 计划文件与 git：计划文件不自动提交；未提交时 worker 的 worktree 里看不到它，所以任务书仍须完整自足。要不要提交，或在 `.gitignore` 里忽略 `.fynvra/`，由用户决定；没忽略时计划文件会出现在「改动」里，「全部丢弃」会删除这些未跟踪的计划文件。
+  - `write_plan` 的使用范围：主 agent 和其他角色的非派发会话都常驻；只能写计划目录，所以不走文件写入审批；计划模式关闭时也能用，供用户要求书面计划时使用。
+- 必改层与文件：
+  - shared `types/{chat,agent,ipc}.ts` 与 Main 字典 `i18n/main/{zh-CN,en}.ts`：`SessionSummary.planMode?: boolean`，仅开启时为 true；`SpawnSessionSpec.planMode?: boolean`；AgentCommand `{ type: 'set-plan-mode'; identity; enabled: boolean }`，unknown parser 只认布尔；IPC 通道 `sessions:set-plan-mode`，入参只有 `{ sessionId, enabled }`。
+  - preload `domains/sessions.ts`：`sessions.setPlanMode({ sessionId, enabled })`，返回 `IpcResult<{ session }>`。
+  - Main `services/sessions/sessionStore.ts`、`services/agentHost/agentHost.ts`、`ipc/sessions.ts`：会话记录是权威。`setPlanMode` 镜像 `setApprovalMode`：更新记录和缓存的 spawn spec；会话已在 worker 里时发 `set-plan-mode`，发不出去就 detach，之后按记录重新 spawn；最后广播 `sessions:changed`。spawn 前按会话记录的当前值重设 `planMode`，会话启动途中切换开关也不会丢（`agentHost.ts` 的 `withPlanMode`）。派发出的 worker 会话一律拒绝，其他会话不看角色；worker 会话的 spawn spec 永远不带 `planMode`，也不继承父会话。
+  - agent `supervisor.ts`、`piSession.ts`：supervisor 处理 `set-plan-mode`，接在会话的 opening 上，运行中也立即生效；piSession 持有开关的当前值，传给 createRoleSession。
+  - agent-runtime `tools/orchestrationTools.ts`、`tools/writePlanTool.ts`、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`approval/`（审批门）、`index.ts`、`README.md`：
+    `CreateRoleSessionOptions.planMode?: () => boolean` 每次读取实时值，缺省视为关闭；worker 会话不生效。
+    orchestrator 策略（行为不变）：`createOrchestrationTools` 的 options 有同名开关：开启时 `dispatch_task` 返回错误、不调用 host，其他编排工具不变。
+    `ORCHESTRATOR_PROMPT` 增加 `write_plan` 条目；新增 `PLAN_MODE_PROMPT`（标题为 `# Plan mode is on`），只在开关为真时，于每次 run 的 `before_agent_start` 追加到角色追加段之后。
+    其他策略：提供了 `planMode`、工具策略不是 orchestrator、且不是 worker 会话时，常驻 `write_plan`（写 `<cwd>/.fynvra/plans/`）；计划模式开启时每次 run 都追加 `DIRECT_PLAN_MODE_PROMPT`，审批门（`createApprovalGate`）按上面「其他角色」一条收紧。只读判定 `isReadOnlyCommand` 偏保守：按 `;` `&&` `||` `|` 拆开后，每段的第一个命令都要在白名单里；只要含重定向、命令替换、PowerShell 脚本块等，就算非只读。agent 进程的 `piSession.ts` 总会提供 `planMode`，所以各角色的非派发会话都有 `write_plan`。
+    `pi/extensions.ts` 的 `appendSystemPromptExtension` 也接受按 run 取文本的函数，返回空就不追加；pi 1.4 每个 run 都会复制一份新的 options，所以关闭计划模式后这段不会残留。
+  - agent-runtime 新工具 `write_plan { title, content, file? }`：注册给 orchestrator 策略的会话，以及上面那类其他策略的会话；在 agent 进程内直接写文件；不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。
+    新建的路径是 `<cwd>/.fynvra/plans/<YYYYMMDD-HHmm>-<slug>.md`：slug 保留 Unicode 字母和数字，最多 48 个字符，为空时用 `plan`；重名时依次加 `-2`、`-3`……，独占创建，不覆盖已有文件。
+    传 `file`（已有计划的纯文件名）时，先写同目录临时文件再 rename，整份替换。正文为 UTF-8，不超过 256 KiB；`.fynvra` 或 `plans` 是符号链接，或 realpath 越出 cwd 时拒绝。
+    正文含 NUL 时拒绝，开头的 BOM 会去掉；`file` 含 Windows 保留字符（`<>:"|?*`）或控制字符时拒绝；更新已有计划时不会创建计划目录。
+  - Renderer `lib/api/sessions.ts`（含 mock）、`stores/sessions/createSessionsStore.ts`、`components/chat/PlanModeToggle.tsx`（挂在 `Composer.tsx` 的审批档位选择器之后）、`components/chat/toolDisplay.ts` / `ToolCallCard.tsx`、`i18n/{zh-CN,en}.ts`：输入框工具栏的开关在会话存在、且没有 `dispatchId` 时显示，不看角色；文案中英双语，提示写明计划在当前项目的 `.fynvra/plans/`；store 先乐观切换，失败时换回原状态并提示，再重拉列表；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
+- 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；派发出的 worker 会话开启计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）。
+
+### 7.11 外观设置
+
+- 行为差异：
+  - 设置页「外观」在「主题」之下新增「界面」「终端」两节，各有「恢复默认」；全部即时生效，不用重启。
+  - 界面：字体（CSS font-family 列表，留空用内置字体栈，占位符显示该字体栈）、字号（正文字号，整数 12–24 px，默认 14）、字重。根字号 = 16 × 字号 / 14，写在 `<html>` 上，Tailwind 的 rem 尺寸随之缩放，相当于整体缩放界面；文件编辑器字号由 `13px` 改为 `0.8125rem`，一起缩放。字体同时覆盖 `--font-sans`，`font-mono` 的代码块、diff 不受影响。字重是 `<html>` 上的默认字重，组件里显式设了字重的文字不受影响。是默认值的项不写行内样式。
+  - 终端：配色方案（默认 `fynvra`，即此前写死的颜色）、字体（留空用 `Consolas, "Cascadia Mono", Menlo, monospace`）、字号（整数 8–32 px，默认 14）、字重（默认 normal）、粗体字重（默认 bold）。新终端按当前设置创建；已打开的终端更新 xterm 的 `options`（fontFamily / fontSize / fontWeight / fontWeightBold / theme），显示中的重新 fit，新行列数沿用 `onResize → terminals:resize` 同步给 PTY；隐藏或卸下的终端量不出尺寸，切回时由 TerminalPane 再 fit。终端四周的留白也用方案的背景色。
+  - 文本框与数字框在失焦或回车（输入法选词的回车除外）时提交；不合法的值不提交并恢复原值，不会每按一次键就写一次 settings.json。
+- 持久化与校验：
+  - `Preferences` 新增可选字段 `uiFontFamily` / `uiFontSize` / `uiFontWeight` / `terminalColorScheme` / `terminalFontFamily` / `terminalFontSize` / `terminalFontWeight` / `terminalFontWeightBold`：缺省即默认值，不写进 `DEFAULT_PREFERENCES`，读取用 `appearancePreferencesOf`。
+  - 字体 trim 后不超过 200 个字符，不含控制字符与 `;{}`；字号为整数且在各自范围内；字重限 `100 / 200 / 300 / normal / 500 / 600 / bold / 800 / 900`（xterm.js 的 FontWeight 取值）；配色方案须是方案列表里的 id。`parsePreferences` 读盘遇到非法值只丢掉该字段；`settings:update` 的补丁有任一非法值就整个作废，字段给 `undefined`（字体也可给空串）表示恢复默认，即删除该字段。Renderer 另用 `CSS.supports` 拦下浏览器不认的字体写法。
+  - 沿用 `settings:update` / `settings:changed`，不新增 IPC。Renderer 只写改动的字段，不经 `useSettingsStore` 的整块落盘。
+- 必改层与文件：
+  - shared：新增纯数据模块 `terminalColorSchemes.ts`，导出方案列表（id、显示名、xterm `ITheme` 形状的颜色），Main 的校验与 Renderer 共用 id 列表；除 `fynvra` 外，颜色取自 iTerm2-Color-Schemes（MIT）的 ghostty 导出，文件里逐个注明来源。`types/settings.ts`：字段、默认值、校验，以及 `parsePreferences` 与 `parsePreferencesPatch` 的接线。
+  - Main：不用改。补丁解析与读盘、落盘时的 `parseSettings` 都在 shared，Main 没有另外的字段白名单。
+  - Renderer：`stores/settings.ts` 的 `useAppearanceStore`（仿通用偏好：只写改动的字段，先乐观更新，保存失败按 Main 重读并提示）；`lib/appearance.ts` 的 `bindDocumentAppearance`；`stores/terminals.ts` 的创建选项与 `bindTerminalAppearance`；`main.tsx` 启动时挂上这两个绑定，首帧等外观设置读回（与偏好共用 1 秒上限）；`components/terminal/TerminalPane.tsx` 的留白底色；`components/files/FileEditor.tsx` 的字号；`components/settings/AppearanceSettings.tsx`；`i18n/{zh-CN,en}.ts`。
+- 明确不做：界面配色方案（即现有的主题）、界面粗体字重、自定义配色导入、按工作区区分的设置、代码块与 diff 的独立字体设置、快捷键缩放。
 
 ## 8. 分阶段
 
@@ -375,6 +423,7 @@ export interface SessionSummary {
   worktreeId?: string; parentSessionId?: string; dispatchId?: string;
   status: SessionStatus; createdAt: number; updatedAt: number;
   model?: SessionModelRef;
+  planMode?: boolean;    // 计划模式（§7.10）：仅开启时为 true，随会话记录保存在 sessions.json
   archivedAt?: number;   // 归档时间（Task 26）：手动归档或闲置扫描；恢复、会话再次运行时清除
 }
 export type ChatRole = 'user' | 'assistant';
@@ -427,6 +476,8 @@ export interface SessionsApi {
   /** 换模型 / 思考档位 / Fast：运行中拒绝；解析失败返回可读错误、记录不变；成功后下一次 prompt 起生效，pi 会话历史保留 */
   setModel(input: { sessionId: string; model: SessionModelRef }): Promise<IpcResult<{ session: SessionSummary }>>;
   modelOptions(input?: { workspaceId?: string }): Promise<IpcResult<ModelOptions>>;
+  /** 计划模式开关（§7.10）：派发出的 worker 会话拒绝；运行中也能切 */
+  setPlanMode(input: { sessionId: string; enabled: boolean }): Promise<IpcResult<{ session: SessionSummary }>>;
   archive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;   // 运行中拒绝
   unarchive(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>; // 闲置计时重新开始
   sweep(): Promise<IpcResult<{ archived: number; removed: number }>>;            // 按设置立即扫一次
@@ -435,7 +486,7 @@ export interface SessionsApi {
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
 
 - **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
   归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经

@@ -27,6 +27,7 @@ import {
   type RespondApprovalInput,
   type SetApprovalModeInput,
   type SetModelInput,
+  type SetPlanModeInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
@@ -258,6 +259,16 @@ export function registerSessionHandlers(
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SET_PLAN_MODE,
+    (_event, raw: unknown): Promise<IpcResult<{ session: SessionSummary }>> => {
+      const input = parseSetPlanModeInput(raw);
+      return input
+        ? guard(() => host().setPlanMode(input))
+        : invalid(translate('sessions.invalidPlanMode'));
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.SESSIONS_SUGGEST_REPLY,
     (_event, raw: unknown): Promise<IpcResult<{ suggestion: ReplySuggestion | null }>> => {
       const input = parseSuggestReplyInput(raw);
@@ -323,6 +334,14 @@ export function parseSetApprovalModeInput(raw: unknown): SetApprovalModeInput | 
   const sessionId = parseSessionId(record?.sessionId);
   const mode = record?.mode;
   return sessionId && isApprovalMode(mode) ? { sessionId, mode } : null;
+}
+
+/** `{ sessionId, enabled }`：enabled 只能是真正的布尔值，不带其他字段 */
+export function parseSetPlanModeInput(raw: unknown): SetPlanModeInput | null {
+  const record = strictRecord(raw, ['sessionId', 'enabled']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const enabled = record?.enabled;
+  return sessionId && typeof enabled === 'boolean' ? { sessionId, enabled } : null;
 }
 
 /** `{ sessionId, roundId }`：roundId 是 settled 事件的会话级 seq，只接受正整数，不带其他字段 */

@@ -252,6 +252,7 @@ export const en: MessagesShape<typeof zhCN> = {
       approvalNotDelivered: 'Approval reply not delivered: {error}',
       setModelFailed: 'Failed to switch model: {error}',
       setApprovalModeFailed: 'Failed to switch approval mode: {error}',
+      setPlanModeFailed: 'Failed to switch plan mode: {error}',
       emptyMessage: 'Message is empty',
       busy: 'Session is running',
       approvalGone: 'Approval request not found or expired',
@@ -262,13 +263,18 @@ export const en: MessagesShape<typeof zhCN> = {
   chat: {
     message: 'Message',
     placeholder: 'Message',
+    placeholderOrchestrator:
+      "Tell me what you need and I'll split it into tasks for workers, e.g. add search to the sidebar",
+    placeholderOrchestratorPlan:
+      "Tell me what you need and I'll write a plan for you to review first, e.g. add export to Settings",
+    placeholderOtherRole: 'Tell me what to do, e.g. fix the login page error or explain a function',
+    placeholderOtherRolePlan:
+      "Tell me what to do; I'll investigate and plan, then act after your review, e.g. refactor the user module",
     composerHint: '{send} to send, {newline} for a new line, {prev} / {next} for history',
     stop: 'Stop',
     send: 'Send',
     working: 'Generating a reply…',
     elapsed: 'Waiting {seconds}s',
-    queuePaused: 'Queue paused; messages preserved',
-    resumeQueue: 'Resume queue',
     stopping: 'Cancelling…',
     compacting: 'Compacting conversation history',
     compactionRecovering: 'Recovering context…',
@@ -411,6 +417,10 @@ export const en: MessagesShape<typeof zhCN> = {
     allowSession: 'Allow for session',
     allow: 'Allow',
   },
+  planMode: {
+    label: 'Plan',
+    hint: "Plan mode: the plan is first written as a document, saved under .fynvra/plans/ in the current project; while it's on, no tasks are dispatched, no files are changed, and commands that make changes need your confirmation. Turn it off after review to carry out the plan",
+  },
   tools: {
     labels: {
       read: 'Read',
@@ -422,6 +432,7 @@ export const en: MessagesShape<typeof zhCN> = {
       ls: 'List folder',
       git_readonly: 'Git',
       dispatch_task: 'Dispatch task',
+      write_plan: 'Write plan',
       list_workers: 'List workers',
       wait_for_workers: 'Wait for workers',
       read_worker_output: 'Read worker output',
@@ -782,6 +793,31 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     appearance: {
       theme: 'Theme',
+      interface: 'Interface',
+      terminal: 'Terminal',
+      resetDefault: 'Restore defaults',
+      font: 'Font',
+      fontSize: 'Font size',
+      fontWeight: 'Font weight',
+      fontWeightBold: 'Bold font weight',
+      colorScheme: 'Color scheme',
+      uiFontHint:
+        'CSS font-family list; leave empty for the built-in fonts. Code blocks and diffs stay monospace',
+      uiFontSizeHint: 'Body text size, {min}–{max} px; the whole interface scales with it',
+      uiFontWeightHint: 'Default weight of body text; text with its own weight is unchanged',
+      terminalFontHint: 'CSS font-family list; leave empty for the default',
+      terminalFontSizeHint: '{min}–{max} px',
+      weights: {
+        thin: '100 (Thin)',
+        extraLight: '200 (Extra Light)',
+        light: '300 (Light)',
+        normal: 'Normal',
+        medium: '500 (Medium)',
+        semiBold: '600 (Semi Bold)',
+        bold: 'Bold',
+        extraBold: '800 (Extra Bold)',
+        black: '900 (Black)',
+      },
     },
     roles: {
       new: 'New',

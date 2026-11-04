@@ -50,6 +50,11 @@ export interface SupervisedSession {
   setModel(spec: ResolvedModelSpec): Promise<void>;
   /** 换审批档位：下一次工具调用起生效；不自动答复待审批请求。 */
   setApprovalMode(mode: ApprovalMode): void;
+  /**
+   * 可选：切换计划模式（不分角色，派发出的 worker 会话除外），下一次 run / 工具调用起按新状态。
+   * 生产会话（piSession）实现；脚本化测试会话可以不实现（supervisor 记一条日志后忽略）
+   */
+  setPlanMode?(enabled: boolean): void;
   retryCompaction?(): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
@@ -185,6 +190,9 @@ export class SessionSupervisor {
         return;
       case 'set-approval-mode':
         this.#setApprovalMode(command.identity, command.mode);
+        return;
+      case 'set-plan-mode':
+        this.#setPlanMode(command.identity, command.enabled);
         return;
       case 'suggest-reply':
         void this.#suggest(command.identity, command.requestId, command.roundId, command.round);
@@ -477,6 +485,40 @@ export class SessionSupervisor {
         return null;
       }
       this.#log('info', `session ${identity.sessionId}: approval mode ${mode}`);
+      return session;
+    });
+  }
+
+  /**
+   * 切换计划模式同样接在 opening 上，运行中也立即生效。会话没实现 setPlanMode 时记一条日志后忽略。
+   * 换不成功时开关可能与 Main 的记录对不上：关掉会话并报 fatal，Main 下次使用前按记录重新 spawn。
+   */
+  #setPlanMode(identity: SessionIdentity, enabled: boolean): void {
+    const managed = this.#current(identity);
+    if (!managed) {
+      this.#reportMissing(identity, 'set-plan-mode');
+      return;
+    }
+    managed.opening = managed.opening.then(async (session) => {
+      if (!session || managed.closed) return session;
+      if (!session.setPlanMode) {
+        this.#log(
+          'warn',
+          `session ${identity.sessionId}: ignored set-plan-mode: the session does not support plan mode`
+        );
+        return session;
+      }
+      try {
+        session.setPlanMode(enabled);
+      } catch (error) {
+        await this.#abandon(
+          managed,
+          session,
+          `failed to switch the plan mode: ${errorMessage(error)}`
+        );
+        return null;
+      }
+      this.#log('info', `session ${identity.sessionId}: plan mode ${enabled ? 'on' : 'off'}`);
       return session;
     });
   }
