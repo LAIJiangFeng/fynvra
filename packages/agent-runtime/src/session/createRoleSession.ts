@@ -21,7 +21,11 @@ import type { OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
 import { bindSessionExtensions, emitSessionShutdown } from '../pi/lifecycle';
 import { createRoleMcpExtensions, type McpServerConfig } from '../pi/mcp';
-import { buildRolePromptAppend, PLAN_MODE_PROMPT } from '../prompts/orchestratorPrompt';
+import {
+  buildRolePromptAppend,
+  DIRECT_PLAN_MODE_PROMPT,
+  PLAN_MODE_PROMPT,
+} from '../prompts/orchestratorPrompt';
 import { createOrchestrationTools, type RoleOption } from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
 import {
@@ -73,9 +77,13 @@ export interface CreateRoleSessionOptions {
    */
   inPlace?: boolean;
   /**
-   * 计划模式的实时开关，宿主持有、随时可变；只对 `role.tools === 'orchestrator'` 的会话生效，其他工具策略忽略它。
-   * 每次 run 开始时读取：为 true 就在角色追加段之后追加 `PLAN_MODE_PROMPT`，关闭后从下一次 run 起这段消失；
-   * 每次 dispatch_task 调用时也读取：为 true 时拒绝派发、不调用 host。缺省视为永远关闭。
+   * 计划模式的实时开关，宿主持有、随时可变；缺省视为永远关闭。关闭后提示词从下一次 run 起、拦截从下一次工具调用起恢复原样。
+   * - `role.tools === 'orchestrator'`：每次 run 开始时读取，为 true 就在角色追加段之后追加 `PLAN_MODE_PROMPT`；
+   *   每次 dispatch_task 调用时也读取，为 true 时拒绝派发、不调用 host。
+   * - 其他工具策略的非 worker 会话（没有 `workerHost`）：write_plan 常驻（与开关当前是否打开无关）；
+   *   每次 run 开始时读取，为 true 就追加 `DIRECT_PLAN_MODE_PROMPT`；审批门每次工具调用时读取，为 true 时
+   *   write / edit / apply_patch 直接拦截，非只读命令与 MCP 不论档位都要人确认（见 createApprovalGate 的 `planMode`）。
+   * - 其他工具策略的 worker 会话忽略它。
    */
   planMode?: () => boolean;
   /** 默认 `SettingsManager.inMemory`：不读用户的 ~/.pi 与项目 .pi 设置 */
@@ -118,10 +126,11 @@ export interface RoleSession {
 /**
  * 按角色创建 pi `AgentSession`（ARCHITECTURE §5）：
  * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan；`readonly` → 只读工具；`all` → pi 默认工具。
- *   传入 `workerHost` 时再加 worker 工具。
+ *   传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
- * - `planMode`（只对 orchestrator 策略）：开着时每次 run 再追加 `PLAN_MODE_PROMPT`，dispatch_task 拒绝派发。
+ * - `planMode`：开着时 orchestrator 策略每次 run 再追加 `PLAN_MODE_PROMPT`、dispatch_task 拒绝派发；
+ *   其他策略的非 worker 会话追加 `DIRECT_PLAN_MODE_PROMPT`，审批门拦截改文件的工具、非只读命令与 MCP 要人确认。
  * - role.approvalMode → 审批门（tool_call 拦截），经 `approval` 请求人工审批。
  */
 export async function createRoleSession(options: CreateRoleSessionOptions): Promise<RoleSession> {
@@ -129,8 +138,18 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   const workerToolset = options.workerHost
     ? createWorkerTools(options.workerHost, options.workerTools)
     : undefined;
+  const orchestrator = role.tools === 'orchestrator';
+  // 计划模式：orchestrator 策略照旧（拒绝派发 + PLAN_MODE_PROMPT）；其他策略只对非 worker 会话生效
+  // （write_plan + DIRECT_PLAN_MODE_PROMPT + 审批门拦截），worker 会话忽略开关
+  const planMode = orchestrator || !workerToolset ? options.planMode : undefined;
+  const directPlanMode = orchestrator ? undefined : planMode;
   const settingsManager = options.settingsManager ?? createDefaultSettings();
-  const { customTools, noTools } = selectTools(options, workerToolset, settingsManager);
+  const { customTools, noTools } = selectTools(
+    options,
+    workerToolset,
+    settingsManager,
+    directPlanMode !== undefined
+  );
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
   const promptAppend = buildRolePromptAppend(role, {
@@ -140,11 +159,11 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
       ? { instructionFile: options.resourcePaths.instructionFile }
       : {}),
   });
-  // 计划模式只对 orchestrator 工具策略生效，其他策略忽略
-  const planMode = role.tools === 'orchestrator' ? options.planMode : undefined;
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
+    // orchestrator 不传：它没有改文件的工具，run_checks 等编排工具不受计划模式影响
+    ...(directPlanMode ? { planMode: directPlanMode } : {}),
   });
   const extensionFactories: InlineExtension[] = [
     // 第一个注册：拦截在其他扩展的 tool_call 处理之前
@@ -155,7 +174,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...(planMode
       ? [
           appendSystemPromptExtension('fynvra-plan-mode', () =>
-            planMode() ? PLAN_MODE_PROMPT : undefined
+            planMode() ? (orchestrator ? PLAN_MODE_PROMPT : DIRECT_PLAN_MODE_PROMPT) : undefined
           ),
         ]
       : []),
@@ -215,10 +234,12 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   };
 }
 
+/** `writePlan`：给 readonly / all 策略加 write_plan（计划模式下的非 worker 会话）；orchestrator 策略总有它 */
 function selectTools(
   options: CreateRoleSessionOptions,
   workerToolset: WorkerToolset | undefined,
-  settings: SettingsManager
+  settings: SettingsManager,
+  writePlan: boolean
 ): { customTools: ToolDefinition[]; noTools?: 'builtin' } {
   const { role, cwd, commandEnv } = options;
   const exec =
@@ -231,6 +252,8 @@ function selectTools(
           })) satisfies ExecFn)
       : undefined);
   const workerTools = workerToolset?.tools ?? [];
+  // 描述不说「唯一能写的文件」：all 策略还有 pi 的 write / edit（名字不冲突）
+  const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
   switch (role.tools) {
     case 'orchestrator': {
       if (!options.host) {
@@ -255,10 +278,14 @@ function selectTools(
     case 'readonly':
       return {
         noTools: 'builtin',
-        customTools: [...createReadonlyTools(cwd, exec ? { exec } : {}), ...workerTools],
+        customTools: [
+          ...createReadonlyTools(cwd, exec ? { exec } : {}),
+          ...planTools,
+          ...workerTools,
+        ],
       };
     case 'all': {
-      if (!commandEnv) return { customTools: workerTools };
+      if (!commandEnv) return { customTools: [...planTools, ...workerTools] };
       const spawnHook: BashSpawnHook = (ctx) => ({ ...ctx, env: commandEnv(ctx.env) });
       // Override implementations, not selection: defaultActive=false preserves pi's defaultTools.
       return {
@@ -275,6 +302,7 @@ function selectTools(
             ...createPowerShellToolDefinition(cwd, { spawnHook }),
             defaultActive: false,
           }),
+          ...planTools,
           ...workerTools,
         ],
       };

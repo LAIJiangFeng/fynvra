@@ -23,6 +23,7 @@ export {
   type ToolCallDescription,
 } from './approval/policy';
 export { protectedAction } from './approval/protectedCommand';
+export { isReadOnlyCommand } from './approval/readonlyCommand';
 export {
   createEventNormalizer,
   type EventNormalizer,
@@ -66,6 +67,7 @@ export {
 export type { McpServerConfig } from './pi/mcp';
 export {
   buildRolePromptAppend,
+  DIRECT_PLAN_MODE_PROMPT,
   ORCHESTRATOR_PROMPT,
   PLAN_MODE_PROMPT,
   WORKER_CONTRACT_PROMPT,
@@ -111,4 +113,5 @@ export {
   PLANS_DIR,
   WRITE_PLAN_TOOL_NAME,
   type WritePlanDetails,
+  type WritePlanToolOptions,
 } from './tools/writePlanTool';
