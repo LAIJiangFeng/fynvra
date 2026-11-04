@@ -126,8 +126,9 @@ export interface SpawnSessionSpec {
    */
   inPlace?: boolean;
   /**
-   * 计划模式：只有主 agent 会话、且会话记录里开着时才带（true），worker 会话永远不带。
-   * 开启时主 agent 只写计划文档（write_plan），dispatch_task 被拒绝；运行中由 set-plan-mode 切换
+   * 计划模式：会话记录里开着时才带（true），不分角色；派发出的 worker 会话永远不带。
+   * 开启时主 agent 只写计划文档（write_plan），dispatch_task 被拒绝；其他角色拦截改文件的工具，
+   * 非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
    */
   planMode?: boolean;
 }
@@ -195,7 +196,8 @@ export type AgentCommand =
    */
   | { type: 'set-approval-mode'; identity: SessionIdentity; mode: ApprovalMode }
   /**
-   * 切换计划模式（只发给主 agent 会话）：worker 更新会话的开关，下一次工具调用起按新状态，运行中也可切换
+   * 切换计划模式（不分角色，不发给派发出的 worker 会话）：worker 更新会话的开关，
+   * 下一次工具调用起按新状态，运行中也可切换
    */
   | { type: 'set-plan-mode'; identity: SessionIdentity; enabled: boolean }
   /**

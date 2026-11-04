@@ -195,7 +195,7 @@ export interface AgentHostService extends AgentHost {
    */
   setApprovalMode(input: SetApprovalModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
-   * 开关主 agent 会话的计划模式：更新记录（落 sessions.json，只在开启时带字段），会话在 worker 里时发 set-plan-mode。
+   * 开关会话的计划模式（不分角色）：更新记录（落 sessions.json，只在开启时带字段），会话在 worker 里时发 set-plan-mode。
    * 运行中也可以切；派发出的 worker 会话拒绝。会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setPlanMode(input: SetPlanModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
@@ -580,7 +580,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
             compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
           }),
           ...(inPlace ? { inPlace: true } : {}),
-          // 计划模式按会话记录，只给主 agent 会话：派发出的 worker 会话永远不带
+          // 计划模式按会话记录，不分角色：派发出的 worker 会话永远不带
           ...(stored.planMode === true && stored.dispatchId === undefined
             ? { planMode: true }
             : {}),
@@ -1327,7 +1327,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   /**
    * 开关计划模式：同审批档位，记录（sessions.json）是权威，缓存的 spawn spec 一并改掉，
-   * 会话在 worker 里时再发 set-plan-mode，不论是否在跑。只给主 agent 会话：派发出的 worker 会话拒绝。
+   * 会话在 worker 里时再发 set-plan-mode，不论是否在跑。不分角色，只有派发出的 worker 会话拒绝。
    */
   async function setPlanMode({
     sessionId,
@@ -1778,7 +1778,7 @@ function withReasoning(spec: ResolvedModelSpec, reasoning: boolean | undefined):
   return reasoning === undefined ? spec : { ...spec, reasoning };
 }
 
-/** spec 的计划模式按会话记录：只有主 agent 会话、且记录里开着时才带，worker 会话永远不带 */
+/** spec 的计划模式按会话记录：记录里开着时才带，不分角色；派发出的 worker 会话永远不带 */
 function withPlanMode(spec: SpawnSessionSpec, stored: StoredSession): SpawnSessionSpec {
   const { planMode: _previous, ...rest } = spec;
   return stored.planMode === true && stored.dispatchId === undefined

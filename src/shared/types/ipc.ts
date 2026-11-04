@@ -106,7 +106,7 @@ export const IPC_CHANNELS = {
   SESSIONS_MODEL_OPTIONS: 'sessions:model-options',
   /** 换会话的审批档位：Renderer 只传会话 id 与档位；运行中也可以切，即时生效 */
   SESSIONS_SET_APPROVAL_MODE: 'sessions:set-approval-mode',
-  /** 开关主 agent 会话的计划模式：Renderer 只传会话 id 与布尔值；运行中也可以切，派发出的 worker 会话拒绝 */
+  /** 开关会话的计划模式（不分角色）：Renderer 只传会话 id 与布尔值；运行中也可以切，派发出的 worker 会话拒绝 */
   SESSIONS_SET_PLAN_MODE: 'sessions:set-plan-mode',
   /**
    * 为刚正常结束的一轮生成一条输入框回复建议：Renderer 只传 `{ sessionId, roundId }`（settled 事件的会话级 seq），
