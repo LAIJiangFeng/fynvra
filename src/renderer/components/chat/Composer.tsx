@@ -62,6 +62,7 @@ import {
 import { ModelPicker } from './ModelPicker';
 import { PlanModeToggle } from './PlanModeToggle';
 import { ReplySuggestionGhost } from './ReplySuggestionGhost';
+import { isOrchestratorRole, useRoles } from './roles';
 
 type Caret = 'start' | 'end';
 
@@ -189,6 +190,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const suggestion = useSessionsStore(selectReplySuggestionOf(sessionId));
   const approvals = useSessionsStore(selectApprovalsOf(sessionId));
   const approvalMode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
+  const roleId = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.roleId);
+  const planMode = useSessionsStore(
+    (state) => selectSessionOf(sessionId)(state)?.planMode === true
+  );
+  const roles = useRoles();
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
   const setDraftImages = useSessionsStore((state) => state.setDraftImages);
@@ -247,6 +253,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
     draft.length < suggestion.text.length &&
     suggestion.text.startsWith(draft);
   const ghostSuffix = ghostVisible && suggestion ? suggestion.text.slice(draft.length) : '';
+  // 占位提示按角色（主 agent / 其他）与计划模式说明能做什么并举一例，不进草稿、不影响发送；
+  // 会话记录还没读到（角色未知）时用通用文案
+  const placeholder =
+    roleId === undefined
+      ? t('chat.placeholder')
+      : isOrchestratorRole(roleId, roles)
+        ? t(planMode ? 'chat.placeholderOrchestratorPlan' : 'chat.placeholderOrchestrator')
+        : t(planMode ? 'chat.placeholderOtherRolePlan' : 'chat.placeholderOtherRole');
   // While running the message is queued (sent when the turn settles) instead of being refused
   const canSend = draft.trim().length > 0 || images.length > 0;
   const submit = () => {
@@ -538,7 +552,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
             aria-label={t('chat.message')}
             aria-keyshortcuts={hints.ariaKeyShortcuts}
             title={hints.title}
-            placeholder={ghostVisible ? '' : t('chat.placeholder')}
+            placeholder={ghostVisible ? '' : placeholder}
             className="field-sizing-content relative z-10 max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
             onChange={(event) => {
               // 翻到的内容一经编辑就成为新的草稿，不再处于浏览状态
