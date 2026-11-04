@@ -57,6 +57,7 @@ const ICONS: Record<string, LucideIcon> = {
   git_readonly: GitBranch,
   dispatch_task: Send,
   write_plan: NotebookPen,
+  write_doc: FilePen,
   list_workers: Users,
   wait_for_workers: Hourglass,
   read_worker_output: ScrollText,

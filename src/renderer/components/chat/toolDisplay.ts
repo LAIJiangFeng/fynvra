@@ -24,6 +24,7 @@ const TOOLS = {
   bash: { family: 'builtin', keys: ['command'] },
   edit: { family: 'builtin', keys: ['path'] },
   write: { family: 'builtin', keys: ['path'] },
+  write_doc: { family: 'builtin', keys: ['path'] },
   grep: { family: 'builtin', keys: ['pattern'] },
   find: { family: 'builtin', keys: ['pattern'] },
   ls: { family: 'builtin', keys: ['path'] },
