@@ -389,7 +389,7 @@ export const zhCN = {
   },
   planMode: {
     label: '计划',
-    hint: '计划模式：主 agent 先把计划写成文档（.fynvra/plans），不派发任务；审阅后关闭开关即可按计划执行',
+    hint: '计划模式：先把计划写成文档，存在当前项目的 .fynvra/plans/ 下；开启期间不派活、不改文件，有改动的命令要你确认。审阅后关闭开关即可执行',
   },
   tools: {
     labels: {
