@@ -253,10 +253,10 @@ export const zhCN = {
     message: '消息',
     placeholder: '输入消息',
     placeholderOrchestrator: '说出你的需求，我拆成任务派给 worker 去做，例如：给侧栏加搜索功能',
-    placeholderOrchestratorPlan: '说出你的需求，我先写一份计划给你审阅，例如：给设置页加导出功能',
+    placeholderOrchestratorPlan: '说出你的需求，我先写计划或文档给你审阅，例如：给设置页加导出功能',
     placeholderOtherRole: '说出你要做的事，例如：修复登录页的报错，或解释某个函数',
     placeholderOtherRolePlan:
-      '说出你要做的事，我先调查并写好计划，审阅后再动手，例如：重构用户模块',
+      '说出你要做的事，我先调查并写好计划或文档，审阅后再动手，例如：重构用户模块',
     composerHint: '{send} 发送，{newline} 换行，{prev} / {next} 翻历史消息',
     stop: '停止',
     send: '发送',
@@ -394,7 +394,7 @@ export const zhCN = {
   },
   planMode: {
     label: '计划',
-    hint: '计划模式：先把计划写成文档，存在当前项目的 .fynvra/plans/ 下；开启期间不派活、不改文件，有改动的命令要你确认。审阅后关闭开关即可执行',
+    hint: '计划模式：用来写计划和文档。计划存在当前项目的 .fynvra/plans/ 下，也可以按你的要求写 Markdown 文档（.md）；开启期间不派活、不改代码，有改动的命令要你确认。审阅后关闭开关即可执行',
   },
   tools: {
     labels: {
@@ -408,6 +408,7 @@ export const zhCN = {
       git_readonly: 'Git',
       dispatch_task: '派发任务',
       write_plan: '写计划',
+      write_doc: '写文档',
       list_workers: '查看 worker',
       wait_for_workers: '等待 worker',
       read_worker_output: '读取 worker 输出',
