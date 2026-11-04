@@ -3,23 +3,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
-import { isOrchestratorRole, useRoles } from './roles';
 
 /**
- * 输入框工具栏里、审批胶囊旁的「计划模式」开关。只给主 agent 会话（内置 orchestrator，或工具策略为
- * orchestrator 的自定义角色），派发出的 worker 会话不显示。开启时主 agent 只把计划写成文档
- * （.fynvra/plans），不派发任务；审阅后关掉再按计划派发。运行中也能切，状态随会话保存。
+ * 输入框工具栏里、审批胶囊旁的「计划模式」开关。所有角色的会话都有，只有派发出的 worker 会话不显示。
+ * 开启时先把计划写成文档，存在当前项目的 .fynvra/plans/ 下：主 agent 不派发任务，其他角色只做只读调查、
+ * 不改文件；审阅后关掉再按计划执行。运行中也能切，状态随会话保存。
  */
 export function PlanModeToggle({ sessionId }: { sessionId: string }) {
-  const roleId = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.roleId);
+  const exists = useSessionsStore((state) => selectSessionOf(sessionId)(state) !== undefined);
   const dispatched = useSessionsStore(
     (state) => selectSessionOf(sessionId)(state)?.dispatchId !== undefined
   );
   const enabled = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.planMode === true);
   const setPlanMode = useSessionsStore((state) => state.setPlanMode);
-  const roles = useRoles();
   const t = useT();
-  if (!roleId || dispatched || !isOrchestratorRole(roleId, roles)) return null;
+  if (!exists || dispatched) return null;
 
   return (
     <Tooltip>

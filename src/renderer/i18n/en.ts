@@ -412,7 +412,7 @@ export const en: MessagesShape<typeof zhCN> = {
   },
   planMode: {
     label: 'Plan',
-    hint: 'Plan mode: the main agent writes the plan as a document (.fynvra/plans) and dispatches no tasks; turn it off after review to carry out the plan',
+    hint: "Plan mode: the plan is first written as a document, saved under .fynvra/plans/ in the current project; while it's on, no tasks are dispatched, no files are changed, and commands that make changes need your confirmation. Turn it off after review to carry out the plan",
   },
   tools: {
     labels: {
