@@ -76,6 +76,19 @@ The user turned on plan mode for this conversation: agree on a written plan with
 - The user turns plan mode off once the plan is approved, and may have edited the file. Before you dispatch, read the plan file again and follow it. Each brief must still be complete on its own: workers may not be able to see the plan.
 - Workers that are already running are handled as usual: answer their questions, review, merge, send back or clean up.`;
 
+/**
+ * 计划模式开启时，给非 orchestrator 工具策略、非 worker 的会话（用户自己开的 Worker 会话、自定义角色）每次 run 追加在
+ * 角色追加段之后：先只读调查、用 write_plan 写计划，和用户商定后再动手。开关由宿主经 createRoleSession 的 `planMode`
+ * 提供，关闭后从下一次 run 起不再追加；审批门按同一开关拦截改文件的工具、让非只读命令与 MCP 要人确认
+ * （createApprovalGate 的 `planMode`）。
+ */
+export const DIRECT_PLAN_MODE_PROMPT = `# Plan mode is on
+The user turned on plan mode for this conversation: agree on a written plan with them before you change anything.
+- Investigate read-only: read files and run only commands that change nothing. While plan mode is on, editing or writing files is refused (write_plan is the exception), and any other command or MCP tool needs the user's approval; do not work around this.
+- Save the plan with write_plan as one Markdown document: the goal, the approach, the steps with the files each one touches, how you will verify the result, the risks, and what is out of scope.
+- After saving the plan, end your turn: summarize it in a few lines, link the plan file and ask the user to review it. When they ask for changes, update the same plan by passing its file name to write_plan.
+- The user turns plan mode off once the plan is approved, and may have edited the file. Read the plan file again before you start, and follow it.`;
+
 // worker 契约里与工作方式无关的几条：提问、不写报告文件、agent 消息不等于用户授权
 const WORKER_SHARED_RULES = [
   '- If you are blocked on a decision the brief does not settle, call `ask_coordinator` with one specific question and wait for the answer. Do not ask about things you can find out from the code.',
