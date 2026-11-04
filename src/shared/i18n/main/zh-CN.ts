@@ -90,7 +90,7 @@ export const mainZhCN = {
     compactionRecoveryRequired: '需要先恢复上下文：请重试压缩，尚未消费的输入已保留。',
     noCompactionRecovery: '此会话没有待恢复的压缩。',
     switchWhileRunning: '会话正在运行，等本轮结束再切换模型',
-    planModeWorkerSession: '计划模式只用于主 agent 会话，派发出的 worker 会话不能切换',
+    planModeWorkerSession: '派发出的 worker 会话不能开启计划模式',
     roleNotFound: '角色不存在：{id}',
     startFailed: '无法启动会话：{error}',
     describeMismatch: 'agent worker 回答的模型数与查询不一致',
