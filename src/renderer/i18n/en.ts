@@ -263,6 +263,13 @@ export const en: MessagesShape<typeof zhCN> = {
   chat: {
     message: 'Message',
     placeholder: 'Message',
+    placeholderOrchestrator:
+      "Tell me what you need and I'll split it into tasks for workers, e.g. add search to the sidebar",
+    placeholderOrchestratorPlan:
+      "Tell me what you need and I'll write a plan for you to review first, e.g. add export to Settings",
+    placeholderOtherRole: 'Tell me what to do, e.g. fix the login page error or explain a function',
+    placeholderOtherRolePlan:
+      "Tell me what to do; I'll investigate and plan, then act after your review, e.g. refactor the user module",
     composerHint: '{send} to send, {newline} for a new line, {prev} / {next} for history',
     stop: 'Stop',
     send: 'Send',
