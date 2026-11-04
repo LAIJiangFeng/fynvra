@@ -21,7 +21,7 @@ export const APPROVAL_ARGS_PREVIEW_CHARS = 2_000;
 
 /**
  * 会改状态的工具。pi 的 bash / powershell / write / edit、编排的 run_checks（在 worker 的 worktree 里执行命令），
- * 以及 apply_patch（pi 1.4 没有，按约定预留）。MCP 工具按 `mcp__<server>__<tool>` 的命名识别。
+ * apply_patch（pi 1.4 没有，按约定预留），以及计划模式下写 Markdown 文档的 write_doc。MCP 工具按 `mcp__<server>__<tool>` 的命名识别。
  */
 const TOOL_KINDS = new Map<string, ApprovalKind>([
   ['bash', 'command'],
@@ -30,6 +30,7 @@ const TOOL_KINDS = new Map<string, ApprovalKind>([
   ['write', 'file-write'],
   ['edit', 'file-edit'],
   ['apply_patch', 'file-edit'],
+  ['write_doc', 'file-write'],
 ]);
 
 const MODE_KINDS: Record<ApprovalMode, readonly ApprovalKind[]> = {
@@ -64,12 +65,12 @@ export function describeToolCall(
       ? commandOf(input)
       : kind === 'mcp'
         ? undefined
-        : writeTargets(toolName, input).join('\n') || undefined;
+        : fileTargetsOf(toolName, input).join('\n') || undefined;
   return { title: toolName, detail: detail ?? argsPreview(input) };
 }
 
-/** 文件工具的写目标：pi 的 write / edit 用 `path`；apply_patch 从补丁头里取 */
-function writeTargets(toolName: string, input: unknown): string[] {
+/** 文件工具的写目标：pi 的 write / edit 与 write_doc 用 `path`；apply_patch 从补丁头里取 */
+export function fileTargetsOf(toolName: string, input: unknown): string[] {
   const args = asRecord(input);
   if (toolName === 'apply_patch') {
     const patch = [args.input, args.patch].find((value) => typeof value === 'string');

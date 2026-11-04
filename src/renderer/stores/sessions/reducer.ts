@@ -673,7 +673,7 @@ function addUsage(total: UsageTotals, usage: ChatMessage['usage']): UsageTotals 
 
 function approvalKindOf(toolName: string): ApprovalKind {
   if (toolName === 'edit') return 'file-edit';
-  if (toolName === 'write') return 'file-write';
+  if (toolName === 'write' || toolName === 'write_doc') return 'file-write';
   if (toolName.startsWith('mcp__')) return 'mcp';
   return 'command';
 }

@@ -33,6 +33,7 @@ import {
   type WorkerToolset,
   type WorkerToolsOptions,
 } from '../tools/workerTools';
+import { createWriteDocTool } from '../tools/writeDocTool';
 import { createWritePlanTool } from '../tools/writePlanTool';
 
 /** Main 按 role.model 解析出的模型 */
@@ -79,10 +80,10 @@ export interface CreateRoleSessionOptions {
   /**
    * 计划模式的实时开关，宿主持有、随时可变；缺省视为永远关闭。关闭后提示词从下一次 run 起、拦截从下一次工具调用起恢复原样。
    * - `role.tools === 'orchestrator'`：每次 run 开始时读取，为 true 就在角色追加段之后追加 `PLAN_MODE_PROMPT`；
-   *   每次 dispatch_task 调用时也读取，为 true 时拒绝派发、不调用 host。
+   *   每次 dispatch_task 调用时也读取，为 true 时拒绝派发、不调用 host；write_doc 每次调用时读取，只有为 true 才写。
    * - 其他工具策略的非 worker 会话（没有 `workerHost`）：write_plan 常驻（与开关当前是否打开无关）；
    *   每次 run 开始时读取，为 true 就追加 `DIRECT_PLAN_MODE_PROMPT`；审批门每次工具调用时读取，为 true 时
-   *   write / edit / apply_patch 直接拦截，非只读命令与 MCP 不论档位都要人确认（见 createApprovalGate 的 `planMode`）。
+   *   write / edit / apply_patch 只在目标全是 Markdown 文档时照原档位处理、其余直接拦截，非只读命令与 MCP 不论档位都要人确认（见 createApprovalGate 的 `planMode`）。
    * - 其他工具策略的 worker 会话忽略它。
    */
   planMode?: () => boolean;
@@ -125,12 +126,12 @@ export interface RoleSession {
 
 /**
  * 按角色创建 pi `AgentSession`（ARCHITECTURE §5）：
- * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan；`readonly` → 只读工具；`all` → pi 默认工具。
+ * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan + write_doc；`readonly` → 只读工具；`all` → pi 默认工具。
  *   传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
- * - `planMode`：开着时 orchestrator 策略每次 run 再追加 `PLAN_MODE_PROMPT`、dispatch_task 拒绝派发；
- *   其他策略的非 worker 会话追加 `DIRECT_PLAN_MODE_PROMPT`，审批门拦截改文件的工具、非只读命令与 MCP 要人确认。
+ * - `planMode`：开着时 orchestrator 策略每次 run 再追加 `PLAN_MODE_PROMPT`、dispatch_task 拒绝派发、write_doc 可写；
+ *   其他策略的非 worker 会话追加 `DIRECT_PLAN_MODE_PROMPT`，审批门只放行写 Markdown 文档的文件工具、非只读命令与 MCP 要人确认。
  * - role.approvalMode → 审批门（tool_call 拦截），经 `approval` 请求人工审批。
  */
 export async function createRoleSession(options: CreateRoleSessionOptions): Promise<RoleSession> {
@@ -271,6 +272,7 @@ function selectTools(
             ...(options.planMode ? { planMode: options.planMode } : {}),
           }),
           createWritePlanTool(cwd),
+          createWriteDocTool(cwd, { planMode: options.planMode ?? (() => false) }),
           ...workerTools,
         ],
       };

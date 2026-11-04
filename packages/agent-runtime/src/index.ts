@@ -19,6 +19,7 @@ export {
   type ApprovalKind,
   approvalKindOf,
   describeToolCall,
+  fileTargetsOf,
   modeRequiresApproval,
   type ToolCallDescription,
 } from './approval/policy';
@@ -79,6 +80,7 @@ export {
   type RoleResourcePaths,
   type RoleSession,
 } from './session/createRoleSession';
+export { DOCUMENT_EXTENSIONS, isDocumentPath } from './tools/documentPath';
 export {
   CHECK_OUTPUT_MAX_CHARS,
   createOrchestrationTools,
@@ -106,6 +108,12 @@ export {
   type WorkerToolset,
   type WorkerToolsOptions,
 } from './tools/workerTools';
+export {
+  createWriteDocTool,
+  WRITE_DOC_TOOL_NAME,
+  type WriteDocDetails,
+  type WriteDocToolOptions,
+} from './tools/writeDocTool';
 export {
   createWritePlanTool,
   PLAN_CONTENT_MAX_BYTES,

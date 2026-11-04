@@ -127,8 +127,8 @@ export interface SpawnSessionSpec {
   inPlace?: boolean;
   /**
    * 计划模式：会话记录里开着时才带（true），不分角色；派发出的 worker 会话永远不带。
-   * 开启时主 agent 只写计划文档（write_plan），dispatch_task 被拒绝；其他角色拦截改文件的工具，
-   * 非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
+   * 开启时主 agent 写计划（write_plan）和 Markdown 文档（write_doc），dispatch_task 被拒绝；
+   * 其他角色只能写/改 Markdown 文档，改其他文件的工具被拦截，非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
    */
   planMode?: boolean;
 }

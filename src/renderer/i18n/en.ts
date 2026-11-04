@@ -266,10 +266,10 @@ export const en: MessagesShape<typeof zhCN> = {
     placeholderOrchestrator:
       "Tell me what you need and I'll split it into tasks for workers, e.g. add search to the sidebar",
     placeholderOrchestratorPlan:
-      "Tell me what you need and I'll write a plan for you to review first, e.g. add export to Settings",
+      "Tell me what you need and I'll write a plan or document for you to review first, e.g. add export to Settings",
     placeholderOtherRole: 'Tell me what to do, e.g. fix the login page error or explain a function',
     placeholderOtherRolePlan:
-      "Tell me what to do; I'll investigate and plan, then act after your review, e.g. refactor the user module",
+      "Tell me what to do; I'll investigate and write a plan or document, then act after your review, e.g. refactor the user module",
     composerHint: '{send} to send, {newline} for a new line, {prev} / {next} for history',
     stop: 'Stop',
     send: 'Send',
@@ -419,7 +419,7 @@ export const en: MessagesShape<typeof zhCN> = {
   },
   planMode: {
     label: 'Plan',
-    hint: "Plan mode: the plan is first written as a document, saved under .fynvra/plans/ in the current project; while it's on, no tasks are dispatched, no files are changed, and commands that make changes need your confirmation. Turn it off after review to carry out the plan",
+    hint: "Plan mode: for plans and documents. Plans are saved under .fynvra/plans/ in the current project, and Markdown documents (.md) can be written where you ask; while it's on, no tasks are dispatched, no code is changed, and commands that make changes need your confirmation. Turn it off after review to carry out the plan",
   },
   tools: {
     labels: {
@@ -433,6 +433,7 @@ export const en: MessagesShape<typeof zhCN> = {
       git_readonly: 'Git',
       dispatch_task: 'Dispatch task',
       write_plan: 'Write plan',
+      write_doc: 'Write document',
       list_workers: 'List workers',
       wait_for_workers: 'Wait for workers',
       read_worker_output: 'Read worker output',

@@ -11,6 +11,8 @@
 | `src/tools/workerTools.ts` | `ask_coordinator` / `report_done`，背后是 `WorkerHost` |
 | `src/tools/readonlyTools.ts` | pi 的 read / grep / find / ls + `git_readonly`（白名单） |
 | `src/tools/writePlanTool.ts` | `write_plan`（orchestrator，以及提供了 `planMode` 的非 worker 会话）：在 agent 进程里把计划写进 `<cwd>/.fynvra/plans/`，不经 Host |
+| `src/tools/writeDocTool.ts` | `write_doc`（仅 orchestrator）：计划模式下新建或整份替换一份 Markdown 文档，不经 Host |
+| `src/tools/documentPath.ts` | `isDocumentPath` / `DOCUMENT_EXTENSIONS`：计划模式允许写的 Markdown 文档路径判定 |
 | `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`PLAN_MODE_PROMPT`、`DIRECT_PLAN_MODE_PROMPT`、`WORKER_CONTRACT_PROMPT` |
 | `src/approval/` | 审批门（`createApprovalGate`）：审批类别与档位、保护底线、计划模式下的只读命令判定（`isReadOnlyCommand`） |
 | `src/events/normalize.ts` | pi 会话事件 → `FynvraSessionEvent`（带 `seq`） |
@@ -23,7 +25,7 @@
 
 | `role.tools` | 会话里的工具 |
 |---|---|
-| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` |
+| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` + `write_doc` |
 | `readonly` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` |
 | `all` | pi 默认工具（read / bash / edit / write） |
 
@@ -36,11 +38,13 @@
 计划模式：`planMode?: () => boolean` 是宿主持有、随时可变的开关，缺省视为关闭。按会话类型生效：
 
 - orchestrator 策略：每次 run 开始时为 true，就在上面的追加段之后再追加 `PLAN_MODE_PROMPT`；dispatch_task 每次调用时
-  也读取它，为 true 时直接返回错误、不调用 Host，其他编排工具（含 run_checks）照常可用。
+  也读取它，为 true 时直接返回错误、不调用 Host，其他编排工具（含 run_checks）照常可用；write_doc 只在它为 true 时写文档。
 - `readonly` / `all` 策略的非 worker 会话（没有 `workerHost`，如用户自己开的 Worker 会话、自定义角色）：
   每次 run 开始时为 true 就追加 `DIRECT_PLAN_MODE_PROMPT`（先只读调查、用 write_plan 写计划，商定后再动手）。
   审批门（`createApprovalGate` 的 `planMode`）每次工具调用时读取它，为 true 时：
-  - write / edit / apply_patch 直接拦截、不问人，拒绝文本让模型改用 write_plan、等用户关闭计划模式；
+  - write / edit / apply_patch 的每个目标（`fileTargetsOf`）都是 Markdown 文档（`isDocumentPath`：`.md` / `.markdown`）
+    时照原档位处理，不另加确认；确定不了目标或有任何非文档目标就直接拦截、不问人，拒绝文本列出违规目标、
+    让模型改用 write_plan、等用户关闭计划模式；
   - bash / powershell 命令经 `isReadOnlyCommand` 判定为只读的按原档位处理（supervised 照样要审批），判定不了的
     不论档位都要人确认；MCP 工具同样不论档位都要人确认。走现有审批通道，`detail` 末尾注明是计划模式要求的；
     保护底线照旧，allowSession 照旧按 kind + 工具名记住；
@@ -78,6 +82,13 @@
 或 realpath 出了 cwd 时拒绝。内容以 UTF-8（无 BOM）写入，最多 256 KiB。它不经 OrchestrationHost，不在
 `ORCHESTRATION_TOOL_METHODS` 里，也不属于审批门的任何类别。
 
+`write_doc { path, content }` 只注册给 orchestrator 策略的会话，只在计划模式开关为 true 时工作（否则拒绝，让模型派 worker）。
+它新建或整份替换一份 Markdown 文档（扩展名 `.md` / `.markdown`，不区分大小写；文件名不能含 `:` 与 `<>"|?*`）。
+`path` 可以是绝对路径、`~` / `~/…`（用户主目录）或相对 cwd，可以在工作区之外（如用户桌面）。目标是目录、符号链接 /
+junction 或其他非普通文件时拒绝；缺失的父目录只在工作区之内创建，工作区之外必须已存在。先在目标目录独占创建
+`.fynvra-*.tmp` 临时文件并落盘，再 rename 原子替换；目标被占用（EPERM / EACCES / EBUSY）时退回直接覆盖。内容以 UTF-8
+（无 BOM，以换行结尾）写入，最多 256 KiB。它不经 OrchestrationHost，审批类别是 `file-write`（按角色档位审批）。
+
 所有工具都是「先归一化再校验」：`prepareArguments` 在 pi 的 schema 校验前修正参数（别名、trim、
 `timeout_ms` clamp 到 [1000, 900000]、`until` 默认 `'all'`、`role` 默认 `'worker'`），`execute` 再做语义校验。
 `execute` 永不抛异常，失败以 `isError` 文本返回；`report_done` 每轮只能成功一次（新的 agent run 开始时重新开放，
@@ -93,7 +104,7 @@ Renderer ⇄ preload ⇄ Main ── OrchestrationService（@fynvra/core：Orche
                        └─ worker 会话 × N：createRoleSession({ workerHost: WorkerHost 代理, cwd: worktree })
 ```
 
-工具只调用注入的接口，不直接操作 git / 进程（`write_plan` 例外：它只写计划目录，见上文）。真正的实现在 Main，
+工具只调用注入的接口，不直接操作 git / 进程（`write_plan` / `write_doc` 例外：它们只写计划目录 / Markdown 文档，见上文）。真正的实现在 Main，
 worker 进程里只放一个转发代理。
 
 ### 1. Main：实现编排逻辑
