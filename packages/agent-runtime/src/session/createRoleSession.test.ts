@@ -146,13 +146,13 @@ async function open(overrides: Partial<CreateRoleSessionOptions> & { role: Role 
 }
 
 describe('createRoleSession tool policies', () => {
-  it('gives the orchestrator only read-only and orchestration tools plus write_plan', async () => {
+  it('gives the orchestrator only read-only and orchestration tools plus write_plan and write_doc', async () => {
     const { session } = await open({
       role: role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' }),
       host: orchestrationHost(),
     });
     expect(session.getActiveToolNames().sort()).toEqual(
-      [...READONLY_TOOLS, ...ORCHESTRATION_TOOLS, 'write_plan'].sort()
+      [...READONLY_TOOLS, ...ORCHESTRATION_TOOLS, 'write_plan', 'write_doc'].sort()
     );
   });
 
