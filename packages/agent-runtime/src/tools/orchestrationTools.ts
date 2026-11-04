@@ -76,7 +76,7 @@ export interface OrchestrationToolsOptions {
 
 /** 计划模式下 dispatch_task 的拒绝文本 */
 const PLAN_MODE_DISPATCH_REFUSAL =
-  'Plan mode is on, so dispatch_task is disabled. Save or update the plan with write_plan, end your turn and ask the user to review it; the user turns plan mode off when the plan is approved.';
+  'Plan mode is on, so dispatch_task is disabled. If the user asked for a document, write it yourself with write_doc. Otherwise save or update the plan with write_plan, end your turn and ask the user to review it; the user turns plan mode off when the plan is approved.';
 
 /**
  * orchestrator 角色的编排工具，与 {@link OrchestrationHost} 方法一一对应。
