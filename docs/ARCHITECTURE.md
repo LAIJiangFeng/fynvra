@@ -140,7 +140,7 @@ export interface Message {
     workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
     roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
     inPlace?: boolean;                  // 工作区没有 git（§6）：orchestrator 追加非 git 模式说明，worker 换用不提交的契约
-    planMode?: () => boolean;           // 计划模式（§7.10）：每次读取实时值，缺省视为关闭；worker 会话不生效，非 orchestrator 策略提供了就常驻 write_plan
+    planMode?: () => boolean;           // 计划模式（§7.10）：每次读取实时值，缺省视为关闭；worker 会话不生效，非 orchestrator 策略提供了就常驻 write_plan；orchestrator 策略的 write_doc 只在开启时可用
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
     exec?: ExecFn;                      // git_readonly 的命令执行器，默认 child_process.execFile
     onExtensionError?: (error: ExtensionError) => void;
@@ -159,9 +159,9 @@ export interface Message {
   type McpServerConfig = PiMcpServerConfig & { name: string };
   ```
 
-  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具 + `write_plan`；
+  - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具 + `write_plan` + `write_doc`（`write_doc` 只在计划模式开启时可用，审批门归为 `file-write`，§7.10）；
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
-  - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门（§7.10）。
+  - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门：只放行目标全是 Markdown 文档的写改（§7.10）。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
   - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 放行普通操作。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止、通道缺失或断连按 deny，拒绝以可读文本作为工具结果返回模型。`allow` 放行一次；`allowSession` 按 kind + 工具名缓存，从 full 切回更严档位清空缓存；切档位不自动答复已有请求。
@@ -170,7 +170,7 @@ export interface Message {
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
   `dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
-  `write_plan { title, content, file? }`（§7.10）也注册给 orchestrator 策略的会话（`readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时同样常驻），但不属于这组映射：它在 agent 进程内直接写 `<cwd>/.fynvra/plans/`，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。计划模式开启时（`createOrchestrationTools` 的 `planMode`）`dispatch_task` 返回错误、不调用 host，其他编排工具不变。
+  `write_plan { title, content, file? }`（§7.10）也注册给 orchestrator 策略的会话（`readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时同样常驻），但不属于这组映射：它在 agent 进程内直接写 `<cwd>/.fynvra/plans/`，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。`write_doc { path, content }`（§7.10）只注册给 orchestrator 策略的会话，同样在 agent 进程内直接写文件、不经 `OrchestrationHost` / Main、不进 `ORCHESTRATION_TOOL_METHODS`；只在计划模式开启时可用，且与 `write_plan` 不同，审批门把它归为 `file-write`，按角色的审批档位处理。计划模式开启时（`createOrchestrationTools` 的 `planMode`）`dispatch_task` 返回错误、不调用 host，错误文本提示用 `write_doc` 写用户要的文档，其他编排工具不变。
   `model` / `thinking` / `fast` 仅按用户明确要求设置，可同时指定；公开 Fast 参数为可选 boolean `fast`，归一化兼容 `fast_mode` / `fastMode`，拒绝字符串 / 数字 / null 强转。
   内部 `DispatchTaskInput` → `Task.fastMode?: boolean`（快照可选字段，旧记录兼容）→ Main launcher 保留 true / false / 缺省：true 请求开启，false 关闭继承，缺省保持角色 / 主会话 / 默认模型的原行为。排队与恢复启动沿用 Task，打回重试沿用保存的会话模型。
   agentHost 在显式 / 角色 / 主会话 / 默认模型落定后复用 `supportsFastMode` 过滤覆盖值，会话记录及 spawn spec 只带协议允许的 Fast；不支持时同模型正常启动，不改 provider、thinking 或审批。工具结果只展示 `fast requested`（true 为 `auto-if-supported`），不把 Task 请求冒充生效状态。
@@ -350,28 +350,34 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 行为差异：
   - 开关：按会话的「计划模式」开关，所有角色的会话都可用，只有派发出的 worker 会话不可用。入口在输入框工具栏、审批档位选择器旁。新会话默认关闭，状态随会话记录保存在 sessions.json，重启、归档后恢复都保持。运行中也能切换：主 agent 的派发拦截立即生效，提示词从下一次 run 起变化。
   - 计划目录：`<cwd>/.fynvra/plans/`。非派发会话的 cwd 是工作区仓库，即当前项目根目录，例如 `D:\project\Agent-Forge\.fynvra\plans\`，不是用户主目录；开关提示里写明「当前项目的 .fynvra/plans/」。
-  - 主 agent（orchestrator 策略）开启时：专门写计划文档。先读代码，再用 `write_plan` 把一份 Markdown 计划写到计划目录，包含目标、方案、任务拆分（每个任务的角色、文件归属、验收）、顺序与依赖、风险、不做的事；在回复里给出计划文件的链接请用户审阅，按反馈更新同一份文件。`dispatch_task` 被拒绝；已在跑的 worker 照常处理：回答、审查、合并、打回、清理。
-  - 其他角色（工具策略不是 orchestrator）开启时：只做只读调查，用 `write_plan` 写计划，不能改文件。审批门收紧：write / edit / apply_patch 直接拦截；bash / powershell 只读的命令（判定见下文 agent-runtime 一条）按原审批档位处理，其余不论档位都要人确认；MCP 工具不论档位都要人确认；保护底线不变，`allowSession` 照旧。
+  - 文档：扩展名为 `.md` / `.markdown`（不分大小写）的 Markdown 文件。计划模式用来写计划和文档；代码、配置和其他任何文件在计划模式下都不会被改。
+  - 主 agent（orchestrator 策略）开启时：专门写计划和文档。用户要写文档时用 `write_doc` 直接写到用户指定的路径（可在项目外，如桌面）。写计划时先读代码，再用 `write_plan` 把一份 Markdown 计划写到计划目录，包含目标、方案、任务拆分（每个任务的角色、文件归属、验收）、顺序与依赖、风险、不做的事；在回复里给出计划文件的链接请用户审阅，按反馈更新同一份文件。`dispatch_task` 被拒绝；已在跑的 worker 照常处理：回答、审查、合并、打回、清理。
+  - 其他角色（工具策略不是 orchestrator）开启时：只做只读调查，用 `write_plan` 写计划，除 Markdown 文档外不能改文件。审批门收紧：write / edit / apply_patch 的每个目标路径都是 Markdown 文档时按原审批档位处理，不再加计划模式确认；没有目标或任一目标不是文档就直接拦截；`readonly` 策略不变（只有 `write_plan`）；bash / powershell 只读的命令（判定见下文 agent-runtime 一条）按原审批档位处理，其余不论档位都要人确认；MCP 工具不论档位都要人确认；保护底线不变，`allowSession` 照旧。
   - 审阅与执行：用户在应用内打开计划文件，预览或直接编辑。审阅通过后关闭计划模式：主 agent 先重读计划文件（用户可能改过），再按计划派发；其他角色不再受计划模式限制，按原审批档位执行。
-  - 计划文件与 git：计划文件不自动提交；未提交时 worker 的 worktree 里看不到它，所以任务书仍须完整自足。要不要提交，或在 `.gitignore` 里忽略 `.fynvra/`，由用户决定；没忽略时计划文件会出现在「改动」里，「全部丢弃」会删除这些未跟踪的计划文件。
+  - 计划文件与 git：计划文件和写进工作区的文档都不自动提交；未提交时 worker 的 worktree 里看不到它，所以任务书仍须完整自足。要不要提交，或在 `.gitignore` 里忽略 `.fynvra/`，由用户决定；没忽略时计划文件会出现在「改动」里，「全部丢弃」会删除这些未跟踪的计划文件。
   - `write_plan` 的使用范围：主 agent 和其他角色的非派发会话都常驻；只能写计划目录，所以不走文件写入审批；计划模式关闭时也能用，供用户要求书面计划时使用。
+  - `write_doc` 的使用范围：只给主 agent（orchestrator 策略），只在计划模式开启时可用；关闭时被拒绝，文档和其他文件一样由派发的 worker 写（行为不变）。审批门把它归为 `file-write`，按角色的审批档位处理（`supervised` 询问，`auto-edits` / `full` 不问）。
 - 必改层与文件：
   - shared `types/{chat,agent,ipc}.ts` 与 Main 字典 `i18n/main/{zh-CN,en}.ts`：`SessionSummary.planMode?: boolean`，仅开启时为 true；`SpawnSessionSpec.planMode?: boolean`；AgentCommand `{ type: 'set-plan-mode'; identity; enabled: boolean }`，unknown parser 只认布尔；IPC 通道 `sessions:set-plan-mode`，入参只有 `{ sessionId, enabled }`。
   - preload `domains/sessions.ts`：`sessions.setPlanMode({ sessionId, enabled })`，返回 `IpcResult<{ session }>`。
   - Main `services/sessions/sessionStore.ts`、`services/agentHost/agentHost.ts`、`ipc/sessions.ts`：会话记录是权威。`setPlanMode` 镜像 `setApprovalMode`：更新记录和缓存的 spawn spec；会话已在 worker 里时发 `set-plan-mode`，发不出去就 detach，之后按记录重新 spawn；最后广播 `sessions:changed`。spawn 前按会话记录的当前值重设 `planMode`，会话启动途中切换开关也不会丢（`agentHost.ts` 的 `withPlanMode`）。派发出的 worker 会话一律拒绝，其他会话不看角色；worker 会话的 spawn spec 永远不带 `planMode`，也不继承父会话。
   - agent `supervisor.ts`、`piSession.ts`：supervisor 处理 `set-plan-mode`，接在会话的 opening 上，运行中也立即生效；piSession 持有开关的当前值，传给 createRoleSession。
-  - agent-runtime `tools/orchestrationTools.ts`、`tools/writePlanTool.ts`、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`approval/`（审批门）、`index.ts`、`README.md`：
+  - agent-runtime `tools/orchestrationTools.ts`、`tools/writePlanTool.ts`、`tools/writeDocTool.ts`、`tools/documentPath.ts`、`prompts/orchestratorPrompt.ts`、`pi/extensions.ts`、`session/createRoleSession.ts`、`approval/`（审批门）、`index.ts`、`README.md`：
     `CreateRoleSessionOptions.planMode?: () => boolean` 每次读取实时值，缺省视为关闭；worker 会话不生效。
-    orchestrator 策略（行为不变）：`createOrchestrationTools` 的 options 有同名开关：开启时 `dispatch_task` 返回错误、不调用 host，其他编排工具不变。
-    `ORCHESTRATOR_PROMPT` 增加 `write_plan` 条目；新增 `PLAN_MODE_PROMPT`（标题为 `# Plan mode is on`），只在开关为真时，于每次 run 的 `before_agent_start` 追加到角色追加段之后。
-    其他策略：提供了 `planMode`、工具策略不是 orchestrator、且不是 worker 会话时，常驻 `write_plan`（写 `<cwd>/.fynvra/plans/`）；计划模式开启时每次 run 都追加 `DIRECT_PLAN_MODE_PROMPT`，审批门（`createApprovalGate`）按上面「其他角色」一条收紧。只读判定 `isReadOnlyCommand` 偏保守：按 `;` `&&` `||` `|` 拆开后，每段的第一个命令都要在白名单里；只要含重定向、命令替换、PowerShell 脚本块等，就算非只读。agent 进程的 `piSession.ts` 总会提供 `planMode`，所以各角色的非派发会话都有 `write_plan`。
+    orchestrator 策略：`createOrchestrationTools` 的 options 有同名开关：开启时 `dispatch_task` 返回错误、不调用 host，错误文本提示用 `write_doc` 写用户要的文档，其他编排工具不变。`createRoleSession` 在 `write_plan` 旁注册 `write_doc`。
+    `ORCHESTRATOR_PROMPT` 增加 `write_plan`、`write_doc` 条目；新增 `PLAN_MODE_PROMPT`（标题为 `# Plan mode is on`），只在开关为真时，于每次 run 的 `before_agent_start` 追加到角色追加段之后。
+    其他策略：提供了 `planMode`、工具策略不是 orchestrator、且不是 worker 会话时，常驻 `write_plan`（写 `<cwd>/.fynvra/plans/`）；计划模式开启时每次 run 都追加 `DIRECT_PLAN_MODE_PROMPT`，审批门（`approval/gate.ts` 的 `createApprovalGate`）按上面「其他角色」一条收紧：文档判定用 `tools/documentPath.ts` 的 `isDocumentPath`，apply_patch 的目标由 `approval/policy.ts` 的 `fileTargetsOf` 从补丁头解析；`DIRECT_PLAN_MODE_PROMPT` 写明可写改 Markdown 文档。只读判定 `isReadOnlyCommand` 偏保守：按 `;` `&&` `||` `|` 拆开后，每段的第一个命令都要在白名单里；只要含重定向、命令替换、PowerShell 脚本块等，就算非只读。agent 进程的 `piSession.ts` 总会提供 `planMode`，所以各角色的非派发会话都有 `write_plan`。
     `pi/extensions.ts` 的 `appendSystemPromptExtension` 也接受按 run 取文本的函数，返回空就不追加；pi 1.4 每个 run 都会复制一份新的 options，所以关闭计划模式后这段不会残留。
   - agent-runtime 新工具 `write_plan { title, content, file? }`：注册给 orchestrator 策略的会话，以及上面那类其他策略的会话；在 agent 进程内直接写文件；不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。
     新建的路径是 `<cwd>/.fynvra/plans/<YYYYMMDD-HHmm>-<slug>.md`：slug 保留 Unicode 字母和数字，最多 48 个字符，为空时用 `plan`；重名时依次加 `-2`、`-3`……，独占创建，不覆盖已有文件。
     传 `file`（已有计划的纯文件名）时，先写同目录临时文件再 rename，整份替换。正文为 UTF-8，不超过 256 KiB；`.fynvra` 或 `plans` 是符号链接，或 realpath 越出 cwd 时拒绝。
     正文含 NUL 时拒绝，开头的 BOM 会去掉；`file` 含 Windows 保留字符（`<>:"|?*`）或控制字符时拒绝；更新已有计划时不会创建计划目录。
+  - agent-runtime 新工具 `write_doc { path, content }`（`tools/writeDocTool.ts`）：只注册给 orchestrator 策略的会话；计划模式关闭时拒绝；在 agent 进程内直接写文件，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`；审批门归为 `file-write`。
+    新建或整份替换一份 Markdown 文档（`isDocumentPath`：扩展名 `.md` / `.markdown`，不分大小写），正文 UTF-8，不超过 256 KiB。`path` 可以是绝对路径、`~` / `~/…`（用户主目录）或相对会话 cwd（工作区根目录），可以在工作区外（如桌面）。
+    工作区内缺少的目录会创建；工作区外目录必须已存在。目标已是目录、符号链接、junction 或其他非普通文件时拒绝。写入先写同目录临时文件再 rename（原子）；Windows 上遇 EPERM / EACCES / EBUSY 时退回原地覆盖。
   - Renderer `lib/api/sessions.ts`（含 mock）、`stores/sessions/createSessionsStore.ts`、`components/chat/PlanModeToggle.tsx`（挂在 `Composer.tsx` 的审批档位选择器之后）、`components/chat/toolDisplay.ts` / `ToolCallCard.tsx`、`i18n/{zh-CN,en}.ts`：输入框工具栏的开关在会话存在、且没有 `dispatchId` 时显示，不看角色；文案中英双语，提示写明计划在当前项目的 `.fynvra/plans/`；store 先乐观切换，失败时换回原状态并提示，再重拉列表；工具卡片把 `write_plan` 作为编排类工具展示，标签为「写计划」。
-- 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；派发出的 worker 会话开启计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）。
+    `write_doc`：`toolDisplay.ts` / `ToolCallCard.tsx` 标签为「写文档」/ Write document，`stores/sessions/timeline.ts` 像 `write` 一样展示内容，`stores/sessions/reducer.ts` 把它映射为 `file-write`；`i18n/{zh-CN,en}.ts` 的计划模式开关提示和计划模式输入框占位文案提到文档。不改 Main / preload / IPC / shared 类型（只在 `src/shared/types/agent.ts` 加 JSDoc 注释）。
+- 明确不做：「确认执行」按钮；计划自动提交，或把进度写回计划；计划与 Run / Task 的关联记录；快捷键；派发出的 worker 会话开启计划模式；按工作区记住开关；Main 侧的派发拦截（拦截放在 agent-runtime 的工具层，与审批门同层）；Markdown 以外的文档格式（.txt、.mdx、.rst、.docx 等）；计划模式关闭时的 `write_doc`；`readonly` 策略角色或派发的 worker 用 `write_doc`；审批门里的符号链接检查（pi 的 write / edit 写一个指向别处的 `.md` 符号链接不会被发现）；Main 侧的文档校验；修改 core 的 `ORCHESTRATOR_SYSTEM_PROMPT`；文档自动提交。
 
 ### 7.11 外观设置
 
