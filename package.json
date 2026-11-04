@@ -28,8 +28,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "pnpm build && e2e run"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.4.0",
@@ -43,7 +42,6 @@
     "@base-ui/react": "^1.9.0",
     "@biomejs/biome": "2.6.2",
     "@codemirror/language-data": "^6.5.2",
-    "@e2e-dev/web": "0.15.4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
@@ -54,7 +52,6 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "e2e": "0.22.0",
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
