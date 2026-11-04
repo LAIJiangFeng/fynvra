@@ -161,7 +161,7 @@ export interface SessionsState extends ChatProjection {
     mode: ApprovalMode
   ): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
-   * 开关主 agent 会话的计划模式：同换审批档位，先乐观更新，Main 回包后以它的记录为准；
+   * 开关会话的计划模式（不分角色，派发出的 worker 会话除外）：同换审批档位，先乐观更新，Main 回包后以它的记录为准；
    * 失败时换回原来的状态、提示原因并重拉列表。运行中、等审批时也可以切。
    */
   setPlanMode(sessionId: string, enabled: boolean): Promise<IpcResult<{ session: SessionSummary }>>;

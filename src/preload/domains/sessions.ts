@@ -65,7 +65,7 @@ export interface SessionsApi {
     mode: ApprovalMode;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
   /**
-   * 开关主 agent 会话的计划模式：运行中也可以，即时生效；派发出的 worker 会话返回错误。
+   * 开关会话的计划模式（不分角色）：运行中也可以，即时生效；派发出的 worker 会话返回错误。
    * 会话还没在 worker 里时下次启动用新值
    */
   setPlanMode(input: {
