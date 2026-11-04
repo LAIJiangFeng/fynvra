@@ -64,7 +64,7 @@ const writePlanSchema = Type.Object(
 
 export interface WritePlanToolOptions {
   /**
-   * 计划是本会话唯一能写的文件（orchestrator），工具描述里这样告诉模型。默认 true；
+   * 除计划模式下用 write_doc 写的 Markdown 文档外，计划是本会话唯一能写的文件（orchestrator），工具描述里这样告诉模型。默认 true；
    * 其他会话（计划模式下的非 orchestrator 会话）传 false，描述只说保存计划。
    */
   onlyWritableFile?: boolean;
@@ -75,7 +75,7 @@ export interface WritePlanToolOptions {
  * 以及提供了计划模式开关的非 orchestrator、非 worker 会话（见 createRoleSession 的 `planMode`）。
  *
  * 在 agent 进程里直接用 node fs 写：不经 OrchestrationHost / Main（不在 ORCHESTRATION_TOOL_METHODS 里），
- * 也不属于审批门的任何类别（计划模式下也照常可用）。对主 agent 来说它是唯一能写的文件。它只能写计划目录：
+ * 也不属于审批门的任何类别（计划模式下也照常可用）。对主 agent 来说，除计划模式下的 write_doc 外它是唯一能写文件的工具。它只能写计划目录：
  * - `.fynvra` 与 `.fynvra/plans` 必须是真实目录（不是符号链接 / junction / 文件），不存在就逐级创建，
  *   计划目录的 realpath 必须在 realpath(cwd) 之内；
  * - 新建：独占创建（`wx`）`<YYYYMMDD-HHmm>-<slug>.md`（本地时间），重名依次加 `-2`、`-3`…，绝不覆盖；
@@ -94,7 +94,9 @@ export function createWritePlanTool(
     description:
       `Save a plan as one Markdown document in the workspace under ${PLANS_DIR}/ and return its file name. ` +
       'Without file it creates a new plan file named after the title; with the file name from an earlier result it replaces that plan in full.' +
-      (options.onlyWritableFile === false ? '' : ' This is the only file you can write.'),
+      (options.onlyWritableFile === false
+        ? ''
+        : ' Apart from Markdown documents with write_doc in plan mode, this is the only file you can write.'),
     promptSnippet: `Save or replace a Markdown plan document in ${PLANS_DIR}/`,
     parameters: writePlanSchema,
     executionMode: 'sequential',

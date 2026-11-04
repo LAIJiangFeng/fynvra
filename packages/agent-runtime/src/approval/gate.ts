@@ -4,6 +4,7 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 import type { ApprovalMode } from '@fynvra/core';
+import { isDocumentPath } from '../tools/documentPath';
 import { errorMessage } from '../tools/result';
 import {
   type ApprovalDecision,
@@ -11,6 +12,7 @@ import {
   approvalKindOf,
   commandOf,
   describeToolCall,
+  fileTargetsOf,
   modeRequiresApproval,
 } from './policy';
 import { protectedAction } from './protectedCommand';
@@ -63,7 +65,8 @@ export interface ApprovalGateOptions extends ApprovalPolicyHooks {
   mode: ApprovalMode;
   /**
    * 计划模式的实时开关（宿主持有，随时可变），每次 check 都重新读取；缺省视为关闭。为 true 时：
-   * - file-write / file-edit 直接拦截、不问人，拒绝文本让模型改用 write_plan（write_plan 不属于这两类）；
+   * - file-write / file-edit：每个写目标都是 Markdown 文档（{@link isDocumentPath}）时照原档位处理，不另加确认；
+   *   确定不了目标或有任何非文档目标就直接拦截、不问人，拒绝文本让模型改用 write_plan（write_plan 不属于这两类）；
    * - command 判定不是只读的（{@link isReadOnlyCommand}）以及所有 mcp，不论档位都要人确认，detail 末尾注明是计划模式要求的；
    * - 只读命令与其他工具照原档位处理。保护底线照旧，allowSession 照旧按 kind + 工具名记住。
    */
@@ -118,7 +121,8 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；
  * - 档位可以随时用 setMode 切换（会话级设置，初始值是角色的档位）；
- * - 计划模式（`planMode` 为 true 时）：改文件的工具直接拒绝，非只读命令与 MCP 不论档位都要人确认；
+ * - 计划模式（`planMode` 为 true 时）：改文件的工具只能写 Markdown 文档（照原档位审批），其他目标直接拒绝；
+ *   非只读命令与 MCP 不论档位都要人确认；
  * - fail-closed：超时、回合中止、宿主出错一律拒绝。拒绝以 block 返回可读文本，不抛异常。
  */
 export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
@@ -138,7 +142,11 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     if (!kind) return undefined;
     const planning = planModeOn();
     if (planning && (kind === 'file-write' || kind === 'file-edit')) {
-      return { block: true, reason: planModeFileRefusal(call.toolName) };
+      const targets = fileTargetsOf(call.toolName, call.input);
+      const offending = targets.filter((target) => !isDocumentPath(target));
+      if (targets.length === 0 || offending.length > 0) {
+        return { block: true, reason: planModeFileRefusal(call.toolName, offending) };
+      }
     }
     const command = kind === 'command' ? commandOf(call.input) : undefined;
     const floor = command === undefined ? undefined : protectedAction(command);
@@ -268,8 +276,12 @@ function validTimeout(timeoutMs: number | undefined): number {
 }
 
 /** 计划模式下改文件的工具被直接拒绝时给模型的工具结果 */
-function planModeFileRefusal(toolName: string): string {
-  return `Plan mode is on, so files cannot be changed: ${toolName} was refused and not run. Save your plan with write_plan instead, and wait for the user to turn plan mode off before you change any file.`;
+function planModeFileRefusal(toolName: string, offending: readonly string[]): string {
+  const shown = offending.slice(0, 3).join(', ');
+  const more = offending.length > 3 ? ` and ${offending.length - 3} more` : '';
+  const because =
+    offending.length > 0 ? `it targets ${shown}${more}` : 'its target file could not be determined';
+  return `Plan mode is on, so only Markdown documents (.md, .markdown) can be written or edited: ${toolName} was refused and not run because ${because}. Save plans with write_plan, and wait for the user to turn plan mode off before you change code or any other file.`;
 }
 
 /** 计划模式要求人确认时附在 detail 末尾，说明为什么要问（这类调用在原档位下可能不用问） */
