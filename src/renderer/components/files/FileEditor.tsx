@@ -81,7 +81,15 @@ export default function FileEditor({
   onChange(text: string): void;
 }) {
   const { name } = file;
-  const [language, setLanguage] = useState<Extension[]>([]);
+  const markdownFile = isMarkdown(name);
+  // Markdown 在所有模式下都用 GFM（表格、删除线、任务列表、裸链接），代码块按语言高亮。
+  // 首次渲染就同步提供：先无语言、再整体 reconfigure 会让实时预览先按纯文本排版测量一遍。
+  const markdownExtension = useMemo(
+    () => (markdownFile ? [markdown({ base: markdownLanguage, codeLanguages: languages })] : null),
+    [markdownFile]
+  );
+  const [loadedLanguage, setLanguage] = useState<Extension[]>([]);
+  const language = markdownExtension ?? loadedLanguage;
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const t = useT();
   useEffect(() => {
@@ -92,9 +100,8 @@ export default function FileEditor({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    // Markdown 在所有模式下都用 GFM（表格、删除线、任务列表、裸链接），代码块按语言高亮。
     if (isMarkdown(name)) {
-      setLanguage([markdown({ base: markdownLanguage, codeLanguages: languages })]);
+      setLanguage((current) => (current.length ? [] : current));
       return;
     }
     let canceled = false;

@@ -2,7 +2,7 @@ import { EditorView, type Extension, Prec } from '@uiw/react-codemirror';
 import { blockField } from './blocks';
 import { inlinePlugin } from './inline';
 import { createLinkOpener } from './links';
-import type { LiveContext } from './shared';
+import { focusTracking, type LiveContext } from './shared';
 
 export type { LiveContext } from './shared';
 
@@ -71,17 +71,54 @@ const LIVE_THEME = EditorView.theme({
   },
   '.cm-ml-image img': { display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle' },
   '.cm-ml-image-alt': { color: 'var(--muted-foreground)' },
-  '.cm-ml-block': { padding: '0.25rem 0', cursor: 'text', minHeight: '1.75em' },
+  // 块内容不继承 .cm-lineWrapping 的 white-space: break-spaces，否则 HTML 源码里的换行和缩进会成为空行。
+  '.cm-ml-block': {
+    padding: '0.25rem 0',
+    cursor: 'text',
+    minHeight: '1.75em',
+    whiteSpace: 'normal',
+  },
+  '.cm-ml-tr': {
+    display: 'grid',
+    borderLeft: '1px solid var(--border)',
+    whiteSpace: 'normal',
+    lineHeight: '1.5',
+    cursor: 'text',
+  },
+  '.cm-ml-tr.cm-ml-tfirst': { borderTop: '1px solid var(--border)' },
+  '.cm-ml-tr.cm-ml-th': {
+    fontWeight: '600',
+    backgroundColor: 'color-mix(in oklab, var(--muted) 50%, transparent)',
+  },
+  '.cm-ml-td': {
+    minWidth: '0',
+    padding: '0.375rem 0.75rem',
+    borderRight: '1px solid var(--border)',
+    borderBottom: '1px solid var(--border)',
+    overflowWrap: 'anywhere',
+  },
+  '.cm-ml-tsep': { height: '1px', backgroundColor: 'var(--border)', cursor: 'text' },
+  '.cm-line.cm-ml-table-src': {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.8125rem',
+    fontWeight: '400',
+    backgroundColor: 'var(--muted)',
+    border: '1px solid var(--border)',
+    padding: '0.25rem 0.5rem',
+  },
+  // 语法高亮把表头当标题（粗体+下划线），源码行里不需要。
+  '.cm-ml-table-src span': { textDecoration: 'none', fontWeight: 'inherit' },
 });
 
-/** Markdown 实时预览：光标所在行显示源码，其余按渲染效果显示；文本本身不被改写。 */
+/** Markdown 实时预览：编辑器聚焦时光标所在行显示源码，其余按渲染效果显示；文本本身不被改写。 */
 export function markdownLive(ctx: LiveContext): Extension {
   const opener = createLinkOpener(ctx);
   return [
     Prec.highest(LIVE_THEME),
     EditorView.lineWrapping,
     inlinePlugin(ctx, opener),
-    blockField(ctx),
+    focusTracking,
+    blockField(ctx, opener),
     EditorView.domEventHandlers({
       mousedown(event, view) {
         if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return false;
