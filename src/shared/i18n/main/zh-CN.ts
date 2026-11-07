@@ -136,6 +136,17 @@ export const mainZhCN = {
     builtinUndeletable: '内置角色不可删除',
     removeFailed: '删除角色失败：{error}',
   },
+  workflows: {
+    readFailed: '读取工作流失败：{error}',
+    invalidId: '无效的工作流 id',
+    notFound: '工作流不存在',
+    invalid: '工作流无效：{error}',
+    saveFailed: '保存工作流失败：{error}',
+    removeFailed: '删除工作流失败：{error}',
+    limitReached: '最多保存 {max} 个工作流',
+    corrupt: '{file} 无法解析，请修复或移走该文件后重试',
+    corruptEntry: '{file} 第 {index} 个工作流无效：{error}',
+  },
   skills: {
     readFailed: '读取技能失败：{error}',
     invalidArgs: '无效的技能参数',

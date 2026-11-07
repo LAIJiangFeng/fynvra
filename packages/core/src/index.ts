@@ -10,3 +10,4 @@ export * from './roles/builtin';
 export * from './roles/JsonFileRoleStore';
 export * from './roles/parseRole';
 export type * from './types';
+export * from './workflows/workflow';

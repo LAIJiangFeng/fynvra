@@ -148,6 +148,17 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     builtinUndeletable: "Built-in roles can't be deleted",
     removeFailed: 'Failed to delete role: {error}',
   },
+  workflows: {
+    readFailed: 'Failed to read workflows: {error}',
+    invalidId: 'Invalid workflow id',
+    notFound: 'Workflow not found',
+    invalid: 'Invalid workflow: {error}',
+    saveFailed: 'Failed to save workflow: {error}',
+    removeFailed: 'Failed to delete workflow: {error}',
+    limitReached: 'You can save at most {max} workflows',
+    corrupt: "{file} can't be parsed; fix or move it away and try again",
+    corruptEntry: 'Workflow #{index} in {file} is invalid: {error}',
+  },
   skills: {
     readFailed: 'Failed to read skills: {error}',
     invalidArgs: 'Invalid skill arguments',
