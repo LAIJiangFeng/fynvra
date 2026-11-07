@@ -24,6 +24,8 @@ export interface WorkflowRegistry {
  * `userData/workflows.json`：`{ version: 1, workflows: Workflow[] }`，最多 50 个。
  * 内存缓存 + 串行读改写 + 原子替换。文件无法解析或含非法记录时一律报错，
  * 不改名、不按空表继续，避免下一次保存把用户的工作流覆盖掉。
+ * 版本号不变：旧条目（步骤不带 needs）读入时由 parseWorkflow 转成线性链，
+ * 下一次保存时整份按新形状（每个节点带 needs）写回。
  */
 export function createWorkflowRegistry(options: { filePath: string }): WorkflowRegistry {
   const { filePath } = options;

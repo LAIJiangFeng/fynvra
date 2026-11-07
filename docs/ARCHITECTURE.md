@@ -99,7 +99,8 @@ export interface Task {
   workflow?: TaskWorkflow;    // 工作流任务（§7.13）：派发时的定义快照与推进状态；roleId 始终等于当前步骤的角色
 }
 export interface TaskWorkflow {
-  id: string; name: string; steps: WorkflowStep[]; maxRounds: number;
+  id: string; name: string; steps: WorkflowStep[]; maxRounds: number; // steps 是派发时的图快照（拓扑序，带 needs）；旧快照缺 needs 时读入按列表顺序补成线性链
+  // 以下是串行引擎的推进状态；W2 并行引擎改为按节点持久化状态与待启动意图（§7.13）
   step: number;               // 当前步骤下标
   rounds: number;             // 已回退次数
   history: { step: number; dispatchId: string; outcome: 'succeeded' | 'failed'; summary: string; at: number }[]; // 最近 30 条，摘要截断 2000 字
@@ -113,17 +114,20 @@ export interface Dispatch {
 }
 export interface Worktree { id: string; workspaceId: string; path: string; branch: string; baseRef: string; baseCommit: string; }
 
-// 工作流（§7.13）：有序的角色步骤
+// 工作流（§7.13）：角色节点组成的有向无环图（沿用 step 命名，界面称「节点」）
+export interface WorkflowPosition { x: number; y: number } // 有限数，±100000
 export interface WorkflowStep {
   id: string;                 // 工作流内唯一 slug
   name: string;               // 显示名，如「开发」，≤ 60
   roleId: string;             // 执行角色，不能是 tools: 'orchestrator' 的角色
-  instructions: string;       // 本步说明，追加进任务书，≤ 4000
-  onFail?: string;            // 本步报告 failed 时退回的步骤 id；缺省 = 整个任务失败
+  instructions: string;       // 本节点说明，追加进任务书，≤ 4000
+  needs: string[];            // 上游节点 id，全部通过后才开始；[] = 起点。归一化输出总是带上
+  position?: WorkflowPosition; // 画布坐标；缺省时界面自动排版
+  onFail?: string;            // 报告 failed 时退回的节点 id，只能是自身或祖先；缺省 = 整个任务失败
 }
 export interface Workflow {
   id: string; name: string; description?: string; // name ≤ 60，description ≤ 500
-  steps: WorkflowStep[];      // 1–10 步
+  steps: WorkflowStep[];      // 1–20 个节点，按稳定拓扑序存放
   maxRounds: number;          // 回退上限，0–10，默认 3
 }
 
@@ -144,7 +148,7 @@ export interface Message {
   - 新启动的会话读取保存后的角色；已经启动的会话不热替换资源、不强制重启。工具权限和编排/worker 协议仍由运行时执行，不因修改参考提示词而移除。
 - `orchestration/`：`OrchestrationStore`（内存实现 + 可注入的 JSON 持久化）、状态迁移纯函数（task / dispatch 合法迁移表，非法迁移返回错误而不是抛异常）、`Inbox`（FIFO、ack、按类型过滤、`waitFor(predicate, timeoutMs)` Promise）。
 - `git/`：`GitWorktreeManager`（注入 `exec(cmd, args, cwd)`）：`create({ repoPath, workspaceId, slug, baseRef, worktreesRoot })` → 分支 `fynvra/<slug>`（冲突加后缀），路径 `<worktreesRoot>/<workspaceId>/<slug>`；`status`（dirty / ahead / behind）；`diff(worktree, baseCommit?, headRef?)`（headRef 默认 HEAD）；`remove`；`prune`；`merge({ repoPath, branch })` 走 `--no-ff`，返回 `{ ok, conflicts?: string[] }`，冲突时自动 `merge --abort`；`deleteBranch`。
-- 工作流：`Workflow` / `WorkflowStep` 类型与 `parseWorkflow(unknown)` 收窄校验（拒绝多余键、`onFail` 必须指向本工作流已有步骤）。
+- 工作流：`Workflow` / `WorkflowStep` 类型与 `parseWorkflow(unknown)` 收窄校验（规则见 §7.13）；`workflows/graph.ts` 的纯函数图工具：`workflowTopologicalOrder`、`findWorkflowCycle`、`workflowParents` / `workflowChildren`、`workflowAncestors` / `workflowDescendants`、`workflowRoots` / `workflowSinks`、`workflowLevels`、`summarizeWorkflow`。
 - `briefs/`：任务书模板渲染（Target / Change / Constraints / Ownership / Acceptance 五段 + `report_done` 契约段）。
 
 ## 5. Agent 运行时（`packages/agent-runtime`，`@fynvra/agent-runtime`）
@@ -262,9 +266,9 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 
 **工作流任务**（`dispatch_task` 带 `workflow`，定义与推进见 §7.13）：
-- 步骤之间由 Main 在 `report_done` 结算后自动推进：同一 worktree（in-place 模式为同一目录）新建下一步角色的 worker 会话和新 Dispatch，任务保持 `in-progress`。只有整个流程结束（最后一步 succeeded → `in-review`）或失败（无可退回步骤、超过回退上限、下一步启动失败 → `failed`）时才向主 agent 发 `worker_done`；主 agent 照常 review_diff / run_checks / merge_worktree。
-- 对工作流任务（in-review 或 failed）执行 `reject_work`：从第一步重新走完整流程，反馈写进第一步任务书，`rounds` 归零、历史保留；现有守卫（待答复提问检查、当前 dispatch 校验等）不变。
-- 崩溃恢复依赖 `Task.workflow.pending`：先写 `pending` 再启动下一步；服务加载 / 对账时发现 in-progress、当前尝试已结算且有 `pending` 的任务，重新执行该推进，不能卡死在 in-progress。任务已被放弃 / 清理时不再推进。
+- 节点之间由 Main 在 `report_done` 结算后自动调度（并行、隔离与汇合合并见 §7.13），任务保持 `in-progress`。只有整张图全部通过（→ `in-review`）或失败（无可退回目标、超过回退上限、节点启动失败 → `failed`）时才向主 agent 发 `worker_done`；主 agent 照常对集成 worktree review_diff / run_checks / merge_worktree。
+- 对工作流任务（in-review 或 failed）执行 `reject_work`：从起点节点开始整图重跑，反馈写进各起点节点的任务书，`rounds` 归零、历史保留；现有守卫（待答复提问检查、dispatch 校验等）不变。
+- 崩溃恢复依赖持久化的节点状态与待启动意图：先写意图再启动节点；服务加载 / 对账时发现 in-progress、有未执行意图的任务，重新执行该推进，不能卡死在 in-progress。任务已被放弃 / 清理时不再推进。（W2 之前的串行引擎用 `Task.workflow.pending`。）
 
 ## 7. IPC 规则
 
@@ -464,22 +468,45 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.13 工作流
 
-- 行为差异：
-  - 工作流是有序的角色步骤（`Workflow` / `WorkflowStep`，§4），步骤共用同一个 worktree（in-place 模式为同一目录），按顺序由不同角色的 worker 执行，以 `report_done` 的 succeeded / failed 判定是否通过。
-  - 派发：`dispatch_task` 可选 `workflow`（id，或不区分大小写的名称），与 `role` 互斥（同时给返回错误）。主 agent 会话的 spawn spec 带工作流清单（id、名称、说明、各步名称 + 角色），工具描述与 orchestrator 提示词据此说明；用户说“用某工作流做某事”时传 `workflow`。Main 派发时以注册表为准：工作流不存在、步骤角色不存在或是编排类角色则返回错误；成功则把定义快照进 `Task.workflow`，`Task.roleId` 始终等于当前步骤的角色。之后编辑工作流不影响已派发的任务。
-  - 推进（Main 在 `report_done` 结算后执行）：本步 succeeded 且不是最后一步 → 新建下一步角色的 worker 会话与新 Dispatch，任务保持 `in-progress`，不发 worker_done。本步 failed：有 `onFail` 且 `rounds < maxRounds` → `rounds + 1`，启动 onFail 指向的步骤，失败摘要作为反馈写进它的任务书；否则任务记 `failed`，发 worker_done(failed)，正文含工作流历程。最后一步 succeeded → 任务 `in-review`，发 worker_done(succeeded)，正文汇总各步摘要，改动文件取各步并集；主 agent 照常验收合并。下一步启动失败 → 任务记 `failed`，发 worker_done(failed) 说明原因。上一步的 worker 会话按现有规则释放，输出仍可通过对应 dispatch 读取。
-  - 任务书：原 spec + 「工作流 X · 第 k/n 步：<步骤名>」+ 本步说明 + 本步判定契约（通过 → `report_done succeeded`；发现需要退回的问题 → `failed`，summary 写清问题与复现）+ 之前各步摘要 / 退回反馈。
-  - `reject_work`、崩溃恢复见 §6。send_to_worker / read_worker_output / ask_coordinator 针对当前步的 dispatch，行为不变；list_workers 每个工作流任务多一行“工作流 名称 · 第 k/n 步 步骤名（角色）· 回退 r/max”；任务列表 / 抽屉显示同样的进度和历史。
-  - 设置页「设置 → 工作流」：列表、新建（预设模板「开发 → 测试 → 审核」，三步默认角色 `worker`，测试 / 审核失败退回开发，maxRounds 3）、编辑（名称、说明、回退上限、步骤增删与上下移动；每步名称、角色下拉（排除编排类角色）、说明、失败退回到）、删除确认。
+工作流是由角色节点组成的有向无环图：每个节点做什么、由哪个角色执行、依赖哪些上游节点。分阶段落地：W1 模型 / 校验 / 迁移 / 本契约，W2 并行执行引擎，W3 画布编辑器，W4 任务进度图。W2 合并之前沿用串行引擎：`steps` 按拓扑序存放，按下标依次执行仍满足依赖，只是不并行。
+
+- 模型与校验（core，`parseWorkflow`，不抛异常，拒绝多余键，`null` 视同缺省）：
+  - 节点沿用 `WorkflowStep`（§4），新增 `needs: string[]`（上游 id，归一化输出总是带上）与可选 `position: { x, y }`（有限数，绝对值 ≤ 100000，缺省时界面自动排版）。
+  - 节点数 1–20；节点 id 在工作流内唯一；`needs` 只能引用已存在的节点，不能重复，不能指向自己；整张图不能有环，错误信息按依赖方向列出环上的节点（如 `a → b → c → a`）。
+  - `onFail` 只能是节点自身或它的祖先（经 `needs` 可传递到达的上游）。
+  - 输出的 `steps` 按稳定拓扑序排列（Kahn，同时可选的节点按原输入顺序取）。
+  - 兼容旧数据：输入里没有任何节点带 `needs` 时，按列表顺序转成线性链（第 i 个依赖第 i-1 个，第一个为 `[]`）；只要有一个节点带 `needs`，缺 `needs` 的节点视为起点 `[]`。旧任务快照（`Task.workflow.steps` 无 `needs`）读入时按同样规则补齐。
+  - 图工具（core 纯函数，W2 / W3 / W4 共用）：`workflowTopologicalOrder(steps) → steps[] | undefined`（有环为 undefined）、`findWorkflowCycle(steps) → id[] | undefined`、`workflowParents` / `workflowChildren(steps, id) → id[]`、`workflowAncestors` / `workflowDescendants(steps, id) → Set<id>`（不含自身）、`workflowRoots` / `workflowSinks(steps) → id[]`、`workflowLevels(steps) → id[][] | undefined`（最长路径分层）、`summarizeWorkflow(steps, label?) → string`。
+  - 文字摘要：每层的每个节点恰好依赖上一层全部节点时按层写成 `开发 → (测试 ‖ 安全审查) → 验收`（同层用 ` ‖ ` 并列，只有一层时不加括号）；否则按拓扑序逐个列出 `开发; 测试 ← 开发; 验收 ← 测试 + 安全审查`。
+- 派发：`dispatch_task` 可选 `workflow`（id，或不区分大小写的名称），与 `role` 互斥（同时给返回错误）。主 agent 会话的 spawn spec 带工作流清单（id、名称、说明、各节点名称 + 角色、`summary` 文字摘要，节点标签为 `名称 [角色]`），工具描述与 orchestrator 提示词显示摘要；用户说“用某工作流做某事”时传 `workflow`。Main 派发时以注册表为准：工作流不存在、节点角色不存在或是编排类角色则返回错误；成功则把定义快照进 `Task.workflow`。之后编辑工作流不影响已派发的任务。
+- 执行语义（W2 实现，Main 在 `report_done` 结算后执行）：
+  - 调度：节点的所有上游都通过（并已合回集成 worktree）后才可运行；每个工作流任务最多同时运行 4 个节点；同时可运行的节点按拓扑序启动。
+  - 隔离（git 工作区）：任务有一个集成 worktree。线性部分（同一时刻只有一个可运行节点）直接在集成 worktree 里运行，和串行引擎一样。能同时运行的节点各自从集成 worktree 当前 HEAD 分出一个节点 worktree。
+  - 汇合合并：节点成功后，把它的分支串行合回集成 worktree；有 worker 正在集成 worktree 里工作时不合并，等它结束后再合。合并冲突算该节点失败，冲突文件列表作为失败反馈；合并完成后清理该节点的 worktree 与分支。
+  - 普通目录（vcs 为 none，in-place 模式）：不隔离，按拓扑序一次只跑一个节点。
+  - 失败：有节点失败后不再启动新节点，等正在运行的节点结束后汇总所有失败。每个失败节点都设置了 `onFail` 且 `rounds < maxRounds` → 退回到这些退回目标中最上游的那个（拓扑序最靠前），`rounds + 1`，把该目标及其所有后代重置为等待，所有失败意见合并作为反馈写进目标节点的任务书；否则整个任务记 `failed`，发 worker_done(failed)，正文含工作流历程。节点启动失败视同该任务失败。
+  - 成功：全部节点通过后任务进入 `in-review`，发 worker_done(succeeded)：正文汇总各节点总结，改动文件取各节点并集；`review_diff` / `merge_worktree` 针对集成 worktree，能看到完整的合并结果。
+  - `reject_work`（in-review 或 failed）：从起点节点开始整图重跑，全部节点重置为等待，反馈写进起点节点任务书，`rounds` 归零、历史保留。
+  - abandon（`cleanup_worktree { abandon: true }`）：停掉所有运行中节点的会话，清理集成 worktree 与所有节点 worktree / 分支。
+  - 崩溃恢复：节点状态（等待 / 运行中 / 通过 / 失败，及是否已合回）与待启动意图随任务持久化，先写意图再启动；服务加载 / 对账时按持久化状态恢复：已结算未合并的先合并，有意图的重新启动，不能卡死在 in-progress。
+- 任务书：原 spec + 「工作流 X · 节点 <名称>」+ 本节点说明 + 判定契约（通过 → `report_done succeeded`；发现需要退回的问题 → `failed`，summary 写清问题与复现）+ 已完成上游节点的摘要 / 退回反馈。
+- 编排工具显示：`list_workers` 对工作流任务列出各节点的状态（等待 / 运行中 + dispatch / 通过 / 失败）与回退次数 `r/max`；`send_to_worker` / `read_worker_output` 接受该任务任一活动节点的 dispatch；`ask_coordinator` 转给主 agent 的问题带上工作流名和节点名；工具说明与提示词里的工作流显示成图的文字摘要。
+- 设置页（W3）「设置 → 工作流」：
+  - 画布编辑器：`@xyflow/react` 画布 + `@dagrejs/dagre` 自动排版。节点卡片显示名称、角色和说明首行；从节点拖出连线建立依赖（写进下游的 `needs`），会形成环的连线被拒绝；删除连线 / 节点时同步更新 `needs` 与失效的 `onFail`；拖动节点写 `position`。
+  - 侧栏编辑选中节点：名称、角色下拉（排除编排类角色）、说明、失败退回目标（只列自身与祖先）。失败退回在画布上用红色虚线从节点指向目标。
+  - 其他：自动排版、预设模板、工作流名称 / 说明 / 回退上限；列表页每个工作流显示文字摘要。保存仍走 `workflows:save`，由 Main 用 `parseWorkflow` 校验。
+  - 公共组件：可复用的 `WorkflowGraph`，分只读与可编辑两种模式，W4 复用只读模式。
+  - 过渡期（W3 之前）：现有线性表单编辑器保存时丢弃 `position`，按当前列表顺序重建线性 `needs`，失败退回只列自身与之前的步骤。
+- 任务进度图（W4）：编排面板里工作流任务显示只读流程图，按节点状态着色（等待 / 运行中 / 通过 / 失败），点击节点查看对应 worker 的输出。
 - 所属层与必改文件：
-  - core：`Workflow` / `WorkflowStep` / `Task.workflow` 类型与 `parseWorkflow`；编排状态与任务书渲染的工作流推进。
-  - Main：工作流注册表服务；编排服务在结算后推进、对账时按 `pending` 恢复；主 agent spawn spec 带工作流清单。
-  - IPC（领域 `workflows`）：`workflows:list`、`workflows:save`（整份 Workflow，新建或替换）、`workflows:remove`（id）。保存只校验结构，角色是否存在在派发时检查（设置页对不存在 / 编排类角色给出提示）。preload 按 §9.1 新增 `workflows` 领域文件。
+  - core：`Workflow` / `WorkflowStep` / `Task.workflow` 类型、`parseWorkflow` 与图工具；编排状态与任务书渲染的工作流推进。
+  - Main：工作流注册表服务；编排服务的调度、合并与恢复；主 agent spawn spec 带工作流清单与摘要。
+  - IPC（领域 `workflows`）：`workflows:list`、`workflows:save`（整份 Workflow，新建或替换）、`workflows:remove`（id）。保存只校验结构，角色是否存在在派发时检查（设置页对不存在 / 编排类角色给出提示）。
   - agent-runtime：`dispatch_task` 的 `workflow` 参数与互斥校验、工具描述与 orchestrator 提示词。
-  - Renderer：「设置 → 工作流」页、编排面板的进度与历史、中英文案。
-- 持久化：`userData/workflows.json` = `{ version: 1, workflows: Workflow[] }`（≤ 50 个），原子写；任务里的快照与推进状态随编排快照 `userData/orchestration/<workspaceId>.json` 保存。
-- 安全边界：入参 `unknown` 收窄、拒绝多余键；编排类角色不能当步骤角色；回退次数受 `maxRounds` 限制，历史与摘要有界；各步 worker 的工具、审批和验收合并规则与普通派发相同。
-- 明确不做：并行步骤、条件分支（除 `onFail` 外）、跨任务工作流、步骤级模型覆盖、内置测试 / 审核角色。
+  - Renderer：「设置 → 工作流」画布编辑器、编排面板的进度图与历史、中英文案。
+- 持久化：`userData/workflows.json` = `{ version: 1, workflows: Workflow[] }`（≤ 50 个），原子写。版本号不变：旧条目（无 `needs`）读入时由 `parseWorkflow` 转成线性链，下次保存整份写成新形状。任务里的快照与推进状态随编排快照 `userData/orchestration/<workspaceId>.json` 保存。
+- 安全边界：入参 `unknown` 收窄、拒绝多余键；编排类角色不能当节点角色；节点数、并发数、回退次数有上限，历史与摘要有界；各节点 worker 的工具、审批和验收合并规则与普通派发相同。
+- 明确不做：条件分支（除 `onFail` 外）、跨任务工作流、节点级模型覆盖、内置测试 / 审核角色、子图与循环。
 
 ## 8. 分阶段
 

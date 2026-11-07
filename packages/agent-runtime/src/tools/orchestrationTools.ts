@@ -71,6 +71,8 @@ export interface WorkflowOption {
   name: string;
   description?: string;
   steps: readonly { name: string; roleId: string }[];
+  /** 图的文字摘要；有值时工具描述显示它而不是按顺序列出步骤 */
+  summary?: string;
 }
 
 export interface OrchestrationToolsOptions {
@@ -458,7 +460,8 @@ function dispatchRefSchema() {
 
 function describeWorkflow(workflow: WorkflowOption): string {
   const name = workflow.name !== workflow.id ? ` (${workflow.name})` : '';
-  const steps = workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
+  const steps =
+    workflow.summary ?? workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
   return `${workflow.id}${name}: ${steps}${workflow.description ? ` — ${oneLine(workflow.description)}` : ''}`;
 }
 
