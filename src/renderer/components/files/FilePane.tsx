@@ -165,7 +165,14 @@ export function FilePane({
           </Button>
         </div>
       ) : !preview ? (
-        <FileMessage loading title={t('common.loading')} />
+        <FileMessage
+          loading
+          title={t(
+            window.fynvra.window.platform === 'win32' && /\.doc$/i.test(file.name)
+              ? 'files.document.docConverting'
+              : 'common.loading'
+          )}
+        />
       ) : preview.kind === 'unsupported' ? (
         <FileMessage title={t(`files.${preview.reason}`)} description={t('files.limits')} />
       ) : preview.kind === 'image' ? (
@@ -182,9 +189,17 @@ export function FilePane({
         </Suspense>
       ) : preview.kind === 'docx' || preview.kind === 'document-text' ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          {preview.kind === 'document-text' && (
+          {(preview.kind === 'document-text' || preview.convertedFrom === 'doc') && (
             <p className="shrink-0 border-b bg-muted/40 px-4 py-1.5 text-muted-foreground text-xs">
-              {t('files.document.docNotice')}
+              {t(
+                preview.kind === 'docx'
+                  ? 'files.document.docConverted'
+                  : preview.conversion === 'unavailable'
+                    ? 'files.document.docNoWord'
+                    : preview.conversion === 'failed'
+                      ? 'files.document.docConvertFailed'
+                      : 'files.document.docNotice'
+              )}
             </p>
           )}
           <div className="relative min-h-0 flex-1">
