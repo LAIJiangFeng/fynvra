@@ -5,6 +5,7 @@ import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
+import { createPluginsApi } from './domains/plugins';
 import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
@@ -57,6 +58,7 @@ const api: FynvraApi = {
   skills: createSkillsApi(ipcRenderer, subscribe),
   instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
+  plugins: createPluginsApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
   usage: createUsageApi(ipcRenderer),
 };

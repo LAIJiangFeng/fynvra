@@ -27,6 +27,7 @@ const spec: SpawnSessionSpec = {
     name: 'Worker',
     skillIds: [],
     mcpServerIds: ['docs'],
+    pluginIds: [],
     tools: 'all',
     approvalMode: 'auto-edits',
   },

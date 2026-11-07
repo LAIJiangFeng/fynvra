@@ -54,6 +54,11 @@ export interface RoleResourcePaths {
   /** skill 目录或 SKILL.md 路径；会话只加载这些 skill */
   skills: string[];
   mcpServers: McpServerConfig[];
+  /**
+   * 插件：pi 包目录或单个扩展文件的绝对路径，交给 DefaultResourceLoader 的 additionalExtensionPaths；
+   * 包里的 extensions / skills / prompts 按 pi 包规则加载（noExtensions / noSkills 不影响这些路径）
+   */
+  extensions?: string[];
   instructionFile?: { name: string; content: string };
 }
 
@@ -195,6 +200,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     noPromptTemplates: true,
     noThemes: true,
     additionalSkillPaths: options.resourcePaths.skills,
+    additionalExtensionPaths: options.resourcePaths.extensions ?? [],
     extensionFactories,
     systemPromptOverride: () => undefined,
     appendSystemPromptOverride: () => [],
