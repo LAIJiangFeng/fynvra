@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   UserCog,
+  Workflow,
   X,
 } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
@@ -29,6 +30,7 @@ import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 import { UsageSettings } from './UsageSettings';
+import { WorkflowsSettings } from './WorkflowsSettings';
 
 /** 页头只有页名（字典 settings.sections.<value>），不加副标题 */
 interface SectionSpec {
@@ -44,6 +46,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'notifications', icon: Bell, Component: NotificationSettings },
   { value: 'providers', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
+  { value: 'workflows', icon: Workflow, Component: WorkflowsSettings },
   { value: 'instructions', icon: FileText, Component: InstructionsSettings },
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
