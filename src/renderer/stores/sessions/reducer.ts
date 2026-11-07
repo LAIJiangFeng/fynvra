@@ -674,7 +674,9 @@ function addUsage(total: UsageTotals, usage: ChatMessage['usage']): UsageTotals 
 function approvalKindOf(toolName: string): ApprovalKind {
   if (toolName === 'edit') return 'file-edit';
   if (toolName === 'write' || toolName === 'write_doc') return 'file-write';
+  if (toolName === 'web_fetch') return 'network';
   if (toolName.startsWith('mcp__')) return 'mcp';
+  // 插件工具名单只在 Main；这里先按 command 展示，Main 的推送到达后以其 kind 为准
   return 'command';
 }
 
@@ -697,11 +699,15 @@ function approvalFromEvent(
   sessionId: string,
   event: Extract<FynvraSessionEvent, { type: 'approval_request' }>
 ): PendingApproval {
-  const detail = describeArgs(event.args);
+  const kind = approvalKindOf(event.toolName);
+  const url = asRecord(event.args)?.url;
+  // network 的 detail 是完整 URL（不截断），与 Main 侧 describeToolCall 一致
+  const detail =
+    kind === 'network' && typeof url === 'string' && url ? url : describeArgs(event.args);
   return {
     id: event.requestId,
     sessionId,
-    kind: approvalKindOf(event.toolName),
+    kind,
     title: event.toolName,
     detail: event.reason ? [detail, event.reason].filter(Boolean).join('\n') : detail,
     // 事件不带过期时间；0 表示未知，Main 的推送到达后补上

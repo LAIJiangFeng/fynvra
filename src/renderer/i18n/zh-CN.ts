@@ -384,6 +384,8 @@ export const zhCN = {
       'file-edit': '编辑文件',
       'file-write': '写入文件',
       mcp: 'MCP 工具',
+      network: '访问网络',
+      plugin: '插件工具',
     },
     pending: '待审批',
     submitting: '正在提交…',
@@ -663,7 +665,7 @@ export const zhCN = {
       manual: '手动代理',
       address: 'HTTP / HTTPS 代理地址',
       scope:
-        '仅覆盖 Git、Agent shell 命令（含 gh）与新终端。模型 API、MCP、应用更新保持各自路由。“现有环境”指继承的进程环境变量，不保证使用 Windows 系统代理',
+        '覆盖 Git、Agent shell 命令（含 gh）等命令/Git 子进程、新终端与内置网页读取（web_fetch）。模型 API、MCP、应用更新的流量不走此设置，保持各自路由。“现有环境”指继承的进程环境变量，不保证使用 Windows 系统代理',
       manualHint:
         '仅支持无认证的 HTTP/HTTPS 代理，同一地址用于 HTTP 和 HTTPS。手动模式清除继承的 ALL_PROXY，并清空 NO_PROXY 绕过规则。命令自身的显式网络配置仍可能覆盖此设置',
       compatibility: 'Git 兼容模式',

@@ -96,7 +96,7 @@ export interface ChatMessage {
   streaming: boolean;
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }
-export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
+export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp' | 'network' | 'plugin';
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 export interface ApprovalRequest {
   id: string;

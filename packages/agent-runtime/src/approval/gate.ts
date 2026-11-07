@@ -67,10 +67,15 @@ export interface ApprovalGateOptions extends ApprovalPolicyHooks {
    * 计划模式的实时开关（宿主持有，随时可变），每次 check 都重新读取；缺省视为关闭。为 true 时：
    * - file-write / file-edit：每个写目标都是 Markdown 文档（{@link isDocumentPath}）时照原档位处理，不另加确认；
    *   确定不了目标或有任何非文档目标就直接拦截、不问人，拒绝文本让模型改用 write_plan（write_plan 不属于这两类）；
-   * - command 判定不是只读的（{@link isReadOnlyCommand}）以及所有 mcp，不论档位都要人确认，detail 末尾注明是计划模式要求的；
-   * - 只读命令与其他工具照原档位处理。保护底线照旧，allowSession 照旧按 kind + 工具名记住。
+   * - command 判定不是只读的（{@link isReadOnlyCommand}）以及所有 mcp / plugin，不论档位都要人确认，detail 末尾注明是计划模式要求的；
+   * - 只读命令与其他工具（含 network）照原档位处理。保护底线照旧，allowSession 照旧按 kind + 工具名记住。
    */
   planMode?: () => boolean;
+  /**
+   * 插件注册的工具名（宿主持有，随时可变），每次 check 都重新读取。{@link approvalKindOf} 判不出类别且工具名在集合里时归为
+   * `plugin`；内置工具名即使出现在集合里也保持原类别。读取失败按 plugin 处理（fail-closed）。
+   */
+  pluginTools?: () => ReadonlySet<string>;
 }
 
 /** pi `tool_call` 事件里审批门用到的部分 */
@@ -117,12 +122,12 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
 
 /**
  * 在 pi 的 tool_call 上按角色审批档位拦截工具调用：
- * - `supervised` 审批命令、文件写 / 改、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 全部放行；
+ * - `supervised` 审批命令、文件写 / 改、MCP、访问网络与插件工具；`auto-edits` 不审批文件写 / 改；`full` 全部放行；
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；
  * - 档位可以随时用 setMode 切换（会话级设置，初始值是角色的档位）；
  * - 计划模式（`planMode` 为 true 时）：改文件的工具只能写 Markdown 文档（照原档位审批），其他目标直接拒绝；
- *   非只读命令与 MCP 不论档位都要人确认；
+ *   非只读命令、MCP 与插件工具不论档位都要人确认；
  * - fail-closed：超时、回合中止、宿主出错一律拒绝。拒绝以 block 返回可读文本，不抛异常。
  */
 export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
@@ -138,7 +143,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     if (signal?.aborted) {
       return { block: true, reason: 'The run was stopped; the tool was not run.' };
     }
-    const kind = approvalKindOf(call.toolName);
+    const kind = approvalKindOf(call.toolName) ?? (isPluginTool(call.toolName) ? 'plugin' : null);
     if (!kind) return undefined;
     const planning = planModeOn();
     if (planning && (kind === 'file-write' || kind === 'file-edit')) {
@@ -150,10 +155,11 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     }
     const command = kind === 'command' ? commandOf(call.input) : undefined;
     const floor = command === undefined ? undefined : protectedAction(command);
-    // 计划模式：MCP 与判定不了只读的命令，不论档位都要人确认
+    // 计划模式：MCP、插件工具与判定不了只读的命令，不论档位都要人确认
     const planConfirm =
       planning &&
       (kind === 'mcp' ||
+        kind === 'plugin' ||
         (kind === 'command' && (command === undefined || !isReadOnlyCommand(command))));
     const key = `${kind}:${call.toolName}`;
     if (!floor && (!(planConfirm || modeRequiresApproval(mode, kind)) || sessionAllowed.has(key))) {
@@ -191,6 +197,16 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
   function planModeOn(): boolean {
     try {
       return options.planMode?.() === true;
+    } catch {
+      return true;
+    }
+  }
+
+  /** 名单读取失败按插件工具处理（fail-closed）：check 永不抛异常 */
+  function isPluginTool(toolName: string): boolean {
+    if (!options.pluginTools) return false;
+    try {
+      return options.pluginTools().has(toolName);
     } catch {
       return true;
     }
@@ -286,9 +302,14 @@ function planModeFileRefusal(toolName: string, offending: readonly string[]): st
 
 /** 计划模式要求人确认时附在 detail 末尾，说明为什么要问（这类调用在原档位下可能不用问） */
 function planModeNote(kind: ApprovalKind): string {
-  return kind === 'mcp'
-    ? 'Plan mode is on: MCP tools need your confirmation.'
-    : 'Plan mode is on: this command is not recognized as read-only, so it needs your confirmation.';
+  switch (kind) {
+    case 'mcp':
+      return 'Plan mode is on: MCP tools need your confirmation.';
+    case 'plugin':
+      return 'Plan mode is on: plugin tools need your confirmation.';
+    default:
+      return 'Plan mode is on: this command is not recognized as read-only, so it needs your confirmation.';
+  }
 }
 
 /** 拒绝时给模型的工具结果：说清拒绝了什么、为什么、工具没有执行、接下来怎么做 */
@@ -318,6 +339,10 @@ function describeAction(request: ApprovalGateRequest): string {
       return target ? `writing ${target}` : `the ${request.toolName} call`;
     case 'file-edit':
       return target ? `editing ${target}` : `the ${request.toolName} call`;
+    case 'network':
+      return target ? `fetching ${oneLine(target)}` : `the ${request.toolName} call`;
+    case 'plugin':
+      return `the plugin tool ${request.toolName}`;
     default:
       return `the MCP tool ${request.toolName}`;
   }

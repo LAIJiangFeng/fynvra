@@ -42,10 +42,10 @@ describe('approvalKindOf', () => {
 });
 
 describe('modeRequiresApproval', () => {
-  const kinds: ApprovalKind[] = ['command', 'file-write', 'file-edit', 'mcp'];
+  const kinds: ApprovalKind[] = ['command', 'file-write', 'file-edit', 'mcp', 'network', 'plugin'];
   const table: Record<ApprovalMode, ApprovalKind[]> = {
-    supervised: ['command', 'file-write', 'file-edit', 'mcp'],
-    'auto-edits': ['command', 'mcp'],
+    supervised: ['command', 'file-write', 'file-edit', 'mcp', 'network', 'plugin'],
+    'auto-edits': ['command', 'mcp', 'network', 'plugin'],
     full: [],
   };
 
