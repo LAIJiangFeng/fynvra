@@ -40,6 +40,9 @@
 走代理时本地预检目标域名；重定向最多 5 跳、逐跳校验；总超时 30 秒，解压后正文上限 5 MB。HTML 经 Readability 提取后
 转 Markdown，字符集按 header / BOM / meta 推断；正文包在 `--- BEGIN UNTRUSTED WEB CONTENT ---` / `--- END UNTRUSTED WEB CONTENT ---`
 之间，用 `start_index` 分页；每个 worker 进程一个内存 LRU 缓存。代理取会话加载时的 `commandEnv` 快照（无则 `process.env`）。
+`createRoleSession({ webFetch: { allowLoopback: true } })`（默认关闭）只放行回环目标（`localhost`、`*.localhost`、
+`127/8`、`::1`、`::ffff:127.x.x.x`）：URL 主机本身须是回环名或回环字面量，公网域名解析到回环仍拒绝；不允许公网重定向到本机；
+回环目标始终直连不走代理、不进缓存；内网、链路本地、云元数据等地址仍拦截。
 联网搜索（`web_search`）不做。
 
 传入 `workerHost` 的会话就是 worker：再加 `ask_coordinator` / `report_done`，系统提示词追加
