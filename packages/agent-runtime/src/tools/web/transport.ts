@@ -47,7 +47,8 @@ export interface FetchedPage {
  * 直连时用自定义 lookup 只连接校验通过的地址；按 proxyEnv 走代理时先在本地解析目标做预检。
  * 不带 Cookie、认证头或调用方提供的任何请求头。
  *
- * allowLoopback：只有起始 URL 本身是回环目标时，重定向链里才允许出现回环目标（公网页面不能重定向到本机）。
+ * allowLoopback：下一跳能否是回环目标取决于当前这一跳：只有从回环页面才能重定向到回环，
+ * 公网页面不能重定向到本机（回环 → 公网之后也不能再回到回环）。
  * 回环目标始终直连、不走代理，lookup 只接受回环地址；非回环目标按原规则（解析到回环仍拒绝）。
  */
 export async function fetchPage(
@@ -60,7 +61,6 @@ export async function fetchPage(
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const start = checkUrl(startUrl.href, { allowLoopback: options.allowLoopback === true });
   if (!start.ok) throw new FetchError(start.error);
-  const loopbackChain = start.loopback;
   let url = startUrl;
   let loopback = start.loopback;
   try {
@@ -80,9 +80,10 @@ export async function fetchPage(
         } catch {
           throw new FetchError(`HTTP ${status} redirect to an invalid Location`);
         }
-        const check = checkUrl(next, { allowLoopback: loopbackChain });
+        // 只有当前 hop 是回环目标时，下一跳才允许回环
+        const check = checkUrl(next, { allowLoopback: loopback });
         if (!check.ok) {
-          if (options.allowLoopback && checkUrl(next, { allowLoopback: true }).ok) {
+          if (!loopback && options.allowLoopback && checkUrl(next, { allowLoopback: true }).ok) {
             throw new FetchError(
               `redirect to ${next} refused: a non-local page cannot redirect to a local address`
             );

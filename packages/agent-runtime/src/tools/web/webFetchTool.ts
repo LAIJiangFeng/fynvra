@@ -19,7 +19,8 @@ export interface WebFetchToolOptions {
   proxyEnv: () => NodeJS.ProcessEnv;
   /**
    * 允许访问本机回环地址（localhost / *.localhost / 127.0.0.0/8 / ::1），默认关闭。
-   * 只放行 URL 主机本身是回环的目标；回环目标直连、不进缓存；公网页面不能重定向到本机。
+   * 只放行 URL 主机本身是回环的目标；回环目标直连、不进缓存；只有从回环页面才能重定向到回环，
+   * 公网页面不能重定向到本机（重定向链经过公网后不能再回到本机）。
    */
   allowLoopback?: boolean;
   /** 默认用进程级共享缓存（每个 agent worker 进程一份） */
