@@ -12,6 +12,7 @@ import { registerTerminalHandlers } from './terminals';
 import { registerUpdateHandlers } from './updates';
 import { registerUsageHandlers } from './usage';
 import { registerWindowHandlers } from './window';
+import { registerWorkflowHandlers } from './workflows';
 import { registerWorkspaceHandlers } from './workspaces';
 import { registerWorkspaceUiHandlers } from './workspaceUi';
 
@@ -28,6 +29,7 @@ export function registerIpcHandlers(): void {
   registerSessionHandlers();
   registerProviderHandlers();
   registerRoleHandlers();
+  registerWorkflowHandlers();
   registerSkillHandlers();
   registerInstructionHandlers();
   registerMcpHandlers();

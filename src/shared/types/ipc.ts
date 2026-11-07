@@ -152,6 +152,12 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：角色已变更 */
   ROLES_CHANGED: 'roles:changed',
 
+  // --- workflows ---
+  WORKFLOWS_LIST: 'workflows:list',
+  /** 参数是整份 Workflow，Main 经 parseWorkflow 收窄；新建或按 id 整份替换 */
+  WORKFLOWS_SAVE: 'workflows:save',
+  WORKFLOWS_REMOVE: 'workflows:remove',
+
   // --- skills ---
   SKILLS_LIST: 'skills:list',
   /** 无参时 Main 弹目录选择框；传 candidateIds 时登记 skills:scan 找到的技能。Renderer 不传路径 */
