@@ -183,6 +183,7 @@ describe('approval round trip through the protocol', () => {
     name: 'Careful',
     skillIds: [],
     mcpServerIds: [],
+    pluginIds: [],
     tools: 'all',
     approvalMode: 'supervised',
   };
