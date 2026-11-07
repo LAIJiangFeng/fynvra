@@ -71,7 +71,7 @@ export function RoleBadge({ roleId }: { roleId: string }) {
   );
 }
 
-/** 工作流任务的进度：当前步、角色、回退次数；两步之间显示正在启动的步骤。 */
+/** 工作流任务的进度：运行中的节点（或失败 / 已通过数）与回退次数；正在启动、合并的节点另起一行。 */
 export function WorkflowProgress({
   workflow,
   className,
@@ -80,9 +80,33 @@ export function WorkflowProgress({
   className?: string;
 }) {
   const t = useT();
-  const step = workflow.steps[workflow.step];
-  const pending = workflow.pending;
-  const next = pending ? workflow.steps[pending.step] : undefined;
+  const separator = t('orchestration.workflow.separator');
+  const names = (ids: readonly string[]) =>
+    ids.map((id) => workflow.steps.find((step) => step.id === id)?.name ?? id).join(separator);
+  const nodes = workflow.nodes;
+  const withStatus = (status: string) =>
+    nodes.filter((node) => node.status === status).map((node) => node.id);
+  const running = withStatus('running');
+  const failed = withStatus('failed');
+  const merging = nodes
+    .filter((node) => node.status === 'passed' && node.merged === false)
+    .map((node) => node.id);
+  const starting = workflow.launches.map((launch) => launch.nodeId);
+  const state =
+    running.length > 0
+      ? t('orchestration.workflow.running', { nodes: names(running) })
+      : failed.length > 0
+        ? t('orchestration.workflow.failed', { nodes: names(failed) })
+        : t('orchestration.workflow.passed', {
+            done: withStatus('passed').length,
+            total: workflow.steps.length,
+          });
+  const busy = [
+    ...(starting.length > 0
+      ? [t('orchestration.workflow.starting', { nodes: names(starting) })]
+      : []),
+    ...(merging.length > 0 ? [t('orchestration.workflow.merging', { nodes: names(merging) })] : []),
+  ];
   return (
     <div
       className={cn('flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground', className)}
@@ -92,24 +116,16 @@ export function WorkflowProgress({
         <span className="truncate">
           {t('orchestration.workflow.progress', {
             name: workflow.name,
-            step: workflow.step + 1,
-            total: workflow.steps.length,
-            stepName: step?.name ?? '?',
-            role: step?.roleId ?? '?',
+            state,
             rounds: workflow.rounds,
             max: workflow.maxRounds,
           })}
         </span>
       </span>
-      {pending && (
+      {busy.length > 0 && (
         <span className="flex min-w-0 items-center gap-1 text-sky-700 dark:text-sky-300">
           <Loader2 className="size-3 shrink-0 animate-spin" />
-          <span className="truncate">
-            {t('orchestration.workflow.advancing', {
-              step: pending.step + 1,
-              stepName: next?.name ?? '?',
-            })}
-          </span>
+          <span className="truncate">{busy.join(' · ')}</span>
         </span>
       )}
     </div>

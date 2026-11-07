@@ -184,8 +184,8 @@ function WorkflowHistory({ workflow }: { workflow: TaskWorkflow }) {
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-medium">
                   {t('orchestration.workflow.entry', {
-                    step: entry.step + 1,
-                    stepName: workflow.steps[entry.step]?.name ?? '?',
+                    step: workflow.steps.findIndex((step) => step.id === entry.nodeId) + 1,
+                    stepName: workflow.steps.find((step) => step.id === entry.nodeId)?.name ?? '?',
                   })}
                 </span>
                 {entry.outcome === 'failed' ? (
