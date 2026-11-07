@@ -167,7 +167,11 @@ export function FilePane({
       ) : !preview ? (
         <FileMessage
           loading
-          title={t(/\.doc$/i.test(file.name) ? 'files.document.docConverting' : 'common.loading')}
+          title={t(
+            window.fynvra.window.platform === 'win32' && /\.doc$/i.test(file.name)
+              ? 'files.document.docConverting'
+              : 'common.loading'
+          )}
         />
       ) : preview.kind === 'unsupported' ? (
         <FileMessage title={t(`files.${preview.reason}`)} description={t('files.limits')} />
