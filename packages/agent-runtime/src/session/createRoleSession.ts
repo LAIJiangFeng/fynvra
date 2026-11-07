@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -171,6 +172,8 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
     // orchestrator 不传：它没有改文件的工具，run_checks 等编排工具不受计划模式影响
     ...(directPlanMode ? { planMode: directPlanMode } : {}),
+    // 插件扩展注册的工具按 plugin 类别审批；loader 在下方创建，check 只在会话运行后发生
+    pluginTools: () => pluginTools(),
   });
   const extensionFactories: InlineExtension[] = [
     // 第一个注册：拦截在其他扩展的 tool_call 处理之前
@@ -206,6 +209,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     appendSystemPromptOverride: () => [],
   });
   await resourceLoader.reload();
+  const pluginTools = createPluginToolNames(resourceLoader, options.resourcePaths.extensions ?? []);
 
   const thinking = options.model.thinking ?? role.model?.thinking;
   const { session } = await createAgentSession({
@@ -331,6 +335,52 @@ function selectTools(
 /** 内存设置：与用户本机的 pi CLI 配置隔离；关掉 pi 的安装遥测与 provider 署名请求头 */
 function createDefaultSettings(): SettingsManager {
   return SettingsManager.inMemory({ enableInstallTelemetry: false });
+}
+
+/** 规范化路径用于比较：resolve、统一分隔符；Windows 上不区分大小写 */
+function normalizePluginPath(value: string): string {
+  const resolved = path.resolve(value).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * 插件工具名单：只统计来源路径等于某个插件路径（单文件插件）或位于插件根目录之下（包插件）的扩展；
+ * Fynvra 内联扩展（`<inline:…>`：审批门、MCP、Magic Context 等）不计入。每次调用读 loader 当前的扩展，
+ * 扩展数与工具总数不变时复用上次结果。没有插件时恒为空集。
+ */
+function createPluginToolNames(
+  loader: DefaultResourceLoader,
+  pluginPaths: readonly string[]
+): () => ReadonlySet<string> {
+  const empty: ReadonlySet<string> = new Set();
+  if (pluginPaths.length === 0) return () => empty;
+  const roots = pluginPaths.map(normalizePluginPath);
+  const fromPlugin = (extensionPath: string): boolean => {
+    if (!extensionPath || extensionPath.startsWith('<')) return false;
+    const normalized = normalizePluginPath(extensionPath);
+    return roots.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  };
+  let cacheKey = '';
+  let cached: ReadonlySet<string> = empty;
+  // 不能抛异常：审批门把 getter 抛错当作「是插件工具」处理，会让所有未归类工具都要审批
+  return () => {
+    let extensions: ReturnType<DefaultResourceLoader['getExtensions']>['extensions'];
+    try {
+      extensions = loader.getExtensions().extensions;
+    } catch {
+      return cached;
+    }
+    const key = `${extensions.length}:${extensions.reduce((sum, ext) => sum + ext.tools.size, 0)}`;
+    if (key === cacheKey) return cached;
+    const names = new Set<string>();
+    for (const extension of extensions) {
+      if (!fromPlugin(extension.path) && !fromPlugin(extension.resolvedPath)) continue;
+      for (const name of extension.tools.keys()) names.add(name);
+    }
+    cacheKey = key;
+    cached = names;
+    return cached;
+  };
 }
 
 function loaderWarnings(loader: DefaultResourceLoader): string[] {
