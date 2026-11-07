@@ -101,7 +101,7 @@ const HTML_SCHEMA: SanitizeOptions = {
 const HTML_PLUGINS: Options['rehypePlugins'] = [rehypeRaw, [rehypeSanitize, HTML_SCHEMA]];
 const LINK_CLASS = 'font-medium text-primary underline underline-offset-4';
 
-function externalLink(href: string): string | null {
+export function externalLink(href: string): string | null {
   if (!/^https?:\/\//i.test(href)) return null;
   try {
     return new URL(href).href;
@@ -114,10 +114,13 @@ export function FileMarkdownPreview({
   file,
   store,
   text,
+  className = 'mx-auto max-w-3xl',
 }: {
   file: WorkspaceFileEntry;
   store: FilesStore;
   text: string;
+  /** 实时预览的表格/HTML 块复用同一套渲染时不再居中限宽。 */
+  className?: string;
 }) {
   const references = useMemo(() => store.getState().markdownReferences(file.id), [store, file]);
   const pendingLink = useRef<symbol | null>(null);
@@ -190,7 +193,7 @@ export function FileMarkdownPreview({
   return (
     <Markdown
       text={text}
-      className="mx-auto max-w-3xl"
+      className={className}
       rehypePlugins={HTML_PLUGINS}
       components={components}
     />

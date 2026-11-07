@@ -24,7 +24,7 @@ export interface DirectoryState {
   truncated: boolean;
 }
 
-export type FileMode = 'edit' | 'preview' | 'split';
+export type FileMode = 'live' | 'edit' | 'split';
 
 export interface PreviewState {
   preview: FilePreview | null;
@@ -103,7 +103,7 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
         draft: '',
         saving: false,
         saveError: null,
-        mode: isMarkdown(name) ? 'preview' : 'edit',
+        mode: isMarkdown(name) ? 'live' : 'edit',
       };
       const request = Symbol();
       fileRequests.set(fileId, request);
