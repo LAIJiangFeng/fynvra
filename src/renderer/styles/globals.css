@@ -114,3 +114,24 @@
 @utility no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* 预览查找高亮（CSS Custom Highlight API，见 PreviewFindBar） */
+::highlight(fynvra-find) {
+  background-color: oklch(0.905 0.182 98.111 / 55%);
+  color: inherit;
+}
+
+::highlight(fynvra-find-current) {
+  background-color: oklch(0.769 0.188 70.08);
+  color: oklch(0.141 0.005 285.823);
+}
+
+.dark ::highlight(fynvra-find) {
+  background-color: oklch(0.795 0.184 86.047 / 35%);
+  color: inherit;
+}
+
+.dark ::highlight(fynvra-find-current) {
+  background-color: oklch(0.769 0.188 70.08);
+  color: oklch(0.141 0.005 285.823);
+}
