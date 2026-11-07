@@ -345,6 +345,8 @@ function WorkflowGraphInner({
         deleteKeyCode={editable ? DELETE_KEYS : null}
         multiSelectionKeyCode={null}
         selectionKeyCode={null}
+        // 只读图嵌在可滚动的面板里：滚轮留给外层滚动，缩放用 Controls 或捏合
+        {...(editable ? {} : { zoomOnScroll: false, panOnScroll: false, preventScrolling: false })}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.25}
