@@ -36,9 +36,10 @@ export type FilePreview = { size: number } & (
   | { kind: 'image'; dataUrl: string }
   /** 只读文档：原始字节经 IPC 结构化克隆传输，Renderer 解析，不可保存。 */
   | { kind: 'pdf'; data: Uint8Array }
-  | { kind: 'docx'; data: Uint8Array }
-  /** 旧版 .doc：Main 提取的正文，只读，不能当作可编辑文本。 */
-  | { kind: 'document-text'; format: 'doc'; text: string }
+  /** convertedFrom：旧版 .doc 经本机 Word 转换而来。 */
+  | { kind: 'docx'; data: Uint8Array; convertedFrom?: 'doc' }
+  /** 旧版 .doc：Main 提取的正文，只读，不能当作可编辑文本；conversion 为转换未成功的原因。 */
+  | { kind: 'document-text'; format: 'doc'; text: string; conversion?: 'unavailable' | 'failed' }
   | { kind: 'unsupported'; reason: 'binary' | 'tooLarge' | 'unreadable' }
 );
 

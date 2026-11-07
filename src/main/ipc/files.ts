@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import {
   type DirectoryResult,
   type EntryRefRequest,
@@ -14,8 +15,9 @@ import {
   type ResolveResult,
 } from '@shared/types/files';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { ClipboardItem, clipboard, ipcMain, shell } from 'electron';
+import { app, ClipboardItem, clipboard, ipcMain, shell } from 'electron';
 import { createFilesService, type FilesShell } from '../services/files';
+import { createWordConverter } from '../services/wordConversion';
 import { getWorkspaceService } from './workspaces';
 
 /**
@@ -57,6 +59,9 @@ export function getFilesService(): ReturnType<typeof createFilesService> {
   filesService ??= createFilesService({
     getWorkspace: (id) => getWorkspaceService().get(id),
     shell: shellAdapter,
+    convertDoc: createWordConverter({
+      cacheDir: join(app.getPath('userData'), 'cache', 'doc-preview'),
+    }).convert,
   });
   return filesService;
 }

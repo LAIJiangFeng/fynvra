@@ -203,6 +203,13 @@ export const en: MessagesShape<typeof zhCN> = {
       pages: '{total} pages',
       page: 'Page {page}',
       docNotice: 'Legacy .doc files show text only; formatting and images are not kept',
+      docConverting: 'Converting .doc with the local Word…',
+      docConverted:
+        'Legacy .doc converted by the local Word (macros disabled); some formatting may differ from the original',
+      docNoWord:
+        'Microsoft Word was not found, so this legacy .doc shows text only; install Word to see formatting, tables and images',
+      docConvertFailed:
+        'Word could not convert this .doc; showing plain text only, formatting and images are not kept',
       parseFailed: 'Could not parse document: {message}',
     },
     errors: {

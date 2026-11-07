@@ -100,17 +100,41 @@ function isDocument(format: DocumentFormat | null, bytes: Buffer): format is Doc
   return bytes.length >= magic.length && bytes.subarray(0, magic.length).equals(magic);
 }
 
+/** 旧版 .doc 转 .docx（Main 注入）；失败原因只区分不可用与失败。 */
+export type ConvertDoc = (
+  bytes: Buffer
+) => Promise<
+  | { ok: true; docx: Buffer }
+  | { ok: false; reason: 'unavailable' | 'failed' | 'timeout' | 'tooLarge' }
+>;
+
 async function documentPreview(
   format: DocumentFormat,
   bytes: Buffer,
-  size: number
+  size: number,
+  convertDoc?: ConvertDoc
 ): Promise<FilePreview> {
   // 复制到独立的 ArrayBuffer：结构化克隆会带上视图背后的整个缓冲区。
   if (format === 'pdf') return { kind: 'pdf', data: new Uint8Array(bytes), size };
   if (format === 'docx') return { kind: 'docx', data: new Uint8Array(bytes), size };
+  let conversion: 'unavailable' | 'failed' | undefined;
+  if (convertDoc) {
+    const converted = await convertDoc(bytes).catch(
+      () => ({ ok: false, reason: 'failed' }) as const
+    );
+    if (converted.ok)
+      return { kind: 'docx', data: new Uint8Array(converted.docx), size, convertedFrom: 'doc' };
+    conversion = converted.reason === 'unavailable' ? 'unavailable' : 'failed';
+  }
   try {
     const document = await new WordExtractor().extract(bytes);
-    return { kind: 'document-text', format: 'doc', text: document.getBody(), size };
+    return {
+      kind: 'document-text',
+      format: 'doc',
+      text: document.getBody(),
+      size,
+      ...(conversion ? { conversion } : {}),
+    };
   } catch {
     return { kind: 'unsupported', reason: 'unreadable', size };
   }
@@ -123,10 +147,11 @@ function versionOf(bytes: Buffer): string {
 async function previewOf(
   bytes: Buffer,
   size: number,
-  format: DocumentFormat | null
+  format: DocumentFormat | null,
+  convertDoc?: ConvertDoc
 ): Promise<FilePreview> {
   if (format && size > MAX_DOCUMENT_BYTES) return { kind: 'unsupported', reason: 'tooLarge', size };
-  if (isDocument(format, bytes)) return documentPreview(format, bytes, size);
+  if (isDocument(format, bytes)) return documentPreview(format, bytes, size, convertDoc);
   const mime = imageMime(bytes);
   if (size > MAX_IMAGE_BYTES || (!mime && size > MAX_TEXT_BYTES))
     return { kind: 'unsupported', reason: 'tooLarge', size };
@@ -146,7 +171,8 @@ function sameFile(a: BigIntStats, b: BigIntStats): boolean {
   return a.ino === b.ino && (process.platform === 'win32' || a.dev === b.dev);
 }
 
-async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry) {
+/** convertDoc 只由 files:read 的预览路径传入；保存前的冲突检查不会启动 Word。 */
+async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry, convertDoc?: ConvertDoc) {
   if (entry.kind !== 'file') throw new FileAccessError('notFile');
   const path = await checkedPath(files.root, entry.relativePath);
   if (!(await lstat(path)).isFile()) throw new FileAccessError('notFile');
@@ -194,7 +220,7 @@ async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry) {
     path,
     info,
     bytes,
-    preview: await previewOf(bytes, Math.max(Number(info.size), bytes.length), format),
+    preview: await previewOf(bytes, Math.max(Number(info.size), bytes.length), format, convertDoc),
   };
 }
 
@@ -222,9 +248,12 @@ const noopShell: FilesShell = {
 export function createFilesService({
   getWorkspace,
   shell = noopShell,
+  convertDoc,
 }: {
   getWorkspace(id: string): Workspace | undefined;
   shell?: FilesShell;
+  /** 可选：.doc 预览先转换为 .docx；不传时只提取文字。 */
+  convertDoc?: ConvertDoc;
 }) {
   const workspaces = new Map<string, WorkspaceFiles>();
   const writes = new Map<string, Promise<unknown>>();
@@ -600,7 +629,7 @@ export function createFilesService({
       try {
         const files = await workspace(input.workspaceId);
         const entry = find(files, input.fileId);
-        return { ok: true, preview: (await snapshot(files, entry)).preview };
+        return { ok: true, preview: (await snapshot(files, entry, convertDoc)).preview };
       } catch (error) {
         return failure(error);
       }
