@@ -1,4 +1,4 @@
-import { renderBrief } from '@fynvra/core';
+import { type BriefWorkflowContext, renderBrief } from '@fynvra/core';
 
 /** dispatch_task 的 spec 按 renderBrief 的五段拆开后的内容。 */
 export interface SpecSections {
@@ -121,10 +121,13 @@ export function renderWorkerBrief(input: {
   title: string;
   spec: string;
   dispatchId: string;
+  /** 工作流任务的当前步骤；普通任务省略，任务书不变 */
+  workflow?: BriefWorkflowContext;
 }): string {
   return renderBrief({
     title: input.title,
     ...parseSpecSections(input.spec),
     dispatchId: input.dispatchId,
+    ...(input.workflow ? { workflow: input.workflow } : {}),
   });
 }

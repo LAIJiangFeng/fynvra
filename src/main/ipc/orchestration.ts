@@ -21,6 +21,7 @@ import {
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
+import { getWorkflowRegistry } from './workflows';
 import { getWorkspaceService } from './workspaces';
 
 let registry: OrchestrationRegistry | null = null;
@@ -43,6 +44,7 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
       listWorkspaces,
       roles: getRoleStore(),
       worktreesRoot: () => getSettingsFile().read().preferences.worktreesRoot,
+      workflows: getWorkflowRegistry(),
       notifyChanged: (workspaceId) =>
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId),
     });

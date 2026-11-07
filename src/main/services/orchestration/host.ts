@@ -34,11 +34,18 @@ import {
   type RoleStore,
   type Run,
   settleDispatch,
+  snapshotTaskWorkflow,
   type Task,
+  type TaskWorkflow,
+  WORKFLOW_FEEDBACK_MAX,
+  type Workflow,
   type Workspace,
   type Worktree,
+  withoutPending,
+  workflowBriefContext,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
+import { type Launched, recordAttempt, startAttemptSession } from './attempt';
 import { renderWorkerBrief } from './brief';
 import {
   type CheckCommandPolicy,
@@ -49,6 +56,7 @@ import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
+import type { WorkflowEngine } from './workflowEngine';
 import { mergedCleanupBlocker } from './worktreeCleanup';
 import { isInsideDirectory } from './worktreesRoot';
 
@@ -91,6 +99,10 @@ export interface OrchestrationHostDeps {
   /** 未成功投递的新尝试：不能被工具绑定或恢复逻辑结算 */
   pendingDispatches?: Set<string>;
   reconcileWorkers?: () => void;
+  /** 用户定义的工作流（workflows.json 注册表）；dispatch_task 的 workflow 以它为准。缺省时不能按工作流派发。 */
+  workflows?: { list(): Promise<readonly Workflow[]> };
+  /** 工作流推进（reject_work 从第一步重来时用）；与 WorkerHost 共用同一个。 */
+  workflowEngine?: WorkflowEngine;
   /** 时钟（epoch ms），默认 `Date.now`。 */
   now?: () => number;
 }
@@ -99,8 +111,6 @@ export interface OrchestrationHostDeps {
 export const HOST_SENDER = 'fynvra';
 
 type Resolved = { run: Run; task: Task; dispatch: Dispatch; worktree: Worktree | undefined };
-/** 普通目录的尝试没有 worktree */
-type Launched = { worktree: Worktree | undefined; dispatch: Dispatch };
 
 /** 尝试是否直接在工作区目录里进行（普通目录）：没有 worktree，也就谈不上「worktree 已清理」。 */
 function isInPlace(dispatch: Dispatch): boolean {
@@ -178,8 +188,15 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   const latestDispatch = (taskId: string): Dispatch | undefined =>
     store.activeDispatch(taskId) ?? store.dispatches.list((d) => d.taskId === taskId).at(-1);
 
+  // 工作流任务在两步之间没有进行中的尝试，但仍在运行
   const pendingCount = (runId: string): number =>
-    store.listTasks(runId).filter((task) => store.activeDispatch(task.id) !== undefined).length;
+    store
+      .listTasks(runId)
+      .filter(
+        (task) =>
+          store.activeDispatch(task.id) !== undefined ||
+          (task.status === 'in-progress' && task.workflow?.pending !== undefined)
+      ).length;
 
   /** dispatch id → 本 Run 里的 task / dispatch / worktree（worktree 清理后为 undefined）。 */
   function resolve(dispatchId: string): HostResult<Resolved> {
@@ -295,65 +312,30 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       worktree = created.worktree;
     }
     const dispatchId = newId('dispatch');
-    const brief = renderWorkerBrief({ title: task.title, spec: task.spec, dispatchId });
-    let started: Awaited<ReturnType<WorkerSessionLauncher['createWorkerSession']>>;
-    try {
-      started = await launcher.createWorkerSession({
-        workspaceId: workspace.id,
-        runId: task.runId,
-        dispatchId,
-        roleId: task.roleId,
-        cwd: worktree?.path ?? repoPath,
-        ...(worktree ? { worktreeId: worktree.id } : {}),
-        // 派发时指定的模型 / 档位 / Fast 请求记在 Task 上，排队或恢复后启动也保留 false
-        ...(task.model !== undefined ? { model: task.model } : {}),
-        ...(task.thinking !== undefined ? { thinking: task.thinking } : {}),
-        ...(task.fastMode !== undefined ? { fastMode: task.fastMode } : {}),
-        brief,
-      });
-    } catch (error) {
-      started = fail(errorMessage(error));
-    }
+    // 工作流任务从当前步骤（新派发与排队启动都是第一步）开始
+    const brief = renderWorkerBrief({
+      title: task.title,
+      spec: task.spec,
+      dispatchId,
+      ...(task.workflow
+        ? { workflow: workflowBriefContext(task.workflow, task.workflow.step) }
+        : {}),
+    });
+    const started = await startAttemptSession({ workspace, launcher, now }, task, {
+      dispatchId,
+      worktree,
+      brief,
+    });
     if (!started.ok) {
       const cleanup = worktree ? await discardWorktree(worktree) : '';
       return fail(`could not start the worker session: ${started.error}${cleanup}`);
     }
-    const dispatch: Dispatch = {
-      id: dispatchId,
-      taskId: task.id,
-      workerSessionId: started.sessionId,
-      worktreeId: worktree?.id ?? '',
-      branch: worktree?.branch ?? '',
-      ...(worktree ? {} : { mode: 'in-place' as const }),
-      startedAt: now(),
-    };
-    return { ok: true, worktree, dispatch };
+    return { ok: true, worktree, dispatch: started.dispatch };
   }
 
   /** 落库一次启动成功的尝试；失败时撤掉已写入的行，task 保持原状。 */
   function record(task: Task, launched: Launched, isNew: boolean): HostResult<{ task: Task }> {
-    const { worktree } = launched;
-    if (worktree) {
-      const inserted = store.worktrees.insert(worktree);
-      if (!inserted.ok) return inserted;
-    }
-    const dropWorktree = () => {
-      if (worktree) store.worktrees.delete(worktree.id);
-    };
-    const dispatch = store.dispatches.insert(launched.dispatch);
-    if (!dispatch.ok) {
-      dropWorktree();
-      return dispatch;
-    }
-    const saved = isNew
-      ? store.tasks.insert({ ...task, status: 'in-progress' })
-      : store.tasks.update(task.id, { status: 'in-progress' });
-    if (!saved.ok) {
-      store.dispatches.delete(launched.dispatch.id);
-      dropWorktree();
-      return saved;
-    }
-    return { ok: true, task: saved.value };
+    return recordAttempt(store, task, launched, isNew);
   }
 
   async function start(task: Task, isNew: boolean): Promise<HostResult<DispatchTaskOutput>> {
@@ -433,10 +415,20 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (input.fastMode !== undefined && typeof input.fastMode !== 'boolean') {
       return fail('fastMode must be a boolean');
     }
-    const role = await roles.get(input.roleId);
-    if (role === undefined) return fail(`unknown role "${input.roleId}"`);
-    if (role.tools === 'orchestrator') {
-      return fail(`role "${role.id}" is an orchestrator role and cannot run a worker`);
+    let roleId: string;
+    let workflow: TaskWorkflow | undefined;
+    if (input.workflowId !== undefined) {
+      const found = await findWorkflow(input.workflowId);
+      if (!found.ok) return found;
+      workflow = snapshotTaskWorkflow(found.workflow);
+      roleId = workflow.steps[0]?.roleId ?? '';
+    } else {
+      const role = await roles.get(input.roleId);
+      if (role === undefined) return fail(`unknown role "${input.roleId}"`);
+      if (role.tools === 'orchestrator') {
+        return fail(`role "${role.id}" is an orchestrator role and cannot run a worker`);
+      }
+      roleId = role.id;
     }
 
     const existing = findRun();
@@ -468,17 +460,52 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       runId: run.id,
       title,
       spec,
-      roleId: role.id,
+      roleId,
       status: 'todo',
       dependsOn,
       ...(model ? { model } : {}),
       ...(input.thinking !== undefined ? { thinking: input.thinking } : {}),
       ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
+      ...(workflow ? { workflow } : {}),
     };
     if (!dependsOn.every((id) => store.tasks.get(id)?.status === 'completed')) {
       return { ok: true, task: unwrap(store.tasks.insert(task)).value };
     }
     return start(task, true);
+  }
+
+  /**
+   * 按 id（先精确、再不区分大小写）或不区分大小写的名称在注册表里找工作流，并检查各步角色：
+   * 必须存在，且不能是编排角色。
+   */
+  async function findWorkflow(raw: unknown): Promise<HostResult<{ workflow: Workflow }>> {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      return fail('workflow must be a workflow id or name');
+    }
+    if (deps.workflows === undefined) return fail('workflows are not available here');
+    const list = await deps.workflows.list();
+    const wanted = raw.trim();
+    const lower = wanted.toLowerCase();
+    const workflow =
+      list.find((entry) => entry.id === wanted) ??
+      list.find((entry) => entry.id.toLowerCase() === lower) ??
+      list.find((entry) => entry.name.trim().toLowerCase() === lower);
+    if (workflow === undefined) {
+      return fail(
+        list.length === 0
+          ? `unknown workflow "${wanted}": no workflows are defined (Settings → Workflows)`
+          : `unknown workflow "${wanted}". Available: ${list.map((entry) => `${entry.id} (${entry.name})`).join(', ')}`
+      );
+    }
+    for (const [index, step] of workflow.steps.entries()) {
+      const where = `workflow "${workflow.name}" step ${index + 1} "${step.name}"`;
+      const role = await roles.get(step.roleId);
+      if (role === undefined) return fail(`${where}: unknown role "${step.roleId}"`);
+      if (role.tools === 'orchestrator') {
+        return fail(`${where}: role "${role.id}" is an orchestrator role and cannot run a worker`);
+      }
+    }
+    return { ok: true, workflow };
   }
 
   async function listWorkers(): Promise<HostResult<ListWorkersOutput>> {
@@ -573,6 +600,20 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail(`task ${task.id} is ${task.status}; dispatch a new task for further work`);
     }
     if (!isInPlace(dispatch) && found.worktree === undefined) return fail(cleanedUp(dispatch));
+    if (task.workflow !== undefined) {
+      // 工作流的每一步是独立会话：只能指挥当前步，两步之间没有可指挥的 worker
+      if (task.workflow.pending !== undefined) {
+        return fail(
+          `task ${task.id} is starting its next workflow step; call list_workers for the new dispatch_id`
+        );
+      }
+      const current = latestDispatch(task.id);
+      if (current?.id !== dispatch.id) {
+        return fail(
+          `dispatch ${dispatch.id} is an earlier workflow step; use the current dispatch_id "${current?.id}"`
+        );
+      }
+    }
     const instruction = unwrap(
       inbox.post({
         runId: run.id,
@@ -732,6 +773,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         `worker ${previous.workerSessionId} is waiting for an ask_coordinator reply; first use send_to_worker to answer, then wait for the worker's current run to finish before calling reject_work`
       );
     }
+    if (task.workflow !== undefined) {
+      return restartWorkflow(run, task as Task & { workflow: TaskWorkflow }, previous, feedback);
+    }
 
     // 打回 = 同一 worktree（普通目录则是同一目录）、同一 worker 会话上的一次新尝试
     const next: Dispatch = {
@@ -801,6 +845,66 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
   }
 
+  /**
+   * reject_work 对工作流任务：在同一 worktree（普通目录则同一目录）从第一步重新走完整流程。
+   * 先写推进意图（pending 第一步 + 反馈，rounds 归零、历史保留）再启动；启动失败时任务回到原状态。
+   */
+  async function restartWorkflow(
+    run: Run,
+    task: Task & { workflow: TaskWorkflow },
+    previous: Dispatch,
+    feedback: string
+  ): Promise<HostResult<RejectWorkOutput>> {
+    const engine = deps.workflowEngine;
+    if (engine === undefined) return fail('workflow tasks cannot be restarted here');
+    if (engine.isAdvancing(task.id)) {
+      return fail(`task ${task.id} is already starting a workflow step; try again shortly`);
+    }
+    const original = task.workflow;
+    const text = `Review feedback from your coordinator on the previous run of this workflow:\n\n${feedback}`;
+    const restarted: TaskWorkflow = {
+      ...withoutPending(original),
+      rounds: 0,
+      pending: {
+        step: 0,
+        feedback:
+          text.length <= WORKFLOW_FEEDBACK_MAX ? text : `${text.slice(0, WORKFLOW_FEEDBACK_MAX)}…`,
+      },
+    };
+    const reopened = store.tasks.update(task.id, { status: 'in-progress', workflow: restarted });
+    if (!reopened.ok) return reopened;
+    const started = await engine.start(task.id);
+    if (!started.ok) {
+      const current = store.tasks.get(task.id);
+      if (
+        current?.status === 'in-progress' &&
+        current.workflow?.pending !== undefined &&
+        latestDispatch(task.id)?.id === previous.id
+      ) {
+        store.tasks.update(task.id, { status: task.status, workflow: original });
+      }
+      return fail(`could not restart the workflow: ${started.error}`);
+    }
+    // 反馈已写进第一步任务书；这条 instruction 只是留档，立即确认
+    const instruction = unwrap(
+      inbox.post({
+        runId: run.id,
+        dispatchId: started.dispatch.id,
+        from: coordinatorSessionId,
+        to: started.dispatch.workerSessionId,
+        type: 'instruction',
+        subject: 'review feedback',
+        body: feedback,
+      })
+    );
+    inbox.ack(instruction.message.id);
+    return {
+      ok: true,
+      messageId: instruction.message.id,
+      workflowRestarted: { dispatchId: started.dispatch.id },
+    };
+  }
+
   /** 显式放弃：进行中的尝试按 failed 结算，已有的汇报保持原样。 */
   function abandon(task: Task): void {
     const active = store.activeDispatch(task.id);
@@ -811,7 +915,16 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       ).dispatch;
       unwrap(store.dispatches.update(active.id, patch));
     }
-    if (task.status !== 'abandoned') unwrap(store.tasks.update(task.id, { status: 'abandoned' }));
+    if (task.status !== 'abandoned') {
+      // 工作流任务放弃时一并撤掉未执行的推进意图
+      const workflow = store.tasks.get(task.id)?.workflow;
+      unwrap(
+        store.tasks.update(task.id, {
+          status: 'abandoned',
+          ...(workflow?.pending !== undefined ? { workflow: withoutPending(workflow) } : {}),
+        })
+      );
+    }
   }
 
   async function cleanupWorktree(

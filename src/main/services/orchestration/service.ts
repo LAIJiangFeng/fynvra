@@ -18,6 +18,7 @@ import {
   type OrchestrationStore,
   type RoleStore,
   settleDispatch,
+  type Workflow,
   type Workspace,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
@@ -33,6 +34,7 @@ import {
   reviewDispatchPanelDiff,
 } from './queries';
 import { createWorkerHost } from './workerHost';
+import { createWorkflowEngine } from './workflowEngine';
 import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
 export interface OrchestrationServiceOptions {
@@ -51,6 +53,10 @@ export interface OrchestrationServiceOptions {
   /** 收件箱每投递一条消息（worker_done / question / escalation …）就同步调用；从快照恢复的不算。桌面通知用。 */
   onMessagePosted?: (message: Message) => void;
   checkPolicy?: CheckCommandPolicy;
+  /** 用户定义的工作流（workflows.json 注册表）；缺省时不能按工作流派发 */
+  workflows?: { list(): Promise<readonly Workflow[]> };
+  /** launcher 是否已接线；未接线时不恢复工作流推进（接线后的对账会再来）。缺省视为已接线 */
+  canLaunch?: () => boolean;
   log?: (message: string) => void;
   now?: () => number;
 }
@@ -216,6 +222,15 @@ export function createOrchestrationService(
     }
   });
   const inbox = new Inbox({ messages: store.messages, now });
+  const workflowEngine = createWorkflowEngine({
+    workspace,
+    store,
+    inbox,
+    launcher,
+    now,
+    log,
+    ...(options.canLaunch ? { canLaunch: options.canLaunch } : {}),
+  });
   // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
   const git = new GitWorktreeManager({
     exec: options.exec,
@@ -247,7 +262,10 @@ export function createOrchestrationService(
   })();
 
   function reconcileWorkers(): void {
-    if (!loaded || !launcher.sessionFailure) return;
+    if (!loaded) return;
+    // 工作流：当前尝试已结算、带 pending 的 in-progress 任务重新执行推进（崩溃恢复）
+    workflowEngine.resume();
+    if (!launcher.sessionFailure) return;
     // Use insertion order, including settled attempts: an old unsettled row must not win over a retry.
     const latest = new Map(store.dispatches.list().map((dispatch) => [dispatch.taskId, dispatch]));
     for (const task of store.tasks.list((entry) => entry.status === 'in-progress')) {
@@ -313,6 +331,8 @@ export function createOrchestrationService(
         checkPolicy: options.checkPolicy,
         pendingDispatches,
         reconcileWorkers,
+        ...(options.workflows ? { workflows: options.workflows } : {}),
+        workflowEngine,
         now,
       });
       return { ok: true, host };
@@ -341,7 +361,14 @@ export function createOrchestrationService(
     }
     return {
       ok: true,
-      host: createWorkerHost({ store, inbox, runId, dispatchId: dispatch.id, now }),
+      host: createWorkerHost({
+        store,
+        inbox,
+        runId,
+        dispatchId: dispatch.id,
+        now,
+        advanceWorkflow: workflowEngine.advance,
+      }),
     };
   };
 
