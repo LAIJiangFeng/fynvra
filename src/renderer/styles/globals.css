@@ -135,3 +135,39 @@
   background-color: oklch(0.769 0.188 70.08);
   color: oklch(0.141 0.005 285.823);
 }
+
+/* React Flow（工作流流程图）：颜色一律取应用主题变量，明暗随主题切换 */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color: var(--border);
+  --xy-edge-stroke: var(--muted-foreground);
+  --xy-edge-stroke-selected: var(--foreground);
+  --xy-connectionline-stroke: var(--ring);
+  --xy-handle-background-color: var(--muted-foreground);
+  --xy-handle-border-color: var(--card);
+  --xy-edge-label-background-color: var(--card);
+  --xy-edge-label-color: var(--muted-foreground);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--accent-foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: 0 0 0 1px var(--border);
+  --xy-selection-background-color: color-mix(in oklch, var(--ring) 15%, transparent);
+  --xy-selection-border: 1px dotted var(--ring);
+}
+
+.react-flow .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}
+
+/* 失败退回：红色虚线 */
+.react-flow__edge.workflow-fail-edge .react-flow__edge-path {
+  stroke: var(--destructive);
+  stroke-dasharray: 6 4;
+}
+
+.react-flow__edge.workflow-fail-edge.selected .react-flow__edge-path {
+  stroke-width: 2.5;
+}

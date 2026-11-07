@@ -1,4 +1,4 @@
-import type { Workflow } from '@fynvra/core';
+import { summarizeWorkflow, type Workflow } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { LayoutTemplate, Pencil, Plus, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -13,7 +13,12 @@ import {
 } from '@/components/ui/dialog';
 import { useT } from '@/i18n/I18nProvider';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
-import { blankWorkflow, presetWorkflow, WorkflowEditor } from './WorkflowEditor';
+import {
+  templateWorkflow,
+  WORKFLOW_TEMPLATES,
+  WorkflowEditor,
+  type WorkflowTemplate,
+} from './WorkflowEditor';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -34,6 +39,7 @@ export function WorkflowsSettings() {
   const [removing, setRemoving] = useState<Workflow | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const drafts = useRef(0);
   const t = useT();
 
@@ -58,10 +64,15 @@ export function WorkflowsSettings() {
 
   const takenIds = workflows.map((workflow) => workflow.id);
 
-  const openDraft = (workflow: Workflow) => {
+  const openDraft = (template: WorkflowTemplate) => {
     drafts.current += 1;
     setStatus(null);
-    setEditing({ kind: 'draft', key: drafts.current, workflow });
+    setChoosing(false);
+    setEditing({
+      kind: 'draft',
+      key: drafts.current,
+      workflow: templateWorkflow(template, t, takenIds),
+    });
   };
 
   const confirmRemove = async () => {
@@ -117,16 +128,12 @@ export function WorkflowsSettings() {
           size="sm"
           variant="outline"
           disabled={!!loadError}
-          onClick={() => openDraft(presetWorkflow(t, takenIds))}
+          onClick={() => setChoosing(true)}
         >
           <LayoutTemplate />
           {t('settings.workflows.newFromPreset')}
         </Button>
-        <Button
-          size="sm"
-          disabled={!!loadError}
-          onClick={() => openDraft(blankWorkflow(t, takenIds))}
-        >
+        <Button size="sm" disabled={!!loadError} onClick={() => openDraft('blank')}>
           <Plus />
           {t('settings.workflows.new')}
         </Button>
@@ -149,11 +156,7 @@ export function WorkflowsSettings() {
           title={t('settings.workflows.empty')}
           description={t('settings.workflows.emptyHint')}
         >
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => openDraft(presetWorkflow(t, takenIds))}
-          >
+          <Button size="sm" variant="outline" onClick={() => setChoosing(true)}>
             <LayoutTemplate />
             {t('settings.workflows.newFromPreset')}
           </Button>
@@ -170,8 +173,15 @@ export function WorkflowsSettings() {
                       {workflow.description}
                     </p>
                   )}
-                  <p className="truncate text-muted-foreground text-xs">
-                    {workflow.steps.map((step) => step.name).join(' → ')}
+                  <p
+                    className="truncate text-muted-foreground text-xs"
+                    title={summarizeWorkflow(workflow.steps)}
+                  >
+                    <span className="tabular-nums">
+                      {t('settings.workflows.nodeCount', { count: workflow.steps.length })}
+                    </span>
+                    {' · '}
+                    {summarizeWorkflow(workflow.steps)}
                   </p>
                 </div>
                 <Button
@@ -203,6 +213,33 @@ export function WorkflowsSettings() {
           </ul>
         )
       )}
+
+      <Dialog open={choosing} onOpenChange={setChoosing}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('settings.workflows.templates.title')}</DialogTitle>
+            <DialogDescription>{t('settings.workflows.templates.hint')}</DialogDescription>
+          </DialogHeader>
+          <ul className="grid gap-2">
+            {WORKFLOW_TEMPLATES.map((template) => (
+              <li key={template}>
+                <button
+                  type="button"
+                  className="grid w-full gap-0.5 rounded-lg border px-3 py-2 text-left hover:bg-accent"
+                  onClick={() => openDraft(template)}
+                >
+                  <span className="font-medium text-sm">
+                    {t(`settings.workflows.templates.${template}`)}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {t(`settings.workflows.templates.${template}Hint`)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={removing !== null}

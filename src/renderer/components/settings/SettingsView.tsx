@@ -48,7 +48,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'notifications', icon: Bell, Component: NotificationSettings },
   { value: 'providers', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
-  { value: 'workflows', icon: Workflow, Component: WorkflowsSettings },
+  { value: 'workflows', icon: Workflow, Component: WorkflowsSettings, wide: true },
   { value: 'instructions', icon: FileText, Component: InstructionsSettings },
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
