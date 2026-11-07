@@ -27,9 +27,12 @@ import {
   type WorkspaceFileEntry,
 } from '@shared/types/files';
 import type { Workspace } from '@shared/types/workspace';
+import WordExtractor from 'word-extractor';
 
 export const MAX_TEXT_BYTES = 256 * 1024;
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** PDF / Word 只读预览的上限；仅在扩展名匹配时放宽有界读取。 */
+export const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 export const MAX_DIRECTORY_ENTRIES = 2000;
 
 interface WorkspaceFiles {
@@ -77,11 +80,53 @@ function imageMime(bytes: Buffer): string | null {
   return null;
 }
 
+type DocumentFormat = 'pdf' | 'docx' | 'doc';
+
+const DOCUMENT_MAGIC: Record<DocumentFormat, Buffer> = {
+  pdf: Buffer.from('%PDF-', 'ascii'),
+  docx: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  doc: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+};
+
+function documentFormatOf(path: string): DocumentFormat | null {
+  const ext = extname(path).toLowerCase();
+  return ext === '.pdf' ? 'pdf' : ext === '.docx' ? 'docx' : ext === '.doc' ? 'doc' : null;
+}
+
+/** 扩展名与魔数必须同时匹配，否则按原有二进制逻辑处理。 */
+function isDocument(format: DocumentFormat | null, bytes: Buffer): format is DocumentFormat {
+  if (!format) return false;
+  const magic = DOCUMENT_MAGIC[format];
+  return bytes.length >= magic.length && bytes.subarray(0, magic.length).equals(magic);
+}
+
+async function documentPreview(
+  format: DocumentFormat,
+  bytes: Buffer,
+  size: number
+): Promise<FilePreview> {
+  // 复制到独立的 ArrayBuffer：结构化克隆会带上视图背后的整个缓冲区。
+  if (format === 'pdf') return { kind: 'pdf', data: new Uint8Array(bytes), size };
+  if (format === 'docx') return { kind: 'docx', data: new Uint8Array(bytes), size };
+  try {
+    const document = await new WordExtractor().extract(bytes);
+    return { kind: 'document-text', format: 'doc', text: document.getBody(), size };
+  } catch {
+    return { kind: 'unsupported', reason: 'unreadable', size };
+  }
+}
+
 function versionOf(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function previewOf(bytes: Buffer, size: number): FilePreview {
+async function previewOf(
+  bytes: Buffer,
+  size: number,
+  format: DocumentFormat | null
+): Promise<FilePreview> {
+  if (format && size > MAX_DOCUMENT_BYTES) return { kind: 'unsupported', reason: 'tooLarge', size };
+  if (isDocument(format, bytes)) return documentPreview(format, bytes, size);
   const mime = imageMime(bytes);
   if (size > MAX_IMAGE_BYTES || (!mime && size > MAX_TEXT_BYTES))
     return { kind: 'unsupported', reason: 'tooLarge', size };
@@ -109,16 +154,21 @@ async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry) {
     path,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
   );
+  let read: { info: BigIntStats; bytes: Buffer; format: DocumentFormat | null };
   try {
     const info = await handle.stat({ bigint: true });
     if (!info.isFile()) throw new FileAccessError('notFile');
     const checked = await checkedPath(files.root, entry.relativePath);
     if (checked !== path || !sameFile(await lstat(checked, { bigint: true }), info))
       throw new FileAccessError('conflict');
+    const format = documentFormatOf(path);
+    const limit = format ? MAX_DOCUMENT_BYTES : MAX_IMAGE_BYTES;
     let bytes = Buffer.alloc(0);
-    if (info.size <= BigInt(MAX_IMAGE_BYTES)) {
+    if (info.size <= BigInt(limit)) {
       // 有界读取，即便文件同时增长也不把无限内容带进 IPC。
-      const buffer = Buffer.alloc(MAX_IMAGE_BYTES + 1);
+      const buffer = Buffer.alloc(
+        format ? Math.min(Number(info.size), limit) + 1 : MAX_IMAGE_BYTES + 1
+      );
       let offset = 0;
       while (offset < buffer.length) {
         const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
@@ -134,15 +184,18 @@ async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry) {
       info.size !== after.size
     )
       throw new FileAccessError('conflict');
-    return {
-      path,
-      info,
-      bytes,
-      preview: previewOf(bytes, Math.max(Number(info.size), bytes.length)),
-    };
+    read = { info, bytes, format };
   } finally {
     await handle.close();
   }
+  // 先关闭句柄再解析，.doc 正文提取期间不占用文件。
+  const { info, bytes, format } = read;
+  return {
+    path,
+    info,
+    bytes,
+    preview: await previewOf(bytes, Math.max(Number(info.size), bytes.length), format),
+  };
 }
 
 /** 文件权限来自 Main 签发的条目 id，不接受 Renderer 提供的路径。所有访问仅限已登记工作区。 */
