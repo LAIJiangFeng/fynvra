@@ -199,6 +199,11 @@ export const zhCN = {
       pages: '共 {total} 页',
       page: '第 {page} 页',
       docNotice: '旧版 .doc 仅显示文字，格式和图片不保留',
+      docConverting: '正在用本机 Word 转换 .doc…',
+      docConverted: '旧版 .doc 已由本机 Word 转换后显示（宏已禁用），个别格式可能与原文不同',
+      docNoWord:
+        '未检测到本机 Word，旧版 .doc 仅显示文字；安装 Microsoft Word 后可显示格式、表格和图片',
+      docConvertFailed: '本机 Word 转换 .doc 失败，已回退为纯文字显示，格式和图片不保留',
       parseFailed: '文档解析失败：{message}',
     },
     errors: {

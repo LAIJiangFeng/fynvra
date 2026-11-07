@@ -98,7 +98,8 @@ export function createMarkdownReferences(
       if (!parts || !api) return null;
       return cached(images, parts.join('/'), 8, async () => {
         const entry = await resolve(parts);
-        if (!entry) return null;
+        // 文档永远不是图片；跳过读取，以免 .doc 引用触发本机 Word 转换。
+        if (!entry || /\.(?:pdf|docx?)$/i.test(entry.name)) return null;
         const result = await api.read({ workspaceId, fileId: entry.id });
         if (!result.ok || result.preview.kind !== 'image') return null;
         const { size, dataUrl } = result.preview;
