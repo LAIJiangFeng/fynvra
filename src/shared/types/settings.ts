@@ -128,6 +128,11 @@ export interface Preferences {
    * never use it. Absent means preserve the inherited environment.
    */
   networkProxy?: NetworkProxy;
+  /**
+   * 允许 web_fetch 访问本机回环地址（localhost / 127.0.0.0/8 / ::1）；缺省或 false 为关闭。
+   * 内网、链路本地、云元数据等地址始终拦截；之后新加载的会话生效。
+   */
+  webFetchAllowLoopback?: boolean;
   /** User-picked applications for the workspace menu; Main verifies new executable paths. */
   openWithApps?: OpenWithApp[];
   theme: ThemeMode;
@@ -559,6 +564,9 @@ export function parsePreferences(raw: unknown): Preferences {
   const compactionStrategy = record?.compactionStrategy;
   return {
     ...(networkProxy ? { networkProxy } : {}),
+    ...(typeof record?.webFetchAllowLoopback === 'boolean'
+      ? { webFetchAllowLoopback: record.webFetchAllowLoopback }
+      : {}),
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
@@ -668,6 +676,10 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
       case 'sidebarOpen':
         if (typeof value !== 'boolean') return null;
         patch.sidebarOpen = value;
+        break;
+      case 'webFetchAllowLoopback':
+        if (typeof value !== 'boolean') return null;
+        patch.webFetchAllowLoopback = value;
         break;
       case 'notifications': {
         const notifications = parseNotificationPreferencesPatch(value);
