@@ -3,6 +3,8 @@
  * @packageDocumentation
  */
 
+import type { WorkflowStep } from './workflows/workflow';
+
 /** 审批档位：supervised 审批命令、写入/编辑与 MCP；auto-edits 自动放行编辑；full 放行普通操作。保护命令任何档位都需确认。 */
 export type ApprovalMode = 'supervised' | 'auto-edits' | 'full';
 
@@ -113,6 +115,36 @@ export interface Task {
   fastMode?: boolean;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
+  /** 按工作流派发时的定义快照与进度；普通任务没有。`roleId` 始终等于当前步骤的角色。 */
+  workflow?: TaskWorkflow;
+}
+
+/** 工作流任务的一条步骤结算记录。 */
+export interface TaskWorkflowHistoryEntry {
+  /** 步骤下标 */
+  step: number;
+  dispatchId: string;
+  outcome: 'succeeded' | 'failed';
+  /** worker 的总结，截断到 2000 字 */
+  summary: string;
+  /** 结算时间（epoch ms） */
+  at: number;
+}
+
+/** 派发时快照进 Task 的工作流定义，加上推进状态。 */
+export interface TaskWorkflow {
+  id: string;
+  name: string;
+  steps: WorkflowStep[];
+  maxRounds: number;
+  /** 当前步骤下标 */
+  step: number;
+  /** 已回退次数 */
+  rounds: number;
+  /** 最近 30 条步骤结算 */
+  history: TaskWorkflowHistoryEntry[];
+  /** 推进意图：已决定要启动、还没落库的步骤（崩溃恢复用） */
+  pending?: { step: number; feedback?: string };
 }
 
 /**
