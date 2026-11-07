@@ -3,9 +3,11 @@ import {
   type Inbox,
   isDispatchSettled,
   type OrchestrationStore,
+  recordWorkflowReport,
   settleDispatch,
 } from '@fynvra/core';
 import { ABORTED, fail, guard, untilAborted } from './hostResult';
+import { workflowDoneBody } from './workflowEngine';
 
 /** ARCHITECTURE §9.5 `createWorkerHost` 的依赖；`now` 是补充的可注入时钟。 */
 export interface WorkerHostDeps {
@@ -14,6 +16,11 @@ export interface WorkerHostDeps {
   runId: string;
   dispatchId: string;
   now?: () => number;
+  /**
+   * 工作流任务的推进：reportDone 写下 `workflow.pending` 后调用，异步执行、不阻塞 report_done。
+   * 缺省时 pending 留在快照里，等服务加载或对账时恢复。
+   */
+  advanceWorkflow?: (taskId: string) => void;
 }
 
 // 正阻塞在 ask_coordinator 里等答复的问题：question 消息 id → 提问的 worker 会话。
@@ -144,6 +151,33 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
         const { id: _id, ...patch } = settled.dispatch;
         const updated = store.dispatches.update(dispatch.id, patch);
         if (!updated.ok) return updated;
+        if (task.workflow !== undefined) {
+          // 工作流：记一条历史再决定下一步。要继续时先把推进意图（pending）落库、任务保持 in-progress，
+          // 再异步启动下一步，主 agent 收不到这一步的 worker_done
+          const decision = recordWorkflowReport(task.workflow, {
+            dispatchId: dispatch.id,
+            outcome,
+            summary,
+            at: settled.dispatch.settledAt ?? now(),
+          });
+          if (decision.final === undefined) {
+            const kept = store.tasks.update(task.id, { workflow: decision.workflow });
+            if (!kept.ok) return kept;
+            deps.advanceWorkflow?.(task.id);
+            return { ok: true };
+          }
+          const finished = store.tasks.update(task.id, {
+            status: decision.final === 'succeeded' ? 'in-review' : 'failed',
+            workflow: decision.workflow,
+          });
+          if (!finished.ok) return finished;
+          const done = inbox.post({
+            ...message,
+            subject: decision.final,
+            body: workflowDoneBody(store, { ...task, workflow: decision.workflow }, decision.final),
+          });
+          return done.ok ? { ok: true } : done;
+        }
         const status = outcome === 'succeeded' ? 'in-review' : 'failed';
         const moved = store.tasks.update(task.id, { status });
         if (!moved.ok) return moved;

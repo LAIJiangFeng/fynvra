@@ -2,6 +2,7 @@ import { type CoreFs, isNotFoundError } from '../fs';
 import { isDispatchOutcome, isMessageType, isTaskStatus, isThinkingLevel } from '../guards';
 import { errorMessage, parentDir, writeFileAtomic } from '../internal/files';
 import type { Dispatch, Message, Run, Task, Worktree } from '../types';
+import { isTaskWorkflow } from '../workflows/taskWorkflow';
 import { canTransitionTask, isDispatchSettled } from './transitions';
 
 /** {@link EntityTable.update} 的补丁：给出的字段覆盖原值，值为 `undefined` 的字段被删除；`id` 不可改。 */
@@ -350,6 +351,7 @@ const TASK_SCHEMA: Schema<Task> = {
     optional: (value) =>
       isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),
   },
+  workflow: { optional: isTaskWorkflow },
 };
 const DISPATCH_SCHEMA: Schema<Dispatch> = {
   id: isString,

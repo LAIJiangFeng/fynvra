@@ -1,5 +1,5 @@
-import type { TaskStatus } from '@fynvra/core';
-import { Bot, type LucideIcon } from 'lucide-react';
+import type { TaskStatus, TaskWorkflow } from '@fynvra/core';
+import { Bot, Loader2, type LucideIcon, Workflow } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { useT } from '@/i18n/I18nProvider';
@@ -68,6 +68,51 @@ export function RoleBadge({ roleId }: { roleId: string }) {
       <Bot />
       <span className="truncate">{name ?? roleId}</span>
     </Badge>
+  );
+}
+
+/** 工作流任务的进度：当前步、角色、回退次数；两步之间显示正在启动的步骤。 */
+export function WorkflowProgress({
+  workflow,
+  className,
+}: {
+  workflow: TaskWorkflow;
+  className?: string;
+}) {
+  const t = useT();
+  const step = workflow.steps[workflow.step];
+  const pending = workflow.pending;
+  const next = pending ? workflow.steps[pending.step] : undefined;
+  return (
+    <div
+      className={cn('flex min-w-0 flex-col gap-0.5 text-[11px] text-muted-foreground', className)}
+    >
+      <span className="flex min-w-0 items-center gap-1">
+        <Workflow className="size-3 shrink-0" />
+        <span className="truncate">
+          {t('orchestration.workflow.progress', {
+            name: workflow.name,
+            step: workflow.step + 1,
+            total: workflow.steps.length,
+            stepName: step?.name ?? '?',
+            role: step?.roleId ?? '?',
+            rounds: workflow.rounds,
+            max: workflow.maxRounds,
+          })}
+        </span>
+      </span>
+      {pending && (
+        <span className="flex min-w-0 items-center gap-1 text-sky-700 dark:text-sky-300">
+          <Loader2 className="size-3 shrink-0 animate-spin" />
+          <span className="truncate">
+            {t('orchestration.workflow.advancing', {
+              step: pending.step + 1,
+              stepName: next?.name ?? '?',
+            })}
+          </span>
+        </span>
+      )}
+    </div>
   );
 }
 

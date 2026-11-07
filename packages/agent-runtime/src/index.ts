@@ -72,6 +72,7 @@ export {
   ORCHESTRATOR_PROMPT,
   PLAN_MODE_PROMPT,
   WORKER_CONTRACT_PROMPT,
+  workflowPrompt,
 } from './prompts/orchestratorPrompt';
 export {
   type CreateRoleSessionOptions,
@@ -92,6 +93,7 @@ export {
   WAIT_TIMEOUT_MAX_MS,
   WAIT_TIMEOUT_MIN_MS,
   WORKER_OUTPUT_PAGE_CHARS,
+  type WorkflowOption,
 } from './tools/orchestrationTools';
 export {
   checkGitArgs,

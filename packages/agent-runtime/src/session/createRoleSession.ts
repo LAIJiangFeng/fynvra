@@ -28,7 +28,11 @@ import {
   DIRECT_PLAN_MODE_PROMPT,
   PLAN_MODE_PROMPT,
 } from '../prompts/orchestratorPrompt';
-import { createOrchestrationTools, type RoleOption } from '../tools/orchestrationTools';
+import {
+  createOrchestrationTools,
+  type RoleOption,
+  type WorkflowOption,
+} from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
 import { createWebFetchTool } from '../tools/web/webFetchTool';
 import {
@@ -80,6 +84,8 @@ export interface CreateRoleSessionOptions {
   workerTools?: WorkerToolsOptions;
   /** dispatch_task 可选的角色（orchestrator 用） */
   roles?: readonly RoleOption[];
+  /** dispatch_task 可选的工作流（orchestrator 用）；非空时工具参数与提示词说明它们 */
+  workflows?: readonly WorkflowOption[];
   /**
    * 工作区没有 git（编排原地进行，没有 worktree）：orchestrator 追加非 git 模式说明，
    * worker 换成不提交的契约（见 buildRolePromptAppend）
@@ -164,6 +170,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   const promptAppend = buildRolePromptAppend(role, {
     worker: workerToolset !== undefined,
     inPlace: options.inPlace === true,
+    ...(options.workflows && options.workflows.length > 0 ? { workflows: options.workflows } : {}),
     ...(options.resourcePaths.instructionFile
       ? { instructionFile: options.resourcePaths.instructionFile }
       : {}),
@@ -285,6 +292,7 @@ function selectTools(
           ...createReadonlyTools(cwd, exec ? { exec } : {}),
           ...createOrchestrationTools(options.host, {
             ...(options.roles ? { roles: options.roles } : {}),
+            ...(options.workflows ? { workflows: options.workflows } : {}),
             ...(options.planMode ? { planMode: options.planMode } : {}),
           }),
           createWritePlanTool(cwd),

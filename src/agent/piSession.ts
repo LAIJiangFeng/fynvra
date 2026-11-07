@@ -128,6 +128,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         },
         agentDir: options.agentDir,
         roles: spec.roles,
+        ...(spec.workflows && spec.workflows.length > 0 ? { workflows: spec.workflows } : {}),
         ...(spec.inPlace ? { inPlace: true } : {}),
         planMode: () => planMode,
         ...(magic ? { extensions: [magic.extension] } : {}),

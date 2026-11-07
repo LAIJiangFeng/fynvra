@@ -472,6 +472,13 @@ export const zhCN = {
     loading: '正在读取编排状态…',
     noTasks: '主 agent 还没有派发任务',
     tabs: { tasks: '任务', changes: '改动' },
+    workflow: {
+      progress: '工作流 {name} · 第 {step}/{total} 步 {stepName}（{role}）· 回退 {rounds}/{max}',
+      advancing: '正在启动第 {step} 步：{stepName}',
+      history: '工作流历程',
+      historyEmpty: '还没有步骤完成',
+      entry: '第 {step} 步 · {stepName}',
+    },
     demo: '演示数据',
     demoEnter: '使用演示数据',
     demoExit: '退出演示数据',

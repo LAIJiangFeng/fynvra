@@ -56,6 +56,7 @@ import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
 import { getSkillRegistry } from './skills';
+import { getWorkflowRegistry } from './workflows';
 import { getWorkspaceService } from './workspaces';
 
 /** 单条 prompt 的上限：挡住异常的超大 IPC 负载 */
@@ -137,6 +138,7 @@ function createAppAgentHost(): AgentHostService {
     resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
+    listWorkflows: () => getWorkflowRegistry().list(),
     broadcast: sendToAllWindows,
   });
 }

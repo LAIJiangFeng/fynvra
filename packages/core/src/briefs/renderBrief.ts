@@ -16,6 +16,21 @@ export interface BriefInput {
   dispatchId: string;
   /** 本任务对 `report_done` 内容的额外要求（如要附上哪条检查输出），写在契约引用之后；可省略。 */
   reportDoneHint?: string | undefined;
+  /** 工作流任务的当前步骤；普通任务省略，任务书与以前逐字一致。 */
+  workflow?: BriefWorkflowContext | undefined;
+}
+
+/** 工作流任务书的上下文：第几步、本步说明、之前各步的摘要与退回反馈。 */
+export interface BriefWorkflowContext {
+  name: string;
+  /** 从 0 开始 */
+  stepIndex: number;
+  stepCount: number;
+  stepName: string;
+  instructions: string;
+  previous: readonly { stepName: string; outcome: 'succeeded' | 'failed'; summary: string }[];
+  /** 退回反馈（后续步骤报告的问题，或主 agent 的审查意见） */
+  feedback?: string;
 }
 
 // 契约全文是 agent-runtime 的 WORKER_CONTRACT_PROMPT，随 worker 会话的系统提示词下发；
@@ -45,6 +60,39 @@ function bulletList(items: readonly string[]): string {
   return bullets.length === 0 ? '_None._' : bullets.join('\n');
 }
 
+function workflowSection(context: BriefWorkflowContext): string {
+  const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const parts = [
+    `工作流 ${oneLine(context.name)} · 第 ${context.stepIndex + 1}/${context.stepCount} 步：${oneLine(context.stepName)}`,
+    '',
+    'You are one step of an automated workflow: do only this step, in this worktree. Earlier steps already worked here; later steps continue from what you leave.',
+    '',
+    '### Step instructions',
+    '',
+    paragraph(context.instructions),
+    '',
+    '### Step verdict',
+    '',
+    '- This step passes: call `report_done` with outcome `succeeded`.',
+    '- You found problems that must be sent back (or you cannot complete this step): call `report_done` with outcome `failed`; the summary must state each problem and how to reproduce it.',
+  ];
+  if (context.previous.length > 0) {
+    parts.push('', '### Earlier steps', '');
+    for (const entry of context.previous) {
+      parts.push(
+        `- **${oneLine(entry.stepName)}** (${entry.outcome}):`,
+        ...normalize(entry.summary || '(no summary)')
+          .split('\n')
+          .map((line) => (line === '' ? '' : `  ${line}`))
+      );
+    }
+  }
+  if (context.feedback !== undefined && normalize(context.feedback) !== '') {
+    parts.push('', '### Feedback to address', '', normalize(context.feedback));
+  }
+  return parts.join('\n');
+}
+
 /**
  * 渲染 worker 任务书（Markdown）：标题 + dispatch id，Target / Change / Constraints / Ownership /
  * Acceptance 五段，最后固定一段 Worker contract——一句话提醒完成后必须调用 `report_done`、
@@ -61,6 +109,7 @@ export function renderBrief(input: BriefInput): string {
     ['Constraints', bulletList(input.constraints)],
     ['Ownership', paragraph(input.ownership)],
     ['Acceptance', bulletList(input.acceptance)],
+    ...(input.workflow ? [['Workflow', workflowSection(input.workflow)] as [string, string]] : []),
     ['Worker contract', contract],
   ];
   return [

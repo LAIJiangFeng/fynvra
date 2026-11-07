@@ -497,6 +497,13 @@ export const en: MessagesShape<typeof zhCN> = {
     loading: 'Loading orchestration…',
     noTasks: 'The main agent has not dispatched tasks yet',
     tabs: { tasks: 'Tasks', changes: 'Changes' },
+    workflow: {
+      progress: 'Workflow {name} · step {step}/{total} {stepName} ({role}) · rounds {rounds}/{max}',
+      advancing: 'Starting step {step}: {stepName}',
+      history: 'Workflow history',
+      historyEmpty: 'No step has finished yet',
+      entry: 'Step {step} · {stepName}',
+    },
     demo: 'Demo data',
     demoEnter: 'Use demo data',
     demoExit: 'Leave demo data',
