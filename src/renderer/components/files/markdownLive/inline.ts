@@ -8,7 +8,7 @@ import {
   type ViewUpdate,
 } from '@uiw/react-codemirror';
 import { type LinkOpener, linkTarget } from './links';
-import { type LiveContext, type SyntaxNode, touches } from './shared';
+import { focusChanged, type LiveContext, type SyntaxNode, touches } from './shared';
 import { BulletWidget, ImageWidget, RuleWidget, TaskWidget } from './widgets';
 
 const HIDDEN = Decoration.replace({});
@@ -35,7 +35,7 @@ function isSpace(text: string): boolean {
   return text === ' ' || text === '\t';
 }
 
-/** 只计算可见区域的行内装饰；块级替换（表格、HTML 块）在 blocks.tsx 的 StateField 中。 */
+/** 只计算可见区域的行内装饰；块级替换（顶层表格逐行、HTML 块）在 blocks.tsx 的 StateField 中。 */
 function build(view: EditorView, ctx: LiveContext): DecorationSet {
   const { state } = view;
   const { doc } = state;
@@ -202,6 +202,7 @@ export function inlinePlugin(ctx: LiveContext, opener: LinkOpener) {
           update.docChanged ||
           update.selectionSet ||
           update.viewportChanged ||
+          focusChanged(update.startState, update.state) ||
           syntaxTree(update.startState) !== syntaxTree(update.state)
         )
           this.decorations = build(update.view, ctx);
