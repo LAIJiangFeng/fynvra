@@ -19,7 +19,15 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 import { LayoutGrid, Trash2 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
@@ -256,9 +264,17 @@ function WorkflowGraphInner({
     [onConnect]
   );
 
-  // 删除一律交给调用方（确认、清理引用），画布自己不删
+  const containerRef = useRef<HTMLDivElement>(null);
+  const explicitDelete = useRef(false);
+
+  // 删除一律交给调用方（确认、清理引用），画布自己不删。
+  // React Flow 的 Delete / Backspace 监听在 document 上：只在焦点位于画布内时生效，
+  // 避免焦点在侧栏控件上时误删画布里选中的元素；「删除所选」按钮走显式路径。
   const handleBeforeDelete = useCallback<OnBeforeDelete<WorkflowFlowNode>>(
     async ({ nodes: removedNodes, edges: removedEdges }) => {
+      const explicit = explicitDelete.current;
+      explicitDelete.current = false;
+      if (!explicit && !containerRef.current?.contains(document.activeElement)) return false;
       const refs = removedEdges.map(edgeRefOf).filter((ref) => ref !== undefined);
       if (removedNodes.length > 0 || refs.length > 0) {
         onDelete?.({ nodeIds: removedNodes.map((node) => node.id), edges: refs });
@@ -277,14 +293,35 @@ function WorkflowGraphInner({
   };
 
   const hasSelection = nodes.some((node) => node.selected) || edges.some((edge) => edge.selected);
-  const deleteSelected = () =>
-    void flow.deleteElements({
-      nodes: nodes.filter((node) => node.selected),
-      edges: edges.filter((edge) => edge.selected),
-    });
+  const deleteSelected = () => {
+    explicitDelete.current = true;
+    void flow
+      .deleteElements({
+        nodes: nodes.filter((node) => node.selected),
+        edges: edges.filter((edge) => edge.selected),
+      })
+      .finally(() => {
+        explicitDelete.current = false;
+      });
+  };
+
+  // 焦点在画布内按 Esc：有选中时只取消选中，不再冒泡（设置页会把 Esc 当成关闭）
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || !editable || !hasSelection) return;
+    if (!event.currentTarget.contains(event.target as Node)) return;
+    event.stopPropagation();
+    setNodes((current) =>
+      current.map((node) => (node.selected ? { ...node, selected: false } : node))
+    );
+    setEdges((current) =>
+      current.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+    );
+    onSelect?.(null);
+  };
 
   return (
-    <div className={cn('h-full w-full', className)}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: 只拦截画布内冒泡上来的 Esc
+    <div ref={containerRef} className={cn('h-full w-full', className)} onKeyDown={handleKeyDown}>
       <ReactFlow<WorkflowFlowNode>
         nodes={nodes}
         edges={edges}

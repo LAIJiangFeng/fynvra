@@ -384,7 +384,24 @@ export function WorkflowEditor({
   const atLimit = draft.steps.length >= WORKFLOW_LIMITS.stepsMax;
 
   return (
-    <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
+    <form
+      className="grid gap-4"
+      onSubmit={(event) => void submit(event)}
+      onKeyDown={(event) => {
+        // 设置页把 Esc 当成关闭：有选中先取消选中；有未保存的修改时走「返回」的确认流程，
+        // 不让它冒泡到设置页；都没有时保持原行为。经 Portal 渲染的弹窗、下拉自己处理 Esc。
+        if (event.key !== 'Escape' || !event.currentTarget.contains(event.target as Node)) return;
+        if (selectedId) {
+          event.stopPropagation();
+          setSelectedId(null);
+          return;
+        }
+        if (dirty) {
+          event.stopPropagation();
+          if (!saving) cancel();
+        }
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={cancel}>
           <ArrowLeft />
