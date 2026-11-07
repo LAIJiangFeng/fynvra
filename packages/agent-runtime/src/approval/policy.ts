@@ -4,7 +4,7 @@ import { truncateHeadChars } from '../tools/result';
 
 // 与 src/shared/types/chat.ts 的 ApprovalKind / ApprovalDecision 同形（packages 不能 import src）。
 /** 审批类别 */
-export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
+export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp' | 'network' | 'plugin';
 /** 人的决定：放行一次 / 本会话同类（kind + 工具名）后续自动放行 / 拒绝 */
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 
@@ -21,7 +21,8 @@ export const APPROVAL_ARGS_PREVIEW_CHARS = 2_000;
 
 /**
  * 会改状态的工具。pi 的 bash / powershell / write / edit、编排的 run_checks（在 worker 的 worktree 里执行命令），
- * apply_patch（pi 1.4 没有，按约定预留），以及计划模式下写 Markdown 文档的 write_doc。MCP 工具按 `mcp__<server>__<tool>` 的命名识别。
+ * apply_patch（pi 1.4 没有，按约定预留），计划模式下写 Markdown 文档的 write_doc，以及访问网络的内置 web_fetch。
+ * MCP 工具按 `mcp__<server>__<tool>` 的命名识别；插件工具由审批门按宿主给的名单识别（见 gate 的 pluginTools）。
  */
 const TOOL_KINDS = new Map<string, ApprovalKind>([
   ['bash', 'command'],
@@ -31,11 +32,12 @@ const TOOL_KINDS = new Map<string, ApprovalKind>([
   ['edit', 'file-edit'],
   ['apply_patch', 'file-edit'],
   ['write_doc', 'file-write'],
+  ['web_fetch', 'network'],
 ]);
 
 const MODE_KINDS: Record<ApprovalMode, readonly ApprovalKind[]> = {
-  supervised: ['command', 'file-write', 'file-edit', 'mcp'],
-  'auto-edits': ['command', 'mcp'],
+  supervised: ['command', 'file-write', 'file-edit', 'mcp', 'network', 'plugin'],
+  'auto-edits': ['command', 'mcp', 'network', 'plugin'],
   full: [],
 };
 
@@ -60,13 +62,26 @@ export function describeToolCall(
   kind: ApprovalKind,
   input: unknown
 ): ToolCallDescription {
+  if (kind === 'network') {
+    // detail 是完整 URL（不截断），供人核对；取不到 URL 时退回参数预览
+    return {
+      title: `${toolName} (network access)`,
+      detail: urlOf(input) ?? argsPreview(input),
+    };
+  }
   const detail =
     kind === 'command'
       ? commandOf(input)
-      : kind === 'mcp'
+      : kind === 'mcp' || kind === 'plugin'
         ? undefined
         : fileTargetsOf(toolName, input).join('\n') || undefined;
   return { title: toolName, detail: detail ?? argsPreview(input) };
+}
+
+/** network 类工具（web_fetch）参数里的 URL */
+export function urlOf(input: unknown): string | undefined {
+  const { url } = asRecord(input);
+  return typeof url === 'string' && url ? url : undefined;
 }
 
 /** 文件工具的写目标：pi 的 write / edit 与 write_doc 用 `path`；apply_patch 从补丁头里取 */

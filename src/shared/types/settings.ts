@@ -123,7 +123,10 @@ export function parseOpenWithApps(raw: unknown): OpenWithApp[] {
 
 /** Renderer 可读写的界面偏好，经 `settings:update` 合并落盘。 */
 export interface Preferences {
-  /** Git/command subprocesses only; absent means preserve the inherited environment. */
+  /**
+   * Git/command subprocesses and the built-in web reader (web_fetch); model, MCP and update traffic
+   * never use it. Absent means preserve the inherited environment.
+   */
   networkProxy?: NetworkProxy;
   /** User-picked applications for the workspace menu; Main verifies new executable paths. */
   openWithApps?: OpenWithApp[];

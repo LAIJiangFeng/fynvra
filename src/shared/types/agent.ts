@@ -280,6 +280,8 @@ const APPROVAL_KIND_SET: Record<ApprovalKind, true> = {
   'file-edit': true,
   'file-write': true,
   mcp: true,
+  network: true,
+  plugin: true,
 };
 const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true };
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };

@@ -409,6 +409,8 @@ export const en: MessagesShape<typeof zhCN> = {
       'file-edit': 'Edit file',
       'file-write': 'Write file',
       mcp: 'MCP tool',
+      network: 'Network access',
+      plugin: 'Plugin tool',
     },
     pending: 'Pending approval',
     submitting: 'Sending response…',
@@ -694,7 +696,7 @@ export const en: MessagesShape<typeof zhCN> = {
       manual: 'Manual proxy',
       address: 'HTTP / HTTPS proxy address',
       scope:
-        'Applies to Git, agent shell commands (including gh), and new terminals. Model APIs, MCP and app updates keep their own routing. Existing environment means inherited process variables, not the Windows system proxy',
+        'Applies to command/Git subprocesses (Git, agent shell commands including gh), new terminals, and the built-in web reader (web_fetch). Model API, MCP and app update traffic does not use this setting and keeps its own routing. Existing environment means inherited process variables, not the Windows system proxy',
       manualHint:
         'Only HTTP/HTTPS proxies without authentication are supported. One address is supplied for both HTTP and HTTPS. Manual mode clears inherited ALL_PROXY and NO_PROXY bypass rules. A command’s own explicit network settings may still override this',
       compatibility: 'Git compatibility mode',
