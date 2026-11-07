@@ -187,7 +187,20 @@ export const zhCN = {
     },
     binary: '此文件暂不支持预览',
     tooLarge: '文件过大，无法预览',
-    limits: '支持 UTF-8 文本（256 KiB 内）和 PNG / JPEG / GIF / WebP 图片（2 MiB 内）',
+    unreadable: '文档解析失败，无法预览',
+    limits:
+      '支持 UTF-8 文本（256 KiB 内）、PNG / JPEG / GIF / WebP 图片（2 MiB 内）和 PDF / Word 文档（32 MiB 内）',
+    document: {
+      pdfPreview: 'PDF 预览',
+      wordPreview: 'Word 预览',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      fitWidth: '适合宽度',
+      pages: '共 {total} 页',
+      page: '第 {page} 页',
+      docNotice: '旧版 .doc 仅显示文字，格式和图片不保留',
+      parseFailed: '文档解析失败：{message}',
+    },
     errors: {
       invalidRequest: '文件请求无效',
       workspaceNotFound: '工作区已被移除，请重新选择',

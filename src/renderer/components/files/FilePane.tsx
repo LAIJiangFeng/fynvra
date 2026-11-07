@@ -17,6 +17,8 @@ import { FileMarkdownPreview } from './FileMarkdownPreview';
 import { PreviewFindBar } from './PreviewFindBar';
 
 const FileEditor = lazy(() => import('./FileEditor'));
+const PdfPreview = lazy(() => import('./PdfPreview'));
+const DocxPreview = lazy(() => import('./DocxPreview'));
 const MODES: FileMode[] = ['edit', 'preview', 'split'];
 
 export function FilePane({
@@ -37,7 +39,10 @@ export function FilePane({
   const markdown = isMarkdown(file.name);
   const dirty = isFileDirty(current);
   const mode = current?.mode;
-  const findable = preview?.kind === 'text' && markdown && mode !== 'edit';
+  const findable =
+    (preview?.kind === 'text' && markdown && mode !== 'edit') ||
+    preview?.kind === 'docx' ||
+    preview?.kind === 'document-text';
   const previewRef = useRef<HTMLElement>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findSignal, setFindSignal] = useState(0);
@@ -170,6 +175,42 @@ export function FilePane({
             alt={file.name}
             className="mx-auto max-w-full rounded border bg-muted/30"
           />
+        </div>
+      ) : preview.kind === 'pdf' ? (
+        <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+          <PdfPreview data={preview.data} />
+        </Suspense>
+      ) : preview.kind === 'docx' || preview.kind === 'document-text' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {preview.kind === 'document-text' && (
+            <p className="shrink-0 border-b bg-muted/40 px-4 py-1.5 text-muted-foreground text-xs">
+              {t('files.document.docNotice')}
+            </p>
+          )}
+          <div className="relative min-h-0 flex-1">
+            <article
+              ref={previewRef}
+              tabIndex={-1}
+              aria-label={t('files.document.wordPreview')}
+              className="h-full overflow-auto bg-background px-6 py-4 outline-none"
+            >
+              {preview.kind === 'docx' ? (
+                <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+                  <DocxPreview data={preview.data} />
+                </Suspense>
+              ) : (
+                <pre className="mx-auto max-w-3xl whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
+                  {preview.text}
+                </pre>
+              )}
+            </article>
+            <PreviewFindBar
+              containerRef={previewRef}
+              open={findOpen}
+              focusSignal={findSignal}
+              onClose={() => setFindOpen(false)}
+            />
+          </div>
         </div>
       ) : (
         <div
