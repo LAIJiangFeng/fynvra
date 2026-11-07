@@ -7,6 +7,7 @@ import {
   type LucideIcon,
   Palette,
   Plug,
+  Puzzle,
   SlidersHorizontal,
   Sparkles,
   UserCog,
@@ -24,6 +25,7 @@ import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { PluginsSettings } from './PluginsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
@@ -47,6 +49,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'instructions', icon: FileText, Component: InstructionsSettings },
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
+  { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
   { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },

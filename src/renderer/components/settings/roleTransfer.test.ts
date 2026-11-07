@@ -8,6 +8,7 @@ const tester: Role = {
   systemPrompt: '只写测试',
   skillIds: [],
   mcpServerIds: [],
+  pluginIds: [],
   tools: 'all',
   approvalMode: 'auto-edits',
 };

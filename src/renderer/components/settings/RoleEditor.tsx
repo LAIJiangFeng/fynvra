@@ -41,6 +41,7 @@ import type { MessageId, T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
 import { useInstructionsStore } from '@/stores/instructions';
 import { useMcpStore } from '@/stores/mcp';
+import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useRolesStore } from '@/stores/roles';
 import { useSkillsStore } from '@/stores/skills';
@@ -290,6 +291,11 @@ export function RoleEditor({
           selected={draft.mcpServerIds}
           disabled={saving}
           onChange={(mcpServerIds) => update({ ...draft, mcpServerIds })}
+        />
+        <PluginToggles
+          selected={draft.pluginIds ?? []}
+          disabled={saving}
+          onChange={(pluginIds) => update({ ...draft, pluginIds })}
         />
       </div>
 
@@ -716,6 +722,28 @@ function McpToggles(props: {
     <ToggleList
       label="settings.roles.mcpServers"
       emptyHint="settings.roles.noMcpServers"
+      items={items}
+      {...props}
+    />
+  );
+}
+
+function PluginToggles(props: {
+  selected: string[];
+  disabled: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  const plugins = usePluginsStore((state) => state.plugins);
+  const items = plugins.map((plugin) => ({
+    id: plugin.id,
+    name: plugin.name,
+    description: plugin.source,
+    inactive: !plugin.enabled,
+  }));
+  return (
+    <ToggleList
+      label="settings.roles.plugins"
+      emptyHint="settings.roles.noPlugins"
       items={items}
       {...props}
     />
