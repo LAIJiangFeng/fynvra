@@ -1,13 +1,19 @@
 import {
   DEFAULT_WORKFLOW_MAX_ROUNDS,
+  findWorkflowCycle,
   WORKER_ROLE_ID,
   WORKFLOW_LIMITS,
   type Workflow,
+  type WorkflowPosition,
   type WorkflowStep,
+  workflowAncestors,
+  workflowChildren,
+  workflowParents,
+  workflowTopologicalOrder,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
-import { ArrowDown, ArrowLeft, ArrowUp, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useId, useState } from 'react';
+import { ArrowLeft, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
+import { type FormEvent, useCallback, useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -18,6 +24,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  connectNodes,
+  nextNodeId,
+  placeNewNode,
+  removeEdges,
+  removeNodes,
+  withPositions,
+} from '@/components/workflows/editing';
+import { clampPosition } from '@/components/workflows/layout';
+import { type WorkflowEdgeRef, WorkflowGraph } from '@/components/workflows/WorkflowGraph';
 import type { T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
 import { useRolesStore } from '@/stores/roles';
@@ -44,64 +60,89 @@ function uniqueId(base: string, taken: Iterable<string>): string {
   }
 }
 
-/** 空白工作流：一步，id 在保存时按名称生成。 */
-export function blankWorkflow(t: T, takenIds: readonly string[]): Workflow {
+export type WorkflowTemplate = 'blank' | 'linear' | 'parallel';
+export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = ['blank', 'linear', 'parallel'];
+
+/**
+ * 新建时的模板。id 在保存时按名称生成（纯中文名回退到这里的 id）。
+ * - blank：一个空节点
+ * - linear：开发 → 测试 → 审核，测试、审核失败退回开发
+ * - parallel：开发 → (测试 ‖ 安全审查) → 验收，三者失败都退回开发
+ */
+export function templateWorkflow(
+  kind: WorkflowTemplate,
+  t: T,
+  takenIds: readonly string[]
+): Workflow {
+  const node = (
+    id: string,
+    name: string,
+    instructions: string,
+    needs: string[],
+    onFail?: string
+  ): WorkflowStep => ({
+    id,
+    name,
+    roleId: DEFAULT_ROLE_ID,
+    instructions,
+    needs,
+    ...(onFail ? { onFail } : {}),
+  });
+  if (kind === 'linear') {
+    const p = 'settings.workflows.preset' as const;
+    return {
+      id: uniqueId('dev-test-review', takenIds),
+      name: t(`${p}.name`),
+      description: t(`${p}.description`),
+      steps: [
+        node('develop', t(`${p}.develop`), t(`${p}.developInstructions`), []),
+        node('test', t(`${p}.test`), t(`${p}.testInstructions`), ['develop'], 'develop'),
+        node('review', t(`${p}.review`), t(`${p}.reviewInstructions`), ['test'], 'develop'),
+      ],
+      maxRounds: DEFAULT_WORKFLOW_MAX_ROUNDS,
+    };
+  }
+  if (kind === 'parallel') {
+    const p = 'settings.workflows.parallelPreset' as const;
+    return {
+      id: uniqueId('dev-test-security-accept', takenIds),
+      name: t(`${p}.name`),
+      description: t(`${p}.description`),
+      steps: [
+        node('develop', t(`${p}.develop`), t(`${p}.developInstructions`), []),
+        node('test', t(`${p}.test`), t(`${p}.testInstructions`), ['develop'], 'develop'),
+        node(
+          'security',
+          t(`${p}.security`),
+          t(`${p}.securityInstructions`),
+          ['develop'],
+          'develop'
+        ),
+        node(
+          'accept',
+          t(`${p}.accept`),
+          t(`${p}.acceptInstructions`),
+          ['test', 'security'],
+          'develop'
+        ),
+      ],
+      maxRounds: DEFAULT_WORKFLOW_MAX_ROUNDS,
+    };
+  }
   return {
     id: uniqueId('workflow', takenIds),
     name: '',
-    steps: [
-      {
-        id: 'step-1',
-        name: t('settings.workflows.defaultStepName'),
-        roleId: DEFAULT_ROLE_ID,
-        instructions: '',
-        needs: [],
-      },
-    ],
+    steps: [node('step-1', t('settings.workflows.defaultNodeName'), '', [])],
     maxRounds: DEFAULT_WORKFLOW_MAX_ROUNDS,
   };
 }
 
-/** 预设「开发 → 测试 → 审核」：测试、审核失败时退回开发，最多退回 3 次。 */
-export function presetWorkflow(t: T, takenIds: readonly string[]): Workflow {
-  return {
-    id: uniqueId('dev-test-review', takenIds),
-    name: t('settings.workflows.preset.name'),
-    description: t('settings.workflows.preset.description'),
-    steps: [
-      {
-        id: 'develop',
-        name: t('settings.workflows.preset.develop'),
-        roleId: DEFAULT_ROLE_ID,
-        instructions: t('settings.workflows.preset.developInstructions'),
-        needs: [],
-      },
-      {
-        id: 'test',
-        name: t('settings.workflows.preset.test'),
-        roleId: DEFAULT_ROLE_ID,
-        instructions: t('settings.workflows.preset.testInstructions'),
-        needs: ['develop'],
-        onFail: 'develop',
-      },
-      {
-        id: 'review',
-        name: t('settings.workflows.preset.review'),
-        roleId: DEFAULT_ROLE_ID,
-        instructions: t('settings.workflows.preset.reviewInstructions'),
-        needs: ['test'],
-        onFail: 'develop',
-      },
-    ],
-    maxRounds: DEFAULT_WORKFLOW_MAX_ROUNDS,
-  };
+/** 编辑器里的草稿：节点总是带 position（缺失的先自动排版补齐）。 */
+function toDraft(workflow: Workflow): Workflow {
+  return { ...workflow, steps: withPositions(workflow.steps) };
 }
 
-/**
- * 发给 Main 前整理：去掉空的可选字段；新建的工作流按名称生成 id。
- * 过渡期的线性表单：丢弃 position，needs 按当前列表顺序重建成线性链（与不带 needs 时
- * parseWorkflow 的兼容规则等价），上下移动步骤后依赖关系与列表顺序一致。
- */
+/** 发给 Main 前整理：去掉空的可选字段，写入 needs 与 position；新建的工作流按名称生成 id。 */
 function toSavable(draft: Workflow, isNew: boolean, takenIds: readonly string[]): Workflow {
   const description = draft.description?.trim();
   const id = isNew
@@ -110,17 +151,71 @@ function toSavable(draft: Workflow, isNew: boolean, takenIds: readonly string[])
         takenIds.filter((taken) => taken !== draft.id)
       )
     : draft.id;
+  const ordered = workflowTopologicalOrder(draft.steps) ?? draft.steps;
   return {
     id,
     name: draft.name,
     ...(description ? { description } : {}),
-    steps: draft.steps.map(({ onFail, needs: _needs, position: _position, ...step }, index) => {
-      const previous = draft.steps[index - 1];
-      return { ...step, needs: previous ? [previous.id] : [], ...(onFail ? { onFail } : {}) };
-    }),
+    steps: ordered.map(({ id: stepId, name, roleId, instructions, needs, position, onFail }) => ({
+      id: stepId,
+      name,
+      roleId,
+      instructions,
+      needs: [...needs],
+      ...(position ? { position: clampPosition(position) } : {}),
+      ...(onFail ? { onFail } : {}),
+    })),
     maxRounds: draft.maxRounds,
   };
 }
+
+interface Issue {
+  text: string;
+  stepId?: string;
+}
+
+/** 前端基础校验（Main 保存时还会用 parseWorkflow 完整校验）。 */
+function validate(draft: Workflow, t: T): Issue[] {
+  const issues: Issue[] = [];
+  if (!draft.name.trim()) issues.push({ text: t('settings.workflows.issues.nameRequired') });
+  const { maxRoundsMin: min, maxRoundsMax: max } = WORKFLOW_LIMITS;
+  if (!Number.isInteger(draft.maxRounds) || draft.maxRounds < min || draft.maxRounds > max) {
+    issues.push({ text: t('settings.workflows.issues.maxRounds', { min, max }) });
+  }
+  if (draft.steps.length < WORKFLOW_LIMITS.stepsMin) {
+    issues.push({ text: t('settings.workflows.issues.noNodes') });
+  }
+  if (draft.steps.length > WORKFLOW_LIMITS.stepsMax) {
+    issues.push({
+      text: t('settings.workflows.issues.tooMany', { max: WORKFLOW_LIMITS.stepsMax }),
+    });
+  }
+  for (const step of draft.steps) {
+    if (!step.name.trim()) {
+      issues.push({
+        text: t('settings.workflows.issues.nodeNameRequired', { id: step.id }),
+        stepId: step.id,
+      });
+    }
+    if (!step.instructions.trim()) {
+      issues.push({
+        text: t('settings.workflows.issues.nodeInstructionsRequired', {
+          name: step.name.trim() || step.id,
+        }),
+        stepId: step.id,
+      });
+    }
+  }
+  const cycle = findWorkflowCycle(draft.steps);
+  if (cycle) {
+    const names = new Map(draft.steps.map((step) => [step.id, step.name || step.id]));
+    const path = [...cycle, cycle[0]].map((id) => names.get(id ?? '') ?? id).join(' → ');
+    issues.push({ text: t('settings.workflows.issues.cycle', { path }) });
+  }
+  return issues;
+}
+
+type Notice = { tone: 'error' | 'muted'; text: string };
 
 export function WorkflowEditor({
   initial,
@@ -135,58 +230,132 @@ export function WorkflowEditor({
   onCancel: () => void;
   onSaved: (workflow: Workflow) => void | Promise<void>;
 }) {
-  const [draft, setDraft] = useState<Workflow>(initial);
+  // 基准也补齐 position：旧数据自动排版本身不算修改
+  const [base] = useState(() => toDraft(initial));
+  const [draft, setDraft] = useState<Workflow>(base);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const roles = useRolesStore((state) => state.roles);
+  const rolesLoaded = useRolesStore((state) => state.loaded);
   const id = useId();
   const t = useT();
-  const changed = JSON.stringify(draft) !== JSON.stringify(initial);
+
+  const changed = JSON.stringify(draft) !== JSON.stringify(base);
   const dirty = isNew || changed;
+  const issues = useMemo(() => validate(draft, t), [draft, t]);
+  const blockedReason = saving
+    ? null
+    : issues.length > 0
+      ? t('settings.workflows.saveBlocked', { count: issues.length })
+      : !dirty
+        ? t('settings.workflows.noChanges')
+        : null;
+  const canSave = !saving && dirty && issues.length === 0;
 
-  const updateStep = (index: number, patch: Partial<WorkflowStep>) =>
-    setDraft((current) => ({
-      ...current,
-      steps: current.steps.map((step, i) => (i === index ? { ...step, ...patch } : step)),
-    }));
+  const roleNames = useMemo<Record<string, string>>(
+    () =>
+      rolesLoaded
+        ? Object.fromEntries(roles.map((role) => [role.id, role.name]))
+        : // 角色还没加载时不误报「不存在」
+          Object.fromEntries(draft.steps.map((step) => [step.roleId, step.roleId])),
+    [roles, rolesLoaded, draft.steps]
+  );
+  const orchestratorIds = useMemo(
+    () => new Set(roles.filter((role) => role.tools === 'orchestrator').map((role) => role.id)),
+    [roles]
+  );
 
-  const moveStep = (index: number, offset: -1 | 1) =>
-    setDraft((current) => {
-      const target = index + offset;
-      const a = current.steps[index];
-      const b = current.steps[target];
-      if (!a || !b) return current;
-      return { ...current, steps: current.steps.with(index, b).with(target, a) };
+  const setSteps = useCallback(
+    (update: (steps: WorkflowStep[]) => WorkflowStep[]) =>
+      setDraft((current) => ({ ...current, steps: update(current.steps) })),
+    []
+  );
+
+  const reportCleared = (cleared: number) =>
+    setNotice(
+      cleared > 0
+        ? { tone: 'muted', text: t('settings.workflows.failCleared', { count: cleared }) }
+        : null
+    );
+
+  const updateStep = (stepId: string, patch: Partial<WorkflowStep>) =>
+    setSteps((steps) => steps.map((step) => (step.id === stepId ? { ...step, ...patch } : step)));
+
+  const handleMove = useCallback(
+    (positions: Record<string, WorkflowPosition>) =>
+      setSteps((steps) =>
+        steps.map((step) => {
+          const position = positions[step.id];
+          return position ? { ...step, position } : step;
+        })
+      ),
+    [setSteps]
+  );
+
+  const handleConnect = (source: string, target: string) => {
+    const result = connectNodes(draft.steps, source, target);
+    if (result.ok) {
+      setDraft({ ...draft, steps: result.steps });
+      setNotice(null);
+      return;
+    }
+    const name = (stepId: string) => draft.steps.find((step) => step.id === stepId)?.name ?? stepId;
+    if (result.reason === 'missing') return;
+    setNotice({
+      tone: 'error',
+      text:
+        result.reason === 'self'
+          ? t('settings.workflows.connectSelf')
+          : result.reason === 'duplicate'
+            ? t('settings.workflows.connectDuplicate')
+            : t('settings.workflows.connectCycle', { from: name(source), to: name(target) }),
     });
+  };
 
-  const removeStep = (index: number) =>
-    setDraft((current) => {
-      const removed = current.steps[index];
-      if (!removed || current.steps.length <= WORKFLOW_LIMITS.stepsMin) return current;
-      // 指向被删步骤的「失败时退回」一并清掉
-      const steps = current.steps
-        .filter((_, i) => i !== index)
-        .map(({ onFail, ...step }) =>
-          onFail && onFail !== removed.id ? { ...step, onFail } : step
-        );
-      return { ...current, steps };
-    });
+  const deleteElements = (nodeIds: string[], edges: WorkflowEdgeRef[]) => {
+    if (nodeIds.length > 0) {
+      const names = draft.steps
+        .filter((step) => nodeIds.includes(step.id))
+        .map((step) => step.name || step.id);
+      const message =
+        names.length === 1
+          ? t('settings.workflows.deleteNodeConfirm', { name: names[0] ?? '' })
+          : t('settings.workflows.deleteNodesConfirm', { count: names.length });
+      if (!window.confirm(message)) return;
+    }
+    let cleared = 0;
+    let steps = draft.steps;
+    if (edges.length > 0) {
+      const result = removeEdges(steps, edges);
+      steps = result.steps;
+      cleared += result.cleared;
+    }
+    if (nodeIds.length > 0) {
+      const result = removeNodes(steps, nodeIds);
+      steps = result.steps;
+      cleared += result.cleared;
+      if (selectedId && nodeIds.includes(selectedId)) setSelectedId(null);
+    }
+    setDraft({ ...draft, steps });
+    reportCleared(cleared);
+  };
 
-  const addStep = () =>
-    setDraft((current) => {
-      if (current.steps.length >= WORKFLOW_LIMITS.stepsMax) return current;
-      const taken = current.steps.map((step) => step.id);
-      let n = current.steps.length + 1;
-      while (taken.includes(`step-${n}`)) n += 1;
-      const step: WorkflowStep = {
-        id: `step-${n}`,
-        name: t('settings.workflows.defaultStepName'),
-        roleId: DEFAULT_ROLE_ID,
-        instructions: '',
-        // 保存时按列表顺序重建（见 toSavable）
-        needs: [],
-      };
-      return { ...current, steps: [...current.steps, step] };
-    });
+  const addNode = () => {
+    if (draft.steps.length >= WORKFLOW_LIMITS.stepsMax) return;
+    const step: WorkflowStep = {
+      id: nextNodeId(draft.steps),
+      name: t('settings.workflows.defaultNodeName'),
+      roleId: DEFAULT_ROLE_ID,
+      instructions: '',
+      needs: [],
+      position: placeNewNode(draft.steps, selectedId),
+    };
+    setDraft({ ...draft, steps: [...draft.steps, step] });
+    setSelectedId(step.id);
+    setNotice(null);
+  };
 
   const cancel = () => {
     if (changed && !window.confirm(t('settings.workflows.discardConfirm'))) return;
@@ -195,6 +364,7 @@ export function WorkflowEditor({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
@@ -210,17 +380,62 @@ export function WorkflowEditor({
     setSaving(false);
   };
 
+  const selected = draft.steps.find((step) => step.id === selectedId);
+  const atLimit = draft.steps.length >= WORKFLOW_LIMITS.stepsMax;
+
   return (
-    <form className="grid gap-5" onSubmit={(event) => void submit(event)}>
-      <div className="flex items-center gap-2">
+    <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
+      <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={cancel}>
           <ArrowLeft />
           {t('settings.workflows.back')}
         </Button>
-        <h3 className="min-w-0 truncate font-medium">
+        <h3 className="min-w-0 flex-1 truncate font-medium">
           {t(isNew ? 'settings.workflows.newTitle' : 'settings.workflows.editTitle')}
         </h3>
+        {blockedReason && (
+          <span className="text-muted-foreground text-xs" aria-live="polite">
+            {blockedReason}
+          </span>
+        )}
+        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={cancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" size="sm" disabled={!canSave} title={blockedReason ?? undefined}>
+          <Save />
+          {t(saving ? 'common.saving' : 'common.save')}
+        </Button>
       </div>
+
+      {error && (
+        <InlineMessage tone="error" className="break-all">
+          {t('settings.workflows.saveFailed', { error })}
+        </InlineMessage>
+      )}
+
+      {issues.length > 0 && (
+        <ul className="grid gap-1 rounded-lg border border-dashed px-3 py-2 text-xs">
+          {issues.map((issue) => (
+            <li
+              key={`${issue.stepId ?? ''}:${issue.text}`}
+              className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400"
+            >
+              <TriangleAlert className="size-3.5 shrink-0" />
+              {issue.stepId ? (
+                <button
+                  type="button"
+                  className="text-left underline-offset-2 hover:underline"
+                  onClick={() => setSelectedId(issue.stepId ?? null)}
+                >
+                  {issue.text}
+                </button>
+              ) : (
+                <span>{issue.text}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
         <Field label={t('settings.workflows.name')} htmlFor={`${id}-name`}>
@@ -269,73 +484,89 @@ export function WorkflowEditor({
         />
       </Field>
 
-      <div className="grid gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-sm">{t('settings.workflows.steps')}</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={saving || draft.steps.length >= WORKFLOW_LIMITS.stepsMax}
-            onClick={addStep}
-          >
-            <Plus />
-            {t('settings.workflows.addStep')}
-          </Button>
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span className="font-medium text-sm">{t('settings.workflows.canvas')}</span>
+          <span className="text-muted-foreground text-xs">
+            {t('settings.workflows.canvasHint')}
+          </span>
         </div>
-        <ol className="grid gap-3">
-          {draft.steps.map((step, index) => (
-            <StepEditor
-              key={step.id}
-              id={`${id}-step-${step.id}`}
-              step={step}
-              index={index}
+        {notice && (
+          <InlineMessage tone={notice.tone} className="break-all">
+            {notice.text}
+          </InlineMessage>
+        )}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="h-[max(28rem,calc(100vh-24rem))] min-w-0 overflow-hidden rounded-lg border bg-muted/30">
+            <WorkflowGraph
               steps={draft.steps}
-              disabled={saving}
-              onChange={(patch) => updateStep(index, patch)}
-              onMove={(offset) => moveStep(index, offset)}
-              onRemove={() => removeStep(index)}
+              roleNames={roleNames}
+              invalidRoleIds={orchestratorIds}
+              editable={!saving}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onMove={handleMove}
+              onConnect={handleConnect}
+              onDelete={({ nodeIds, edges }) => deleteElements(nodeIds, edges)}
+              toolbar={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="bg-card"
+                  disabled={atLimit}
+                  title={
+                    atLimit
+                      ? t('settings.workflows.nodeLimit', { max: WORKFLOW_LIMITS.stepsMax })
+                      : undefined
+                  }
+                  onClick={addNode}
+                >
+                  <Plus />
+                  {t('settings.workflows.addNode')}
+                </Button>
+              }
             />
-          ))}
-        </ol>
-      </div>
-
-      {error && (
-        <InlineMessage tone="error" className="break-all">
-          {error}
-        </InlineMessage>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button type="submit" disabled={saving || !dirty}>
-          <Save />
-          {t(saving ? 'common.saving' : 'common.save')}
-        </Button>
-        <Button type="button" variant="outline" disabled={saving} onClick={cancel}>
-          {t('common.cancel')}
-        </Button>
+          </div>
+          <aside className="min-w-0 rounded-lg border p-4 lg:max-h-[max(28rem,calc(100vh-24rem))] lg:overflow-y-auto">
+            {selected ? (
+              <NodeInspector
+                key={selected.id}
+                id={`${id}-node`}
+                step={selected}
+                steps={draft.steps}
+                disabled={saving}
+                onChange={(patch) => updateStep(selected.id, patch)}
+                onSelect={setSelectedId}
+                onRemove={() => deleteElements([selected.id], [])}
+              />
+            ) : (
+              <p className="text-muted-foreground text-sm">{t('settings.workflows.node.empty')}</p>
+            )}
+          </aside>
+        </div>
       </div>
     </form>
   );
 }
 
-function StepEditor({
+const NO_FALLBACK = '';
+
+function NodeInspector({
   id,
   step,
-  index,
   steps,
   disabled,
   onChange,
-  onMove,
+  onSelect,
   onRemove,
 }: {
   id: string;
   step: WorkflowStep;
-  index: number;
   steps: readonly WorkflowStep[];
   disabled: boolean;
   onChange: (patch: Partial<WorkflowStep>) => void;
-  onMove: (offset: -1 | 1) => void;
+  onSelect: (id: string) => void;
   onRemove: () => void;
 }) {
   const roles = useRolesStore((state) => state.roles);
@@ -359,137 +590,145 @@ function StepEditor({
       : [{ value: step.roleId, label: current?.name ?? step.roleId }]),
   ];
 
-  const NO_FALLBACK = '';
+  const byId = new Map(steps.map((other) => [other.id, other]));
+  const label = (stepId: string) => byId.get(stepId)?.name.trim() || stepId;
+  const ancestors = workflowAncestors(steps, step.id);
+  const ordered = workflowTopologicalOrder(steps) ?? steps;
   const failItems = [
     { value: NO_FALLBACK, label: t('settings.workflows.noFallback') },
-    // 只能退回到自身或之前的步骤（祖先）；当前值即使已无效也保持可见，保存时由 Main 拒绝
-    ...steps
-      .map((other, i) => ({
-        value: other.id,
-        label: t('settings.workflows.stepLabel', { n: i + 1, name: other.name }),
-        keep: i <= index || other.id === step.onFail,
-      }))
-      .filter((item) => item.keep)
-      .map(({ keep: _keep, ...item }) => item),
+    { value: step.id, label: t('settings.workflows.node.failSelf') },
+    // 只能退回到祖先节点（按拓扑序列出）
+    ...ordered
+      .filter((other) => ancestors.has(other.id))
+      .map((other) => ({ value: other.id, label: label(other.id) })),
   ];
+  const parents = workflowParents(steps, step.id);
+  const children = workflowChildren(steps, step.id);
+
+  const links = (ids: string[]) =>
+    ids.length === 0 ? (
+      <span className="text-muted-foreground">{t('settings.workflows.node.none')}</span>
+    ) : (
+      <span className="flex flex-wrap gap-1">
+        {ids.map((other) => (
+          <button
+            key={other}
+            type="button"
+            className="rounded border px-1.5 py-0.5 hover:bg-accent"
+            onClick={() => onSelect(other)}
+          >
+            {label(other)}
+          </button>
+        ))}
+      </span>
+    );
 
   return (
-    <li className="grid gap-3 rounded-lg border p-4">
-      <div className="flex items-center gap-1">
-        <span className="min-w-0 flex-1 truncate font-medium text-muted-foreground text-xs">
-          {t('settings.workflows.stepNumber', { n: index + 1 })}
+    <div className="grid gap-4">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate font-medium text-sm">
+          {t('settings.workflows.node.title')}
         </span>
+        <code className="truncate text-muted-foreground text-xs">{step.id}</code>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={t('settings.workflows.moveUp')}
-          title={t('settings.workflows.moveUp')}
-          disabled={disabled || index === 0}
-          onClick={() => onMove(-1)}
-        >
-          <ArrowUp />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t('settings.workflows.moveDown')}
-          title={t('settings.workflows.moveDown')}
-          disabled={disabled || index === steps.length - 1}
-          onClick={() => onMove(1)}
-        >
-          <ArrowDown />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t('settings.workflows.removeStep')}
-          title={t('settings.workflows.removeStep')}
-          disabled={disabled || steps.length <= WORKFLOW_LIMITS.stepsMin}
+          aria-label={t('settings.workflows.node.remove')}
+          title={t('settings.workflows.node.remove')}
+          disabled={disabled}
           onClick={onRemove}
         >
           <Trash2 />
         </Button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label={t('settings.workflows.stepName')} htmlFor={`${id}-name`}>
-          <Input
-            id={`${id}-name`}
-            value={step.name}
-            maxLength={WORKFLOW_LIMITS.nameMax}
-            disabled={disabled}
-            onChange={(event) => onChange({ name: event.target.value })}
-          />
-        </Field>
-        <Field label={t('settings.workflows.stepRole')} htmlFor={`${id}-role`}>
-          <Select
-            items={roleItems}
-            value={step.roleId}
-            disabled={disabled}
-            onValueChange={(value) => {
-              if (typeof value === 'string' && value) onChange({ roleId: value });
-            }}
-          >
-            <SelectTrigger id={`${id}-role`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {roleItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label={t('settings.workflows.onFail')} htmlFor={`${id}-fail`}>
-          <Select
-            items={failItems}
-            value={step.onFail ?? NO_FALLBACK}
-            disabled={disabled}
-            onValueChange={(value) => {
-              if (typeof value === 'string') onChange({ onFail: value || undefined });
-            }}
-          >
-            <SelectTrigger id={`${id}-fail`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {failItems.map((item) => (
-                <SelectItem key={item.value || 'none'} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
+      <Field label={t('settings.workflows.node.name')} htmlFor={`${id}-name`}>
+        <Input
+          id={`${id}-name`}
+          value={step.name}
+          maxLength={WORKFLOW_LIMITS.nameMax}
+          disabled={disabled}
+          onChange={(event) => onChange({ name: event.target.value })}
+        />
+      </Field>
 
-      {roleWarning && (
-        <p className="flex items-center gap-1.5 text-amber-600 text-xs dark:text-amber-400">
-          <TriangleAlert className="size-3.5 shrink-0" />
-          {roleWarning}
-        </p>
-      )}
+      <Field label={t('settings.workflows.node.role')} htmlFor={`${id}-role`}>
+        <Select
+          items={roleItems}
+          value={step.roleId}
+          disabled={disabled}
+          onValueChange={(value) => {
+            if (typeof value === 'string' && value) onChange({ roleId: value });
+          }}
+        >
+          <SelectTrigger id={`${id}-role`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {roleItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {roleWarning && (
+          <p className="flex items-center gap-1.5 text-amber-600 text-xs dark:text-amber-400">
+            <TriangleAlert className="size-3.5 shrink-0" />
+            {roleWarning}
+          </p>
+        )}
+      </Field>
 
       <Field
-        label={t('settings.workflows.stepInstructions')}
+        label={t('settings.workflows.node.instructions')}
         htmlFor={`${id}-instructions`}
-        hint={t('settings.workflows.stepInstructionsHint')}
+        hint={t('settings.workflows.node.instructionsHint')}
       >
         <Textarea
           id={`${id}-instructions`}
-          rows={4}
+          rows={6}
           value={step.instructions}
           maxLength={WORKFLOW_LIMITS.instructionsMax}
           disabled={disabled}
-          className="max-h-[40vh] min-h-24"
+          className="max-h-[40vh] min-h-28"
           onChange={(event) => onChange({ instructions: event.target.value })}
         />
       </Field>
-    </li>
+
+      <Field label={t('settings.workflows.onFail')} htmlFor={`${id}-fail`}>
+        <Select
+          items={failItems}
+          value={step.onFail ?? NO_FALLBACK}
+          disabled={disabled}
+          onValueChange={(value) => {
+            if (typeof value === 'string') onChange({ onFail: value || undefined });
+          }}
+        >
+          <SelectTrigger id={`${id}-fail`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {failItems.map((item) => (
+              <SelectItem key={item.value || 'none'} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <div className="grid gap-2 text-xs">
+        <div className="grid gap-1">
+          <span className="font-medium">{t('settings.workflows.node.upstream')}</span>
+          {links(parents)}
+        </div>
+        <div className="grid gap-1">
+          <span className="font-medium">{t('settings.workflows.node.downstream')}</span>
+          {links(children)}
+        </div>
+      </div>
+    </div>
   );
 }
