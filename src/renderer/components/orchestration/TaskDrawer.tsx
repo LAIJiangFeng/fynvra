@@ -1,6 +1,6 @@
 import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
 import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -13,6 +13,7 @@ import { formatClock, formatDuration } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
 import { WorkerOutput } from './WorkerOutput';
+import { WorkflowRunGraph } from './WorkflowRunGraph';
 
 /**
  * 任务详情：盖在面板上的抽屉（非模态，Esc 或「返回」关闭）。只读：合并 / 打回是主 agent 的事，
@@ -39,6 +40,15 @@ export function TaskDrawer({
   const inPlace = latest?.mode === 'in-place';
   const reviewable =
     latest && !inPlace && (task.status === 'in-review' || task.status === 'completed');
+  // 在流程图里点选的节点及其尝试；没有时输出区显示最新一次尝试
+  const [picked, setPicked] = useState<{ nodeId: string; dispatchId: string } | null>(null);
+  const pickedValid = picked && dispatches.some((dispatch) => dispatch.id === picked.dispatchId);
+  const outputId = pickedValid ? picked.dispatchId : latest?.id;
+  const outputRef = useRef<HTMLDivElement>(null);
+  const pickedName =
+    pickedValid && task.workflow && Array.isArray(task.workflow.steps)
+      ? (task.workflow.steps.find((step) => step.id === picked.nodeId)?.name ?? picked.nodeId)
+      : null;
 
   useEffect(() => {
     containerRef.current?.focus();
@@ -102,6 +112,19 @@ export function TaskDrawer({
         {task.dependsOn.length > 0 && (
           <DependencySection view={view} task={task} onOpenTask={onOpenTask} />
         )}
+        {task.workflow && (
+          <WorkflowRunGraph
+            workflow={task.workflow}
+            dispatches={dispatches}
+            selectedNodeId={pickedValid ? picked.nodeId : null}
+            onOpenOutput={(nodeId, dispatchId) => {
+              setPicked({ nodeId, dispatchId });
+              window.requestAnimationFrame(() =>
+                outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+              );
+            }}
+          />
+        )}
         {task.workflow && <WorkflowHistory workflow={task.workflow} />}
         <section aria-label={t('orchestration.attempts')}>
           <SectionTitle>
@@ -121,7 +144,28 @@ export function TaskDrawer({
           <SectionTitle>{t('orchestration.messages')}</SectionTitle>
           <MessageStream view={view} dispatches={dispatches} />
         </section>
-        {latest && <WorkerOutput key={latest.id} dispatchId={latest.id} />}
+        {outputId && (
+          <div ref={outputRef} className="flex flex-col gap-1">
+            {pickedName !== null && (
+              <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="truncate">
+                  {t('orchestration.workflow.viewingNode', { name: pickedName })}
+                </span>
+                {outputId !== latest?.id && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-5 shrink-0 px-1.5 text-[11px]"
+                    onClick={() => setPicked(null)}
+                  >
+                    {t('orchestration.workflow.viewLatest')}
+                  </Button>
+                )}
+              </p>
+            )}
+            <WorkerOutput key={outputId} dispatchId={outputId} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -172,20 +216,23 @@ function MarkdownLite({ text }: { text: string }) {
 /** 工作流各步的结算记录（最近 30 条），新的在下。 */
 function WorkflowHistory({ workflow }: { workflow: TaskWorkflow }) {
   const t = useT();
+  // 旧快照可能缺少字段
+  const history = Array.isArray(workflow.history) ? workflow.history : [];
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
   return (
     <section aria-label={t('orchestration.workflow.history')}>
       <SectionTitle>{t('orchestration.workflow.history')}</SectionTitle>
-      {workflow.history.length === 0 ? (
+      {history.length === 0 ? (
         <p className="text-muted-foreground text-xs">{t('orchestration.workflow.historyEmpty')}</p>
       ) : (
         <ol className="flex flex-col gap-2">
-          {workflow.history.map((entry) => (
+          {history.map((entry) => (
             <li key={`${entry.dispatchId}:${entry.at}`} className="text-xs">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-medium">
                   {t('orchestration.workflow.entry', {
-                    step: workflow.steps.findIndex((step) => step.id === entry.nodeId) + 1,
-                    stepName: workflow.steps.find((step) => step.id === entry.nodeId)?.name ?? '?',
+                    step: steps.findIndex((step) => step.id === entry.nodeId) + 1,
+                    stepName: steps.find((step) => step.id === entry.nodeId)?.name ?? '?',
                   })}
                 </span>
                 {entry.outcome === 'failed' ? (
