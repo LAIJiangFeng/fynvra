@@ -148,9 +148,10 @@ export const en: MessagesShape<typeof zhCN> = {
     readonly: 'Read only',
     closeFile: 'Close {name}',
     editor: 'Edit {name}',
+    liveLinkHint: 'Ctrl/Cmd + click to open link',
     markdownPreview: 'Markdown preview',
     viewMode: 'File view mode',
-    modes: { edit: 'Edit', preview: 'Preview', split: 'Split' },
+    modes: { live: 'Live', edit: 'Source', split: 'Split' },
     find: {
       label: 'Find in preview',
       placeholder: 'Find',

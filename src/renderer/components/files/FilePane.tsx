@@ -19,7 +19,7 @@ import { PreviewFindBar } from './PreviewFindBar';
 const FileEditor = lazy(() => import('./FileEditor'));
 const PdfPreview = lazy(() => import('./PdfPreview'));
 const DocxPreview = lazy(() => import('./DocxPreview'));
-const MODES: FileMode[] = ['edit', 'preview', 'split'];
+const MODES: FileMode[] = ['live', 'edit', 'split'];
 
 export function FilePane({
   file,
@@ -40,7 +40,7 @@ export function FilePane({
   const dirty = isFileDirty(current);
   const mode = current?.mode;
   const findable =
-    (preview?.kind === 'text' && markdown && mode !== 'edit') ||
+    (preview?.kind === 'text' && markdown && mode === 'split') ||
     preview?.kind === 'docx' ||
     preview?.kind === 'document-text';
   const previewRef = useRef<HTMLElement>(null);
@@ -49,7 +49,7 @@ export function FilePane({
   const save = useEffectEvent(() => {
     void store.getState().saveFile(file.id);
   });
-  /** Ctrl/Cmd+F：预览模式总是打开查找条；双栏仅在焦点不在编辑器时；编辑模式交给 CodeMirror */
+  /** Ctrl/Cmd+F：双栏仅在焦点不在编辑器时打开查找条；实时预览和源码模式交给 CodeMirror */
   const openFind = useEffectEvent((event: KeyboardEvent) => {
     if (!findable) return;
     if (mode === 'split' && document.activeElement?.closest('.cm-editor')) return;
@@ -57,7 +57,7 @@ export function FilePane({
     setFindOpen(true);
     setFindSignal((signal) => signal + 1);
   });
-  // 切换文件（标签失活）、切到编辑模式或预览不可用时关闭查找条
+  // 切换文件（标签失活）、离开双栏模式或预览不可用时关闭查找条
   useEffect(() => {
     if (!active || !findable) setFindOpen(false);
   }, [active, findable]);
@@ -221,29 +221,20 @@ export function FilePane({
               'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] @min-[42rem]:grid-cols-2 @min-[42rem]:grid-rows-[minmax(0,1fr)]'
           )}
         >
-          <div
-            className={cn(
-              'min-h-0 min-w-0 overflow-hidden',
-              markdown && current.mode === 'preview' && 'hidden'
-            )}
-          >
+          <div className="min-h-0 min-w-0 overflow-hidden">
             <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
               <FileEditor
-                name={file.name}
+                file={file}
+                store={store}
+                live={markdown && current.mode === 'live'}
                 value={current.draft}
                 source={preview.text}
                 onChange={(text) => store.getState().editFile(file.id, text)}
               />
             </Suspense>
           </div>
-          {markdown && (
-            <div
-              className={cn(
-                'relative min-h-0 min-w-0',
-                current.mode === 'edit' && 'hidden',
-                current.mode === 'split' && 'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
-              )}
-            >
+          {markdown && current.mode === 'split' && (
+            <div className="relative min-h-0 min-w-0 border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l">
               <article
                 ref={previewRef}
                 tabIndex={-1}
