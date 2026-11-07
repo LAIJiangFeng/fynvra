@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
@@ -346,7 +347,7 @@ function normalizePluginPath(value: string): string {
 /**
  * 插件工具名单：只统计来源路径等于某个插件路径（单文件插件）或位于插件根目录之下（包插件）的扩展；
  * Fynvra 内联扩展（`<inline:…>`：审批门、MCP、Magic Context 等）不计入。每次调用读 loader 当前的扩展，
- * 扩展数与工具总数不变时复用上次结果。没有插件时恒为空集。
+ * 每次都重算（路径同时与 resolve 形式和真实路径比较）。没有插件时恒为空集。
  */
 function createPluginToolNames(
   loader: DefaultResourceLoader,
@@ -354,32 +355,39 @@ function createPluginToolNames(
 ): () => ReadonlySet<string> {
   const empty: ReadonlySet<string> = new Set();
   if (pluginPaths.length === 0) return () => empty;
-  const roots = pluginPaths.map(normalizePluginPath);
+  // 每个插件路径同时取 resolve 形式与真实路径（符号链接 / junction）；真实路径只在这里算一次，失败忽略
+  const roots = new Set<string>();
+  for (const pluginPath of pluginPaths) {
+    roots.add(normalizePluginPath(pluginPath));
+    try {
+      roots.add(normalizePluginPath(fs.realpathSync.native(pluginPath)));
+    } catch {
+      // 路径不存在或不可读：只用 resolve 形式
+    }
+  }
+  const rootList = [...roots];
   const fromPlugin = (extensionPath: string): boolean => {
     if (!extensionPath || extensionPath.startsWith('<')) return false;
     const normalized = normalizePluginPath(extensionPath);
-    return roots.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+    return rootList.some((root) => normalized === root || normalized.startsWith(`${root}/`));
   };
-  let cacheKey = '';
-  let cached: ReadonlySet<string> = empty;
+  // 不缓存：扩展与工具很少，每次重算才能覆盖运行中注销再注册的同数量工具
+  let lastGood: ReadonlySet<string> = empty;
   // 不能抛异常：审批门把 getter 抛错当作「是插件工具」处理，会让所有未归类工具都要审批
   return () => {
     let extensions: ReturnType<DefaultResourceLoader['getExtensions']>['extensions'];
     try {
       extensions = loader.getExtensions().extensions;
     } catch {
-      return cached;
+      return lastGood;
     }
-    const key = `${extensions.length}:${extensions.reduce((sum, ext) => sum + ext.tools.size, 0)}`;
-    if (key === cacheKey) return cached;
     const names = new Set<string>();
     for (const extension of extensions) {
       if (!fromPlugin(extension.path) && !fromPlugin(extension.resolvedPath)) continue;
       for (const name of extension.tools.keys()) names.add(name);
     }
-    cacheKey = key;
-    cached = names;
-    return cached;
+    lastGood = names;
+    return names;
   };
 }
 
