@@ -9,6 +9,7 @@ import type {
   ThinkingLevel,
   Workflow,
 } from '@fynvra/core';
+import { summarizeWorkflow } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { supportsFastMode } from '@shared/modelFast';
 import type {
@@ -613,6 +614,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         name: workflow.name,
         ...(workflow.description ? { description: workflow.description } : {}),
         steps: workflow.steps.map((step) => ({ name: step.name, roleId: step.roleId })),
+        summary: summarizeWorkflow(workflow.steps, (step) => `${step.name} [${step.roleId}]`),
       }));
     } catch (error) {
       log('warn', `session ${sessionId}: could not read workflows: ${errorMessage(error)}`);

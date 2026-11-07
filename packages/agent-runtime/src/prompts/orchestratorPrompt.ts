@@ -145,11 +145,13 @@ export function workflowPrompt(
     name: string;
     description?: string;
     steps: readonly { name: string; roleId: string }[];
+    summary?: string;
   }[]
 ): string | undefined {
   if (workflows.length === 0) return undefined;
   const list = workflows.map((workflow) => {
-    const steps = workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
+    const steps =
+      workflow.summary ?? workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
     const description = workflow.description
       ? ` — ${workflow.description.replace(/\s+/g, ' ')}`
       : '';

@@ -142,8 +142,20 @@ function isStepSnapshot(value: unknown): value is WorkflowStep {
     typeof value.name === 'string' &&
     typeof value.roleId === 'string' &&
     typeof value.instructions === 'string' &&
+    (value.needs === undefined ||
+      (Array.isArray(value.needs) && value.needs.every((need) => typeof need === 'string'))) &&
     (value.onFail === undefined || typeof value.onFail === 'string')
   );
+}
+
+/** 旧快照（W1 之前）的步骤没有 needs：全部缺省时按列表顺序补成线性链，否则缺的补 []。就地修改。 */
+function fillLegacyNeeds(steps: Record<string, unknown>[]): void {
+  const legacy = steps.every((step) => step.needs === undefined);
+  steps.forEach((step, index) => {
+    if (step.needs !== undefined) return;
+    const previous = steps[index - 1];
+    step.needs = legacy && previous ? [previous.id] : [];
+  });
 }
 
 function isHistoryEntry(value: unknown): value is TaskWorkflowHistoryEntry {
@@ -158,7 +170,10 @@ function isHistoryEntry(value: unknown): value is TaskWorkflowHistoryEntry {
   );
 }
 
-/** 快照读入时的 Task.workflow 守卫：步骤下标必须落在步骤范围内。 */
+/**
+ * 快照读入时的 Task.workflow 守卫：步骤下标必须落在步骤范围内。
+ * 通过时就地给旧快照的步骤补齐 needs（见 {@link fillLegacyNeeds}），让读出的值符合 {@link WorkflowStep}。
+ */
 export function isTaskWorkflow(value: unknown): value is TaskWorkflow {
   if (!isRecord(value)) return false;
   const { steps, history, pending } = value;
@@ -177,13 +192,14 @@ export function isTaskWorkflow(value: unknown): value is TaskWorkflow {
   ) {
     return false;
   }
-  if (pending === undefined) return true;
-  return (
-    isRecord(pending) &&
-    isIndex(pending.step) &&
-    pending.step < steps.length &&
-    (pending.feedback === undefined || typeof pending.feedback === 'string')
-  );
+  const pendingOk =
+    pending === undefined ||
+    (isRecord(pending) &&
+      isIndex(pending.step) &&
+      pending.step < steps.length &&
+      (pending.feedback === undefined || typeof pending.feedback === 'string'));
+  if (pendingOk) fillLegacyNeeds(steps as unknown as Record<string, unknown>[]);
+  return pendingOk;
 }
 
 /** 任务是否按工作流执行。 */

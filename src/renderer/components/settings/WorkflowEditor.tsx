@@ -55,6 +55,7 @@ export function blankWorkflow(t: T, takenIds: readonly string[]): Workflow {
         name: t('settings.workflows.defaultStepName'),
         roleId: DEFAULT_ROLE_ID,
         instructions: '',
+        needs: [],
       },
     ],
     maxRounds: DEFAULT_WORKFLOW_MAX_ROUNDS,
@@ -73,12 +74,14 @@ export function presetWorkflow(t: T, takenIds: readonly string[]): Workflow {
         name: t('settings.workflows.preset.develop'),
         roleId: DEFAULT_ROLE_ID,
         instructions: t('settings.workflows.preset.developInstructions'),
+        needs: [],
       },
       {
         id: 'test',
         name: t('settings.workflows.preset.test'),
         roleId: DEFAULT_ROLE_ID,
         instructions: t('settings.workflows.preset.testInstructions'),
+        needs: ['develop'],
         onFail: 'develop',
       },
       {
@@ -86,6 +89,7 @@ export function presetWorkflow(t: T, takenIds: readonly string[]): Workflow {
         name: t('settings.workflows.preset.review'),
         roleId: DEFAULT_ROLE_ID,
         instructions: t('settings.workflows.preset.reviewInstructions'),
+        needs: ['test'],
         onFail: 'develop',
       },
     ],
@@ -93,7 +97,11 @@ export function presetWorkflow(t: T, takenIds: readonly string[]): Workflow {
   };
 }
 
-/** 发给 Main 前整理：去掉空的可选字段；新建的工作流按名称生成 id。 */
+/**
+ * 发给 Main 前整理：去掉空的可选字段；新建的工作流按名称生成 id。
+ * 过渡期的线性表单：丢弃 position，needs 按当前列表顺序重建成线性链（与不带 needs 时
+ * parseWorkflow 的兼容规则等价），上下移动步骤后依赖关系与列表顺序一致。
+ */
 function toSavable(draft: Workflow, isNew: boolean, takenIds: readonly string[]): Workflow {
   const description = draft.description?.trim();
   const id = isNew
@@ -106,10 +114,10 @@ function toSavable(draft: Workflow, isNew: boolean, takenIds: readonly string[])
     id,
     name: draft.name,
     ...(description ? { description } : {}),
-    steps: draft.steps.map(({ onFail, ...step }) => ({
-      ...step,
-      ...(onFail ? { onFail } : {}),
-    })),
+    steps: draft.steps.map(({ onFail, needs: _needs, position: _position, ...step }, index) => {
+      const previous = draft.steps[index - 1];
+      return { ...step, needs: previous ? [previous.id] : [], ...(onFail ? { onFail } : {}) };
+    }),
     maxRounds: draft.maxRounds,
   };
 }
@@ -174,6 +182,8 @@ export function WorkflowEditor({
         name: t('settings.workflows.defaultStepName'),
         roleId: DEFAULT_ROLE_ID,
         instructions: '',
+        // 保存时按列表顺序重建（见 toSavable）
+        needs: [],
       };
       return { ...current, steps: [...current.steps, step] };
     });
@@ -352,10 +362,15 @@ function StepEditor({
   const NO_FALLBACK = '';
   const failItems = [
     { value: NO_FALLBACK, label: t('settings.workflows.noFallback') },
-    ...steps.map((other, i) => ({
-      value: other.id,
-      label: t('settings.workflows.stepLabel', { n: i + 1, name: other.name }),
-    })),
+    // 只能退回到自身或之前的步骤（祖先）；当前值即使已无效也保持可见，保存时由 Main 拒绝
+    ...steps
+      .map((other, i) => ({
+        value: other.id,
+        label: t('settings.workflows.stepLabel', { n: i + 1, name: other.name }),
+        keep: i <= index || other.id === step.onFail,
+      }))
+      .filter((item) => item.keep)
+      .map(({ keep: _keep, ...item }) => item),
   ];
 
   return (

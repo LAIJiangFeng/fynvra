@@ -94,6 +94,8 @@ export interface AgentWorkflowOption {
   name: string;
   description?: string;
   steps: { name: string; roleId: string }[];
+  /** 图的文字摘要（summarizeWorkflow），如 `开发 [worker] → (测试 [worker] ‖ 审查 [worker])` */
+  summary?: string;
 }
 
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
@@ -658,8 +660,8 @@ function parseRoleOption(raw: unknown): AgentRoleOption | null {
 function parseWorkflowOption(raw: unknown): AgentWorkflowOption | null {
   const record = asRecord(raw);
   if (!record || !isNonEmptyString(record.id) || !isNonEmptyString(record.name)) return null;
-  const { description } = record;
-  if (!isOptional(description, isString)) return null;
+  const { description, summary } = record;
+  if (!isOptional(description, isString) || !isOptional(summary, isString)) return null;
   const steps = parseList(record.steps, (item) => {
     const step = asRecord(item);
     if (!step || !isNonEmptyString(step.name) || !isNonEmptyString(step.roleId)) return null;
@@ -671,6 +673,7 @@ function parseWorkflowOption(raw: unknown): AgentWorkflowOption | null {
     name: record.name,
     ...(description !== undefined ? { description: description as string } : {}),
     steps,
+    ...(summary !== undefined ? { summary: summary as string } : {}),
   };
 }
 
