@@ -17,9 +17,15 @@
     "@earendil-works/pi-agent-core": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",
-    "@fynvra/core": "workspace:*"
+    "@fynvra/core": "workspace:*",
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.18.15",
+    "turndown": "7.2.5"
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@types/turndown": "5.0.6"
   }
 }
