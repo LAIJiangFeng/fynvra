@@ -132,6 +132,36 @@ export const IN_PLACE_WORKER_CONTRACT_PROMPT = [
   ...WORKER_SHARED_RULES,
 ].join('\n');
 
+/**
+ * 用户定义了工作流时追加给 orchestrator 的说明：用户要求用某个工作流时传 `workflow`，
+ * 步骤由 Fynvra 自动推进，只有整个流程结束或失败时才收到 worker_done。清单为空时返回 undefined。
+ */
+export function workflowPrompt(
+  workflows: readonly {
+    id: string;
+    name: string;
+    description?: string;
+    steps: readonly { name: string; roleId: string }[];
+  }[]
+): string | undefined {
+  if (workflows.length === 0) return undefined;
+  const list = workflows.map((workflow) => {
+    const steps = workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
+    const description = workflow.description
+      ? ` — ${workflow.description.replace(/\s+/g, ' ')}`
+      : '';
+    return `- \`${workflow.id}\` (${workflow.name})${description}: ${steps}`;
+  });
+  return [
+    '# Workflows',
+    'The user defined these workflows. When the user asks to do something with one of them (by id or name), call dispatch_task with `workflow` set to it and without `role`; each step runs with its own role.',
+    '',
+    ...list,
+    '',
+    'Fynvra advances a workflow task automatically, step after step in the same worktree, and sends a step back when a later step reports problems. You receive worker_done only when the whole workflow finishes (its last step succeeded: review, check and merge as usual) or fails (the message contains the whole history). list_workers shows the current step; read_worker_output, send_to_worker and ask_coordinator replies concern the current step. reject_work on a workflow task runs the whole workflow again from its first step with your feedback.',
+  ].join('\n');
+}
+
 function escapeInstructionSource(name: string): string {
   return name
     .replace(/&/g, '&amp;')
@@ -152,6 +182,8 @@ export function buildRolePromptAppend(
     worker: boolean;
     inPlace?: boolean;
     instructionFile?: { name: string; content: string };
+    /** 可用工作流（只对 orchestrator 生效）；非空时追加 {@link workflowPrompt} */
+    workflows?: Parameters<typeof workflowPrompt>[0];
   }
 ): string {
   const orchestrator = role.tools === 'orchestrator';
@@ -163,6 +195,7 @@ export function buildRolePromptAppend(
       : undefined,
     orchestrator ? ORCHESTRATOR_PROMPT : undefined,
     orchestrator && inPlace ? IN_PLACE_ORCHESTRATOR_PROMPT : undefined,
+    orchestrator && options.workflows ? workflowPrompt(options.workflows) : undefined,
     options.worker
       ? inPlace
         ? IN_PLACE_WORKER_CONTRACT_PROMPT

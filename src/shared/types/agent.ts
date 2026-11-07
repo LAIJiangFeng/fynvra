@@ -88,6 +88,14 @@ export interface AgentRoleOption {
   description?: string;
 }
 
+/** dispatch_task 可选的工作流（orchestrator 会话用）：id、名称、说明、各步名称与角色 */
+export interface AgentWorkflowOption {
+  id: string;
+  name: string;
+  description?: string;
+  steps: { name: string; roleId: string }[];
+}
+
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
 export interface SpawnSessionSpec {
   /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
@@ -108,6 +116,8 @@ export interface SpawnSessionSpec {
   worker: boolean;
   /** dispatch_task 的角色枚举（orchestrator 策略的会话用） */
   roles: AgentRoleOption[];
+  /** dispatch_task 可选的工作流（orchestrator 策略的会话用）；缺省视为空 */
+  workflows?: AgentWorkflowOption[];
   /**
    * bash 工具用的 shell（Main 解析：settings.json 的 `preferences.shellPath`，或 Windows 上探测到的 Git Bash）；
    * 缺省时由 pi 自己找，Windows 上可能取到 PATH 上的 WSL bash.exe
@@ -641,6 +651,25 @@ function parseRoleOption(raw: unknown): AgentRoleOption | null {
   };
 }
 
+function parseWorkflowOption(raw: unknown): AgentWorkflowOption | null {
+  const record = asRecord(raw);
+  if (!record || !isNonEmptyString(record.id) || !isNonEmptyString(record.name)) return null;
+  const { description } = record;
+  if (!isOptional(description, isString)) return null;
+  const steps = parseList(record.steps, (item) => {
+    const step = asRecord(item);
+    if (!step || !isNonEmptyString(step.name) || !isNonEmptyString(step.roleId)) return null;
+    return { name: step.name, roleId: step.roleId };
+  });
+  if (!steps) return null;
+  return {
+    id: record.id,
+    name: record.name,
+    ...(description !== undefined ? { description: description as string } : {}),
+    steps,
+  };
+}
+
 function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -652,6 +681,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const skills = parseStringList(record.skills);
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
   const roles = parseList(record.roles, parseRoleOption);
+  // 缺省视为空；给了就必须合法
+  const workflows =
+    record.workflows === undefined ? [] : parseList(record.workflows, parseWorkflowOption);
   const { cwd, sessionFile, worker, shellPath, inPlace, planMode } = record;
   const compactionStrategy =
     record.compactionStrategy === undefined
@@ -670,7 +702,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       !isString(instructionFile.content))
   )
     return null;
-  if (!role.ok || !model || !skills || !mcpServers || !roles) return null;
+  if (!role.ok || !model || !skills || !mcpServers || !roles || !workflows) return null;
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
   }
@@ -686,6 +718,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     mcpServers,
     worker,
     roles,
+    ...(workflows.length > 0 ? { workflows } : {}),
     ...(instructionFile
       ? {
           instructionFile: {

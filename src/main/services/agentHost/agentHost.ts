@@ -7,6 +7,7 @@ import type {
   FynvraSessionEventBody,
   Role,
   ThinkingLevel,
+  Workflow,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { supportsFastMode } from '@shared/modelFast';
@@ -16,6 +17,7 @@ import type {
   AgentMcpServer,
   AgentRoleOption,
   AgentWorkerEvent,
+  AgentWorkflowOption,
   HostCallResult,
   LogLevel,
   ModelQuery,
@@ -95,6 +97,8 @@ export interface AgentHostDeps {
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
+  /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
+  listWorkflows?(): Promise<readonly Workflow[]>;
   workerOptions?: Pick<
     WorkerClientOptions,
     'readyTimeoutMs' | 'maxRestarts' | 'restartWindowMs' | 'restartDelayMs'
@@ -555,6 +559,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const resources = await resolveResources(role);
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
+      const workflows = role.tools === 'orchestrator' ? await workflowOptions(stored.id) : [];
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
       const compactionStrategy = resolveCompactionStrategy();
@@ -573,6 +578,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           mcpServers: resources.mcpServers,
           worker: stored.dispatchId !== undefined,
           roles,
+          ...(workflows.length > 0 ? { workflows } : {}),
           ...(networkProxy ? { networkProxy } : {}),
           ...(shellPath ? { shellPath } : {}),
           compactionStrategy,
@@ -588,6 +594,22 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       };
     } catch (error) {
       return fail(translate('agent.startFailed', { error: errorMessage(error) }));
+    }
+  }
+
+  /** 工作流清单；读不到（如 workflows.json 损坏）时记 warning 并按空清单继续 */
+  async function workflowOptions(sessionId: string): Promise<AgentWorkflowOption[]> {
+    if (!deps.listWorkflows) return [];
+    try {
+      return (await deps.listWorkflows()).map((workflow) => ({
+        id: workflow.id,
+        name: workflow.name,
+        ...(workflow.description ? { description: workflow.description } : {}),
+        steps: workflow.steps.map((step) => ({ name: step.name, roleId: step.roleId })),
+      }));
+    } catch (error) {
+      log('warn', `session ${sessionId}: could not read workflows: ${errorMessage(error)}`);
+      return [];
     }
   }
 

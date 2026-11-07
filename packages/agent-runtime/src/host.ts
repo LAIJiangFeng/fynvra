@@ -17,8 +17,10 @@ export type WaitUntil = 'any' | 'all';
 export interface DispatchTaskInput {
   title: string;
   spec: string;
-  /** 已归一化的角色 id，未指定时为 `'worker'` */
+  /** 已归一化的角色 id，未指定时为 `'worker'`；给了 `workflowId` 时忽略（各步角色由工作流决定） */
   roleId: string;
+  /** 按工作流执行：工作流 id 或不区分大小写的名称；与显式 role 互斥（工具层保证） */
+  workflowId?: string;
   /** 必须先完成（合并）的 task id */
   dependsOn: string[];
   /** worker 用的模型：`modelId` 或 `providerId/modelId`；缺省按角色 / 主 agent 的模型 */
@@ -131,6 +133,8 @@ export interface RejectWorkInput {
 }
 export interface RejectWorkOutput {
   messageId: string;
+  /** 工作流任务：从第一步重新走完整流程（新 worker 会话与新 dispatch） */
+  workflowRestarted?: { dispatchId: string };
 }
 
 export interface CleanupWorktreeInput extends DispatchRef {
