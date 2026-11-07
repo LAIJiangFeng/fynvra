@@ -163,7 +163,7 @@ export function workflowPrompt(
     '',
     ...list,
     '',
-    'Fynvra advances a workflow task automatically, step after step in the same worktree, and sends a step back when a later step reports problems. You receive worker_done only when the whole workflow finishes (its last step succeeded: review, check and merge as usual) or fails (the message contains the whole history). list_workers shows the current step; read_worker_output, send_to_worker and ask_coordinator replies concern the current step. reject_work on a workflow task runs the whole workflow again from its first step with your feedback.',
+    'Each workflow is a graph (`A → (B ‖ C) → D`: B and C run in parallel after A). Fynvra schedules a workflow task automatically: a node starts once all its upstream nodes passed; parallel nodes work in their own worktrees and are merged back into the task worktree; a node that reports problems sends the work back to its fallback node. You receive worker_done only when the whole workflow finishes (every node passed: review, check and merge that dispatch as usual, it covers the combined result) or fails (the message lists every node and the history). list_workers shows every node with its status and dispatch_id; read_worker_output and send_to_worker accept the dispatch_id of any running node, and questions from a node name the workflow and node. reject_work on a finished workflow task runs the whole graph again from its start nodes with your feedback.',
   ].join('\n');
 }
 

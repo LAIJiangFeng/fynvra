@@ -17,9 +17,11 @@ import {
   type Message,
   type OrchestrationStore,
   type RoleStore,
+  recordWorkflowNodeReport,
   settleDispatch,
   type Workflow,
   type Workspace,
+  workflowRunningDispatchIds,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
@@ -222,15 +224,6 @@ export function createOrchestrationService(
     }
   });
   const inbox = new Inbox({ messages: store.messages, now });
-  const workflowEngine = createWorkflowEngine({
-    workspace,
-    store,
-    inbox,
-    launcher,
-    now,
-    log,
-    ...(options.canLaunch ? { canLaunch: options.canLaunch } : {}),
-  });
   // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
   const git = new GitWorktreeManager({
     exec: options.exec,
@@ -244,6 +237,18 @@ export function createOrchestrationService(
         throw error;
       }
     },
+  });
+  const workflowEngine = createWorkflowEngine({
+    workspace,
+    store,
+    inbox,
+    launcher,
+    git,
+    exec: options.exec,
+    resolveWorktreesRoot: options.resolveWorktreesRoot,
+    now,
+    log,
+    ...(options.canLaunch ? { canLaunch: options.canLaunch } : {}),
   });
 
   const ready = (async () => {
@@ -263,12 +268,15 @@ export function createOrchestrationService(
 
   function reconcileWorkers(): void {
     if (!loaded) return;
-    // 工作流：当前尝试已结算、带 pending 的 in-progress 任务重新执行推进（崩溃恢复）
+    // 工作流：按持久化的节点状态与启动意图恢复推进（崩溃恢复）
     workflowEngine.resume();
     if (!launcher.sessionFailure) return;
+    reconcileWorkflowNodes(launcher.sessionFailure);
     // Use insertion order, including settled attempts: an old unsettled row must not win over a retry.
     const latest = new Map(store.dispatches.list().map((dispatch) => [dispatch.taskId, dispatch]));
-    for (const task of store.tasks.list((entry) => entry.status === 'in-progress')) {
+    for (const task of store.tasks.list(
+      (entry) => entry.status === 'in-progress' && entry.workflow === undefined
+    )) {
       const dispatch = latest.get(task.id);
       if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id)) continue;
       const run = store.runs.get(task.runId);
@@ -298,6 +306,37 @@ export function createOrchestrationService(
         subject: 'failed',
         body: reason,
       });
+    }
+  }
+  /** 工作流节点的会话确定已失败：该节点按 failed 结算（同 report_done failed），由引擎汇总。 */
+  function reconcileWorkflowNodes(sessionFailure: (sessionId: string) => string | undefined) {
+    for (const task of store.tasks.list(
+      (entry) => entry.status === 'in-progress' && entry.workflow !== undefined
+    )) {
+      if (task.workflow === undefined) continue;
+      for (const dispatchId of workflowRunningDispatchIds(task.workflow)) {
+        const dispatch = store.dispatches.get(dispatchId);
+        if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id))
+          continue;
+        const reason = sessionFailure(dispatch.workerSessionId);
+        if (!reason) continue;
+        // No awaits between evidence, current-state validation and writes.
+        const current = store.tasks.get(task.id);
+        if (current?.status !== 'in-progress' || current.workflow === undefined) continue;
+        const settled = settleDispatch(dispatch, 'failed', reason, dispatch.filesModified, now());
+        if (!settled.ok) continue;
+        const { id: _id, ...patch } = settled.dispatch;
+        if (dispatch.summary) patch.summary = `${dispatch.summary}\n\n${reason}`;
+        const next = recordWorkflowNodeReport(current.workflow, {
+          dispatchId: dispatch.id,
+          outcome: 'failed',
+          summary: patch.summary ?? reason,
+          at: patch.settledAt ?? now(),
+        });
+        if (next === undefined || !store.dispatches.update(dispatch.id, patch).ok) continue;
+        store.tasks.update(task.id, { workflow: next });
+        workflowEngine.advance(task.id);
+      }
     }
   }
   void ready.then(reconcileWorkers);
@@ -448,6 +487,13 @@ export function createOrchestrationService(
       );
       const current = new Map(
         tasks.flatMap((task) => {
+          // 运行中的工作流：每个运行中节点都是当前尝试（它们的提问都要送到）
+          if (task.workflow !== undefined && task.status === 'in-progress') {
+            return workflowRunningDispatchIds(task.workflow).flatMap((id) => {
+              const dispatch = store.dispatches.get(id);
+              return dispatch ? [[dispatch.id, { task, dispatch }] as const] : [];
+            });
+          }
           const dispatch = store.activeDispatch(task.id) ?? latest.get(task.id);
           return dispatch ? [[dispatch.id, { task, dispatch }] as const] : [];
         })

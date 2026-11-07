@@ -23,6 +23,7 @@ import type {
   WorkerEntry,
 } from '@fynvra/agent-runtime';
 import {
+  cancelTaskWorkflow,
   type Dispatch,
   type ExecFn,
   type GitWorktreeManager,
@@ -33,16 +34,15 @@ import {
   type OrchestrationStore,
   type RoleStore,
   type Run,
+  restartTaskWorkflow,
   settleDispatch,
   snapshotTaskWorkflow,
   type Task,
   type TaskWorkflow,
-  WORKFLOW_FEEDBACK_MAX,
   type Workflow,
   type Workspace,
   type Worktree,
-  withoutPending,
-  workflowBriefContext,
+  workflowRunningDispatchIds,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { type Launched, recordAttempt, startAttemptSession } from './attempt';
@@ -188,15 +188,19 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   const latestDispatch = (taskId: string): Dispatch | undefined =>
     store.activeDispatch(taskId) ?? store.dispatches.list((d) => d.taskId === taskId).at(-1);
 
-  // 工作流任务在两步之间没有进行中的尝试，但仍在运行
+  // 工作流任务在整体结束前都算仍在运行（节点之间可能没有进行中的尝试）
   const pendingCount = (runId: string): number =>
     store
       .listTasks(runId)
       .filter(
         (task) =>
           store.activeDispatch(task.id) !== undefined ||
-          (task.status === 'in-progress' && task.workflow?.pending !== undefined)
+          (task.status === 'in-progress' && task.workflow !== undefined)
       ).length;
+
+  /** 工作流任务正在运行的节点的 dispatch。 */
+  const runningNodes = (task: Task): string[] =>
+    task.workflow === undefined ? [] : workflowRunningDispatchIds(task.workflow);
 
   /** dispatch id → 本 Run 里的 task / dispatch / worktree（worktree 清理后为 undefined）。 */
   function resolve(dispatchId: string): HostResult<Resolved> {
@@ -220,6 +224,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   function resolveCurrent(dispatchId: string): HostResult<Resolved> {
     const found = resolve(dispatchId);
     if (!found.ok) return found;
+    // 运行中的工作流：任一运行中节点的 dispatch 都代表这个任务（如 cleanup_worktree abandon）
+    if (found.task.status === 'in-progress' && runningNodes(found.task).includes(dispatchId)) {
+      return found;
+    }
     const current = latestDispatch(found.task.id);
     if (current?.id !== dispatchId) {
       return fail(
@@ -312,15 +320,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       worktree = created.worktree;
     }
     const dispatchId = newId('dispatch');
-    // 工作流任务从当前步骤（新派发与排队启动都是第一步）开始
-    const brief = renderWorkerBrief({
-      title: task.title,
-      spec: task.spec,
-      dispatchId,
-      ...(task.workflow
-        ? { workflow: workflowBriefContext(task.workflow, task.workflow.step) }
-        : {}),
-    });
+    const brief = renderWorkerBrief({ title: task.title, spec: task.spec, dispatchId });
     const started = await startAttemptSession({ workspace, launcher, now }, task, {
       dispatchId,
       worktree,
@@ -338,9 +338,68 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return recordAttempt(store, task, launched, isNew);
   }
 
+  /** 建任务的集成 worktree（普通目录不建）。 */
+  async function createTaskWorktree(task: Task): Promise<HostResult<{ worktree?: Worktree }>> {
+    if (inPlace) return { ok: true };
+    const created = await git.create({
+      repoPath,
+      workspaceId: workspace.id,
+      slug: task.title,
+      baseRef: coordinatorBranch,
+      worktreesRoot: await deps.resolveWorktreesRoot(workspace),
+    });
+    if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
+    return { ok: true, worktree: created.worktree };
+  }
+
+  /**
+   * 工作流任务：建集成 worktree → 任务进入 in-progress（全部节点等待）→ 由引擎启动首批节点。
+   * 启动失败时任务回到原状（新任务不落库），删掉刚建的 worktree。
+   */
+  async function startWorkflow(
+    task: Task & { workflow: TaskWorkflow },
+    isNew: boolean
+  ): Promise<HostResult<DispatchTaskOutput>> {
+    const engine = deps.workflowEngine;
+    if (engine === undefined) return fail('workflow tasks cannot be started here');
+    const created = await createTaskWorktree(task);
+    if (!created.ok) return created;
+    const { worktree } = created;
+    const dropWorktree = async () => {
+      if (worktree === undefined) return '';
+      store.worktrees.delete(worktree.id);
+      return discardWorktree(worktree);
+    };
+    if (worktree) {
+      const inserted = store.worktrees.insert(worktree);
+      if (!inserted.ok) return fail(`${inserted.error}${await discardWorktree(worktree)}`);
+    }
+    const workflow: TaskWorkflow = {
+      ...task.workflow,
+      ...(worktree ? { worktreeId: worktree.id } : {}),
+    };
+    const saved = isNew
+      ? store.tasks.insert({ ...task, workflow, status: 'in-progress' })
+      : store.tasks.update(task.id, { workflow, status: 'in-progress' });
+    if (!saved.ok) return fail(`${saved.error}${await dropWorktree()}`);
+    const started = await engine.start(task.id, () => {
+      if (isNew) store.tasks.delete(task.id);
+      else store.tasks.update(task.id, { status: task.status, workflow: task.workflow });
+    });
+    if (!started.ok) {
+      return fail(`could not start the workflow: ${started.error}${await dropWorktree()}`);
+    }
+    const dispatch = started.dispatches[0];
+    const current = store.tasks.get(task.id) ?? saved.value;
+    return dispatch ? { ok: true, task: current, dispatch } : { ok: true, task: current };
+  }
+
   async function start(task: Task, isNew: boolean): Promise<HostResult<DispatchTaskOutput>> {
     launching.add(task.id);
     try {
+      if (task.workflow !== undefined) {
+        return await startWorkflow(task as Task & { workflow: TaskWorkflow }, isNew);
+      }
       const launched = await launch(task);
       if (!launched.ok) return launched;
       // 必须紧跟在 launcher resolve 之后同步落库，中间不能有 await：
@@ -601,23 +660,21 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
     if (!isInPlace(dispatch) && found.worktree === undefined) return fail(cleanedUp(dispatch));
     if (task.workflow !== undefined) {
-      // 工作流的每一步是独立会话：只能指挥当前步，两步之间没有可指挥的 worker
-      if (task.workflow.pending !== undefined) {
+      // 工作流的每个节点是独立会话：只能指挥运行中的节点
+      const running = task.status === 'in-progress' ? runningNodes(task) : [];
+      if (!running.includes(dispatch.id)) {
         return fail(
-          `task ${task.id} is starting its next workflow step; call list_workers for the new dispatch_id`
-        );
-      }
-      const current = latestDispatch(task.id);
-      if (current?.id !== dispatch.id) {
-        return fail(
-          `dispatch ${dispatch.id} is an earlier workflow step; use the current dispatch_id "${current?.id}"`
+          running.length === 0
+            ? `dispatch ${dispatch.id} is not a running workflow node and task ${task.id} has none right now; call list_workers`
+            : `dispatch ${dispatch.id} is not a running workflow node; running nodes: ${running.map((id) => `"${id}"`).join(', ')}`
         );
       }
     }
     const instruction = unwrap(
       inbox.post({
         runId: run.id,
-        dispatchId: latestDispatch(task.id)?.id ?? dispatch.id,
+        dispatchId:
+          task.workflow !== undefined ? dispatch.id : (latestDispatch(task.id)?.id ?? dispatch.id),
         from: coordinatorSessionId,
         to: workerSessionId,
         type: 'instruction',
@@ -846,8 +903,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   }
 
   /**
-   * reject_work 对工作流任务：在同一 worktree（普通目录则同一目录）从第一步重新走完整流程。
-   * 先写推进意图（pending 第一步 + 反馈，rounds 归零、历史保留）再启动；启动失败时任务回到原状态。
+   * reject_work 对工作流任务：在同一集成 worktree（普通目录则同一目录）整图从起点重跑。
+   * 全部节点重置为等待、反馈交给起点、rounds 归零、历史保留，由引擎启动首批节点；启动失败时任务回到原状态。
    */
   async function restartWorkflow(
     run: Run,
@@ -861,37 +918,32 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail(`task ${task.id} is already starting a workflow step; try again shortly`);
     }
     const original = task.workflow;
+    // 上一轮留下的节点 worktree（失败节点）不再需要：整图重跑会从集成 worktree 重新分出
+    await engine.discardNodes(task.id);
+    const latest = store.tasks.get(task.id);
+    if (latest?.status !== task.status || latestDispatch(task.id)?.id !== previous.id) {
+      return fail(`task ${task.id} changed while its workflow was restarting; call list_workers`);
+    }
     const text = `Review feedback from your coordinator on the previous run of this workflow:\n\n${feedback}`;
-    const restarted: TaskWorkflow = {
-      ...withoutPending(original),
-      rounds: 0,
-      pending: {
-        step: 0,
-        feedback:
-          text.length <= WORKFLOW_FEEDBACK_MAX ? text : `${text.slice(0, WORKFLOW_FEEDBACK_MAX)}…`,
-      },
-    };
+    const restarted = restartTaskWorkflow(original, text);
     const reopened = store.tasks.update(task.id, { status: 'in-progress', workflow: restarted });
     if (!reopened.ok) return reopened;
-    const started = await engine.start(task.id);
-    if (!started.ok) {
+    const started = await engine.start(task.id, () => {
       const current = store.tasks.get(task.id);
-      if (
-        current?.status === 'in-progress' &&
-        current.workflow?.pending !== undefined &&
-        latestDispatch(task.id)?.id === previous.id
-      ) {
+      if (current?.status === 'in-progress' && latestDispatch(task.id)?.id === previous.id) {
         store.tasks.update(task.id, { status: task.status, workflow: original });
       }
-      return fail(`could not restart the workflow: ${started.error}`);
-    }
-    // 反馈已写进第一步任务书；这条 instruction 只是留档，立即确认
+    });
+    if (!started.ok) return fail(`could not restart the workflow: ${started.error}`);
+    const first = started.dispatches[0];
+    if (first === undefined) return fail('the workflow restarted but no node could be started');
+    // 反馈已写进起点节点的任务书；这条 instruction 只是留档，立即确认
     const instruction = unwrap(
       inbox.post({
         runId: run.id,
-        dispatchId: started.dispatch.id,
+        dispatchId: first.id,
         from: coordinatorSessionId,
-        to: started.dispatch.workerSessionId,
+        to: first.workerSessionId,
         type: 'instruction',
         subject: 'review feedback',
         body: feedback,
@@ -901,27 +953,30 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return {
       ok: true,
       messageId: instruction.message.id,
-      workflowRestarted: { dispatchId: started.dispatch.id },
+      workflowRestarted: { dispatchId: first.id },
     };
   }
 
-  /** 显式放弃：进行中的尝试按 failed 结算，已有的汇报保持原样。 */
+  /** 显式放弃：进行中的尝试（工作流是所有运行中的节点）按 failed 结算，已有的汇报保持原样。 */
   function abandon(task: Task): void {
-    const active = store.activeDispatch(task.id);
-    if (active !== undefined) {
-      const reason = 'Abandoned by the coordinator (cleanup_worktree).';
+    const reason = 'Abandoned by the coordinator (cleanup_worktree).';
+    const active =
+      task.workflow === undefined
+        ? [store.activeDispatch(task.id)].filter((entry) => entry !== undefined)
+        : store.dispatches.list((entry) => entry.taskId === task.id && !isDispatchSettled(entry));
+    for (const dispatch of active) {
       const { id: _id, ...patch } = unwrap(
-        settleDispatch(active, 'failed', reason, undefined, now())
+        settleDispatch(dispatch, 'failed', reason, undefined, now())
       ).dispatch;
-      unwrap(store.dispatches.update(active.id, patch));
+      unwrap(store.dispatches.update(dispatch.id, patch));
     }
     if (task.status !== 'abandoned') {
-      // 工作流任务放弃时一并撤掉未执行的推进意图
+      // 工作流任务放弃时运行中的节点记为取消，并撤掉未执行的启动意图
       const workflow = store.tasks.get(task.id)?.workflow;
       unwrap(
         store.tasks.update(task.id, {
           status: 'abandoned',
-          ...(workflow?.pending !== undefined ? { workflow: withoutPending(workflow) } : {}),
+          ...(workflow !== undefined ? { workflow: cancelTaskWorkflow(workflow) } : {}),
         })
       );
     }
@@ -935,7 +990,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
     const found = resolveCurrent(input.dispatchId);
     if (!found.ok) return found;
-    const { task, dispatch, worktree } = found;
+    const { task, dispatch } = found;
+    let { worktree } = found;
     const completed = task.status === 'completed';
     if (!completed && task.status !== 'abandoned') {
       if (input.abandon !== true) {
@@ -949,6 +1005,16 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     // abandon 写回 store 后再读取最终状态；已放弃的重复清理也需结算会话错误。
     const disposeOptions =
       store.tasks.get(task.id)?.status === 'abandoned' ? { clearError: true } : undefined;
+    if (task.workflow !== undefined && deps.workflowEngine !== undefined) {
+      // 工作流：停掉所有节点会话、清理所有节点 worktree，再按下面的规则清理集成 worktree
+      const problems = await deps.workflowEngine.discardNodes(task.id);
+      if (problems) return fail(`could not clean up the workflow node worktrees: ${problems}`);
+      const integration =
+        store.tasks.get(task.id)?.workflow?.worktreeId ?? task.workflow.worktreeId;
+      if (!isInPlace(dispatch)) {
+        worktree = integration === undefined ? undefined : store.worktrees.get(integration);
+      }
+    }
     if (isInPlace(dispatch)) {
       // 普通目录只停 worker，改动留在目录里；验收与取消仍遵循相同的状态契约。
       await disposeWorker(dispatch.workerSessionId, disposeOptions);
