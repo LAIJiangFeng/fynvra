@@ -1,4 +1,4 @@
-import type { TaskStatus, TaskWorkflow } from '@fynvra/core';
+import type { TaskStatus, TaskWorkflow, TaskWorkflowNodeStatus } from '@fynvra/core';
 import { Bot, Loader2, type LucideIcon, Workflow } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -71,6 +71,77 @@ export function RoleBadge({ roleId }: { roleId: string }) {
   );
 }
 
+const NODE_STATUSES: readonly TaskWorkflowNodeStatus[] = [
+  'waiting',
+  'running',
+  'passed',
+  'failed',
+  'cancelled',
+];
+
+/** 各节点的运行状态（按 step id）；旧快照缺少或识别不了的状态按「等待」。 */
+export function workflowNodeStatuses(
+  workflow: TaskWorkflow
+): Record<string, TaskWorkflowNodeStatus> {
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
+  const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+  const statuses: Record<string, TaskWorkflowNodeStatus> = {};
+  for (const step of steps) statuses[step.id] = 'waiting';
+  for (const node of nodes) {
+    if (node && node.id in statuses && NODE_STATUSES.includes(node.status)) {
+      statuses[node.id] = node.status;
+    }
+  }
+  return statuses;
+}
+
+/** 整个工作流的状态：有节点运行 / 待启动即运行中，其次失败、全部通过、取消，否则等待。 */
+export function workflowOverallStatus(workflow: TaskWorkflow): TaskWorkflowNodeStatus {
+  const values = Object.values(workflowNodeStatuses(workflow));
+  const launches = Array.isArray(workflow.launches) ? workflow.launches : [];
+  if (values.includes('running') || launches.length > 0) return 'running';
+  if (values.includes('failed')) return 'failed';
+  if (values.length > 0 && values.every((status) => status === 'passed')) return 'passed';
+  if (values.includes('cancelled')) return 'cancelled';
+  return 'waiting';
+}
+
+const DOT_TONE: Record<TaskWorkflowNodeStatus, string> = {
+  waiting: 'bg-muted-foreground/30',
+  running: 'bg-sky-500 animate-pulse',
+  passed: 'bg-emerald-500',
+  failed: 'bg-destructive',
+  cancelled: 'bg-muted-foreground/60',
+};
+
+/** 任务卡片用的紧凑节点状态点（按 steps 顺序，悬停显示节点名与状态）。 */
+export function WorkflowNodeDots({
+  workflow,
+  className,
+}: {
+  workflow: TaskWorkflow;
+  className?: string;
+}) {
+  const t = useT();
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
+  if (steps.length === 0) return null;
+  const statuses = workflowNodeStatuses(workflow);
+  return (
+    <span aria-hidden className={cn('flex flex-wrap items-center gap-1', className)}>
+      {steps.map((step) => {
+        const status = statuses[step.id] ?? 'waiting';
+        return (
+          <span
+            key={step.id}
+            title={`${step.name} · ${t(`settings.workflows.graph.status.${status}`)}`}
+            className={cn('size-1.5 shrink-0 rounded-full', DOT_TONE[status])}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 /** 工作流任务的进度：运行中的节点（或失败 / 已通过数）与回退次数；正在启动、合并的节点另起一行。 */
 export function WorkflowProgress({
   workflow,
@@ -81,9 +152,12 @@ export function WorkflowProgress({
 }) {
   const t = useT();
   const separator = t('orchestration.workflow.separator');
+  // 旧快照可能缺少运行状态字段
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
+  const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+  const launches = Array.isArray(workflow.launches) ? workflow.launches : [];
   const names = (ids: readonly string[]) =>
-    ids.map((id) => workflow.steps.find((step) => step.id === id)?.name ?? id).join(separator);
-  const nodes = workflow.nodes;
+    ids.map((id) => steps.find((step) => step.id === id)?.name ?? id).join(separator);
   const withStatus = (status: string) =>
     nodes.filter((node) => node.status === status).map((node) => node.id);
   const running = withStatus('running');
@@ -91,7 +165,7 @@ export function WorkflowProgress({
   const merging = nodes
     .filter((node) => node.status === 'passed' && node.merged === false)
     .map((node) => node.id);
-  const starting = workflow.launches.map((launch) => launch.nodeId);
+  const starting = launches.map((launch) => launch.nodeId);
   const state =
     running.length > 0
       ? t('orchestration.workflow.running', { nodes: names(running) })
@@ -99,7 +173,7 @@ export function WorkflowProgress({
         ? t('orchestration.workflow.failed', { nodes: names(failed) })
         : t('orchestration.workflow.passed', {
             done: withStatus('passed').length,
-            total: workflow.steps.length,
+            total: steps.length,
           });
   const busy = [
     ...(starting.length > 0

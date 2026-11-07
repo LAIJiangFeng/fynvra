@@ -64,6 +64,8 @@ export interface WorkflowGraphProps {
   onSelect?: (id: string | null) => void;
   /** 点击节点（只读模式也会触发，W4 用来查看 worker 输出） */
   onNodeClick?: (id: string) => void;
+  /** 鼠标移入节点时为节点 id，移出时为 null（W4 用来显示节点详情） */
+  onNodeHover?: (id: string | null) => void;
   /** 拖动结束或自动排版：新的坐标（已取整、限制在模型范围内） */
   onMove?: (positions: Record<string, WorkflowPosition>) => void;
   /** 从 source 的出口拉线到 target 的入口；是否接受由调用方判断 */
@@ -119,6 +121,7 @@ function WorkflowGraphInner({
   selectedId = null,
   onSelect,
   onNodeClick,
+  onNodeHover,
   onMove,
   onConnect,
   onDelete,
@@ -330,6 +333,8 @@ function WorkflowGraphInner({
         onEdgesChange={handleEdgesChange}
         onSelectionChange={editable ? handleSelection : undefined}
         onNodeClick={onNodeClick ? (_event, node) => onNodeClick(node.id) : undefined}
+        onNodeMouseEnter={onNodeHover ? (_event, node) => onNodeHover(node.id) : undefined}
+        onNodeMouseLeave={onNodeHover ? () => onNodeHover(null) : undefined}
         onNodeDragStop={editable ? handleDragStop : undefined}
         onConnect={editable ? handleConnect : undefined}
         onBeforeDelete={handleBeforeDelete}
@@ -340,6 +345,8 @@ function WorkflowGraphInner({
         deleteKeyCode={editable ? DELETE_KEYS : null}
         multiSelectionKeyCode={null}
         selectionKeyCode={null}
+        // 只读图嵌在可滚动的面板里：滚轮留给外层滚动，缩放用 Controls 或捏合
+        {...(editable ? {} : { zoomOnScroll: false, panOnScroll: false, preventScrolling: false })}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.25}
