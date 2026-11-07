@@ -191,7 +191,20 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     binary: 'Preview is not available for this file',
     tooLarge: 'File is too large to preview',
-    limits: 'Supports UTF-8 text up to 256 KiB and PNG / JPEG / GIF / WebP images up to 2 MiB',
+    unreadable: 'Could not parse this document',
+    limits:
+      'Supports UTF-8 text up to 256 KiB, PNG / JPEG / GIF / WebP images up to 2 MiB, and PDF / Word documents up to 32 MiB',
+    document: {
+      pdfPreview: 'PDF preview',
+      wordPreview: 'Word preview',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fitWidth: 'Fit width',
+      pages: '{total} pages',
+      page: 'Page {page}',
+      docNotice: 'Legacy .doc files show text only; formatting and images are not kept',
+      parseFailed: 'Could not parse document: {message}',
+    },
     errors: {
       invalidRequest: 'Invalid file request',
       workspaceNotFound: 'Workspace removed, select another workspace',
