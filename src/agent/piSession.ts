@@ -123,6 +123,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         resourcePaths: {
           skills: spec.skills,
           mcpServers: spec.mcpServers.map(toMcpServerConfig),
+          extensions: spec.plugins ?? [],
           ...(spec.instructionFile ? { instructionFile: spec.instructionFile } : {}),
         },
         agentDir: options.agentDir,

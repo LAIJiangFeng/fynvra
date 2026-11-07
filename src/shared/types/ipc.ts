@@ -184,6 +184,17 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
 
+  // --- plugins ---
+  PLUGINS_LIST: 'plugins:list',
+  /** 无参：Main 弹框选目录或扩展文件并登记；Renderer 不传路径 */
+  PLUGINS_ADD_LOCAL: 'plugins:add-local',
+  /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
+  PLUGINS_INSTALL: 'plugins:install',
+  PLUGINS_REMOVE: 'plugins:remove',
+  PLUGINS_TOGGLE: 'plugins:toggle',
+  /** Main → Renderer：插件列表已变更 */
+  PLUGINS_CHANGED: 'plugins:changed',
+
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',
   INSTRUCTIONS_READ: 'instructions:read',

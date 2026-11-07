@@ -9,6 +9,7 @@ export const SETTINGS_SECTIONS = [
   'instructions',
   'skills',
   'mcp',
+  'plugins',
   'appearance',
   'keybindings',
   'usage',

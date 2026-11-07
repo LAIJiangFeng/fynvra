@@ -63,6 +63,8 @@ export interface RoleSource {
 export interface RoleResources {
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** 插件路径（pi 包目录或扩展文件）；缺省等价于 [] */
+  plugins?: string[];
   instructionFile?: SpawnSessionSpec['instructionFile'];
   /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
   warnings: string[];
@@ -576,6 +578,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           skills: resources.skills,
           ...(resources.instructionFile ? { instructionFile: resources.instructionFile } : {}),
           mcpServers: resources.mcpServers,
+          ...(resources.plugins?.length ? { plugins: resources.plugins } : {}),
           worker: stored.dispatchId !== undefined,
           roles,
           ...(workflows.length > 0 ? { workflows } : {}),

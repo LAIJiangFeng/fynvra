@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -32,6 +34,7 @@ import {
   type WorkflowOption,
 } from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
+import { createWebFetchTool } from '../tools/web/webFetchTool';
 import {
   createWorkerTools,
   type WorkerToolset,
@@ -57,6 +60,11 @@ export interface RoleResourcePaths {
   /** skill 目录或 SKILL.md 路径；会话只加载这些 skill */
   skills: string[];
   mcpServers: McpServerConfig[];
+  /**
+   * 插件：pi 包目录或单个扩展文件的绝对路径，交给 DefaultResourceLoader 的 additionalExtensionPaths；
+   * 包里的 extensions / skills / prompts 按 pi 包规则加载（noExtensions / noSkills 不影响这些路径）
+   */
+  extensions?: string[];
   instructionFile?: { name: string; content: string };
 }
 
@@ -133,7 +141,7 @@ export interface RoleSession {
 /**
  * 按角色创建 pi `AgentSession`（ARCHITECTURE §5）：
  * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan + write_doc；`readonly` → 只读工具；`all` → pi 默认工具。
- *   传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
+ *   各策略都加 web_fetch；传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
  * - `planMode`：开着时 orchestrator 策略每次 run 再追加 `PLAN_MODE_PROMPT`、dispatch_task 拒绝派发、write_doc 可写；
@@ -172,6 +180,8 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
     // orchestrator 不传：它没有改文件的工具，run_checks 等编排工具不受计划模式影响
     ...(directPlanMode ? { planMode: directPlanMode } : {}),
+    // 插件扩展注册的工具按 plugin 类别审批；loader 在下方创建，check 只在会话运行后发生
+    pluginTools: () => pluginTools(),
   });
   const extensionFactories: InlineExtension[] = [
     // 第一个注册：拦截在其他扩展的 tool_call 处理之前
@@ -201,11 +211,13 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     noPromptTemplates: true,
     noThemes: true,
     additionalSkillPaths: options.resourcePaths.skills,
+    additionalExtensionPaths: options.resourcePaths.extensions ?? [],
     extensionFactories,
     systemPromptOverride: () => undefined,
     appendSystemPromptOverride: () => [],
   });
   await resourceLoader.reload();
+  const pluginTools = createPluginToolNames(resourceLoader, options.resourcePaths.extensions ?? []);
 
   const thinking = options.model.thinking ?? role.model?.thinking;
   const { session } = await createAgentSession({
@@ -262,6 +274,10 @@ function selectTools(
   const workerTools = workerToolset?.tools ?? [];
   // 描述不说「唯一能写的文件」：all 策略还有 pi 的 write / edit（名字不冲突）
   const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
+  // 所有工具策略都有 web_fetch；代理与命令一致，取会话加载时的 commandEnv 快照
+  const webFetch = createWebFetchTool({
+    proxyEnv: () => (commandEnv ? commandEnv(process.env) : process.env),
+  });
   switch (role.tools) {
     case 'orchestrator': {
       if (!options.host) {
@@ -281,6 +297,7 @@ function selectTools(
           }),
           createWritePlanTool(cwd),
           createWriteDocTool(cwd, { planMode: options.planMode ?? (() => false) }),
+          webFetch,
           ...workerTools,
         ],
       };
@@ -291,11 +308,12 @@ function selectTools(
         customTools: [
           ...createReadonlyTools(cwd, exec ? { exec } : {}),
           ...planTools,
+          webFetch,
           ...workerTools,
         ],
       };
     case 'all': {
-      if (!commandEnv) return { customTools: [...planTools, ...workerTools] };
+      if (!commandEnv) return { customTools: [...planTools, webFetch, ...workerTools] };
       const spawnHook: BashSpawnHook = (ctx) => ({ ...ctx, env: commandEnv(ctx.env) });
       // Override implementations, not selection: defaultActive=false preserves pi's defaultTools.
       return {
@@ -313,6 +331,7 @@ function selectTools(
             defaultActive: false,
           }),
           ...planTools,
+          webFetch,
           ...workerTools,
         ],
       };
@@ -325,6 +344,59 @@ function selectTools(
 /** 内存设置：与用户本机的 pi CLI 配置隔离；关掉 pi 的安装遥测与 provider 署名请求头 */
 function createDefaultSettings(): SettingsManager {
   return SettingsManager.inMemory({ enableInstallTelemetry: false });
+}
+
+/** 规范化路径用于比较：resolve、统一分隔符；Windows 上不区分大小写 */
+function normalizePluginPath(value: string): string {
+  const resolved = path.resolve(value).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * 插件工具名单：只统计来源路径等于某个插件路径（单文件插件）或位于插件根目录之下（包插件）的扩展；
+ * Fynvra 内联扩展（`<inline:…>`：审批门、MCP、Magic Context 等）不计入。每次调用读 loader 当前的扩展，
+ * 每次都重算（路径同时与 resolve 形式和真实路径比较）。没有插件时恒为空集。
+ */
+function createPluginToolNames(
+  loader: DefaultResourceLoader,
+  pluginPaths: readonly string[]
+): () => ReadonlySet<string> {
+  const empty: ReadonlySet<string> = new Set();
+  if (pluginPaths.length === 0) return () => empty;
+  // 每个插件路径同时取 resolve 形式与真实路径（符号链接 / junction）；真实路径只在这里算一次，失败忽略
+  const roots = new Set<string>();
+  for (const pluginPath of pluginPaths) {
+    roots.add(normalizePluginPath(pluginPath));
+    try {
+      roots.add(normalizePluginPath(fs.realpathSync.native(pluginPath)));
+    } catch {
+      // 路径不存在或不可读：只用 resolve 形式
+    }
+  }
+  const rootList = [...roots];
+  const fromPlugin = (extensionPath: string): boolean => {
+    if (!extensionPath || extensionPath.startsWith('<')) return false;
+    const normalized = normalizePluginPath(extensionPath);
+    return rootList.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  };
+  // 不缓存：扩展与工具很少，每次重算才能覆盖运行中注销再注册的同数量工具
+  let lastGood: ReadonlySet<string> = empty;
+  // 不能抛异常：审批门把 getter 抛错当作「是插件工具」处理，会让所有未归类工具都要审批
+  return () => {
+    let extensions: ReturnType<DefaultResourceLoader['getExtensions']>['extensions'];
+    try {
+      extensions = loader.getExtensions().extensions;
+    } catch {
+      return lastGood;
+    }
+    const names = new Set<string>();
+    for (const extension of extensions) {
+      if (!fromPlugin(extension.path) && !fromPlugin(extension.resolvedPath)) continue;
+      for (const name of extension.tools.keys()) names.add(name);
+    }
+    lastGood = names;
+    return names;
+  };
 }
 
 function loaderWarnings(loader: DefaultResourceLoader): string[] {

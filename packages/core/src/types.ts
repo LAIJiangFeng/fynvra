@@ -37,6 +37,8 @@ export interface Role {
   instructionFileId?: string | null;
   /** 启用的 MCP 服务器 id。 */
   mcpServerIds: string[];
+  /** 启用的插件 id；缺省等价于 `[]`（旧角色文件没有该字段）。 */
+  pluginIds?: string[];
   /** 工具策略。 */
   tools: ToolPolicy;
   /** 审批档位。 */

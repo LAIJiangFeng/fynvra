@@ -110,6 +110,8 @@ export interface SpawnSessionSpec {
   /** 已解析的 skill 目录或 SKILL.md 路径 */
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** 角色挂载的插件（pi 包目录或扩展文件）的绝对路径；缺失按 `[]`，兼容旧消息 */
+  plugins?: string[];
   /** Main reads the selected file on every spawn; worker never accesses its source path. */
   instructionFile?: { name: string; content: string };
   /** 由编排派发的 worker 会话：加 ask_coordinator / report_done，背后是 Main 的 WorkerHost */
@@ -680,6 +682,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const model = parseModelSpec(record.model);
   const skills = parseStringList(record.skills);
   const mcpServers = parseList(record.mcpServers, parseMcpServer);
+  const plugins = record.plugins === undefined ? [] : parseStringList(record.plugins);
   const roles = parseList(record.roles, parseRoleOption);
   // 缺省视为空；给了就必须合法
   const workflows =
@@ -702,7 +705,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       !isString(instructionFile.content))
   )
     return null;
-  if (!role.ok || !model || !skills || !mcpServers || !roles || !workflows) return null;
+  if (!role.ok || !model || !skills || !mcpServers || !plugins || !roles || !workflows) return null;
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
   }
@@ -716,6 +719,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     model,
     skills,
     mcpServers,
+    ...(plugins.length > 0 ? { plugins } : {}),
     worker,
     roles,
     ...(workflows.length > 0 ? { workflows } : {}),

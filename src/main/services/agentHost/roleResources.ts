@@ -2,6 +2,7 @@ import type { Role } from '@fynvra/core';
 import type { AgentMcpServer } from '@shared/types/agent';
 import type { InstructionRegistry } from '../instructions/instructionRegistry';
 import type { McpRegistry, StoredMcpServer } from '../mcp/mcpRegistry';
+import type { PluginRegistry } from '../plugins/pluginRegistry';
 import type { SkillRegistry } from '../skills/skillRegistry';
 import type { RoleResources } from './agentHost';
 
@@ -10,10 +11,13 @@ export interface RoleResourceSources {
   instructions?: Pick<InstructionRegistry, 'resolve'>;
   /** 含 env / headers 明文：解析结果只交给 worker（spawn-session 这一跳），不经 IPC */
   mcpServers: Pick<McpRegistry, 'list'>;
+  /** plugins.json；缺省时角色挂载的插件按已删除处理 */
+  plugins?: Pick<PluginRegistry, 'list'>;
 }
 
 /**
- * agentHost 的 `resolveResources`：按角色的 skillIds / mcpServerIds 从 skills.json、mcp.json 取条目。
+ * agentHost 的 `resolveResources`：按角色的 skillIds / mcpServerIds / pluginIds 从 skills.json、mcp.json、
+ * plugins.json 取条目。
  * - 技能取目录路径，MCP 服务器以注册表 id 为名映射成协议里的 AgentMcpServer（stdio 带 command / args / env，
  *   http / sse 带 url / headers；worker 再补上 pi 的传输类型）；
  * - 停用的条目不加载；角色引用了已删除的 id 时跳过，记一条 warning；
@@ -25,9 +29,11 @@ export function createRoleResourceResolver(
   return async (role) => {
     const skillIds = [...new Set(role.skillIds)];
     const serverIds = [...new Set(role.mcpServerIds)];
-    const [skills, servers, instructionFile] = await Promise.all([
+    const pluginIds = [...new Set(role.pluginIds ?? [])];
+    const [skills, servers, plugins, instructionFile] = await Promise.all([
       skillIds.length > 0 ? sources.skills.list() : [],
       serverIds.length > 0 ? sources.mcpServers.list() : [],
+      pluginIds.length > 0 && sources.plugins ? sources.plugins.list() : [],
       sources.instructions?.resolve(role.instructionFileId),
     ]);
     const warnings: string[] = [];
@@ -46,9 +52,17 @@ export function createRoleResourceResolver(
       }
       return server?.enabled ? [toAgentMcpServer(server)] : [];
     });
+    const pluginPaths = pluginIds.flatMap((id) => {
+      const plugin = plugins.find((candidate) => candidate.id === id);
+      if (!plugin) {
+        warnings.push(`plugin "${id}" of role "${role.id}" is no longer registered; skipped`);
+      }
+      return plugin?.enabled ? [plugin.path] : [];
+    });
     return {
       skills: skillPaths,
       mcpServers,
+      ...(pluginPaths.length > 0 ? { plugins: pluginPaths } : {}),
       warnings,
       ...(instructionFile ? { instructionFile } : {}),
     };

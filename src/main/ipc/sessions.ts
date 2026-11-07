@@ -51,6 +51,7 @@ import { sendToAllWindows } from '../windows/createAppWindow';
 import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
 import { getOrchestrationRegistry } from './orchestration';
+import { getPluginRegistry } from './plugins';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -131,6 +132,7 @@ function createAppAgentHost(): AgentHostService {
       skills: getSkillRegistry(),
       instructions: getInstructionRegistry(),
       mcpServers: getMcpRegistry(),
+      plugins: getPluginRegistry(),
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
     resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),

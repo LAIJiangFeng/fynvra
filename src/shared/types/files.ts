@@ -34,7 +34,12 @@ export interface TextFilePreview {
 export type FilePreview = { size: number } & (
   | TextFilePreview
   | { kind: 'image'; dataUrl: string }
-  | { kind: 'unsupported'; reason: 'binary' | 'tooLarge' }
+  /** 只读文档：原始字节经 IPC 结构化克隆传输，Renderer 解析，不可保存。 */
+  | { kind: 'pdf'; data: Uint8Array }
+  | { kind: 'docx'; data: Uint8Array }
+  /** 旧版 .doc：Main 提取的正文，只读，不能当作可编辑文本。 */
+  | { kind: 'document-text'; format: 'doc'; text: string }
+  | { kind: 'unsupported'; reason: 'binary' | 'tooLarge' | 'unreadable' }
 );
 
 export interface DirectoryRequest {

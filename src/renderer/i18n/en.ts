@@ -191,7 +191,20 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     binary: 'Preview is not available for this file',
     tooLarge: 'File is too large to preview',
-    limits: 'Supports UTF-8 text up to 256 KiB and PNG / JPEG / GIF / WebP images up to 2 MiB',
+    unreadable: 'Could not parse this document',
+    limits:
+      'Supports UTF-8 text up to 256 KiB, PNG / JPEG / GIF / WebP images up to 2 MiB, and PDF / Word documents up to 32 MiB',
+    document: {
+      pdfPreview: 'PDF preview',
+      wordPreview: 'Word preview',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fitWidth: 'Fit width',
+      pages: '{total} pages',
+      page: 'Page {page}',
+      docNotice: 'Legacy .doc files show text only; formatting and images are not kept',
+      parseFailed: 'Could not parse document: {message}',
+    },
     errors: {
       invalidRequest: 'Invalid file request',
       workspaceNotFound: 'Workspace removed, select another workspace',
@@ -703,6 +716,7 @@ export const en: MessagesShape<typeof zhCN> = {
       instructions: 'Instruction files',
       skills: 'Skills',
       mcp: 'MCP',
+      plugins: 'Plugins',
       appearance: 'Appearance',
       keybindings: 'Shortcuts',
       usage: 'Usage',
@@ -888,6 +902,8 @@ export const en: MessagesShape<typeof zhCN> = {
       noSkills: 'No skills',
       mcpServers: 'MCP servers',
       noMcpServers: 'No MCP servers',
+      plugins: 'Plugins',
+      noPlugins: 'No plugins',
       selected: '{count} selected',
       removedEntry: 'Removed',
       copyAsNew: 'Duplicate',
@@ -1088,6 +1104,29 @@ export const en: MessagesShape<typeof zhCN> = {
       claudeCodePath: '~/.claude.json (with projects), ~/.claude/settings.json',
       vscodePath: 'mcp.json in the VS Code user folder (Insiders too)',
       imported: 'Imported {count} MCP {count|server|servers}',
+    },
+    plugins: {
+      title: 'Plugins',
+      subtitle: 'pi extensions or pi packages; once attached to a role, new sessions load them',
+      warning:
+        'Plugins run arbitrary code with your user permissions. Only install trusted sources',
+      addLocal: 'Add local plugin',
+      installPlaceholder:
+        'npm:<name>[@version], git:<host>/<path>[@ref] or an https:// repository URL',
+      install: 'Install',
+      installing: 'Installing…',
+      installHint:
+        'Requires npm or git on this computer; installs into the app data folder and leaves ~/.pi alone',
+      empty: 'No plugins yet',
+      kinds: { local: 'Local', npm: 'npm', git: 'git' },
+      removeConsequence:
+        'Roles that use it will stop loading it; local plugins are only unregistered, files are kept',
+      removing: 'Removing…',
+      confirmTitle: 'Add plugin?',
+      confirmInstall: 'About to install: {source}',
+      confirmLocal: 'Next, choose a plugin folder or an extension file (.ts / .js / .mjs)',
+      continue: 'I trust this source, continue',
+      added: 'Added plugin "{name}"',
     },
     instructions: {
       title: 'Instruction files',
