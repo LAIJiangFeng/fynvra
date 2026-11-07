@@ -99,6 +99,8 @@ export interface AgentHostDeps {
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
+  /** 是否允许 web_fetch 访问本机回环地址（生产为 preferences.webFetchAllowLoopback）；缺省关闭 */
+  resolveWebFetchAllowLoopback?(): boolean;
   /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
   listWorkflows?(): Promise<readonly Workflow[]>;
   workerOptions?: Pick<
@@ -564,6 +566,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const workflows = role.tools === 'orchestrator' ? await workflowOptions(stored.id) : [];
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
+      const webFetchAllowLoopback = deps.resolveWebFetchAllowLoopback?.() === true;
       const compactionStrategy = resolveCompactionStrategy();
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
@@ -583,6 +586,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           roles,
           ...(workflows.length > 0 ? { workflows } : {}),
           ...(networkProxy ? { networkProxy } : {}),
+          ...(webFetchAllowLoopback ? { webFetchAllowLoopback: true as const } : {}),
           ...(shellPath ? { shellPath } : {}),
           compactionStrategy,
           compactionTimeoutMs: compactionTimeoutMsOf({
@@ -1065,9 +1069,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!state.respawn) continue;
       state.respawn = false;
       if (state.spec && deps.store.get(sessionId)) {
+        const { webFetchAllowLoopback: _previous, ...spec } = state.spec;
         spawnWith(sessionId, state, {
-          ...state.spec,
+          ...spec,
           networkProxy: deps.resolveNetworkProxy?.(),
+          ...(deps.resolveWebFetchAllowLoopback?.() === true
+            ? { webFetchAllowLoopback: true as const }
+            : {}),
         });
       }
     }

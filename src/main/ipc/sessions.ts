@@ -138,6 +138,8 @@ function createAppAgentHost(): AgentHostService {
     resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
+    resolveWebFetchAllowLoopback: () =>
+      getSettingsFile().read().preferences.webFetchAllowLoopback === true,
     listWorkflows: () => getWorkflowRegistry().list(),
     broadcast: sendToAllWindows,
   });

@@ -100,6 +100,8 @@ export interface AgentWorkflowOption {
 export interface SpawnSessionSpec {
   /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
   networkProxy?: NetworkProxy;
+  /** web_fetch 允许访问本机回环地址；只有开启时才带 */
+  webFetchAllowLoopback?: true;
   role: Role;
   /** 会话工作目录：工作区仓库根或 worktree（Main 由记录推导） */
   cwd: string;
@@ -678,6 +680,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const networkProxy =
     record.networkProxy === undefined ? undefined : parseNetworkProxy(record.networkProxy);
   if (networkProxy === null) return null;
+  if (record.webFetchAllowLoopback !== undefined && record.webFetchAllowLoopback !== true) {
+    return null;
+  }
   const role = parseRole(record.role);
   const model = parseModelSpec(record.model);
   const skills = parseStringList(record.skills);
@@ -713,6 +718,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   if (!isOptional(planMode, isBoolean)) return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
+    ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
     role: role.role,
     cwd,
     sessionFile,

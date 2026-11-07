@@ -112,6 +112,8 @@ export interface CreateRoleSessionOptions {
   extensions?: readonly InlineExtension[];
   /** Transform only command subprocess environments, after pi injects session metadata. */
   commandEnv?: (env: NodeJS.ProcessEnv) => NodeJS.ProcessEnv;
+  /** web_fetch 选项：allowLoopback 允许访问本机回环地址（默认关闭，规则见 createWebFetchTool） */
+  webFetch?: { allowLoopback?: boolean };
   /** git_readonly 的命令执行器，默认 child_process.execFile */
   exec?: ExecFn;
   /** 扩展（MCP 等）在事件处理中抛出的错误 */
@@ -277,6 +279,7 @@ function selectTools(
   // 所有工具策略都有 web_fetch；代理与命令一致，取会话加载时的 commandEnv 快照
   const webFetch = createWebFetchTool({
     proxyEnv: () => (commandEnv ? commandEnv(process.env) : process.env),
+    ...(options.webFetch?.allowLoopback === true ? { allowLoopback: true } : {}),
   });
   switch (role.tools) {
     case 'orchestrator': {

@@ -5,7 +5,7 @@ import * as https from 'node:https';
 import type { LookupFunction } from 'node:net';
 import type { Readable } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
-import { checkUrl, hostOf, isBlockedAddress } from './addressPolicy';
+import { checkUrl, hostOf, isBlockedAddress, isLoopbackAddress } from './addressPolicy';
 
 export const FETCH_TIMEOUT_MS = 30_000;
 export const MAX_REDIRECTS = 5;
@@ -46,18 +46,26 @@ export interface FetchedPage {
  * GET 一个页面：手动跟随重定向（每一跳重新校验地址），总超时 30 秒，响应 signal。
  * 直连时用自定义 lookup 只连接校验通过的地址；按 proxyEnv 走代理时先在本地解析目标做预检。
  * 不带 Cookie、认证头或调用方提供的任何请求头。
+ *
+ * allowLoopback：下一跳能否是回环目标取决于当前这一跳：只有从回环页面才能重定向到回环，
+ * 公网页面不能重定向到本机（回环 → 公网之后也不能再回到回环）。
+ * 回环目标始终直连、不走代理，lookup 只接受回环地址；非回环目标按原规则（解析到回环仍拒绝）。
  */
 export async function fetchPage(
   startUrl: URL,
   env: NodeJS.ProcessEnv,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { allowLoopback?: boolean } = {}
 ): Promise<FetchedPage> {
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const start = checkUrl(startUrl.href, { allowLoopback: options.allowLoopback === true });
+  if (!start.ok) throw new FetchError(start.error);
   let url = startUrl;
+  let loopback = start.loopback;
   try {
     for (let hop = 0; ; hop++) {
-      const response = await requestOnce(url, env, combined);
+      const response = await requestOnce(url, env, combined, loopback);
       const status = response.statusCode ?? 0;
       const location = response.headers.location;
       if (status >= 300 && status < 400 && status !== 304) {
@@ -72,9 +80,18 @@ export async function fetchPage(
         } catch {
           throw new FetchError(`HTTP ${status} redirect to an invalid Location`);
         }
-        const check = checkUrl(next);
-        if (!check.ok) throw new FetchError(`redirect to ${next} refused: ${check.error}`);
+        // 只有当前 hop 是回环目标时，下一跳才允许回环
+        const check = checkUrl(next, { allowLoopback: loopback });
+        if (!check.ok) {
+          if (!loopback && options.allowLoopback && checkUrl(next, { allowLoopback: true }).ok) {
+            throw new FetchError(
+              `redirect to ${next} refused: a non-local page cannot redirect to a local address`
+            );
+          }
+          throw new FetchError(`redirect to ${next} refused: ${check.error}`);
+        }
         url = check.url;
+        loopback = check.loopback;
         continue;
       }
       const contentType = String(response.headers['content-type'] ?? '');
@@ -112,10 +129,12 @@ type ProxyMode = { proxied: false } | { proxied: true; agentEnv: NodeJS.ProcessE
 async function requestOnce(
   url: URL,
   env: NodeJS.ProcessEnv,
-  signal: AbortSignal
+  signal: AbortSignal,
+  loopback: boolean
 ): Promise<http.IncomingMessage> {
   const secure = url.protocol === 'https:';
-  const mode = proxyMode(url, env);
+  // 回环目标始终直连：走代理会发到代理机器自己的 localhost
+  const mode: ProxyMode = loopback ? { proxied: false } : proxyMode(url, env);
   const headers = {
     'User-Agent': USER_AGENT,
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
@@ -138,7 +157,7 @@ async function requestOnce(
       headers,
       signal,
       agent: false,
-      lookup: safeLookup,
+      lookup: loopback ? loopbackLookup : safeLookup,
       rejectUnauthorized: true,
     };
   }
@@ -267,6 +286,36 @@ const safeLookup: LookupFunction = (hostname, options, callback) => {
       const failure: FetchError & { code?: string } = blocked
         ? blockedError(hostname, blocked.address)
         : new FetchError(`${hostname} has no address`);
+      failure.code = BLOCKED_CODE;
+      callback(failure, '', 0);
+      return;
+    }
+    if (options.all) callback(null, addresses);
+    else callback(null, first.address, first.family);
+  });
+};
+
+/**
+ * 回环目标（localhost / *.localhost）的 lookup：解析结果必须全部是回环地址。
+ * *.localhost 按 RFC 6761 当作 localhost 解析。
+ */
+const loopbackLookup: LookupFunction = (hostname, options, callback) => {
+  const lookupOptions: LookupOptions & { all: true } = { ...options, all: true };
+  const name = hostname.toLowerCase().replace(/\.+$/, '');
+  const target = name.endsWith('.localhost') ? 'localhost' : name;
+  dnsLookup(target, lookupOptions, (error, addresses) => {
+    if (error) {
+      callback(error, '', 0);
+      return;
+    }
+    const outside = addresses.find((entry) => !isLoopbackAddress(entry.address));
+    const first = addresses[0];
+    if (outside || !first) {
+      const failure: FetchError & { code?: string } = new FetchError(
+        outside
+          ? `${hostname} resolves to ${outside.address}, which is not a loopback address; it cannot be fetched`
+          : `${hostname} has no address`
+      );
       failure.code = BLOCKED_CODE;
       callback(failure, '', 0);
       return;

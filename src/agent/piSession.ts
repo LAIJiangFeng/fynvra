@@ -139,6 +139,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
                 commandEnvironment(env, spec.networkProxy, process.platform === 'win32'),
             }
           : {}),
+        ...(spec.webFetchAllowLoopback ? { webFetch: { allowLoopback: true } } : {}),
       });
     } catch (error) {
       magic?.dispose();

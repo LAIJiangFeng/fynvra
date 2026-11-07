@@ -721,6 +721,15 @@ export const en: MessagesShape<typeof zhCN> = {
       keybindings: 'Shortcuts',
       usage: 'Usage',
     },
+    webFetch: {
+      title: 'Web reader',
+      allowLoopback: 'Allow web_fetch to access local addresses (localhost / 127.0.0.1 / ::1)',
+      approval: 'Still requires “Network access” approval; no longer asked in “Full access” mode',
+      exposure:
+        'Content from local services (dev servers, admin interfaces, proxy control ports, etc.) will enter the conversation',
+      blocked: 'Intranet and cloud metadata addresses are always blocked',
+      effective: 'Applies to sessions loaded afterwards',
+    },
     network: {
       title: 'Git and command proxy',
       environment: 'Use existing environment',

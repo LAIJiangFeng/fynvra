@@ -690,6 +690,14 @@ export const zhCN = {
       keybindings: '快捷键',
       usage: '用量',
     },
+    webFetch: {
+      title: '网页读取',
+      allowLoopback: '允许 web_fetch 访问本机地址（localhost / 127.0.0.1 / ::1）',
+      approval: '仍会走“访问网络”审批；“完全放行”档位下不再询问',
+      exposure: '本机服务（开发服务器、管理接口、代理控制端口等）的内容会进入对话',
+      blocked: '内网和云元数据地址始终被拦截',
+      effective: '之后新加载的会话生效',
+    },
     network: {
       title: 'Git 与命令代理',
       environment: '使用现有环境',
