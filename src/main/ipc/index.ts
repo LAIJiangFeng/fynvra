@@ -3,6 +3,7 @@ import { registerInstructionHandlers } from './instructions';
 import { registerMcpHandlers } from './mcp';
 import { registerNotificationHandlers } from './notifications';
 import { registerOrchestrationHandlers } from './orchestration';
+import { registerPluginHandlers } from './plugins';
 import { registerProviderHandlers } from './providers';
 import { registerRoleHandlers } from './roles';
 import { registerSessionHandlers } from './sessions';
@@ -31,6 +32,7 @@ export function registerIpcHandlers(): void {
   registerSkillHandlers();
   registerInstructionHandlers();
   registerMcpHandlers();
+  registerPluginHandlers();
   registerNotificationHandlers();
   registerUsageHandlers();
 }
