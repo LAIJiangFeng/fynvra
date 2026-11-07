@@ -27,9 +27,25 @@ const EXIT_UNAVAILABLE = 3;
 /**
  * 常量脚本：路径只经环境变量传入，不拼进脚本文本。
  * 宏禁用失败即退出；不改任何 Options.*（会持久化到用户 Word 配置）。
+ * 每次转换写到临时目录后以 -File 执行（不用 -EncodedCommand，便于审计、避免 EDR 误报）。
+ * 装有 Office PIA 时 PowerShell 按 interop 类型绑定，ByRef 参数可能报 PSReference 错误：
+ * 非 COM 异常（参数绑定类）时改用 IDispatch 晚绑定 InvokeMember 重试。
  */
 const SCRIPT = `
 $ErrorActionPreference = 'Stop'
+function Test-BindingError($record) {
+  $inner = $record.Exception
+  while ($inner.InnerException) { $inner = $inner.InnerException }
+  return -not ($inner -is [System.Runtime.InteropServices.COMException])
+}
+function Invoke-Com($target, [string]$name, [object[]]$arguments, [scriptblock]$direct) {
+  try {
+    return & $direct
+  } catch {
+    if (-not (Test-BindingError $_)) { throw }
+    return [System.__ComObject].InvokeMember($name, [System.Reflection.BindingFlags]::InvokeMethod, $null, $target, $arguments)
+  }
+}
 $source = $env:FYNVRA_DOC_SOURCE
 $target = $env:FYNVRA_DOC_TARGET
 if (-not $source -or -not $target) { exit 4 }
@@ -63,16 +79,19 @@ try {
   }
   $m = [Type]::Missing
   $password = 'fynvra-no-password'
-  $doc = $word.Documents.Open($source, $false, $true, $false, $password, $password, $false, $m, $m, $m, $m, $false, $false, $m, $true)
-  $doc.SaveAs2($target, 12)
-  $doc.Close(0)
+  $docs = $word.Documents
+  $openArgs = [object[]]@($source, $false, $true, $false, $password, $password, $false, $m, $m, $m, $m, $false, $false, $m, $true)
+  $doc = Invoke-Com $docs 'Open' $openArgs { $docs.Open($source, $false, $true, $false, $password, $password, $false, $m, $m, $m, $m, $false, $false, $m, $true) }
+  if ($doc -eq $null) { throw 'open' }
+  [void](Invoke-Com $doc 'SaveAs2' ([object[]]@($target, 12)) { $doc.SaveAs2($target, 12) })
+  [void](Invoke-Com $doc 'Close' ([object[]]@(0)) { $doc.Close(0) })
   $doc = $null
   $code = 0
 } catch {
 } finally {
-  if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
+  if ($doc -ne $null) { try { [void](Invoke-Com $doc 'Close' ([object[]]@(0)) { $doc.Close(0) }) } catch {} }
   try {
-    if ($own -or $word.Documents.Count -eq 0) { $word.Quit(0) }
+    if ($own -or $word.Documents.Count -eq 0) { [void](Invoke-Com $word 'Quit' ([object[]]@(0)) { $word.Quit(0) }) }
   } catch {}
   try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) } catch {}
   $word = $null
@@ -164,7 +183,11 @@ export function createWordConverter({ cacheDir }: { cacheDir: string }) {
   }
 
   /** 启动一次 PowerShell 转换；返回退出码，超时返回 'timeout'。 */
-  function runWord(source: string, target: string): Promise<number | 'timeout' | 'spawnError'> {
+  function runWord(
+    script: string,
+    source: string,
+    target: string
+  ): Promise<number | 'timeout' | 'spawnError'> {
     return new Promise((resolve) => {
       const powershell = join(
         systemRoot(),
@@ -175,15 +198,7 @@ export function createWordConverter({ cacheDir }: { cacheDir: string }) {
       );
       const child = spawn(
         powershell,
-        [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-EncodedCommand',
-          Buffer.from(SCRIPT, 'utf16le').toString('base64'),
-        ],
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
         {
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'ignore'],
@@ -235,12 +250,15 @@ export function createWordConverter({ cacheDir }: { cacheDir: string }) {
       await rm(tmpRoot, { recursive: true, force: true }).catch(() => undefined);
     }
     const dir = join(tmpRoot, randomUUID());
+    const script = join(dir, 'convert.ps1');
     const source = join(dir, 'source.doc');
     const target = join(dir, 'out.docx');
     try {
       await mkdir(dir, { recursive: true });
       await writeFile(source, bytes, { flag: 'wx' });
-      const outcome = await runWord(source, target);
+      // 脚本为纯 ASCII 常量，随临时目录一起删除。
+      await writeFile(script, SCRIPT, { encoding: 'utf8', flag: 'wx' });
+      const outcome = await runWord(script, source, target);
       if (outcome !== 0) {
         if (outcome === EXIT_UNAVAILABLE || outcome === 'spawnError') unavailable = true;
         const reason: Failure['reason'] =
