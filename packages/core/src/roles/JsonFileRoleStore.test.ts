@@ -14,6 +14,7 @@ const tester: Role = {
   systemPrompt: 'Write failing tests first.',
   skillIds: ['tdd'],
   mcpServerIds: [],
+  pluginIds: [],
   tools: 'all',
   approvalMode: 'supervised',
 };
@@ -77,6 +78,7 @@ describe('JsonFileRoleStore', () => {
       systemPrompt: '先澄清再执行',
       skillIds: ['tdd'],
       mcpServerIds: ['pencil'],
+      pluginIds: [],
       model: { providerId: 'local', modelId: 'model', thinking: 'high' },
       tools: 'readonly',
       approvalMode: 'supervised',
@@ -105,6 +107,7 @@ describe('JsonFileRoleStore', () => {
       ...original,
       skillIds: ['tdd'],
       mcpServerIds: ['pencil'],
+      pluginIds: [],
       model: { providerId: 'local', modelId: 'model' },
     });
     expect((await store.save(cleared)).ok).toBe(true);

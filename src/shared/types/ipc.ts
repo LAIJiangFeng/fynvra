@@ -152,6 +152,12 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：角色已变更 */
   ROLES_CHANGED: 'roles:changed',
 
+  // --- workflows ---
+  WORKFLOWS_LIST: 'workflows:list',
+  /** 参数是整份 Workflow，Main 经 parseWorkflow 收窄；新建或按 id 整份替换 */
+  WORKFLOWS_SAVE: 'workflows:save',
+  WORKFLOWS_REMOVE: 'workflows:remove',
+
   // --- skills ---
   SKILLS_LIST: 'skills:list',
   /** 无参时 Main 弹目录选择框；传 candidateIds 时登记 skills:scan 找到的技能。Renderer 不传路径 */
@@ -177,6 +183,17 @@ export const IPC_CHANNELS = {
   MCP_IMPORT: 'mcp:import',
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
+
+  // --- plugins ---
+  PLUGINS_LIST: 'plugins:list',
+  /** 无参：Main 弹框选目录或扩展文件并登记；Renderer 不传路径 */
+  PLUGINS_ADD_LOCAL: 'plugins:add-local',
+  /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
+  PLUGINS_INSTALL: 'plugins:install',
+  PLUGINS_REMOVE: 'plugins:remove',
+  PLUGINS_TOGGLE: 'plugins:toggle',
+  /** Main → Renderer：插件列表已变更 */
+  PLUGINS_CHANGED: 'plugins:changed',
 
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',

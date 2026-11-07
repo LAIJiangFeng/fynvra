@@ -3,6 +3,7 @@ import { registerInstructionHandlers } from './instructions';
 import { registerMcpHandlers } from './mcp';
 import { registerNotificationHandlers } from './notifications';
 import { registerOrchestrationHandlers } from './orchestration';
+import { registerPluginHandlers } from './plugins';
 import { registerProviderHandlers } from './providers';
 import { registerRoleHandlers } from './roles';
 import { registerSessionHandlers } from './sessions';
@@ -12,6 +13,7 @@ import { registerTerminalHandlers } from './terminals';
 import { registerUpdateHandlers } from './updates';
 import { registerUsageHandlers } from './usage';
 import { registerWindowHandlers } from './window';
+import { registerWorkflowHandlers } from './workflows';
 import { registerWorkspaceHandlers } from './workspaces';
 import { registerWorkspaceUiHandlers } from './workspaceUi';
 
@@ -28,9 +30,11 @@ export function registerIpcHandlers(): void {
   registerSessionHandlers();
   registerProviderHandlers();
   registerRoleHandlers();
+  registerWorkflowHandlers();
   registerSkillHandlers();
   registerInstructionHandlers();
   registerMcpHandlers();
+  registerPluginHandlers();
   registerNotificationHandlers();
   registerUsageHandlers();
 }

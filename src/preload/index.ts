@@ -5,6 +5,7 @@ import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
+import { createPluginsApi } from './domains/plugins';
 import { createProvidersApi } from './domains/providers';
 import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
@@ -13,6 +14,7 @@ import { createSkillsApi } from './domains/skills';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
+import { createWorkflowsApi } from './domains/workflows';
 import { createWorkspacesApi } from './domains/workspaces';
 import { createWorkspaceUiApi } from './domains/workspaceUi';
 import type { FynvraApi, Unsubscribe } from './types';
@@ -52,9 +54,11 @@ const api: FynvraApi = {
   }),
   providers: createProvidersApi(ipcRenderer, subscribe),
   roles: createRolesApi(ipcRenderer, subscribe),
+  workflows: createWorkflowsApi(ipcRenderer),
   skills: createSkillsApi(ipcRenderer, subscribe),
   instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
+  plugins: createPluginsApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
   usage: createUsageApi(ipcRenderer),
 };

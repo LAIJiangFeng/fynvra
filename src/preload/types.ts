@@ -64,9 +64,11 @@ export interface FynvraApi {
   sessions: import('./domains/sessions').SessionsApi;
   providers: import('./domains/providers').ProvidersApi;
   roles: import('./domains/roles').RolesApi;
+  workflows: import('./domains/workflows').WorkflowsApi;
   skills: import('./domains/skills').SkillsApi;
   instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
+  plugins: import('./domains/plugins').PluginsApi;
   notifications: import('./domains/notifications').NotificationsApi;
   usage: import('./domains/usage').UsageApi;
 }

@@ -37,6 +37,7 @@ export function newRole(taken: Iterable<string>): Role {
     name: translate('settings.roles.newRole'),
     skillIds: [],
     mcpServerIds: [],
+    pluginIds: [],
     tools: 'all',
     approvalMode: 'auto-edits',
   };
