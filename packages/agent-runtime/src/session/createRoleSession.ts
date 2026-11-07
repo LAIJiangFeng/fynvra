@@ -28,6 +28,7 @@ import {
 } from '../prompts/orchestratorPrompt';
 import { createOrchestrationTools, type RoleOption } from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
+import { createWebFetchTool } from '../tools/web/webFetchTool';
 import {
   createWorkerTools,
   type WorkerToolset,
@@ -127,7 +128,7 @@ export interface RoleSession {
 /**
  * 按角色创建 pi `AgentSession`（ARCHITECTURE §5）：
  * - 工具策略：`orchestrator` → 只读工具 + 编排工具 + write_plan + write_doc；`readonly` → 只读工具；`all` → pi 默认工具。
- *   传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
+ *   各策略都加 web_fetch；传入 `workerHost` 时再加 worker 工具；不是 worker 又提供了 `planMode` 时，`readonly` / `all` 也加 write_plan。
  * - skills → DefaultResourceLoader；MCP → createMcpExtension + bindExtensions；
  *   role.systemPrompt 与契约段 → before_agent_start 追加；模型与思考档位来自 `model`。
  * - `planMode`：开着时 orchestrator 策略每次 run 再追加 `PLAN_MODE_PROMPT`、dispatch_task 拒绝派发、write_doc 可写；
@@ -255,6 +256,10 @@ function selectTools(
   const workerTools = workerToolset?.tools ?? [];
   // 描述不说「唯一能写的文件」：all 策略还有 pi 的 write / edit（名字不冲突）
   const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
+  // 所有工具策略都有 web_fetch；代理与命令一致，取会话加载时的 commandEnv 快照
+  const webFetch = createWebFetchTool({
+    proxyEnv: () => (commandEnv ? commandEnv(process.env) : process.env),
+  });
   switch (role.tools) {
     case 'orchestrator': {
       if (!options.host) {
@@ -273,6 +278,7 @@ function selectTools(
           }),
           createWritePlanTool(cwd),
           createWriteDocTool(cwd, { planMode: options.planMode ?? (() => false) }),
+          webFetch,
           ...workerTools,
         ],
       };
@@ -283,11 +289,12 @@ function selectTools(
         customTools: [
           ...createReadonlyTools(cwd, exec ? { exec } : {}),
           ...planTools,
+          webFetch,
           ...workerTools,
         ],
       };
     case 'all': {
-      if (!commandEnv) return { customTools: [...planTools, ...workerTools] };
+      if (!commandEnv) return { customTools: [...planTools, webFetch, ...workerTools] };
       const spawnHook: BashSpawnHook = (ctx) => ({ ...ctx, env: commandEnv(ctx.env) });
       // Override implementations, not selection: defaultActive=false preserves pi's defaultTools.
       return {
@@ -305,6 +312,7 @@ function selectTools(
             defaultActive: false,
           }),
           ...planTools,
+          webFetch,
           ...workerTools,
         ],
       };

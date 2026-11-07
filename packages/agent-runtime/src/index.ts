@@ -102,6 +102,13 @@ export {
   type GitArgsCheck,
   type ReadonlyToolsOptions,
 } from './tools/readonlyTools';
+export { checkUrl as checkWebUrl, isBlockedAddress } from './tools/web/addressPolicy';
+export {
+  createWebFetchTool,
+  WEB_FETCH_TOOL_NAME,
+  type WebFetchDetails,
+  type WebFetchToolOptions,
+} from './tools/web/webFetchTool';
 export {
   ASK_TIMEOUT_DEFAULT_MS,
   createWorkerTools,
