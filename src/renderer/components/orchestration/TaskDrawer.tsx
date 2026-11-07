@@ -1,4 +1,4 @@
-import type { Dispatch, Task } from '@fynvra/core';
+import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
 import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +8,7 @@ import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { dispatchesOf, latestDispatchOf } from '@/stores/orchestration';
-import { RoleBadge, SectionTitle, StatusBadge, StatusDot } from './common';
+import { RoleBadge, SectionTitle, StatusBadge, StatusDot, WorkflowProgress } from './common';
 import { formatClock, formatDuration } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
@@ -82,6 +82,7 @@ export function TaskDrawer({
               </span>
             )}
           </div>
+          {task.workflow && <WorkflowProgress workflow={task.workflow} className="mt-1.5" />}
         </div>
         {reviewable && (
           <Button
@@ -101,6 +102,7 @@ export function TaskDrawer({
         {task.dependsOn.length > 0 && (
           <DependencySection view={view} task={task} onOpenTask={onOpenTask} />
         )}
+        {task.workflow && <WorkflowHistory workflow={task.workflow} />}
         <section aria-label={t('orchestration.attempts')}>
           <SectionTitle>
             {t('orchestration.attemptsCount', { count: dispatches.length })}
@@ -165,6 +167,49 @@ function MarkdownLite({ text }: { text: string }) {
       </p>
     );
   });
+}
+
+/** 工作流各步的结算记录（最近 30 条），新的在下。 */
+function WorkflowHistory({ workflow }: { workflow: TaskWorkflow }) {
+  const t = useT();
+  return (
+    <section aria-label={t('orchestration.workflow.history')}>
+      <SectionTitle>{t('orchestration.workflow.history')}</SectionTitle>
+      {workflow.history.length === 0 ? (
+        <p className="text-muted-foreground text-xs">{t('orchestration.workflow.historyEmpty')}</p>
+      ) : (
+        <ol className="flex flex-col gap-2">
+          {workflow.history.map((entry) => (
+            <li key={`${entry.dispatchId}:${entry.at}`} className="text-xs">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium">
+                  {t('orchestration.workflow.entry', {
+                    step: entry.step + 1,
+                    stepName: workflow.steps[entry.step]?.name ?? '?',
+                  })}
+                </span>
+                {entry.outcome === 'failed' ? (
+                  <Badge variant="destructive">{t('orchestration.outcome.failed')}</Badge>
+                ) : (
+                  <Badge className="border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                    {t('orchestration.outcome.succeeded')}
+                  </Badge>
+                )}
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {formatClock(entry.at)}
+                </span>
+              </div>
+              {entry.summary && (
+                <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-muted-foreground">
+                  {entry.summary}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 function DependencySection({

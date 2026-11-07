@@ -20,7 +20,7 @@ import {
   latestMessageOfTask,
   tasksByStatus,
 } from '@/stores/orchestration';
-import { RoleBadge, StatusDot } from './common';
+import { RoleBadge, StatusDot, WorkflowProgress } from './common';
 import {
   formatDuration,
   formatRelative,
@@ -284,6 +284,8 @@ function TaskCard({
         )}
         {attempts > 1 && <span>{t('orchestration.attemptNth', { count: attempts })}</span>}
       </div>
+
+      {task.workflow && <WorkflowProgress workflow={task.workflow} className="mt-1" />}
 
       {dependencies.length > 0 && (
         <p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
