@@ -7,6 +7,7 @@ import {
   type Role,
   type Task,
   THINKING_LEVELS,
+  workflowNodeLabel,
   workflowProgressLine,
 } from '@fynvra/core';
 import type {
@@ -357,9 +358,9 @@ export function createOrchestrationTools(
             [
               `## Workflow restarted · dispatch ${code(payload.dispatchId)}`,
               `- message_id: ${code(result.messageId)}`,
-              `- new dispatch_id: ${code(result.workflowRestarted.dispatchId)} (step 1)`,
+              `- new dispatch_id: ${code(result.workflowRestarted.dispatchId)} (a start node)`,
               '',
-              'The workflow runs again from its first step in the same worktree, with your feedback in the first step brief. You will be woken automatically only when the whole workflow finishes or fails.',
+              'The whole workflow graph runs again from its start nodes in the same task worktree, with your feedback in the start node briefs. You will be woken automatically only when the whole workflow finishes or fails.',
             ].join('\n'),
             result
           );
@@ -835,24 +836,26 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
     ...(task.workflow
       ? [
           '',
-          'Workflow: Fynvra advances the steps automatically in the same worktree. You receive worker_done only when the whole workflow finishes (last step succeeded) or fails.',
+          'Workflow: Fynvra schedules the nodes automatically along the graph (parallel nodes in their own worktrees, merged back into this task worktree). You receive worker_done only when the whole workflow finishes (every node passed) or fails; its dispatch_id covers the combined result for review_diff / run_checks / merge_worktree.',
         ]
       : []),
   ].join('\n');
 }
 
-/** 工作流任务的进度行；普通任务没有 */
+/** 工作流任务的进度：工作流名、图摘要、回退次数，每个节点一行（状态、名称、角色、dispatch_id）；普通任务没有 */
 function workflowLines(task: Task): string[] {
-  if (!task.workflow) return [];
-  const pending = task.workflow.pending;
-  return [
-    `- ${workflowProgressLine(task.workflow)}`,
-    ...(pending
-      ? [
-          `- advancing: starting step ${pending.step + 1}/${task.workflow.steps.length} ${task.workflow.steps[pending.step]?.name ?? ''}`.trimEnd(),
-        ]
-      : []),
-  ];
+  const workflow = task.workflow;
+  if (!workflow) return [];
+  const launching = new Map(workflow.launches.map((launch) => [launch.nodeId, launch]));
+  const nodes = workflow.steps.map((step) => {
+    const node = workflow.nodes.find((entry) => entry.id === step.id);
+    const launch = launching.get(step.id);
+    const status = launch ? 'starting' : node ? workflowNodeLabel(node) : 'waiting';
+    const dispatch = node?.dispatchId && !launch ? ` · dispatch_id: ${code(node.dispatchId)}` : '';
+    const own = (launch?.placement ?? node?.placement) === 'isolated' ? ' · own worktree' : '';
+    return `  - ${status} · ${step.name} · role: ${step.roleId}${dispatch}${own}`;
+  });
+  return [`- ${workflowProgressLine(workflow)}`, '- nodes:', ...nodes];
 }
 
 function formatWorkers(workers: readonly WorkerEntry[]): string {
@@ -872,6 +875,9 @@ function formatWorkers(workers: readonly WorkerEntry[]): string {
       lines.push('- not started yet (waiting for dependencies)');
       return lines.join('\n');
     }
+    // 运行中的工作流看节点行；结束后这里的 dispatch 代表整个工作流（集成 worktree）
+    if (task.workflow && task.status === 'in-progress') return lines.join('\n');
+    if (task.workflow) lines.push('- whole-workflow result (use it for review / merge / reject):');
     lines.push(
       dispatch.mode === 'in-place'
         ? `- dispatch_id: ${code(dispatch.id)} · in place (no git)`

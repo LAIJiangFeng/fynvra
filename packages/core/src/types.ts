@@ -117,14 +117,14 @@ export interface Task {
   fastMode?: boolean;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
-  /** 按工作流派发时的定义快照与进度；普通任务没有。`roleId` 始终等于当前步骤的角色。 */
+  /** 按工作流派发时的定义快照与进度；普通任务没有。`roleId` 是最近启动的节点的角色。 */
   workflow?: TaskWorkflow;
 }
 
-/** 工作流任务的一条步骤结算记录。 */
+/** 工作流任务的一条节点结算记录。 */
 export interface TaskWorkflowHistoryEntry {
-  /** 步骤下标 */
-  step: number;
+  /** 节点 id */
+  nodeId: string;
   dispatchId: string;
   outcome: 'succeeded' | 'failed';
   /** worker 的总结，截断到 2000 字 */
@@ -133,20 +133,59 @@ export interface TaskWorkflowHistoryEntry {
   at: number;
 }
 
+/** 工作流节点在本轮的运行状态。 */
+export type TaskWorkflowNodeStatus = 'waiting' | 'running' | 'passed' | 'failed' | 'cancelled';
+
+/**
+ * 节点在哪里运行：`integration` 是任务的集成 worktree（普通目录即工作区目录），
+ * `isolated` 是从集成 worktree 当前 HEAD 分出的节点 worktree，通过后合回集成 worktree。
+ */
+export type TaskWorkflowPlacement = 'integration' | 'isolated';
+
+/** 一个节点的运行状态（按 `steps` 顺序，一个节点一条）。 */
+export interface TaskWorkflowNodeState {
+  /** 节点 id（`WorkflowStep.id`） */
+  id: string;
+  status: TaskWorkflowNodeStatus;
+  /** 本轮的尝试；waiting 时没有 */
+  dispatchId?: string;
+  placement?: TaskWorkflowPlacement;
+  /** 隔离节点的 worktree */
+  worktreeId?: string;
+  /** 隔离节点通过后是否已合回集成 worktree；集成节点没有该字段 */
+  merged?: boolean;
+  /** waiting：下次启动时写进任务书的退回 / 审查反馈 */
+  feedback?: string;
+  /** failed：失败原因（worker 总结、合并冲突、启动失败），截断到 2000 字 */
+  failure?: string;
+}
+
+/** 启动意图：已决定启动、会话还没落库的节点（先落库意图再启动，崩溃恢复用）。 */
+export interface TaskWorkflowLaunch {
+  nodeId: string;
+  /** 预先分配的 dispatch id：store 里已有它就说明已经启动过，不再重复启动 */
+  dispatchId: string;
+  placement: TaskWorkflowPlacement;
+  /** 隔离节点已建好的 worktree（建好就落库，恢复时复用） */
+  worktreeId?: string;
+}
+
 /** 派发时快照进 Task 的工作流定义，加上推进状态。 */
 export interface TaskWorkflow {
   id: string;
   name: string;
   steps: WorkflowStep[];
   maxRounds: number;
-  /** 当前步骤下标 */
-  step: number;
   /** 已回退次数 */
   rounds: number;
-  /** 最近 30 条步骤结算 */
+  /** 各节点的运行状态，与 `steps` 一一对应 */
+  nodes: TaskWorkflowNodeState[];
+  /** 待启动的节点 */
+  launches: TaskWorkflowLaunch[];
+  /** 集成 worktree（git 工作区）；普通目录没有 */
+  worktreeId?: string;
+  /** 最近 30 条节点结算 */
   history: TaskWorkflowHistoryEntry[];
-  /** 推进意图：已决定要启动、还没落库的步骤（崩溃恢复用） */
-  pending?: { step: number; feedback?: string };
 }
 
 /**
