@@ -537,24 +537,21 @@ function WebFetchSection() {
   return (
     <section>
       <SectionHeader title={t('settings.webFetch.title')} />
-      <div className="grid gap-2 rounded-lg border p-4">
-        <div className="flex items-center justify-between gap-4">
-          <label htmlFor={id} className="min-w-0 text-sm">
-            {t('settings.webFetch.allowLoopback')}
-          </label>
+      <ul className="divide-y rounded-lg border">
+        <li className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <label htmlFor={id} className="font-medium text-sm">
+              {t('settings.webFetch.allowLoopback')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">{t('settings.webFetch.hint')}</p>
+          </div>
           <Switch
             id={id}
             checked={allowLoopback}
             onCheckedChange={(checked) => void update({ webFetchAllowLoopback: checked })}
           />
-        </div>
-        <ul className="grid list-disc gap-1 pl-4 text-muted-foreground text-xs">
-          <li>{t('settings.webFetch.approval')}</li>
-          <li>{t('settings.webFetch.exposure')}</li>
-          <li>{t('settings.webFetch.blocked')}</li>
-          <li>{t('settings.webFetch.effective')}</li>
-        </ul>
-      </div>
+        </li>
+      </ul>
     </section>
   );
 }
