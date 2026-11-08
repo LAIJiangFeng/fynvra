@@ -1,8 +1,11 @@
 import { errorMessage } from '@shared/guards';
-import type { PluginEntry } from '@shared/types/plugins';
+import type { IpcResult } from '@shared/types/ipc';
+import type { PluginEntry, PluginMode } from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
+  PluginActionResult,
   PluginAddResult,
+  PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
@@ -12,11 +15,33 @@ export interface PluginsState {
   loaded: boolean;
   error: string | null;
   refresh(): Promise<void>;
-  /** Main 弹框选择目录或扩展文件；不传路径 */
-  addLocal(): Promise<PluginAddResult>;
+  /** Main 弹框选择目录或扩展文件；copy 复制一份，link 引用原文件；不传路径 */
+  addLocal(mode: PluginMode): Promise<PluginAddResult>;
   install(source: string): Promise<PluginAddResult>;
   remove(id: string): Promise<PluginRemoveResult>;
   toggle(id: string, enabled: boolean): Promise<PluginToggleResult>;
+  reveal(id: string): Promise<IpcResult>;
+  openIn(id: string, appId: string): Promise<IpcResult>;
+  openAsWorkspace(id: string): Promise<PluginOpenAsWorkspaceResult>;
+  recopy(id: string): Promise<PluginActionResult>;
+  convertToCopy(id: string): Promise<PluginActionResult>;
+}
+
+/** IPC 调用本身失败（极少见）也折成 { ok: false } */
+async function safely<T>(call: () => Promise<T>): Promise<T | { ok: false; error: string }> {
+  try {
+    return await call();
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+async function safeAction(call: () => Promise<PluginActionResult>): Promise<PluginActionResult> {
+  try {
+    return await call();
+  } catch (error) {
+    return { ok: false, code: 'failed', error: errorMessage(error) };
+  }
 }
 
 const api = window.fynvra.plugins;
@@ -39,10 +64,10 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
     }
   },
 
-  async addLocal() {
+  async addLocal(mode) {
     let result: PluginAddResult;
     try {
-      result = await api.addLocal();
+      result = await api.addLocal({ mode });
     } catch (error) {
       result = { ok: false, code: 'failed', error: errorMessage(error) };
     }
@@ -79,6 +104,22 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
     } catch (error) {
       result = { ok: false, error: errorMessage(error) };
     }
+    if (result.ok) await get().refresh();
+    return result;
+  },
+
+  reveal: (id) => safely(() => api.reveal(id)),
+  openIn: (id, appId) => safely(() => api.openIn({ id, appId })),
+  openAsWorkspace: (id) => safely(() => api.openAsWorkspace(id)),
+
+  async recopy(id) {
+    const result = await safeAction(() => api.recopy(id));
+    if (result.ok) await get().refresh();
+    return result;
+  },
+
+  async convertToCopy(id) {
+    const result = await safeAction(() => api.convertToCopy(id));
     if (result.ok) await get().refresh();
     return result;
   },

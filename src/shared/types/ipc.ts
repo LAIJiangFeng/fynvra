@@ -186,8 +186,18 @@ export const IPC_CHANNELS = {
 
   // --- plugins ---
   PLUGINS_LIST: 'plugins:list',
-  /** 无参：Main 弹框选目录或扩展文件并登记；Renderer 不传路径 */
+  /** `{ mode }`（缺省 copy）：Main 弹框选目录或扩展文件，复制或引用后登记；Renderer 不传路径 */
   PLUGINS_ADD_LOCAL: 'plugins:add-local',
+  /** id：用系统文件管理器打开插件所在位置 */
+  PLUGINS_REVEAL: 'plugins:reveal',
+  /** `{ id, appId }`：用「用…打开」目标打开插件目录（目标列表复用 workspaces:open-with-apps） */
+  PLUGINS_OPEN_IN: 'plugins:open-in',
+  /** id：把插件目录按普通目录挂为工作区，返回 workspaceId */
+  PLUGINS_OPEN_AS_WORKSPACE: 'plugins:open-as-workspace',
+  /** id：仅 copy 模式，从来源重新复制覆盖副本 */
+  PLUGINS_RECOPY: 'plugins:recopy',
+  /** id：仅 link 模式，把原路径复制成副本并改为 copy 模式 */
+  PLUGINS_CONVERT_TO_COPY: 'plugins:convert-to-copy',
   /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
   PLUGINS_INSTALL: 'plugins:install',
   PLUGINS_REMOVE: 'plugins:remove',

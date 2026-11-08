@@ -218,6 +218,13 @@ export const mainZhCN = {
     pickKindFile: '单个扩展文件',
     pickTitle: '选择插件',
     fileFilter: 'pi 扩展',
+    copyFailed: '复制插件失败：{error}',
+    copyTooLarge: '插件超过 200 MB 或 2 万个文件，请改用引用模式',
+    sourceInCopyRoot: '插件来源与副本目录重叠，无法复制',
+    outsideCopyRoot: '副本不在插件副本目录内，已拒绝操作',
+    notCopy: '只有副本模式的插件能重新复制',
+    notLink: '只有引用模式的插件能转为副本',
+    openFailed: '打开插件失败：{error}',
   },
   providers: {
     readFailed: '读取模型服务失败：{error}',
