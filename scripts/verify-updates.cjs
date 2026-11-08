@@ -59,6 +59,17 @@ if (!process.versions.electron) {
   app.getVersion = () => '0.1.0';
   app.getAppPath = () => runtimeRoot;
   Object.defineProperty(app, 'isPackaged', { get: () => true });
+  // 强制打包态会让主进程设置已安装版的任务栏身份；改用测试专用 id，避免污染已安装的 Fynvra。
+  const E2E_APP_ID = 'com.fynvra.app.e2e';
+  let requestedAppId = null;
+  let appliedAppId = null;
+  const setAppId = app.setAppUserModelId.bind(app);
+  app.setAppUserModelId = (id) => {
+    requestedAppId = id;
+    appliedAppId = E2E_APP_ID;
+    setAppId(E2E_APP_ID);
+  };
+  const appId = () => ({ requested: requestedAppId, applied: appliedAppId });
   const packageInfo = JSON.parse(readFileSync(join(runtimeRoot, 'package.json'), 'utf8'));
   const manualMac = mac && packageInfo.fynvraMacUpdateMode !== 'signed';
   const { autoUpdater } = createRequire(join(runtimeRoot, 'package.json'))('electron-updater');
@@ -166,6 +177,10 @@ if (!process.versions.electron) {
       assert.equal(activeWorkers.size, 0, '安装前 agent 已实际退出');
       assert.equal(installCalls, 1);
       assert.equal(errors.length, 0, errors.join('\n'));
+      if (process.platform === 'win32') {
+        assert.equal(requestedAppId, 'com.fynvra.app', '打包分支请求的应用身份已被拦截');
+        checks.push('Windows 应用身份使用测试专用 id，不影响已安装的 Fynvra');
+      }
       checks.push('明确放弃未保存文件后，等待 agent 退出才调用安装器');
       checks.push(`确认对话框实际路径: ${[...dialogPaths].join(' + ') || '无'}`);
       assert.equal(readFileSync(join(base, 'workspace/notes.txt'), 'utf8'), '原始文件\n');
@@ -177,6 +192,7 @@ if (!process.versions.electron) {
             platform: process.platform,
             arch: process.arch,
             runtimeRoot,
+            appId: appId(),
             checks,
             dialogPaths: [...dialogPaths],
             requests,
@@ -281,6 +297,7 @@ if (!process.versions.electron) {
                     arch: process.arch,
                     runtimeRoot,
                     mode: 'manual',
+                    appId: appId(),
                     checks,
                     requests,
                     installCalls,
