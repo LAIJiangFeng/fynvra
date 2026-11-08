@@ -26,6 +26,7 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld).toHaveBeenCalledTimes(1);
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
+      'appDialog',
       'files',
       'instructions',
       'mcp',

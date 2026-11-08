@@ -49,6 +49,7 @@ export const zhCN = {
   common: {
     close: '关闭',
     cancel: '取消',
+    confirm: '确定',
     create: '创建',
     working: '处理中…',
     gotIt: '知道了',

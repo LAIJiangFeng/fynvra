@@ -3,6 +3,7 @@ import type { WorkspaceSummary } from '@shared/types/workspace';
 import { create } from 'zustand';
 import type { OpenWithTarget, WorkspaceCopyKind } from '../../preload/domains/workspaces';
 import { translate } from '../i18n';
+import { confirmDialog } from '../lib/appDialog';
 import { filesStoreFor } from './files';
 import { forgetWorkspaceTabs } from './workspaceTabs';
 
@@ -161,7 +162,14 @@ export const useWorkspacesStore = create<WorkspacesState>()((set, get) => ({
       return;
     }
     // Include snapshots of workspaces that have not been hydrated in this run.
-    if (!window.confirm(translate('workspaceTabs.removeDrafts'))) return;
+    if (
+      !(await confirmDialog({
+        message: translate('workspaceTabs.removeDrafts'),
+        confirmLabel: translate('workspaces.removeFromList'),
+        destructive: true,
+      }))
+    )
+      return;
     try {
       const result = await api.remove(id);
       if (!result.ok) {

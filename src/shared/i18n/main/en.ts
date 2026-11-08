@@ -18,6 +18,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     choose: 'Choose',
     add: 'Add',
     cancel: 'Cancel',
+    ok: 'OK',
   },
   app: {
     startFailed: 'Fynvra failed to start',

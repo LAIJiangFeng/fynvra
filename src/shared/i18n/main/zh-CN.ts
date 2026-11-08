@@ -16,6 +16,7 @@ export const mainZhCN = {
     choose: '选择',
     add: '添加',
     cancel: '取消',
+    ok: '确定',
   },
   app: {
     startFailed: 'Fynvra 启动失败',

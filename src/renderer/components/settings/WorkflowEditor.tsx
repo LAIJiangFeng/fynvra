@@ -13,7 +13,7 @@ import {
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { ArrowLeft, Plus, Save, Trash2, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useCallback, useId, useMemo, useState } from 'react';
+import { type FormEvent, useCallback, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -36,6 +36,7 @@ import { clampPosition } from '@/components/workflows/layout';
 import { type WorkflowEdgeRef, WorkflowGraph } from '@/components/workflows/WorkflowGraph';
 import type { T } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
+import { confirmDialog } from '@/lib/appDialog';
 import { useRolesStore } from '@/stores/roles';
 import { Field, InlineMessage } from './common';
 
@@ -232,6 +233,8 @@ export function WorkflowEditor({
 }) {
   // 基准也补齐 position：旧数据自动排版本身不算修改
   const [base] = useState(() => toDraft(initial));
+  /** 确认框（放弃修改 / 删除节点）是否正打开 */
+  const confirming = useRef(false);
   const [draft, setDraft] = useState<Workflow>(base);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -314,7 +317,8 @@ export function WorkflowEditor({
     });
   };
 
-  const deleteElements = (nodeIds: string[], edges: WorkflowEdgeRef[]) => {
+  const deleteElements = async (nodeIds: string[], edges: WorkflowEdgeRef[]) => {
+    if (confirming.current) return;
     if (nodeIds.length > 0) {
       const names = draft.steps
         .filter((step) => nodeIds.includes(step.id))
@@ -323,7 +327,17 @@ export function WorkflowEditor({
         names.length === 1
           ? t('settings.workflows.deleteNodeConfirm', { name: names[0] ?? '' })
           : t('settings.workflows.deleteNodesConfirm', { count: names.length });
-      if (!window.confirm(message)) return;
+      confirming.current = true;
+      try {
+        const confirmed = await confirmDialog({
+          message,
+          confirmLabel: t('common.delete'),
+          destructive: true,
+        });
+        if (!confirmed) return;
+      } finally {
+        confirming.current = false;
+      }
     }
     let cleared = 0;
     let steps = draft.steps;
@@ -357,8 +371,22 @@ export function WorkflowEditor({
     setNotice(null);
   };
 
-  const cancel = () => {
-    if (changed && !window.confirm(t('settings.workflows.discardConfirm'))) return;
+  // 确认框打开期间再按 Esc / 「返回」不重复弹窗
+  const cancel = async () => {
+    if (confirming.current) return;
+    if (changed) {
+      confirming.current = true;
+      try {
+        const discard = await confirmDialog({
+          message: t('settings.workflows.discardConfirm'),
+          confirmLabel: t('files.discard'),
+          destructive: true,
+        });
+        if (!discard) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
     onCancel();
   };
 
@@ -398,12 +426,12 @@ export function WorkflowEditor({
         }
         if (dirty) {
           event.stopPropagation();
-          if (!saving) cancel();
+          if (!saving) void cancel();
         }
       }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={cancel}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => void cancel()}>
           <ArrowLeft />
           {t('settings.workflows.back')}
         </Button>
@@ -415,7 +443,13 @@ export function WorkflowEditor({
             {blockedReason}
           </span>
         )}
-        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={cancel}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={saving}
+          onClick={() => void cancel()}
+        >
           {t('common.cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={!canSave} title={blockedReason ?? undefined}>
@@ -524,7 +558,7 @@ export function WorkflowEditor({
               onSelect={setSelectedId}
               onMove={handleMove}
               onConnect={handleConnect}
-              onDelete={({ nodeIds, edges }) => deleteElements(nodeIds, edges)}
+              onDelete={({ nodeIds, edges }) => void deleteElements(nodeIds, edges)}
               toolbar={
                 <Button
                   type="button"
@@ -555,7 +589,7 @@ export function WorkflowEditor({
                 disabled={saving}
                 onChange={(patch) => updateStep(selected.id, patch)}
                 onSelect={setSelectedId}
-                onRemove={() => deleteElements([selected.id], [])}
+                onRemove={() => void deleteElements([selected.id], [])}
               />
             ) : (
               <p className="text-muted-foreground text-sm">{t('settings.workflows.node.empty')}</p>
