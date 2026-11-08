@@ -18,6 +18,7 @@ import {
   FolderOpen,
   FolderPlus,
   FolderTree,
+  HardDriveDownload,
   Loader2,
   PackagePlus,
   Plus,
@@ -54,6 +55,7 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { PluginImportDialog } from './PluginImportDialog';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
@@ -72,7 +74,15 @@ export function PluginsSettings() {
   const [source, setSource] = useState('');
   const [working, setWorking] = useState<'local' | 'remote' | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
+  const [importSession, setImportSession] = useState<number | null>(null);
+  const importSessions = useRef(0);
   const t = useT();
+
+  const openImport = () => {
+    importSessions.current += 1;
+    setStatus(null);
+    setImportSession(importSessions.current);
+  };
 
   const proceed = async (target: Target) => {
     if (working) return;
@@ -96,6 +106,11 @@ export function PluginsSettings() {
   return (
     <section>
       <SectionHeader title={t('settings.plugins.title')}>
+        <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
+          <HardDriveDownload />
+          <span className="hidden sm:inline">{t('settings.import.fromLocal')}</span>
+          <span className="sm:hidden">{t('settings.import.fromLocalShort')}</span>
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -141,7 +156,12 @@ export function PluginsSettings() {
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       {loaded && plugins.length === 0 ? (
-        <EmptyState icon={Puzzle} title={t('settings.plugins.empty')} />
+        <EmptyState icon={Puzzle} title={t('settings.plugins.empty')}>
+          <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
+            <HardDriveDownload />
+            {t('settings.import.fromLocalShort')}
+          </Button>
+        </EmptyState>
       ) : (
         <ul className="divide-y rounded-lg border">
           {plugins.map((plugin) => (
@@ -149,6 +169,12 @@ export function PluginsSettings() {
           ))}
         </ul>
       )}
+
+      <PluginImportDialog
+        session={importSession}
+        onClose={() => setImportSession(null)}
+        onImported={setStatus}
+      />
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { lstat, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
@@ -6,6 +6,7 @@ import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   isPluginProviderName,
   localPluginMode,
+  MAX_PLUGIN_IMPORT_IDS,
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
   parseRemotePluginSource,
@@ -24,15 +25,18 @@ import {
 import type {
   PluginActionResult,
   PluginAddResult,
+  PluginImportResult,
   PluginListResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginScanImportsResult,
   PluginSetManualProvidersResult,
   PluginSetProviderMappingResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
 import { translate } from '../i18n';
 import { detectVsCode, launchApplication, validCustomAppPath } from '../services/openWith';
+import { type PiImportCandidate, scanPiPlugins } from '../services/plugins/piImport';
 import {
   copyDirOf,
   copyPluginInto,
@@ -142,6 +146,43 @@ export function registerPluginHandlers(): void {
           return { ok: false, code: 'failed', error: errorMessage(error) };
         }
       });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_SCAN_IMPORTS,
+    async (_event, raw: unknown): Promise<PluginScanImportsResult> => {
+      if (!isEmptyArgs(raw)) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        const scan = await scanPiPlugins({
+          home: homedir(),
+          env: process.env,
+          existing: await getPluginRegistry().list(),
+        });
+        importCache = new Map(scan.candidates.map((candidate) => [candidate.id, candidate]));
+        return {
+          ok: true,
+          candidates: scan.candidates.map(toCandidateView),
+          warnings: scan.warnings,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: translate('plugins.importScanFailed', { error: scanWarning(error) }),
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_IMPORT,
+    async (_event, raw: unknown): Promise<PluginImportResult> => {
+      const ids = parseImportIds(raw);
+      if (!ids) return { ok: false, error: translate('common.invalidArgs') };
+      return exclusive(
+        () => ({ ok: false, error: translate('plugins.busy') }),
+        () => importCandidates(ids)
+      );
     }
   );
 
@@ -390,6 +431,82 @@ function parseManualProviders(raw: unknown): SetPluginManualProvidersInput | nul
   return { id, names: [...new Set(names as string[])] };
 }
 
+/** 上一次 plugins:scan-imports 的候选（含路径 / 来源），按 id 查找；每次扫描整体替换 */
+let importCache = new Map<string, PiImportCandidate>();
+
+function toCandidateView(candidate: PiImportCandidate) {
+  const { id, name, kind, form, display, duplicateOf } = candidate;
+  return {
+    id,
+    name,
+    kind,
+    display,
+    ...(form ? { form } : {}),
+    ...(duplicateOf ? { duplicateOf } : {}),
+  };
+}
+
+/** 只接受 `{ ids }`：1–200 个非空字符串（最长 64），去重保序 */
+function parseImportIds(raw: unknown): string[] | null {
+  const record = asRecord(raw);
+  if (!record || Object.keys(record).some((key) => key !== 'ids')) return null;
+  const { ids } = record;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_PLUGIN_IMPORT_IDS) return null;
+  if (!ids.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64)) return null;
+  return [...new Set(ids as string[])];
+}
+
+/**
+ * 在 exclusive 锁内逐个导入：本地候选走与「添加本地插件」相同的复制流程，npm / git 走 installRemote。
+ * 某项失败不影响其他项；全部结束后有成功的才广播一次 plugins:changed。错误里不带完整路径。
+ */
+async function importCandidates(ids: readonly string[]): Promise<PluginImportResult> {
+  const imported: string[] = [];
+  const failed: { name: string; error: string }[] = [];
+  for (const id of ids) {
+    const candidate = importCache.get(id);
+    if (!candidate) {
+      failed.push({ name: id, error: translate('plugins.importUnknown') });
+      continue;
+    }
+    if (candidate.duplicateOf) {
+      failed.push({
+        name: candidate.name,
+        error: translate('plugins.alreadyRegistered', { name: candidate.duplicateOf }),
+      });
+      continue;
+    }
+    let result: PluginAddResult;
+    try {
+      if (candidate.kind === 'local') {
+        const missing = await lstat(candidate.path).then(
+          () => null,
+          (error: unknown) => scanWarning(error)
+        );
+        result = missing
+          ? {
+              ok: false,
+              code: 'invalid',
+              error: translate('plugins.pathMissing', { error: missing }),
+            }
+          : await registerLocal(candidate.path);
+      } else {
+        result = await registerRemote(candidate.source, candidate.kind);
+      }
+    } catch (error) {
+      result = { ok: false, code: 'failed', error: scanWarning(error) };
+    }
+    if (result.ok) {
+      imported.push(result.plugin.name);
+      importCache.set(id, { ...candidate, duplicateOf: result.plugin.name });
+    } else {
+      failed.push({ name: candidate.name, error: result.error });
+    }
+  }
+  if (imported.length > 0) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+  return { ok: true, imported, failed };
+}
+
 /** plugins:add-local 不带参数：只接受 undefined 或空对象 `{}` */
 function isEmptyArgs(raw: unknown): boolean {
   if (raw === undefined) return true;
@@ -460,6 +577,13 @@ function busyResult(): { ok: false; code: 'busy'; error: string } {
 async function addLocal(sender: Electron.WebContents): Promise<PluginAddResult> {
   const picked = await pickLocalPlugin(sender);
   if (!picked) return { ok: false, code: 'canceled', error: translate('common.canceled') };
+  const result = await registerLocal(picked);
+  if (result.ok) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+  return result;
+}
+
+/** 按路径添加本地插件（校验、查重、复制、登记、扫描服务名）；不广播，由调用方决定 */
+async function registerLocal(picked: string): Promise<PluginAddResult> {
   const checked = await inspectLocalPlugin(picked);
   if (!checked.ok) return { ok: false, code: 'invalid', error: checked.error };
   const plugins = getPluginRegistry();
@@ -485,9 +609,7 @@ async function addLocal(sender: Electron.WebContents): Promise<PluginAddResult> 
     await discardCopy(copied.path);
     return { ok: false, code: 'invalid', error: added.error };
   }
-  const plugin = await scanAfterChange(added.plugin);
-  sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin };
+  return { ok: true, plugin: await scanAfterChange(added.plugin) };
 }
 
 /** 只删副本根目录内的目录；不在根目录内时什么也不删 */
@@ -553,6 +675,13 @@ async function convertToCopy(id: string): Promise<PluginActionResult> {
 }
 
 async function installRemote(source: string, kind: 'npm' | 'git'): Promise<PluginAddResult> {
+  const result = await registerRemote(source, kind);
+  if (result.ok) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+  return result;
+}
+
+/** 经 pi 包管理器安装并登记、扫描服务名；不广播，由调用方决定 */
+async function registerRemote(source: string, kind: 'npm' | 'git'): Promise<PluginAddResult> {
   const plugins = getPluginRegistry();
   const duplicate = await plugins.findDuplicate({ source });
   if (duplicate) {
@@ -576,9 +705,7 @@ async function installRemote(source: string, kind: 'npm' | 'git'): Promise<Plugi
   if (!path) return { ok: false, code: 'failed', error: translate('plugins.installedPathMissing') };
   const added = await plugins.add({ name: await pluginName(path), source, kind, path });
   if (!added.ok) return { ok: false, code: 'invalid', error: added.error };
-  const plugin = await scanAfterChange(added.plugin);
-  sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin };
+  return { ok: true, plugin: await scanAfterChange(added.plugin) };
 }
 
 /**

@@ -200,6 +200,10 @@ export const IPC_CHANNELS = {
   PLUGINS_CONVERT_TO_COPY: 'plugins:convert-to-copy',
   /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
   PLUGINS_INSTALL: 'plugins:install',
+  /** 无参数（或 `{}`）：只读扫描原生 pi 的扩展与包，返回候选视图；候选缓存在 Main，每次扫描替换 */
+  PLUGINS_SCAN_IMPORTS: 'plugins:scan-imports',
+  /** `{ ids }`：按扫描缓存里的候选 id 逐个导入（本地复制、npm / git 安装）；Renderer 不传路径 */
+  PLUGINS_IMPORT: 'plugins:import',
   /** id：删除插件，并从所有角色的 pluginIds 中移除（有改动时广播 roles:changed） */
   PLUGINS_REMOVE: 'plugins:remove',
   PLUGINS_TOGGLE: 'plugins:toggle',
