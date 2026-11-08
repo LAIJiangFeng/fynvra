@@ -11,10 +11,21 @@ export interface ImportSourcePaths {
   codexConfig: string;
   codexAuth: string;
   ccSwitchDb: string;
+  piModels: string;
+  piAuth: string;
+  piSettings: string;
 }
 
-export function locateImportSources(home: string): ImportSourcePaths {
+/** pi 的 agent 目录：`PI_CODING_AGENT_DIR` 优先，否则 `~/.pi/agent`。 */
+export function locateImportSources(
+  home: string,
+  env: Readonly<Record<string, string | undefined>> = {}
+): ImportSourcePaths {
+  const piAgentDir = env.PI_CODING_AGENT_DIR?.trim() || join(home, '.pi', 'agent');
   return {
+    piModels: join(piAgentDir, 'models.json'),
+    piAuth: join(piAgentDir, 'auth.json'),
+    piSettings: join(piAgentDir, 'settings.json'),
     claudeSettings: join(home, '.claude', 'settings.json'),
     codexConfig: join(home, '.codex', 'config.toml'),
     codexAuth: join(home, '.codex', 'auth.json'),

@@ -16,6 +16,7 @@ import { readCcSwitch } from './readers/ccSwitch';
 import { readClaudeCode } from './readers/claudeCode';
 import { readCodex } from './readers/codex';
 import type { DiscoveredProvider, Env, ReaderResult } from './readers/common';
+import { readPi } from './readers/pi';
 
 // 「从本机导入」分三层：定位（locate.ts）→ 读取（readers/，纯函数）→ 编排去重（本文件）。
 // 各来源并行读取；单个来源失败只变成它自己的一条 warning，不影响其它来源。
@@ -25,12 +26,14 @@ export const PROVIDER_IMPORT_SOURCES: readonly ProviderImportSource[] = [
   'claude-code',
   'codex',
   'cc-switch',
+  'pi',
 ];
 
 const SOURCE_LABELS: Readonly<Record<ProviderImportSource, string>> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   'cc-switch': 'CC Switch',
+  pi: 'pi',
 };
 
 export function isProviderImportSource(value: unknown): value is ProviderImportSource {
@@ -64,7 +67,7 @@ export async function scanProviderImports(
   options: ScanOptions = {}
 ): Promise<ProviderImportScan> {
   const { existing = [], home = homedir(), env = process.env, tempDir = tmpdir() } = options;
-  const paths = locateImportSources(home);
+  const paths = locateImportSources(home, env);
   const selected = PROVIDER_IMPORT_SOURCES.filter((source) => sources.includes(source));
   const results = await Promise.all(
     selected.map((source) =>
@@ -109,6 +112,15 @@ async function readSource(
     case 'cc-switch': {
       const rows = await readCcSwitchRows(paths.ccSwitchDb, tempDir);
       return rows === null ? NOTHING : readCcSwitch(rows, env);
+    }
+    case 'pi': {
+      // 只读文件；models.json 里的命令型 key 不执行
+      const [models, auth, settings] = await Promise.all([
+        readTextIfExists(paths.piModels),
+        readTextIfExists(paths.piAuth),
+        readTextIfExists(paths.piSettings),
+      ]);
+      return models === null ? NOTHING : readPi({ models, auth, settings, env });
     }
   }
 }
