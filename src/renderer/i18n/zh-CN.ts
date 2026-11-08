@@ -371,6 +371,10 @@ export const zhCN = {
     recallQueued: '撤回编辑',
     recallQueuedDraftExists: '请先处理输入框中的草稿，再撤回编辑',
     replySuggestionHint: '回复建议：{suggestion}。按右箭头填入输入框',
+    mentionWorkflows: '工作流',
+    mentionRoles: '角色',
+    mentionNoWorkflows: '还没有工作流，去 设置 → 工作流 新建',
+    mentionNoRoles: '还没有可派发的角色，去 设置 → 角色 新建',
   },
   model: {
     pick: '选择模型',

@@ -19,6 +19,8 @@ Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) S
 - **验收合并**：worker 完成后读 diff、跑检查命令、判断是否达标；达标则把 worker 分支合并到主 agent 所在分支，再删 worktree；不达标则把意见发回让 worker 继续改。
 - 向用户汇报每个任务的结果与证据。
 
+在主 agent 会话的输入框里，开头或空白后输入 `/` 选工作流、`@` 选角色（↑↓ 移动，Enter / Tab 选中，Esc 关闭），插入 `/工作流名`、`@角色名`（名称含空格时写成 `@「名称」`），表示用这个工作流做或派给这个角色；消息里的这些写法显示成标签，原文不变。
+
 ### 3. Worker 在独立 worktree 里干活
 每个 worker 会话绑定一个 worktree（分支 `fynvra/<task-slug>`）。worker 的工具：pi 默认编程工具 + `ask_coordinator`（阻塞提问）+ `report_done`（一次性汇报，带 succeeded/failed）。
 worker 的审批档位随主 agent 派发时的当前档位；模型按角色配置，角色没配则用主 agent 当前的。主 agent 与 Worker 都执行真实工具审批：`supervised` 审批命令、文件写入/编辑、MCP、访问网络与插件工具；`auto-edits` 自动接受编辑，命令、MCP、访问网络与插件工具仍需审批；`full` 放行普通操作，但 `rm -rf`、`git push` 等保护底线在任何档位都必须人工确认，会话内允许也不豁免。用户可允许一次、会话内允许或拒绝；超时、Stop、断连按拒绝处理。参数校验、角色白名单、路径边界、编排权限和真正的信息提问仍有效。

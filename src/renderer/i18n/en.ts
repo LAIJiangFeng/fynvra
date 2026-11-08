@@ -394,6 +394,10 @@ export const en: MessagesShape<typeof zhCN> = {
     recallQueued: 'Recall to edit',
     recallQueuedDraftExists: 'Finish or clear the current draft before recalling a queued message',
     replySuggestionHint: 'Reply suggestion: {suggestion}. Press Right Arrow to fill it in',
+    mentionWorkflows: 'Workflows',
+    mentionRoles: 'Roles',
+    mentionNoWorkflows: 'No workflows yet. Create one in Settings → Workflows',
+    mentionNoRoles: 'No roles to assign yet. Create one in Settings → Roles',
   },
   model: {
     pick: 'Select model',

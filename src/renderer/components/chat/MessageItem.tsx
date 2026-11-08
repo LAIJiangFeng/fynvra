@@ -1,11 +1,18 @@
 import { memo, useState } from 'react';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
-import { selectCompactingOf, type TimelineMessage, useSessionsStore } from '@/stores/sessions';
+import {
+  selectCompactingOf,
+  selectSessionOf,
+  type TimelineMessage,
+  useSessionsStore,
+} from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
 import { ChatMarkdown } from './ChatMarkdown';
 import { CopyButton } from './CopyButton';
 import { ImagePreview } from './ImagePreview';
+import { MentionText, useMentionOptions } from './MentionMenu';
+import { isOrchestratorRole, useRoles } from './roles';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ReadonlyTools, ToolCallCard } from './ToolCallCard';
 
@@ -35,6 +42,12 @@ function UserMessage({ message }: { message: TimelineMessage }) {
   const t = useT();
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const sending = message.optimistic && !message.failed;
+  // 编排会话里的 `/工作流`、`@角色` 显示成标签；只改显示，原文不变
+  const roleId = useSessionsStore((state) => selectSessionOf(message.sessionId)(state)?.roleId);
+  const roles = useRoles();
+  const { options: mentionTargets } = useMentionOptions(
+    roleId !== undefined && isOrchestratorRole(roleId, roles)
+  );
   return (
     <div className="flex flex-col items-end gap-1">
       {message.images?.map((image, index) => (
@@ -72,7 +85,7 @@ function UserMessage({ message }: { message: TimelineMessage }) {
             message.failed && 'border border-destructive/50'
           )}
         >
-          {message.text}
+          <MentionText text={message.text} targets={mentionTargets} />
         </div>
       )}
       {message.optimistic && <PendingDelivery message={message} />}
