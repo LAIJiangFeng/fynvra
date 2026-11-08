@@ -67,6 +67,8 @@ export interface RoleResources {
   mcpServers: AgentMcpServer[];
   /** 插件路径（pi 包目录或扩展文件）；缺省等价于 [] */
   plugins?: string[];
+  /** 与 plugins 同序的插件 id 与路径，agent 据此识别哪个插件在按名字找模型服务 */
+  pluginRefs?: SpawnSessionSpec['pluginRefs'];
   instructionFile?: SpawnSessionSpec['instructionFile'];
   /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
   warnings: string[];
@@ -108,6 +110,8 @@ export interface AgentHostDeps {
    * 只在角色挂了插件时读取并下发。缺省不下发
    */
   resolvePluginProviders?(): Promise<PluginProviderSpec[]>;
+  /** agent 报告插件按名字找了一个模型服务（生产为写进 plugins.json 的 requestedProviders）；缺省忽略 */
+  onPluginProviderLookup?(pluginId: string, name: string): void;
   /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
   listWorkflows?(): Promise<readonly Workflow[]>;
   workerOptions?: Pick<
@@ -592,6 +596,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(resources.instructionFile ? { instructionFile: resources.instructionFile } : {}),
           mcpServers: resources.mcpServers,
           ...(resources.plugins?.length ? { plugins: resources.plugins } : {}),
+          ...(resources.plugins?.length && resources.pluginRefs?.length
+            ? { pluginRefs: resources.pluginRefs }
+            : {}),
           ...(pluginProviders ? { pluginProviders } : {}),
           worker: stored.dispatchId !== undefined,
           roles,
@@ -1001,6 +1008,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         return;
       case 'log':
         log(event.level, `[agent] ${event.message}`);
+        return;
+      case 'plugin-provider-lookup':
+        try {
+          deps.onPluginProviderLookup?.(event.pluginId, event.name);
+        } catch {
+          log('warn', `failed to record a model service lookup of plugin ${event.pluginId}`);
+        }
         return;
     }
   }

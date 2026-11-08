@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
-import { isApprovalDecision } from '@shared/types/agent';
+import { isApprovalDecision, type PluginProviderSpec } from '@shared/types/agent';
 import {
   type ChatImage,
   type ChatMessage,
@@ -141,28 +141,55 @@ function createAppAgentHost(): AgentHostService {
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
-    // 只在角色挂了插件时调用：已启用、有 key、有模型的服务按服务 id 暴露给插件（与原生 pi 的 models.json 一致）
-    resolvePluginProviders: async () =>
-      (await getProviderStore().list()).flatMap((provider) =>
-        provider.enabled && provider.apiKey && provider.models.length > 0
-          ? [
-              {
-                id: provider.id,
-                name: provider.name,
-                api: provider.api,
-                baseUrl: resolveBaseUrl(provider.api, provider.baseUrl),
-                apiKey: provider.apiKey,
-                models: provider.models.map((model) => ({
-                  id: model.id,
-                  ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
-                })),
-              },
-            ]
-          : []
-      ),
+    resolvePluginProviders,
+    // 插件运行时按名字找过的服务记进 plugins.json；内容变了才广播
+    onPluginProviderLookup: (pluginId, name) => {
+      void getPluginRegistry()
+        .recordRequestedProvider(pluginId, name)
+        .then((changed) => {
+          if (changed) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+        })
+        .catch(() => undefined);
+    },
     listWorkflows: () => getWorkflowRegistry().list(),
     broadcast: sendToAllWindows,
   });
+}
+
+/**
+ * 只在角色挂了插件时调用。先把已启用、有 key、有模型的服务按服务 id 暴露给插件（与原生 pi 的 models.json 一致），
+ * 再按 plugins.json 的 providerMap 下发别名：目标服务可用时加一条 `id: 名字` 的副本（替换同 id 的条目）；
+ * 目标不可用时移除同名条目——用户明确选了服务，不回退到同名服务。
+ */
+async function resolvePluginProviders(): Promise<PluginProviderSpec[]> {
+  const providers = (await getProviderStore().list()).flatMap((provider): PluginProviderSpec[] =>
+    provider.enabled && provider.apiKey && provider.models.length > 0
+      ? [
+          {
+            id: provider.id,
+            name: provider.name,
+            api: provider.api,
+            baseUrl: resolveBaseUrl(provider.api, provider.baseUrl),
+            apiKey: provider.apiKey,
+            models: provider.models.map((model) => ({
+              id: model.id,
+              ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+            })),
+          },
+        ]
+      : []
+  );
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const providerMap = await getPluginRegistry()
+    .getProviderMap()
+    .catch((): Record<string, string> => ({}));
+  let result = providers;
+  for (const [name, serviceId] of Object.entries(providerMap)) {
+    const target = byId.get(serviceId);
+    result = result.filter((provider) => provider.id !== name);
+    if (target) result.push({ ...target, id: name });
+  }
+  return result;
 }
 
 /**

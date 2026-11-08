@@ -202,6 +202,8 @@ export const IPC_CHANNELS = {
   PLUGINS_INSTALL: 'plugins:install',
   PLUGINS_REMOVE: 'plugins:remove',
   PLUGINS_TOGGLE: 'plugins:toggle',
+  /** `{ name, serviceId: string | null }`：插件里的服务名改用哪个模型服务；null 恢复「自动（同名）」 */
+  PLUGINS_SET_PROVIDER_MAPPING: 'plugins:set-provider-mapping',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 

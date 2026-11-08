@@ -5,10 +5,12 @@ import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   isPluginMode,
+  isPluginProviderName,
   localPluginMode,
   type PluginEntry,
   type PluginMode,
   parseRemotePluginSource,
+  type SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
 import {
   app,
@@ -25,6 +27,7 @@ import type {
   PluginListResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginSetProviderMappingResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
 import { translate } from '../i18n';
@@ -48,6 +51,7 @@ import {
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { showAppMessageBox } from './appDialog';
+import { getProviderStore } from './providers';
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
@@ -92,7 +96,12 @@ async function exclusive<T>(onBusy: () => T, task: () => Promise<T>): Promise<T>
 export function registerPluginHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.PLUGINS_LIST, async (): Promise<PluginListResult> => {
     try {
-      return { ok: true, plugins: await getPluginRegistry().list() };
+      const plugins = getPluginRegistry();
+      return {
+        ok: true,
+        plugins: await plugins.list(),
+        providerMap: await plugins.getProviderMap(),
+      };
     } catch (error) {
       return { ok: false, error: translate('plugins.readFailed', { error: errorMessage(error) }) };
     }
@@ -164,6 +173,33 @@ export function registerPluginHandlers(): void {
         if (!plugin) return { ok: false, error: translate('plugins.notFound') };
         sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
         return { ok: true, plugin };
+      } catch (error) {
+        return {
+          ok: false,
+          error: translate('plugins.updateFailed', { error: errorMessage(error) }),
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_SET_PROVIDER_MAPPING,
+    async (_event, raw: unknown): Promise<PluginSetProviderMappingResult> => {
+      const input = parseProviderMapping(raw);
+      if (!input) return { ok: false, error: translate('plugins.invalidProviderMapping') };
+      try {
+        if (input.serviceId !== null) {
+          const serviceId = input.serviceId;
+          const exists = (await getProviderStore().list()).some(
+            (provider) => provider.id === serviceId
+          );
+          if (!exists) return { ok: false, error: translate('plugins.providerServiceNotFound') };
+        }
+        const plugins = getPluginRegistry();
+        if (await plugins.setProviderMapping(input.name, input.serviceId)) {
+          sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+        }
+        return { ok: true, providerMap: await plugins.getProviderMap() };
       } catch (error) {
         return {
           ok: false,
@@ -501,6 +537,18 @@ async function removePlugin(id: string): Promise<PluginRemoveResult> {
   await plugins.remove(id);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
   return { ok: true };
+}
+
+/** 只接受 `name` 与 `serviceId` 两个键；serviceId 为 null 或 registry id */
+function parseProviderMapping(raw: unknown): SetPluginProviderMappingInput | null {
+  const record = asRecord(raw);
+  if (!record || Object.keys(record).some((key) => key !== 'name' && key !== 'serviceId')) {
+    return null;
+  }
+  const { name, serviceId } = record;
+  if (!isPluginProviderName(name)) return null;
+  if (serviceId === null) return { name, serviceId: null };
+  return isRegistryId(serviceId) ? { name, serviceId } : null;
 }
 
 function parseToggle(raw: unknown): { id: string; enabled: boolean } | null {

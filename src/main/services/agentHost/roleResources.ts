@@ -52,17 +52,18 @@ export function createRoleResourceResolver(
       }
       return server?.enabled ? [toAgentMcpServer(server)] : [];
     });
-    const pluginPaths = pluginIds.flatMap((id) => {
+    const pluginRefs = pluginIds.flatMap((id) => {
       const plugin = plugins.find((candidate) => candidate.id === id);
       if (!plugin) {
         warnings.push(`plugin "${id}" of role "${role.id}" is no longer registered; skipped`);
       }
-      return plugin?.enabled ? [plugin.path] : [];
+      return plugin?.enabled ? [{ id: plugin.id, path: plugin.path }] : [];
     });
+    const pluginPaths = pluginRefs.map((ref) => ref.path);
     return {
       skills: skillPaths,
       mcpServers,
-      ...(pluginPaths.length > 0 ? { plugins: pluginPaths } : {}),
+      ...(pluginPaths.length > 0 ? { plugins: pluginPaths, pluginRefs } : {}),
       warnings,
       ...(instructionFile ? { instructionFile } : {}),
     };

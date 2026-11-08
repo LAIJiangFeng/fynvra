@@ -222,6 +222,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     toolMissing: '{tool} was not found; install it and make sure it is on PATH',
     removeFailed: 'Failed to remove plugin: {error}',
     updateFailed: 'Failed to update plugin: {error}',
+    invalidProviderMapping:
+      'Invalid model service mapping: the name must be 1–64 letters, digits, ".", "_" or "-" and must not start with "fynvra-"',
+    providerServiceNotFound: 'The selected model service does not exist',
+    providerMapFull: 'At most {max} model service mappings are allowed',
     notAbsolute: 'Plugin path must be absolute',
     pathMissing: 'Plugin path is not available: {error}',
     badFileType: 'A plugin must be a directory or a .ts / .js / .mjs extension file',

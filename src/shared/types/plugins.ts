@@ -22,6 +22,46 @@ export interface PluginEntry {
   mode?: PluginMode;
   /** 仅 copy 模式：复制来源的原始路径 */
   sourcePath?: string;
+  /**
+   * 插件运行时按名字找过的模型服务（如 `getProvider("sub2api")`），由 agent 进程识别后上报；
+   * 去重，按首次出现排序，最多 {@link MAX_REQUESTED_PROVIDERS} 个
+   */
+  requestedProviders?: string[];
+}
+
+/** 每个插件最多记录的服务名个数 */
+export const MAX_REQUESTED_PROVIDERS = 20;
+/** plugins.json 的 providerMap 最多条目数 */
+export const MAX_PROVIDER_MAP_ENTRIES = 100;
+
+/** 插件里的服务名 → Fynvra 服务 id；没有条目的名字按「自动（同名服务）」 */
+export type PluginProviderMap = Record<string, string>;
+
+const PLUGIN_PROVIDER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * 插件里的服务名（pi provider 名）：`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`，且不以 `fynvra-` 开头（不区分大小写；
+ * 那是 Fynvra 运行时 provider 键的前缀）
+ */
+export function isPluginProviderName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    PLUGIN_PROVIDER_NAME.test(value) &&
+    !value.toLowerCase().startsWith('fynvra-')
+  );
+}
+
+/** 与 Main jsonRegistry 的 REGISTRY_ID 相同（shared 不能 import Main） */
+const REGISTRY_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export function isRegistryId(value: unknown): value is string {
+  return typeof value === 'string' && REGISTRY_ID.test(value);
+}
+
+/** `plugins:set-provider-mapping` 的入参；serviceId 为 null 表示删除映射（恢复自动） */
+export interface SetPluginProviderMappingInput {
+  name: string;
+  serviceId: string | null;
 }
 
 /** 本地插件的实际模式（旧记录缺省为 link）；npm / git 插件返回 null */

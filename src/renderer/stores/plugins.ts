@@ -1,17 +1,20 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
-import type { PluginEntry, PluginMode } from '@shared/types/plugins';
+import type { PluginEntry, PluginMode, PluginProviderMap } from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   PluginActionResult,
   PluginAddResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginSetProviderMappingResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
 
 export interface PluginsState {
   plugins: PluginEntry[];
+  /** 插件里的服务名 → 服务 id（全局）；没有条目的名字为「自动（同名）」 */
+  providerMap: PluginProviderMap;
   loaded: boolean;
   error: string | null;
   refresh(): Promise<void>;
@@ -25,6 +28,11 @@ export interface PluginsState {
   openAsWorkspace(id: string): Promise<PluginOpenAsWorkspaceResult>;
   recopy(id: string): Promise<PluginActionResult>;
   convertToCopy(id: string): Promise<PluginActionResult>;
+  /** serviceId 为 null 恢复「自动（同名）」 */
+  setProviderMapping(
+    name: string,
+    serviceId: string | null
+  ): Promise<PluginSetProviderMappingResult>;
 }
 
 /** IPC 调用本身失败（极少见）也折成 { ok: false } */
@@ -48,6 +56,7 @@ const api = window.fynvra.plugins;
 
 export const usePluginsStore = create<PluginsState>()((set, get) => ({
   plugins: [],
+  providerMap: {},
   loaded: false,
   error: null,
 
@@ -56,7 +65,12 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
       const result = await api.list();
       set(
         result.ok
-          ? { plugins: result.plugins, loaded: true, error: null }
+          ? {
+              plugins: result.plugins,
+              providerMap: result.providerMap ?? {},
+              loaded: true,
+              error: null,
+            }
           : { loaded: true, error: result.error }
       );
     } catch (error) {
@@ -121,6 +135,12 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
   async convertToCopy(id) {
     const result = await safeAction(() => api.convertToCopy(id));
     if (result.ok) await get().refresh();
+    return result;
+  },
+
+  async setProviderMapping(name, serviceId) {
+    const result = await safely(() => api.setProviderMapping({ name, serviceId }));
+    if (result.ok) set({ providerMap: result.providerMap });
     return result;
   },
 }));

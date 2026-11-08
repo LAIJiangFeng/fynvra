@@ -210,6 +210,10 @@ export const mainZhCN = {
     toolMissing: '未找到 {tool}，请先安装并确保它在 PATH 中',
     removeFailed: '移除插件失败：{error}',
     updateFailed: '更新插件失败：{error}',
+    invalidProviderMapping:
+      '无效的模型服务关联：名称须为 1–64 个字母、数字、“.”“_”或“-”，且不能以 fynvra- 开头',
+    providerServiceNotFound: '所选的模型服务不存在',
+    providerMapFull: '最多只能设置 {max} 条模型服务关联',
     notAbsolute: '插件路径必须是绝对路径',
     pathMissing: '插件路径不可用：{error}',
     badFileType: '插件必须是目录，或 .ts / .js / .mjs 扩展文件',

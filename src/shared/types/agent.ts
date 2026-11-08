@@ -21,6 +21,7 @@ import {
   type SessionStatus,
 } from './chat';
 import { parseCompactionState, parseContextRuntime, parseRetryState } from './contextRuntime';
+import { isPluginProviderName, isRegistryId } from './plugins';
 import { type CompactionStrategy, isCompactionStrategy, isCompactionTimeoutMs } from './settings';
 
 /**
@@ -104,7 +105,10 @@ export interface AgentWorkflowOption {
  * key 明文只在 Main → worker 这一跳出现。
  */
 export interface PluginProviderSpec {
-  /** Fynvra 服务 id（registry id 规则，不以 `fynvra-` 开头） */
+  /**
+   * 插件查找用的名字：Fynvra 服务 id，或 providerMap 里的插件服务名（别名）；
+   * 符合 {@link isPluginProviderName}
+   */
   id: string;
   name: string;
   api: string;
@@ -113,9 +117,15 @@ export interface PluginProviderSpec {
   models: { id: string; reasoning?: boolean }[];
 }
 
-/** 与 Main jsonRegistry 的 REGISTRY_ID 相同（shared 不能 import Main） */
-const PLUGIN_PROVIDER_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+/** 角色挂载的插件：agent 据此把调用栈里的路径对应到插件 id（识别插件按名字找了哪些模型服务） */
+export interface PluginRefSpec {
+  id: string;
+  /** 插件实际加载的绝对路径（与 plugins 里的相同） */
+  path: string;
+}
+
 const MAX_PLUGIN_PROVIDERS = 64;
+const MAX_PLUGIN_REFS = 64;
 const MAX_PLUGIN_PROVIDER_MODELS = 512;
 
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
@@ -136,6 +146,8 @@ export interface SpawnSessionSpec {
   mcpServers: AgentMcpServer[];
   /** 角色挂载的插件（pi 包目录或扩展文件）的绝对路径；缺失按 `[]`，兼容旧消息 */
   plugins?: string[];
+  /** 插件 id 与路径的对应（见 {@link PluginRefSpec}）；只有挂了插件的会话才带 */
+  pluginRefs?: PluginRefSpec[];
   /** 插件可见的模型服务；只有挂了插件的会话才带（见 {@link PluginProviderSpec}） */
   pluginProviders?: PluginProviderSpec[];
   /** Main reads the selected file on every spawn; worker never accesses its source path. */
@@ -299,7 +311,9 @@ export type AgentWorkerEvent =
   /** describe-models 的回答（进程级） */
   | { type: 'models-described'; requestId: string; result: ModelsDescribedResult }
   /** 诊断日志（进程级） */
-  | { type: 'log'; level: LogLevel; message: string };
+  | { type: 'log'; level: LogLevel; message: string }
+  /** 插件按名字找了一个模型服务（进程级；同一进程内每个「插件 + 名字」只报一次） */
+  | { type: 'plugin-provider-lookup'; pluginId: string; name: string };
 
 // Record 键强制穷举联合类型：chat.ts / core 加了成员而这里没加会编译失败。
 const SESSION_STATUS_SET: Record<SessionStatus, true> = {
@@ -422,6 +436,12 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
     const { level, message } = record;
     return memberOf(LOG_LEVEL_SET, level) && typeof message === 'string'
       ? { type: 'log', level, message }
+      : null;
+  }
+  if (record.type === 'plugin-provider-lookup') {
+    const { pluginId, name } = record;
+    return isRegistryId(pluginId) && isPluginProviderName(name)
+      ? { type: 'plugin-provider-lookup', pluginId, name }
       : null;
   }
   if (record.type === 'models-described') {
@@ -718,9 +738,7 @@ function parsePluginProvider(raw: unknown): PluginProviderSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
   const { id, name, api, baseUrl, apiKey } = record;
-  if (typeof id !== 'string' || !PLUGIN_PROVIDER_ID.test(id) || id.startsWith('fynvra-')) {
-    return null;
-  }
+  if (!isPluginProviderName(id)) return null;
   if (
     !isNonEmptyString(api) ||
     !isNonEmptyString(baseUrl) ||
@@ -744,6 +762,19 @@ function parsePluginProvider(raw: unknown): PluginProviderSpec | null {
   }
   if (models.length === 0) return null;
   return { id, name: isNonEmptyString(name) ? name : id, api, baseUrl, apiKey, models };
+}
+
+/** 非法条目丢弃；超出上限的截掉 */
+function parsePluginRefs(raw: unknown): PluginRefSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const refs: PluginRefSpec[] = [];
+  for (const item of raw) {
+    if (refs.length >= MAX_PLUGIN_REFS) break;
+    const record = asRecord(item);
+    if (!record || !isRegistryId(record.id) || !isNonEmptyString(record.path)) continue;
+    refs.push({ id: record.id, path: record.path });
+  }
+  return refs;
 }
 
 function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
@@ -798,6 +829,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     skills,
     mcpServers,
     ...(plugins.length > 0 ? { plugins } : {}),
+    ...(record.pluginRefs !== undefined ? { pluginRefs: parsePluginRefs(record.pluginRefs) } : {}),
     ...(record.pluginProviders !== undefined
       ? { pluginProviders: parsePluginProviders(record.pluginProviders) }
       : {}),
