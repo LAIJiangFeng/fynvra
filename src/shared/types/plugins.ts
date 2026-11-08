@@ -27,6 +27,15 @@ export interface PluginEntry {
    * 去重，按首次出现排序，最多 {@link MAX_REQUESTED_PROVIDERS} 个
    */
   requestedProviders?: string[];
+  /**
+   * 添加 / 安装 / 复制后静态扫描插件代码识别出的服务名（只读文本，不执行代码）；去重，按首次出现排序，
+   * 最多 {@link MAX_REQUESTED_PROVIDERS} 个
+   */
+  scannedProviders?: string[];
+  /** 上次扫描时被扫文件的相对路径 + 大小 + mtime 的哈希；变了就重新扫描 */
+  scanStamp?: string;
+  /** 用户手动添加的服务名；最多 {@link MAX_REQUESTED_PROVIDERS} 个 */
+  manualProviders?: string[];
 }
 
 /** 每个插件最多记录的服务名个数 */
@@ -62,6 +71,12 @@ export function isRegistryId(value: unknown): value is string {
 export interface SetPluginProviderMappingInput {
   name: string;
   serviceId: string | null;
+}
+
+/** `plugins:set-manual-providers` 的入参：整组替换手动添加的服务名 */
+export interface SetPluginManualProvidersInput {
+  id: string;
+  names: string[];
 }
 
 /** 本地插件的实际模式（旧记录缺省为 link）；npm / git 插件返回 null */

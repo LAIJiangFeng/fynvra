@@ -225,6 +225,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidProviderMapping:
       'Invalid model service mapping: the name must be 1–64 letters, digits, ".", "_" or "-" and must not start with "fynvra-"',
     providerServiceNotFound: 'The selected model service does not exist',
+    invalidManualProviders:
+      'Invalid service names: at most 20, each 1–64 letters, digits, ".", "_" or "-", not starting with "fynvra-"',
     providerMapFull: 'At most {max} model service mappings are allowed',
     notAbsolute: 'Plugin path must be absolute',
     pathMissing: 'Plugin path is not available: {error}',

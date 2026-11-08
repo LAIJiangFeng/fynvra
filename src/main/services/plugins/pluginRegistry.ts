@@ -42,6 +42,20 @@ export interface PluginRegistry {
    * 只有内容变了才写盘并返回 true，插件不存在时返回 false
    */
   recordRequestedProvider(id: string, name: string): Promise<boolean>;
+  /**
+   * 写入静态扫描结果；条目不存在或加载路径已不是 path（扫描期间被重新复制）时不写。
+   * 只有内容变了才写盘；返回最新条目（不存在时 undefined）
+   */
+  updateScan(
+    id: string,
+    path: string,
+    scan: { providers: string[]; stamp: string }
+  ): Promise<PluginEntry | undefined>;
+  /** 整组替换手动添加的服务名（非法、重复的丢弃，最多 20 个）；只有内容变了才写盘 */
+  setManualProviders(
+    id: string,
+    names: readonly string[]
+  ): Promise<{ plugin: PluginEntry; changed: boolean } | undefined>;
   /** 插件里的服务名 → 服务 id */
   getProviderMap(): Promise<PluginProviderMap>;
   /**
@@ -176,6 +190,35 @@ export function createPluginRegistry(options: {
         const updated: PluginEntry = { ...current, requestedProviders: [...requested, name] };
         return { next: entries.with(index, updated), result: true };
       }),
+    updateScan: (id, path, scan) =>
+      transact((entries) => {
+        const index = entries.findIndex((entry) => entry.id === id);
+        const current = entries[index];
+        if (!current) return { result: undefined };
+        if (current.path !== path) return { result: current };
+        const providers = parseRequestedProviders(scan.providers);
+        const same =
+          current.scanStamp === scan.stamp && sameNames(current.scannedProviders ?? [], providers);
+        if (same) return { result: current };
+        const updated: PluginEntry = { ...current, scanStamp: scan.stamp };
+        if (providers.length > 0) updated.scannedProviders = providers;
+        else delete updated.scannedProviders;
+        return { next: entries.with(index, updated), result: updated };
+      }),
+    setManualProviders: (id, names) =>
+      transact<{ plugin: PluginEntry; changed: boolean } | undefined>((entries) => {
+        const index = entries.findIndex((entry) => entry.id === id);
+        const current = entries[index];
+        if (!current) return { result: undefined };
+        const manual = parseRequestedProviders(names);
+        if (sameNames(current.manualProviders ?? [], manual)) {
+          return { result: { plugin: current, changed: false } };
+        }
+        const updated: PluginEntry = { ...current };
+        if (manual.length > 0) updated.manualProviders = manual;
+        else delete updated.manualProviders;
+        return { next: entries.with(index, updated), result: { plugin: updated, changed: true } };
+      }),
     getProviderMap: () => enqueue(async () => ({ ...(await loadState()).providerMap })),
     setProviderMapping: (name, serviceId) =>
       enqueue(async () => {
@@ -267,6 +310,9 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   if (!record) return null;
   const { id, name, source, kind, path, enabled, installedAt, mode, sourcePath } = record;
   const requestedProviders = parseRequestedProviders(record.requestedProviders);
+  const scannedProviders = parseRequestedProviders(record.scannedProviders);
+  const manualProviders = parseRequestedProviders(record.manualProviders);
+  const { scanStamp } = record;
   if (!isRegistryId(id) || typeof name !== 'string' || !name.trim()) return null;
   if (typeof source !== 'string' || !source.trim()) return null;
   if (typeof kind !== 'string' || !KINDS.includes(kind as PluginKind)) return null;
@@ -285,10 +331,17 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
       ? { sourcePath }
       : {}),
     ...(requestedProviders.length > 0 ? { requestedProviders } : {}),
+    ...(scannedProviders.length > 0 ? { scannedProviders } : {}),
+    ...(typeof scanStamp === 'string' && /^[0-9a-f]{1,64}$/.test(scanStamp) ? { scanStamp } : {}),
+    ...(manualProviders.length > 0 ? { manualProviders } : {}),
   };
 }
 
-/** 非法与重复的名字丢弃，最多 {@link MAX_REQUESTED_PROVIDERS} 个 */
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, index) => name === b[index]);
+}
+
+/** 非法与重复的名字丢弃，最多 {@link MAX_REQUESTED_PROVIDERS} 个（requested / scanned / manual 共用） */
 function parseRequestedProviders(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const names: string[] = [];

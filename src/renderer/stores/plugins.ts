@@ -7,6 +7,7 @@ import type {
   PluginAddResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginSetManualProvidersResult,
   PluginSetProviderMappingResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
@@ -33,6 +34,8 @@ export interface PluginsState {
     name: string,
     serviceId: string | null
   ): Promise<PluginSetProviderMappingResult>;
+  /** 整组替换手动添加的服务名 */
+  setManualProviders(id: string, names: string[]): Promise<PluginSetManualProvidersResult>;
 }
 
 /** IPC 调用本身失败（极少见）也折成 { ok: false } */
@@ -141,6 +144,15 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
   async setProviderMapping(name, serviceId) {
     const result = await safely(() => api.setProviderMapping({ name, serviceId }));
     if (result.ok) set({ providerMap: result.providerMap });
+    return result;
+  },
+
+  async setManualProviders(id, names) {
+    const result = await safely(() => api.setManualProviders({ id, names }));
+    if (result.ok) {
+      const plugin = result.plugin;
+      set({ plugins: get().plugins.map((entry) => (entry.id === plugin.id ? plugin : entry)) });
+    }
     return result;
   },
 }));

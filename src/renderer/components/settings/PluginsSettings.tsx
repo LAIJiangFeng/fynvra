@@ -1,6 +1,12 @@
-import { providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
+import { findCatalogProvider, providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelProviderView } from '@shared/types/llm';
-import { localPluginMode, type PluginEntry, type PluginMode } from '@shared/types/plugins';
+import {
+  isPluginProviderName,
+  localPluginMode,
+  MAX_REQUESTED_PROVIDERS,
+  type PluginEntry,
+  type PluginMode,
+} from '@shared/types/plugins';
 import {
   AppWindow,
   CircleAlert,
@@ -14,12 +20,14 @@ import {
   FolderTree,
   Loader2,
   PackagePlus,
+  Plus,
   Puzzle,
   RefreshCw,
   ShieldAlert,
   Trash2,
+  X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,6 +63,8 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
+import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -221,6 +231,7 @@ function PluginRow({
   const remove = usePluginsStore((state) => state.remove);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [addingName, setAddingName] = useState(false);
   const t = useT();
   const mode = localPluginMode(plugin);
   const onError = (text: string) => onStatus({ tone: 'error', text });
@@ -246,7 +257,12 @@ function PluginRow({
             {plugin.source}
           </p>
         )}
-        <RequestedProviders plugin={plugin} onError={onError} />
+        <RequestedProviders
+          plugin={plugin}
+          adding={addingName}
+          onAddingChange={setAddingName}
+          onError={onError}
+        />
         {confirmingRemove && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">
@@ -295,7 +311,12 @@ function PluginRow({
           if (!result.ok) onError(result.error);
         }}
       />
-      <PluginActions plugin={plugin} mode={mode} onStatus={onStatus} />
+      <PluginActions
+        plugin={plugin}
+        mode={mode}
+        onStatus={onStatus}
+        onAddServiceName={() => setAddingName(true)}
+      />
       <Button
         variant="ghost"
         size="icon-xs"
@@ -314,10 +335,13 @@ function PluginActions({
   plugin,
   mode,
   onStatus,
+  onAddServiceName,
 }: {
   plugin: PluginEntry;
   mode: PluginMode | null;
   onStatus: (status: Status) => void;
+  /** 在卡片里原地打开「添加模型服务名」输入框 */
+  onAddServiceName: () => void;
 }) {
   const reveal = usePluginsStore((state) => state.reveal);
   const openIn = usePluginsStore((state) => state.openIn);
@@ -327,6 +351,8 @@ function PluginActions({
   const targets = useWorkspacesStore((state) => state.openWithTargets);
   const loadOpenWithApps = useWorkspacesStore((state) => state.loadOpenWithApps);
   const [busy, setBusy] = useState(false);
+  /** 选了「添加模型服务名」时菜单关闭不把焦点还给「…」按钮，留给刚出现的输入框；其他项不变 */
+  const keepFocusOnClose = useRef(false);
   const t = useT();
   const onError = (text: string) => onStatus({ tone: 'error', text });
 
@@ -384,7 +410,14 @@ function PluginActions({
       >
         {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        finalFocus={() => {
+          if (!keepFocusOnClose.current) return true;
+          keepFocusOnClose.current = false;
+          return false;
+        }}
+      >
         <DropdownMenuItem onClick={async () => report(await reveal(plugin.id))}>
           <FolderOpen />
           {t('settings.plugins.reveal')}
@@ -416,6 +449,15 @@ function PluginActions({
         <DropdownMenuItem onClick={() => void openWorkspace()}>
           <FolderTree />
           {t('settings.plugins.openAsWorkspace')}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            keepFocusOnClose.current = true;
+            onAddServiceName();
+          }}
+        >
+          <Plus />
+          {t('settings.plugins.manualAdd')}
         </DropdownMenuItem>
         {mode && <DropdownMenuSeparator />}
         {mode === 'copy' && (
@@ -451,41 +493,114 @@ function isUsable(provider: ModelProviderView): boolean {
   return provider.enabled && provider.hasApiKey && provider.models.length > 0;
 }
 
-/** 卡片里「需要的模型服务」：插件运行时按名查找过的服务，每个名字可下拉改选实际使用的服务 */
+/** 插件的服务名：扫描结果、运行时记录、手动添加三者合并去重，保持各自顺序 */
+function pluginProviderNames(entry: PluginEntry): string[] {
+  return [
+    ...new Set([
+      ...(entry.scannedProviders ?? []),
+      ...(entry.requestedProviders ?? []),
+      ...(entry.manualProviders ?? []),
+    ]),
+  ];
+}
+
+/** 「新建服务」的草稿：沿用「自定义」（OpenAI 兼容）新建时的默认值，名称预填为服务名 */
+function newServiceDraft(name: string): ProviderDraft | null {
+  const custom = findCatalogProvider('openai-compatible');
+  return custom ? { ...draftFromCatalog(custom), name } : null;
+}
+
+/**
+ * 卡片里的「模型服务」：添加时扫描代码识别的、运行时按名查找过的和手动添加的服务名，
+ * 每个名字可下拉改选实际使用的服务；未找到的可直接新建。列表为空且不在手动添加时什么也不显示
+ * （很多插件不用模型服务），手动添加的入口在卡片「…」菜单里
+ */
 function RequestedProviders({
   plugin,
+  adding,
+  onAddingChange,
   onError,
 }: {
   plugin: PluginEntry;
+  adding: boolean;
+  onAddingChange: (adding: boolean) => void;
   onError: (text: string) => void;
 }) {
   const plugins = usePluginsStore((state) => state.plugins);
   const providerMap = usePluginsStore((state) => state.providerMap);
   const setProviderMapping = usePluginsStore((state) => state.setProviderMapping);
+  const setManualProviders = usePluginsStore((state) => state.setManualProviders);
   const providers = useProvidersStore((state) => state.providers);
   const t = useT();
-  const names = plugin.requestedProviders ?? [];
+  const names = pluginProviderNames(plugin);
+  const manual = plugin.manualProviders ?? [];
+  const detected = new Set([
+    ...(plugin.scannedProviders ?? []),
+    ...(plugin.requestedProviders ?? []),
+  ]);
+  const [creating, setCreating] = useState<(ProviderEditing & { name: string }) | null>(null);
+  const sessions = useRef(0);
 
   /** 被多个插件用到的名字 */
   const shared = useMemo(() => {
     const counts = new Map<string, number>();
     for (const entry of plugins) {
-      for (const name of new Set(entry.requestedProviders ?? [])) {
+      for (const name of pluginProviderNames(entry)) {
         counts.set(name, (counts.get(name) ?? 0) + 1);
       }
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
   }, [plugins]);
 
-  if (names.length === 0) {
-    return (
-      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedEmpty')}</p>
+  const removeManual = async (name: string) => {
+    const result = await setManualProviders(
+      plugin.id,
+      manual.filter((item) => item !== name)
     );
-  }
+    if (!result.ok) onError(result.error);
+  };
+
+  const openCreate = (name: string) => {
+    const draft = newServiceDraft(name);
+    if (!draft) return;
+    sessions.current += 1;
+    setCreating({ key: sessions.current, draft, name });
+  };
+
+  /** 新服务 id 与服务名不同（如自动生成 sub2api-2）时关联过去；相同时清掉可能残留的失效映射 */
+  const linkCreated = async (name: string, providerId: string) => {
+    const result = await setProviderMapping(name, providerId === name ? null : providerId);
+    if (!result.ok) onError(result.error);
+  };
+
+  const addForm = adding && (
+    <ManualNameForm
+      pluginId={plugin.id}
+      names={names}
+      manual={manual}
+      onDone={() => onAddingChange(false)}
+    />
+  );
+
+  if (names.length === 0) return addForm || null;
 
   return (
     <div className="mt-2">
-      <p className="mb-1 font-medium text-xs">{t('settings.plugins.requestedTitle')}</p>
+      <div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+        <span className="truncate">
+          {t('settings.plugins.requestedTitle')} · {t('settings.plugins.requestedApplyHint')}
+        </span>
+        {!adding && (
+          <button
+            type="button"
+            className="shrink-0 text-primary hover:underline"
+            title={t('settings.plugins.manualAdd')}
+            onClick={() => onAddingChange(true)}
+          >
+            {t('settings.plugins.manualAddShort')}
+          </button>
+        )}
+      </div>
       <ul className="flex flex-col gap-1.5">
         {names.map((name) => {
           const mapped = Object.hasOwn(providerMap, name) ? providerMap[name] : undefined;
@@ -507,6 +622,7 @@ function RequestedProviders({
             items.push({ value: mapped, label: t('settings.plugins.requestedMissing') });
           }
           const state = !target ? 'missing' : isUsable(target) ? 'usable' : 'unavailable';
+          const removable = manual.includes(name) && !detected.has(name);
           return (
             <li key={name}>
               <div className="flex items-center gap-2">
@@ -563,6 +679,30 @@ function RequestedProviders({
                         : 'settings.plugins.requestedUnavailable'
                   )}
                 </span>
+                {state === 'missing' && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 px-2 text-xs"
+                    onClick={() => openCreate(name)}
+                  >
+                    {t('settings.plugins.createService')}
+                  </Button>
+                )}
+                {removable && (
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="size-6 shrink-0"
+                    aria-label={t('settings.plugins.manualRemove', { name })}
+                    title={t('settings.plugins.manualRemove', { name })}
+                    onClick={() => void removeManual(name)}
+                  >
+                    <X />
+                  </Button>
+                )}
               </div>
               {shared.has(name) && (
                 <p className="mt-0.5 text-muted-foreground text-xs">
@@ -573,7 +713,107 @@ function RequestedProviders({
           );
         })}
       </ul>
-      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedFooter')}</p>
+      {addForm}
+      <ProviderDialog
+        editing={creating}
+        onClose={() => setCreating(null)}
+        onSaved={(providerId) => {
+          if (creating) void linkCreated(creating.name, providerId);
+        }}
+      />
+    </div>
+  );
+}
+
+/** 卡片里原地出现的「添加模型服务名」小输入框；每次打开重新挂载，状态自动清空 */
+function ManualNameForm({
+  pluginId,
+  names,
+  manual,
+  onDone,
+}: {
+  pluginId: string;
+  /** 卡片上已显示的全部名字（查重用） */
+  names: readonly string[];
+  manual: readonly string[];
+  onDone: () => void;
+}) {
+  const setManualProviders = usePluginsStore((state) => state.setManualProviders);
+  const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  // 从「…」菜单打开时，菜单关闭比输入框挂载晚：等下一帧再聚焦一次
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const t = useT();
+
+  const submit = async () => {
+    const name = input.trim();
+    if (!isPluginProviderName(name)) {
+      setInputError(t('settings.plugins.manualInvalid'));
+      return;
+    }
+    if (names.includes(name)) {
+      setInputError(t('settings.plugins.manualExists'));
+      return;
+    }
+    if (manual.length >= MAX_REQUESTED_PROVIDERS) {
+      setInputError(t('settings.plugins.manualFull', { max: MAX_REQUESTED_PROVIDERS }));
+      return;
+    }
+    const result = await setManualProviders(pluginId, [...manual, name]);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div className="mt-1.5">
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <Input
+          ref={inputRef}
+          autoFocus
+          value={input}
+          maxLength={64}
+          placeholder={t('settings.plugins.manualPlaceholder')}
+          aria-label={t('settings.plugins.manualAdd')}
+          aria-invalid={inputError !== null}
+          className="h-7 max-w-56 font-mono text-xs"
+          onChange={(event) => {
+            setInput(event.target.value);
+            setInputError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              onDone();
+            }
+          }}
+        />
+        <Button type="submit" size="sm" className="h-7 px-2 text-xs">
+          {t('common.confirm')}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={onDone}
+        >
+          {t('common.cancel')}
+        </Button>
+      </form>
+      {inputError && <p className="mt-0.5 text-destructive text-xs">{inputError}</p>}
     </div>
   );
 }

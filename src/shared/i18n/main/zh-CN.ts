@@ -213,6 +213,8 @@ export const mainZhCN = {
     invalidProviderMapping:
       '无效的模型服务关联：名称须为 1–64 个字母、数字、“.”“_”或“-”，且不能以 fynvra- 开头',
     providerServiceNotFound: '所选的模型服务不存在',
+    invalidManualProviders:
+      '无效的服务名：最多 20 个，每个须为 1–64 个字母、数字、“.”“_”或“-”，且不能以 fynvra- 开头',
     providerMapFull: '最多只能设置 {max} 条模型服务关联',
     notAbsolute: '插件路径必须是绝对路径',
     pathMissing: '插件路径不可用：{error}',

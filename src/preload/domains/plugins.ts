@@ -3,6 +3,7 @@ import type {
   PluginEntry,
   PluginMode,
   PluginProviderMap,
+  SetPluginManualProvidersInput,
   SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
 
@@ -12,6 +13,7 @@ export type PluginListResult = IpcResult<{
   providerMap: PluginProviderMap;
 }>;
 export type PluginSetProviderMappingResult = IpcResult<{ providerMap: PluginProviderMap }>;
+export type PluginSetManualProvidersResult = IpcResult<{ plugin: PluginEntry }>;
 /** busy：已有安装 / 卸载在进行；canceled：取消了选择框 */
 export type PluginAddResult =
   | { ok: true; plugin: PluginEntry }
@@ -47,6 +49,8 @@ export interface PluginsApi {
   convertToCopy(id: string): Promise<PluginActionResult>;
   /** 插件里的服务名改用哪个模型服务（须是已存在的服务 id）；serviceId 为 null 恢复「自动（同名）」 */
   setProviderMapping(input: SetPluginProviderMappingInput): Promise<PluginSetProviderMappingResult>;
+  /** 整组替换插件手动添加的服务名（合法、最多 20 个） */
+  setManualProviders(input: SetPluginManualProvidersInput): Promise<PluginSetManualProvidersResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -67,6 +71,7 @@ export function createPluginsApi(ipc: Invoker, subscribe: Subscribe): PluginsApi
     recopy: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_RECOPY, id),
     convertToCopy: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_CONVERT_TO_COPY, id),
     setProviderMapping: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_SET_PROVIDER_MAPPING, input),
+    setManualProviders: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_SET_MANUAL_PROVIDERS, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PLUGINS_CHANGED, () => callback()),
   };
 }

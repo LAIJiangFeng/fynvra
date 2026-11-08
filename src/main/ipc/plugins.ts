@@ -7,9 +7,11 @@ import {
   isPluginMode,
   isPluginProviderName,
   localPluginMode,
+  MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
   type PluginMode,
   parseRemotePluginSource,
+  type SetPluginManualProvidersInput,
   type SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
 import {
@@ -27,6 +29,7 @@ import type {
   PluginListResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginSetManualProvidersResult,
   PluginSetProviderMappingResult,
   PluginToggleResult,
 } from '../../preload/domains/plugins';
@@ -48,6 +51,7 @@ import {
   packageManagerError,
   pluginName,
 } from '../services/plugins/pluginSources';
+import { scanPluginProviders } from '../services/plugins/providerScan';
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { showAppMessageBox } from './appDialog';
@@ -99,7 +103,7 @@ export function registerPluginHandlers(): void {
       const plugins = getPluginRegistry();
       return {
         ok: true,
-        plugins: await plugins.list(),
+        plugins: await refreshScans(plugins),
         providerMap: await plugins.getProviderMap(),
       };
     } catch (error) {
@@ -210,6 +214,25 @@ export function registerPluginHandlers(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_SET_MANUAL_PROVIDERS,
+    async (_event, raw: unknown): Promise<PluginSetManualProvidersResult> => {
+      const input = parseManualProviders(raw);
+      if (!input) return { ok: false, error: translate('plugins.invalidManualProviders') };
+      try {
+        const result = await getPluginRegistry().setManualProviders(input.id, input.names);
+        if (!result) return { ok: false, error: translate('plugins.notFound') };
+        if (result.changed) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+        return { ok: true, plugin: result.plugin };
+      } catch (error) {
+        return {
+          ok: false,
+          error: translate('plugins.updateFailed', { error: errorMessage(error) }),
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.PLUGINS_REVEAL,
     async (_event, rawId: unknown): Promise<IpcResult> => {
       if (!isRegistryId(rawId)) return { ok: false, error: translate('plugins.invalidId') };
@@ -306,6 +329,69 @@ export function registerPluginHandlers(): void {
   );
 }
 
+/** 日志只带错误码，不带 fs 错误里的路径 */
+function scanWarning(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === 'string' ? code : 'unknown';
+}
+
+/**
+ * 添加 / 安装 / 复制成功后立即扫描并写入；失败只记 warning，返回原条目，不影响操作本身
+ */
+async function scanAfterChange(plugin: PluginEntry): Promise<PluginEntry> {
+  try {
+    const scan = await scanPluginProviders(plugin.path);
+    const updated = await getPluginRegistry().updateScan(plugin.id, plugin.path, {
+      providers: scan.names ?? [],
+      stamp: scan.stamp,
+    });
+    return updated ?? plugin;
+  } catch (error) {
+    console.warn(`[plugins] scan failed for ${plugin.id}: ${scanWarning(error)}`);
+    return plugin;
+  }
+}
+
+/**
+ * plugins:list 时补扫：没有扫描记录或 stamp 变了就重新扫描并写入（写入走注册表串行队列）。
+ * 不广播 plugins:changed（Renderer 收到广播会再调 list，会循环）。
+ */
+async function refreshScans(plugins: PluginRegistry): Promise<PluginEntry[]> {
+  const entries = await plugins.list();
+  const results = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const scan = await scanPluginProviders(entry.path, entry.scanStamp);
+        if (scan.names === null) return false;
+        await plugins.updateScan(entry.id, entry.path, {
+          providers: scan.names,
+          stamp: scan.stamp,
+        });
+        return true;
+      } catch (error) {
+        // 路径不存在（如引用的原文件被删）很常见，不刷日志
+        if (scanWarning(error) !== 'ENOENT') {
+          console.warn(`[plugins] scan failed for ${entry.id}: ${scanWarning(error)}`);
+        }
+        return false;
+      }
+    })
+  );
+  return results.some(Boolean) ? plugins.list() : entries;
+}
+
+/** 只接受 `id` 与 `names` 两个键；names 全部合法、最多 20 个，去重后保序 */
+function parseManualProviders(raw: unknown): SetPluginManualProvidersInput | null {
+  const record = asRecord(raw);
+  if (!record || Object.keys(record).some((key) => key !== 'id' && key !== 'names')) return null;
+  const { id, names } = record;
+  if (!isRegistryId(id) || !Array.isArray(names) || names.length > MAX_REQUESTED_PROVIDERS) {
+    return null;
+  }
+  if (!names.every((name) => isPluginProviderName(name))) return null;
+  return { id, names: [...new Set(names as string[])] };
+}
+
 /** 不传参数视为 `{ mode: 'copy' }`（兼容旧调用）；只接受 `mode` 一个键 */
 function parseAddLocal(raw: unknown): PluginMode | null {
   if (raw === undefined) return 'copy';
@@ -390,8 +476,9 @@ async function addLocal(sender: Electron.WebContents, mode: PluginMode): Promise
       mode: 'link',
     });
     if (!added.ok) return { ok: false, code: 'invalid', error: added.error };
+    const plugin = await scanAfterChange(added.plugin);
     sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-    return { ok: true, plugin: added.plugin };
+    return { ok: true, plugin };
   }
 
   const duplicate = await plugins.findDuplicate({ source: checked.path, path: checked.path });
@@ -416,8 +503,9 @@ async function addLocal(sender: Electron.WebContents, mode: PluginMode): Promise
     await discardCopy(copied.path);
     return { ok: false, code: 'invalid', error: added.error };
   }
+  const plugin = await scanAfterChange(added.plugin);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin: added.plugin };
+  return { ok: true, plugin };
 }
 
 /** 只删副本根目录内的目录；不在根目录内时什么也不删 */
@@ -451,8 +539,9 @@ async function recopy(id: string): Promise<PluginActionResult> {
     sourcePath: plugin.sourcePath,
   });
   if (!updated) return { ok: false, code: 'failed', error: translate('plugins.notFound') };
+  const scanned = await scanAfterChange(updated);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin: updated };
+  return { ok: true, plugin: scanned };
 }
 
 /** 仅 link 模式：把原路径复制成副本，条目改为 copy（sourcePath = 原 path） */
@@ -476,8 +565,9 @@ async function convertToCopy(id: string): Promise<PluginActionResult> {
     await discardCopy(copied.path);
     return { ok: false, code: 'failed', error: translate('plugins.notFound') };
   }
+  const scanned = await scanAfterChange(updated);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin: updated };
+  return { ok: true, plugin: scanned };
 }
 
 async function installRemote(source: string, kind: 'npm' | 'git'): Promise<PluginAddResult> {
@@ -504,8 +594,9 @@ async function installRemote(source: string, kind: 'npm' | 'git'): Promise<Plugi
   if (!path) return { ok: false, code: 'failed', error: translate('plugins.installedPathMissing') };
   const added = await plugins.add({ name: await pluginName(path), source, kind, path });
   if (!added.ok) return { ok: false, code: 'invalid', error: added.error };
+  const plugin = await scanAfterChange(added.plugin);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-  return { ok: true, plugin: added.plugin };
+  return { ok: true, plugin };
 }
 
 /**
