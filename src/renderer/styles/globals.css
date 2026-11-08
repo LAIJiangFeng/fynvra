@@ -162,6 +162,51 @@
   height: 10px;
 }
 
+/* 可编辑画布的出入口圆点：可见 14px，透明外圈把点击范围扩到 28px（只读与 fail 圆点不带此类） */
+.react-flow .react-flow__handle.workflow-handle {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--card);
+  cursor: crosshair;
+  transition:
+    width 120ms ease,
+    height 120ms ease,
+    background-color 120ms ease;
+}
+
+.react-flow .react-flow__handle.workflow-handle::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 100%;
+}
+
+.react-flow .react-flow__handle.workflow-handle:hover,
+.react-flow .react-flow__handle.workflow-handle.connectingfrom {
+  width: 18px;
+  height: 18px;
+  background-color: var(--primary);
+}
+
+/* 拖出连线时：所有可落点的入口高亮，吸附到的入口、鼠标下的目标卡片更显眼 */
+.workflow-connecting
+  .react-flow__node:not(.workflow-connect-source)
+  .react-flow__handle.workflow-handle-in {
+  background-color: var(--ring);
+}
+
+.workflow-connecting .react-flow__handle.workflow-handle-in.connectingto {
+  width: 18px;
+  height: 18px;
+  background-color: var(--primary);
+}
+
+.workflow-connecting .react-flow__node:not(.workflow-connect-source):hover .workflow-node-card {
+  box-shadow:
+    0 0 0 1px var(--background),
+    0 0 0 3px var(--ring);
+}
+
 /* 失败退回：红色虚线 */
 .react-flow__edge.workflow-fail-edge .react-flow__edge-path {
   stroke: var(--destructive);

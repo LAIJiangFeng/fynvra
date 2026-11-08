@@ -11,6 +11,8 @@ import {
   MarkerType,
   type NodeChange,
   type OnBeforeDelete,
+  type OnConnectEnd,
+  type OnConnectStart,
   type OnNodeDrag,
   type OnSelectionChangeFunc,
   Panel,
@@ -81,6 +83,8 @@ const NODE_TYPES = { workflowStep: WorkflowNodeCard };
 const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 const PRO_OPTIONS = { hideAttribution: true };
 const DELETE_KEYS = ['Delete', 'Backspace'];
+/** 拖出连线时，离入口圆点多远（屏幕像素）就吸附过去 */
+const CONNECTION_RADIUS = 50;
 
 /** 说明首行（去掉空白行），卡片上截断显示。 */
 function firstLine(text: string): string {
@@ -268,6 +272,53 @@ function WorkflowGraphInner({
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 正在从哪个节点的出口拉线：画布据此高亮可落点的入口和鼠标下的目标卡片
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+
+  const handleConnectStart = useCallback<OnConnectStart>(
+    (_event, { nodeId, handleId, handleType }) => {
+      setConnectingFrom(handleType === 'source' && handleId === 'out' ? nodeId : null);
+    },
+    []
+  );
+
+  // 没对准入口圆点时：松手落在另一张节点卡片的任意位置也算连到它，
+  // 仍走同一个 onConnect，自连 / 重复 / 成环由调用方照常校验。
+  const handleConnectEnd = useCallback<OnConnectEnd>(
+    (event, state) => {
+      setConnectingFrom(null);
+      if (state.isValid) return; // 已由 onConnect 处理
+      const from = state.fromHandle;
+      if (from?.type !== 'source' || from.id !== 'out') return;
+      if (!('clientX' in event)) return; // 触屏：忽略
+      const container = containerRef.current;
+      if (!container) return;
+      for (const element of document.elementsFromPoint(event.clientX, event.clientY)) {
+        if (!container.contains(element)) continue;
+        if (element.closest('.react-flow__panel')) return; // 落在工具栏 / 缩放控件上
+        const nodeElement = element.closest<HTMLElement>('.react-flow__node');
+        if (!nodeElement) continue;
+        const target = nodeElement.dataset.id;
+        if (!target) return;
+        // 松手仍在自己的出口圆点上：视为放弃，不报自连
+        if (target === from.nodeId && element.closest('.react-flow__handle')) return;
+        onConnect?.(from.nodeId, target);
+        return;
+      }
+    },
+    [onConnect]
+  );
+
+  const flowNodes = useMemo(
+    () =>
+      connectingFrom
+        ? nodes.map((node) =>
+            node.id === connectingFrom ? { ...node, className: 'workflow-connect-source' } : node
+          )
+        : nodes,
+    [nodes, connectingFrom]
+  );
   const explicitDelete = useRef(false);
 
   // 删除一律交给调用方（确认、清理引用），画布自己不删。
@@ -324,9 +375,13 @@ function WorkflowGraphInner({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: 只拦截画布内冒泡上来的 Esc
-    <div ref={containerRef} className={cn('h-full w-full', className)} onKeyDown={handleKeyDown}>
+    <div
+      ref={containerRef}
+      className={cn('h-full w-full', connectingFrom && 'workflow-connecting', className)}
+      onKeyDown={handleKeyDown}
+    >
       <ReactFlow<WorkflowFlowNode>
-        nodes={nodes}
+        nodes={flowNodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
         onNodesChange={handleNodesChange}
@@ -337,6 +392,9 @@ function WorkflowGraphInner({
         onNodeMouseLeave={onNodeHover ? () => onNodeHover(null) : undefined}
         onNodeDragStop={editable ? handleDragStop : undefined}
         onConnect={editable ? handleConnect : undefined}
+        onConnectStart={editable ? handleConnectStart : undefined}
+        onConnectEnd={editable ? handleConnectEnd : undefined}
+        connectionRadius={CONNECTION_RADIUS}
         onBeforeDelete={handleBeforeDelete}
         nodesDraggable={editable}
         nodesConnectable={editable}

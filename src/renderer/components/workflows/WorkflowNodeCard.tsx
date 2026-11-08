@@ -60,7 +60,7 @@ function WorkflowNodeCardImpl({ data, selected }: NodeProps<WorkflowFlowNode>) {
   return (
     <div
       className={cn(
-        'flex flex-col justify-center gap-0.5 rounded-lg border-2 bg-card px-3 py-2 text-card-foreground shadow-xs',
+        'workflow-node-card flex flex-col justify-center gap-0.5 rounded-lg border-2 bg-card px-3 py-2 text-card-foreground shadow-xs',
         status && STATUS_STYLE[status].card,
         selected && 'ring-2 ring-ring ring-offset-1 ring-offset-background'
       )}
@@ -71,6 +71,7 @@ function WorkflowNodeCardImpl({ data, selected }: NodeProps<WorkflowFlowNode>) {
         position={Position.Left}
         id="in"
         isConnectable={data.editable}
+        className={data.editable ? 'workflow-handle workflow-handle-in' : undefined}
         style={data.editable ? undefined : HIDDEN_HANDLE}
       />
       <Handle
@@ -78,6 +79,7 @@ function WorkflowNodeCardImpl({ data, selected }: NodeProps<WorkflowFlowNode>) {
         position={Position.Right}
         id="out"
         isConnectable={data.editable}
+        className={data.editable ? 'workflow-handle workflow-handle-out' : undefined}
         style={data.editable ? undefined : HIDDEN_HANDLE}
       />
       <Handle
