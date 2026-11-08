@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   openHtml: vi.fn(),
 }));
 vi.mock('electron', () => ({
+  app: { getPath: () => 'user-data' },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
       mocks.handlers.set(channel, handler),
@@ -20,6 +21,9 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../services/files', () => ({
   createFilesService: () => mocks,
+}));
+vi.mock('../services/wordConversion', () => ({
+  createWordConverter: () => ({ convert: vi.fn() }),
 }));
 vi.mock('./workspaces', () => ({ getWorkspaceService: () => ({ get: vi.fn() }) }));
 
