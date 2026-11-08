@@ -89,6 +89,14 @@ export interface DispatchTaskView {
   dependsOn: string[];
   /** 任务书（Markdown） */
   spec: string;
+  /** 按工作流派发时的工作流 id 或名称；普通任务为空串 */
+  workflow: string;
+}
+
+/** 从 dispatch_task 的结果文本里取 task id（`- task_id: \`task_xxx\``）；结果未到或认不出时为 undefined */
+export function dispatchTaskIdOf(output: string | undefined): string | undefined {
+  if (!output) return undefined;
+  return /^- task_id: `+ ?([^`\s]+) ?`+/m.exec(output)?.[1];
 }
 
 /** dispatch_task 卡片：任务标题、角色（缺省 worker）、依赖、任务书 */
@@ -97,6 +105,7 @@ export function dispatchTaskView(args: unknown): DispatchTaskView {
   return {
     title: textOf(record?.title),
     role: textOf(record?.role) || 'worker',
+    workflow: textOf(record?.workflow).trim(),
     dependsOn: stringsOf(record?.depends_on),
     spec: typeof record?.spec === 'string' ? record.spec : '',
   };

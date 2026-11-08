@@ -27,19 +27,30 @@ import {
   Trash2,
   Undo2,
   Users,
+  Workflow,
   Wrench,
 } from 'lucide-react';
 import { memo, type ReactNode, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
+import { useOrchestrationStore } from '@/stores/orchestration';
 import { type DiffLine, diffEdit, type FileChange, fileChangeOf } from '@/stores/sessions/timeline';
-import { useGeneralPreferencesStore } from '@/stores/settings';
+import { useGeneralPreferencesStore, useSettingsStore } from '@/stores/settings';
+import {
+  DispatchStatusBadge,
+  useDispatchedTask,
+  WORKFLOW_TAG_CLASS,
+  WorkflowProgressText,
+  WorkflowTaskProgress,
+} from './DispatchProgress';
 import { formatDuration } from './format';
 import { Markdown } from './Markdown';
 import {
   describeTool,
+  dispatchTaskIdOf,
   dispatchTaskView,
   prettyArgs,
   reportDoneView,
@@ -261,31 +272,112 @@ function CompactToolLine({ call }: { call: ChatToolCall }) {
   );
 }
 
-/** 主 agent 派发任务：突出任务标题与执行角色 */
+/**
+ * 主 agent 派发任务：突出任务标题与执行角色（工作流任务显示工作流徽标）。
+ * 结果里的 task_id 对上快照里的任务后显示实时状态；工作流任务另有进度区。
+ * 对不上（结果未到、旧 run、已清理）时是静态卡片。
+ */
 function DispatchTaskCard({ call }: { call: ChatToolCall }) {
   const t = useT();
   const task = dispatchTaskView(call.args);
   const style = FAMILY_STYLE.orchestration;
+  const taskId = dispatchTaskIdOf(call.output);
+  const { workspaceId, task: live } = useDispatchedTask(taskId);
+  const focusTask = useOrchestrationStore((state) => state.focusTask);
+  const workflow = live?.workflow;
+  const workflowName = workflow?.name || task.workflow;
+  // 进度区：用户没动过时，任务进行中就展开
+  const [progressChoice, setProgressChoice] = useState<boolean | null>(null);
+  const active = live?.status === 'todo' || live?.status === 'in-progress';
+  const progressOpen = progressChoice ?? active;
+
+  /** 打开右侧面板的任务抽屉（可定位到工作流节点） */
+  const viewTask = (nodeId?: string) => {
+    if (!live || !workspaceId) return;
+    const settings = useSettingsStore.getState();
+    if (!settings.sidePanelOpen) settings.toggleSidePanel();
+    focusTask({ workspaceId, taskId: live.id, ...(nodeId ? { nodeId } : {}) });
+  };
 
   return (
     <Collapsible className={cn('rounded-md border text-sm', style.card)}>
-      <CardTrigger
-        icon={<Send className={cn('size-3.5 shrink-0', style.icon)} />}
-        title={
-          <>
-            <span className={cn('shrink-0 font-medium text-xs', style.icon)}>
-              {t('tools.labels.dispatch_task')}
-            </span>
-            <span className="min-w-0 truncate font-medium">
-              {task.title || t('tools.untitledTask')}
-            </span>
-            <Badge variant="outline" className="shrink-0">
-              {task.role}
-            </Badge>
-          </>
-        }
-        call={call}
-      />
+      <div className="flex min-w-0 items-center">
+        <CardTrigger
+          icon={<Send className={cn('size-3.5 shrink-0', style.icon)} />}
+          title={
+            <>
+              <span className={cn('shrink-0 font-medium text-xs', style.icon)}>
+                {t('tools.labels.dispatch_task')}
+              </span>
+              <span className="min-w-0 truncate font-medium">
+                {task.title || t('tools.untitledTask')}
+              </span>
+              {workflowName ? (
+                <Badge className={cn('max-w-40 shrink-0', WORKFLOW_TAG_CLASS)}>
+                  <Workflow />
+                  <span className="truncate">
+                    {t('tools.workflowBadge', { name: workflowName })}
+                  </span>
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="shrink-0">
+                  {task.role}
+                </Badge>
+              )}
+              {live && <DispatchStatusBadge status={live.status} workflow={!!workflowName} />}
+              {workflow && <WorkflowProgressText workflow={workflow} />}
+            </>
+          }
+          call={call}
+        />
+        {live && !workflow && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mr-1.5 h-6 shrink-0 px-2 text-xs"
+            title={t('tools.viewTaskHint')}
+            onClick={() => viewTask()}
+          >
+            {t('tools.viewTask')}
+          </Button>
+        )}
+      </div>
+      {live && workflow && workspaceId && (
+        <div className="border-t px-3 py-1.5">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-expanded={progressOpen}
+              className="flex min-w-0 flex-1 items-center gap-1 rounded text-left text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              onClick={() => setProgressChoice(!progressOpen)}
+            >
+              <ChevronRight
+                className={cn('size-3.5 transition-transform', progressOpen && 'rotate-90')}
+              />
+              {t('tools.workflowProgress')}
+            </button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 shrink-0 px-2 text-xs"
+              title={t('tools.viewTaskHint')}
+              onClick={() => viewTask()}
+            >
+              {t('tools.viewTask')}
+            </Button>
+          </div>
+          {progressOpen && (
+            <div className="pt-1.5">
+              <WorkflowTaskProgress
+                workspaceId={workspaceId}
+                task={live}
+                workflow={workflow}
+                onOpenNode={viewTask}
+              />
+            </div>
+          )}
+        </div>
+      )}
       <CollapsibleContent className="space-y-2 border-t px-3 py-2">
         {task.dependsOn.length > 0 && (
           <p className="flex flex-wrap items-center gap-1 text-muted-foreground text-xs">
