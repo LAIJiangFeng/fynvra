@@ -94,8 +94,11 @@ function matchAt(
   if (text[position] === '「') {
     const close = text.indexOf('」', position + 1);
     if (close < 0) return null;
-    const inner = text.slice(position + 1, close);
-    const target = candidates.find((candidate) => candidate.name === inner);
+    const inner = text.slice(position + 1, close).toLowerCase();
+    const target = candidates.find(
+      (candidate) =>
+        candidate.name.toLowerCase() === inner || candidate.id.toLowerCase() === inner
+    );
     return target ? { length: close + 1 - position, target } : null;
   }
   let best: { length: number; target: MentionTarget } | null = null;
