@@ -61,6 +61,7 @@ import {
   packageManagerError,
   pluginName,
 } from '../services/plugins/pluginSources';
+import { refusePiProtectedDelete } from '../services/plugins/protectedPaths';
 import { scanPluginProviders } from '../services/plugins/providerScan';
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
@@ -859,6 +860,14 @@ async function removePlugin(id: string): Promise<PluginRemoveResult> {
   if (managedDir) {
     if (!(await tryRemoveDir(managedDir))) leftover = managedDir;
   } else if (plugin.kind !== 'local') {
+    // pi remove 会在 agentDir 下删文件：它或登记路径落在原生 pi 目录内时一律不删
+    if (refusePiProtectedDelete(agentDir()) || refusePiProtectedDelete(plugin.path)) {
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.uninstallFailed', { error: 'protected' }),
+      };
+    }
     const manager = await loadPackageManager(agentDir());
     try {
       await manager.remove(plugin.source);

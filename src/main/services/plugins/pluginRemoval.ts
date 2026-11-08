@@ -1,6 +1,7 @@
 import { chmod, lstat, readdir, rm } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { isStrictlyInside } from './pluginCopies';
+import { refusePiProtectedDelete } from './protectedPaths';
 
 /** 待清理列表上限（plugins.json 顶层 pendingDeletes） */
 export const MAX_PENDING_DELETES = 50;
@@ -34,9 +35,10 @@ function segmentsUnder(root: string, path: string): string[] | null {
  * - 副本根目录下恰好一层（`<root>/<dir>`，含残留的 `.tmp-` / `.old-`）；
  * - 旧 git：`agent/git/<host>/<路径…>`，至少两层；
  * - 旧 npm：`agent/npm/node_modules/<包>` 或 `…/@scope/<包>`。
- * 永远不会是受管根目录本身或其上级。
+ * 永远不会是受管根目录本身或其上级；位于原生 pi 目录（`~/.pi`、PI_CODING_AGENT_DIR）内的一律拒绝。
  */
 export function ownedPluginDir(roots: ManagedRoots, path: string): string | null {
+  if (refusePiProtectedDelete(path)) return null;
   const copy = segmentsUnder(roots.copyRoot, path);
   if (copy) return copy.length === 1 ? resolve(path) : null;
   const git = segmentsUnder(roots.legacyGit, path);
@@ -80,7 +82,7 @@ const RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 20
  */
 export async function removeManagedDir(roots: ManagedRoots, dir: string): Promise<void> {
   const target = ownedPluginDir(roots, dir);
-  if (!target) throw new Error('outside-managed-root');
+  if (!target || refusePiProtectedDelete(target)) throw new Error('outside-managed-root');
   try {
     await rm(target, RM_OPTIONS);
     return;
@@ -90,6 +92,7 @@ export async function removeManagedDir(roots: ManagedRoots, dir: string): Promis
       throw codeError(error);
     }
   }
+  if (refusePiProtectedDelete(target)) throw new Error('outside-managed-root');
   await makeWritable(target);
   try {
     await rm(target, RM_OPTIONS);
