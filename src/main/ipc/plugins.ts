@@ -865,7 +865,7 @@ async function removePlugin(id: string): Promise<PluginRemoveResult> {
       return {
         ok: false,
         code: 'failed',
-        error: translate('plugins.uninstallFailed', { error: 'protected' }),
+        error: translate('plugins.uninstallFailed', { error: 'pi-protected' }),
       };
     }
     const manager = await loadPackageManager(agentDir());

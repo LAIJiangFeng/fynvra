@@ -193,6 +193,8 @@ async function exists(path: string): Promise<boolean> {
 
 /** 递归删除；位于原生 pi 目录（~/.pi、PI_CODING_AGENT_DIR）内的一律拒绝，只记不带路径的 warning */
 async function rmTree(path: string): Promise<void> {
-  if (refusePiProtectedDelete(path)) throw new Error('protected');
+  if (refusePiProtectedDelete(path)) {
+    throw Object.assign(new Error('pi-protected'), { code: 'pi-protected' });
+  }
   await rm(path, { recursive: true, force: true });
 }

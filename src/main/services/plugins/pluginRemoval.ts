@@ -73,16 +73,25 @@ function codeError(error: unknown): Error {
   return wrapped;
 }
 
+function piProtected(): Error {
+  const error = new Error('pi-protected');
+  (error as NodeJS.ErrnoException).code = 'pi-protected';
+  return error;
+}
+
 const RM_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 } as const;
 
 /**
  * 稳健删除受管插件目录：先校验 `dir` 是插件自己的目录（见 {@link ownedPluginDir}），再 rm（带重试）；
  * Windows 上遇到 EPERM / EACCES（如 git 的只读 pack 文件）先把整棵树改成可写再试一次。
+ * 目标是原生 pi 目录（`~/.pi`、PI_CODING_AGENT_DIR）、在其中或是其上级时一律拒绝（`pi-protected`）。
  * 失败时抛出只带错误码的 Error。目录不存在视为成功。
  */
 export async function removeManagedDir(roots: ManagedRoots, dir: string): Promise<void> {
+  if (refusePiProtectedDelete(dir)) throw piProtected();
   const target = ownedPluginDir(roots, dir);
-  if (!target || refusePiProtectedDelete(target)) throw new Error('outside-managed-root');
+  if (!target) throw new Error('outside-managed-root');
+  if (refusePiProtectedDelete(target)) throw piProtected();
   try {
     await rm(target, RM_OPTIONS);
     return;
@@ -92,7 +101,7 @@ export async function removeManagedDir(roots: ManagedRoots, dir: string): Promis
       throw codeError(error);
     }
   }
-  if (refusePiProtectedDelete(target)) throw new Error('outside-managed-root');
+  if (refusePiProtectedDelete(target)) throw piProtected();
   await makeWritable(target);
   try {
     await rm(target, RM_OPTIONS);
