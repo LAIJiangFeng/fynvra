@@ -34,7 +34,7 @@ export const zhCN = {
     unsupported: '当前平台暂未提供自动更新安装包',
     manualInstall:
       '此 Mac 安装包未使用 Apple 开发者证书签名，请从 GitHub Releases 下载新版并手动安装',
-    automatic: '正式版启动后自动检查，此后每 4 小时检查一次；自动下载，确认后重启安装',
+    automatic: '正式版每 4 小时自动检查并下载更新，确认后重启安装',
     status: {
       idle: '将自动检查新版本',
       checking: '正在检查更新…',
@@ -712,29 +712,23 @@ export const zhCN = {
     },
     webFetch: {
       title: '网页读取',
-      allowLoopback: '允许 web_fetch 访问本机地址（localhost / 127.0.0.1 / ::1）',
-      approval: '仍会走“访问网络”审批；“完全放行”档位下不再询问',
-      exposure: '本机服务（开发服务器、管理接口、代理控制端口等）的内容会进入对话',
-      blocked: '内网和云元数据地址始终被拦截',
-      effective: '之后新加载的会话生效',
+      allowLoopback: '允许 web_fetch 访问本机地址',
+      hint: '仅限 localhost、127.0.0.1 和 ::1，仍需「访问网络」审批，新会话生效',
     },
     network: {
       title: 'Git 与命令代理',
       environment: '使用现有环境',
       manual: '手动代理',
       address: 'HTTP / HTTPS 代理地址',
-      scope:
-        '覆盖 Git、Agent shell 命令（含 gh）等命令/Git 子进程、新终端与内置网页读取（web_fetch）。模型 API、MCP、应用更新的流量不走此设置，保持各自路由。“现有环境”指继承的进程环境变量，不保证使用 Windows 系统代理',
-      manualHint:
-        '仅支持无认证的 HTTP/HTTPS 代理，同一地址用于 HTTP 和 HTTPS。手动模式清除继承的 ALL_PROXY，并清空 NO_PROXY 绕过规则。命令自身的显式网络配置仍可能覆盖此设置',
+      scope: '用于 Git、Agent 命令、新终端和 web_fetch；模型 API、MCP 和应用更新不走这里',
+      environmentHint: '沿用继承的代理环境变量，不读取 Windows 系统代理',
+      manualHint: '仅支持无账号密码的 HTTP/HTTPS 代理，会忽略继承的 ALL_PROXY 和 NO_PROXY',
       compatibility: 'Git 兼容模式',
-      compatibilityHint: '使用 HTTP/1.1 与 Git protocol v0，不降低 TLS 验证',
-      effective:
-        '保存后，应用新发起的 Git 操作和命令使用此设置；Agent 命令在会话下次启动或恢复时生效，终端在下次新建时生效。已有会话和终端不会自动重启',
-      invalid: '请输入合法 HTTP/HTTPS 代理地址与端口，不支持账号密码、路径、查询参数或片段',
+      compatibilityHint: 'Git 连接不稳定时开启，改用 HTTP/1.1 和 protocol v0',
+      effective: '保存后对新的 Git 操作、会话和终端生效',
+      invalid: '请输入 http(s)://主机:端口，不支持账号密码或路径',
       test: '测试连接',
-      testHint:
-        '测试当前草稿，不自动保存：分别检测 GitHub API HTTPS 与公开 Fynvra 仓库的 HEAD。不会验证 push 权限，也不保证所有服务均可访问',
+      testHint: '用当前填写的设置检测能否连上 GitHub，不会保存',
       testing: '正在测试连接…',
       saved: '已保存，新会话与新终端将使用此设置',
       api: 'GitHub API HTTPS',
@@ -794,13 +788,11 @@ export const zhCN = {
       compaction: '上下文压缩',
       compactionSelected: '设置选择的策略',
       compactionTimeout: '原生压缩总等待时限（秒）',
-      compactionTimeoutHint:
-        '含摘要重试的总等待时间，30～1800 秒，默认 600 秒（10 分钟）。新加载会话生效；已加载会话重启应用后生效。超时会保留原会话和待发送消息，可手动重试',
+      compactionTimeoutHint: '30～1800 秒，默认 600；超时后保留会话和消息，可手动重试',
       compactionNative: 'pi 原生自动压缩',
       compactionMagic: 'Magic Context（默认）',
       compactionOff: '关闭自动压缩',
-      compactionHint:
-        '新加载会话生效；Magic Context 使用当前会话模型在后台整理历史，可能产生额外模型请求。失败时暂停并保留输入，需显式恢复，不会自动转用原生压缩',
+      compactionHint: 'Magic Context 用当前模型在后台整理历史，会产生额外请求；新会话生效',
       off: '关闭',
       never: '永不',
       days: '{days} 天',
