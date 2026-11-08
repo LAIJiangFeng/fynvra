@@ -50,9 +50,9 @@ export interface PluginPackageManager {
 }
 
 /**
- * 动态加载 pi 的 DefaultPackageManager（Main 启动路径上不 import pi）。agentDir / cwd 都用会话的 agentDir，
- * 设置用 pi 的内存 SettingsManager：不写 pi settings 文件，不读 ~/.pi。npm 包装到 `<agentDir>/npm`，
- * git 仓库克隆到 `<agentDir>/git`。
+ * 动态加载 pi 的 DefaultPackageManager（Main 启动路径上不 import pi）。agentDir / cwd 都用传入的目录
+ * （安装时是副本根目录下的临时目录，卸载旧条目时是会话的 agentDir），设置用 pi 的内存 SettingsManager：
+ * 不写 pi settings 文件，不读 ~/.pi。npm 包装到 `<agentDir>/npm`，git 仓库克隆到 `<agentDir>/git/<host>/<path>`。
  */
 export async function loadPackageManager(agentDir: string): Promise<PluginPackageManager> {
   const { DefaultPackageManager, SettingsManager } = await import(

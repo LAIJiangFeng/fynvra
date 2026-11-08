@@ -18,8 +18,9 @@ export type PluginSetManualProvidersResult = IpcResult<{ plugin: PluginEntry }>;
 export type PluginAddResult =
   | { ok: true; plugin: PluginEntry }
   | { ok: false; code: 'canceled' | 'invalid' | 'busy' | 'failed'; error: string };
+/** warning：登记已删，但目录暂时删不掉（已进待清理列表，重启后清理） */
 export type PluginRemoveResult =
-  | { ok: true }
+  | { ok: true; warning?: string }
   | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
 export type PluginToggleResult = IpcResult<{ plugin: PluginEntry }>;
 /** 重新复制 / 转为副本：busy 表示已有安装、卸载或复制在进行 */
