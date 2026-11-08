@@ -152,7 +152,7 @@ describe('createRoleSession tool policies', () => {
       host: orchestrationHost(),
     });
     expect(session.getActiveToolNames().sort()).toEqual(
-      [...READONLY_TOOLS, ...ORCHESTRATION_TOOLS, 'write_plan', 'write_doc'].sort()
+      [...READONLY_TOOLS, ...ORCHESTRATION_TOOLS, 'write_plan', 'write_doc', 'web_fetch'].sort()
     );
   });
 
@@ -168,14 +168,16 @@ describe('createRoleSession tool policies', () => {
       workerHost: workerHost(),
     });
     expect(session.getActiveToolNames().sort()).toEqual(
-      [...READONLY_TOOLS, 'ask_coordinator', 'report_done'].sort()
+      [...READONLY_TOOLS, 'web_fetch', 'ask_coordinator', 'report_done'].sort()
     );
   });
 
   it('gives an all-tools worker the pi default tools plus the worker tools', async () => {
     const { session } = await open({ role: role({ tools: 'all' }), workerHost: workerHost() });
     const active = session.getActiveToolNames();
-    expect(active).toEqual(expect.arrayContaining(['read', 'edit', 'write', 'report_done']));
+    expect(active).toEqual(
+      expect.arrayContaining(['read', 'edit', 'write', 'web_fetch', 'report_done'])
+    );
     expect(active).toContain('ask_coordinator');
     expect(active).not.toContain('git_readonly');
     expect(active).not.toContain('dispatch_task');
@@ -531,7 +533,13 @@ describe('command environment injection through real pi tools', () => {
           compaction: { enabled: false },
         }),
       });
-      expect(session.getActiveToolNames().sort()).toEqual(['bash', 'edit', 'read', 'write']);
+      expect(session.getActiveToolNames().sort()).toEqual([
+        'bash',
+        'edit',
+        'read',
+        'web_fetch',
+        'write',
+      ]);
       session.setActiveToolsByName(['read', 'bash', 'powershell', 'edit', 'write']);
       const events: FynvraSessionEvent[] = [];
       const subscription = subscribeNormalized(session, (event) => events.push(event));

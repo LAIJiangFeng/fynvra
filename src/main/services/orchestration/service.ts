@@ -17,8 +17,11 @@ import {
   type Message,
   type OrchestrationStore,
   type RoleStore,
+  recordWorkflowNodeReport,
   settleDispatch,
+  type Workflow,
   type Workspace,
+  workflowRunningDispatchIds,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
@@ -33,6 +36,7 @@ import {
   reviewDispatchPanelDiff,
 } from './queries';
 import { createWorkerHost } from './workerHost';
+import { createWorkflowEngine } from './workflowEngine';
 import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
 
 export interface OrchestrationServiceOptions {
@@ -51,6 +55,10 @@ export interface OrchestrationServiceOptions {
   /** 收件箱每投递一条消息（worker_done / question / escalation …）就同步调用；从快照恢复的不算。桌面通知用。 */
   onMessagePosted?: (message: Message) => void;
   checkPolicy?: CheckCommandPolicy;
+  /** 用户定义的工作流（workflows.json 注册表）；缺省时不能按工作流派发 */
+  workflows?: { list(): Promise<readonly Workflow[]> };
+  /** launcher 是否已接线；未接线时不恢复工作流推进（接线后的对账会再来）。缺省视为已接线 */
+  canLaunch?: () => boolean;
   log?: (message: string) => void;
   now?: () => number;
 }
@@ -150,6 +158,7 @@ function observeStore(
     messages: observe(store.messages, changed, messagePosted),
     listTasks: (runId) => store.listTasks(runId),
     activeDispatch: (taskId) => store.activeDispatch(taskId),
+    activeDispatches: (taskId) => store.activeDispatches(taskId),
     reclaimableDispatches: (runId) => store.reclaimableDispatches(runId),
     snapshot: () => store.snapshot(),
   };
@@ -230,6 +239,18 @@ export function createOrchestrationService(
       }
     },
   });
+  const workflowEngine = createWorkflowEngine({
+    workspace,
+    store,
+    inbox,
+    launcher,
+    git,
+    exec: options.exec,
+    resolveWorktreesRoot: options.resolveWorktreesRoot,
+    now,
+    log,
+    ...(options.canLaunch ? { canLaunch: options.canLaunch } : {}),
+  });
 
   const ready = (async () => {
     try {
@@ -247,10 +268,16 @@ export function createOrchestrationService(
   })();
 
   function reconcileWorkers(): void {
-    if (!loaded || !launcher.sessionFailure) return;
+    if (!loaded) return;
+    // 工作流：按持久化的节点状态与启动意图恢复推进（崩溃恢复）
+    workflowEngine.resume();
+    if (!launcher.sessionFailure) return;
+    reconcileWorkflowNodes(launcher.sessionFailure);
     // Use insertion order, including settled attempts: an old unsettled row must not win over a retry.
     const latest = new Map(store.dispatches.list().map((dispatch) => [dispatch.taskId, dispatch]));
-    for (const task of store.tasks.list((entry) => entry.status === 'in-progress')) {
+    for (const task of store.tasks.list(
+      (entry) => entry.status === 'in-progress' && entry.workflow === undefined
+    )) {
       const dispatch = latest.get(task.id);
       if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id)) continue;
       const run = store.runs.get(task.runId);
@@ -280,6 +307,53 @@ export function createOrchestrationService(
         subject: 'failed',
         body: reason,
       });
+    }
+  }
+  /**
+   * 工作流节点的会话确定已失败：该节点按 failed 结算（同 report_done failed），由引擎汇总。
+   * 并行节点各有一个未结算的尝试：逐个检查运行中节点绑定的尝试和任务全部未结算的尝试。
+   * 没有绑定到运行中节点、也不属于待启动意图的孤儿尝试会话已死时只结算它自己（否则同一节点再也起不来）。
+   */
+  function reconcileWorkflowNodes(sessionFailure: (sessionId: string) => string | undefined) {
+    for (const task of store.tasks.list(
+      (entry) => entry.status === 'in-progress' && entry.workflow !== undefined
+    )) {
+      if (task.workflow === undefined) continue;
+      const running = workflowRunningDispatchIds(task.workflow);
+      const launching = new Set(task.workflow.launches.map((launch) => launch.dispatchId));
+      for (const orphan of store.activeDispatches(task.id)) {
+        if (running.includes(orphan.id) || launching.has(orphan.id)) continue;
+        if (pendingDispatches.has(orphan.id)) continue;
+        const reason = sessionFailure(orphan.workerSessionId);
+        if (!reason) continue;
+        const settled = settleDispatch(orphan, 'failed', reason, orphan.filesModified, now());
+        if (!settled.ok) continue;
+        const { id: _id, ...patch } = settled.dispatch;
+        if (store.dispatches.update(orphan.id, patch).ok) workflowEngine.advance(task.id);
+      }
+      for (const dispatchId of running) {
+        const dispatch = store.dispatches.get(dispatchId);
+        if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id))
+          continue;
+        const reason = sessionFailure(dispatch.workerSessionId);
+        if (!reason) continue;
+        // No awaits between evidence, current-state validation and writes.
+        const current = store.tasks.get(task.id);
+        if (current?.status !== 'in-progress' || current.workflow === undefined) continue;
+        const settled = settleDispatch(dispatch, 'failed', reason, dispatch.filesModified, now());
+        if (!settled.ok) continue;
+        const { id: _id, ...patch } = settled.dispatch;
+        if (dispatch.summary) patch.summary = `${dispatch.summary}\n\n${reason}`;
+        const next = recordWorkflowNodeReport(current.workflow, {
+          dispatchId: dispatch.id,
+          outcome: 'failed',
+          summary: patch.summary ?? reason,
+          at: patch.settledAt ?? now(),
+        });
+        if (next === undefined || !store.dispatches.update(dispatch.id, patch).ok) continue;
+        store.tasks.update(task.id, { workflow: next });
+        workflowEngine.advance(task.id);
+      }
     }
   }
   void ready.then(reconcileWorkers);
@@ -313,6 +387,8 @@ export function createOrchestrationService(
         checkPolicy: options.checkPolicy,
         pendingDispatches,
         reconcileWorkers,
+        ...(options.workflows ? { workflows: options.workflows } : {}),
+        workflowEngine,
         now,
       });
       return { ok: true, host };
@@ -341,7 +417,14 @@ export function createOrchestrationService(
     }
     return {
       ok: true,
-      host: createWorkerHost({ store, inbox, runId, dispatchId: dispatch.id, now }),
+      host: createWorkerHost({
+        store,
+        inbox,
+        runId,
+        dispatchId: dispatch.id,
+        now,
+        advanceWorkflow: workflowEngine.advance,
+      }),
     };
   };
 
@@ -421,6 +504,13 @@ export function createOrchestrationService(
       );
       const current = new Map(
         tasks.flatMap((task) => {
+          // 运行中的工作流：每个运行中节点都是当前尝试（它们的提问都要送到）
+          if (task.workflow !== undefined && task.status === 'in-progress') {
+            return workflowRunningDispatchIds(task.workflow).flatMap((id) => {
+              const dispatch = store.dispatches.get(id);
+              return dispatch ? [[dispatch.id, { task, dispatch }] as const] : [];
+            });
+          }
           const dispatch = store.activeDispatch(task.id) ?? latest.get(task.id);
           return dispatch ? [[dispatch.id, { task, dispatch }] as const] : [];
         })

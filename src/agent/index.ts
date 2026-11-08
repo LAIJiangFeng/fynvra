@@ -2,6 +2,7 @@ import { errorMessage } from '@shared/guards';
 import { type AgentWorkerEvent, parseAgentCommand } from '@shared/types/agent';
 import { createModelRegistry, createWorkerModelRuntime, type ModelRegistry } from './models';
 import { createPiSessionFactory } from './piSession';
+import { createPluginLookupTracker } from './pluginLookups';
 import { SessionSupervisor } from './supervisor';
 
 /**
@@ -25,14 +26,45 @@ const post = (event: AgentWorkerEvent) => port.postMessage(event);
 const log = (level: 'info' | 'warn' | 'error', message: string) =>
   post({ type: 'log', level, message });
 
+// 插件按名字找模型服务时上报 Main（只带插件 id 与名字，不带路径）
+const pluginLookups = createPluginLookupTracker((pluginId, name) => {
+  try {
+    post({ type: 'plugin-provider-lookup', pluginId, name });
+  } catch {
+    // 上报失败不影响插件的查询
+  }
+});
+
 let models: Promise<ModelRegistry> | undefined;
 const modelRegistry = (): Promise<ModelRegistry> =>
-  (models ??= createWorkerModelRuntime(agentDir).then(createModelRegistry));
+  (models ??= createWorkerModelRuntime(agentDir).then((runtime) => {
+    try {
+      pluginLookups.instrument(runtime);
+    } catch {
+      log('warn', 'failed to track model service lookups of plugins');
+    }
+    return createModelRegistry(runtime);
+  }));
 const supervisor = new SessionSupervisor({
   post,
   openSession: createPiSessionFactory({
     agentDir,
     resolveModel: async (spec) => (await modelRegistry()).resolve(spec),
+    registerPlugins: (refs) => pluginLookups.register(refs),
+    // 失败只记 warning，不让会话启动失败；只记服务 id，不记地址与 key
+    exposePluginProviders: async (providers) => {
+      try {
+        const { skipped } = await (await modelRegistry()).exposeProviders(providers);
+        if (skipped.length > 0) {
+          log(
+            'warn',
+            `model services skipped for plugins (name taken by pi or a plugin, or update failed): ${skipped.join(', ')}`
+          );
+        }
+      } catch {
+        log('warn', 'failed to expose model services to plugins');
+      }
+    },
     onContextLog: (message) => log('info', `context ${message}`),
     onListenerError: (error) =>
       log('error', `session event listener failed: ${errorMessage(error)}`),

@@ -6,6 +6,7 @@ import { roleDescription } from '@/components/chat/roles';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
+import { confirmDialog } from '@/lib/appDialog';
 import { cn } from '@/lib/utils';
 import { useRolesStore } from '@/stores/roles';
 import { EmptyState, InlineMessage } from './common';
@@ -27,6 +28,7 @@ export function RolesSettings() {
   const [status, setStatus] = useState<Status | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const drafts = useRef(0);
+  const confirming = useRef(false);
   const t = useT();
 
   const takenIds = roles.map((role) => role.id);
@@ -37,15 +39,28 @@ export function RolesSettings() {
     target?.kind === 'existing' ? roles.find((role) => role.id === target.id) : undefined;
 
   /** 切换编辑目标前确认放弃未保存的修改。 */
-  const go = (next: Editing) => {
-    if (dirty && !window.confirm(t('settings.roles.discardConfirm'))) return;
+  const go = async (next: Editing) => {
+    if (confirming.current) return;
+    if (dirty) {
+      confirming.current = true;
+      try {
+        const discard = await confirmDialog({
+          message: t('settings.roles.discardConfirm'),
+          confirmLabel: t('files.discard'),
+          destructive: true,
+        });
+        if (!discard) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
     setDirty(false);
     setStatus(null);
     setEditing(next);
   };
   const openDraft = (role: Role) => {
     drafts.current += 1;
-    go({ kind: 'draft', key: drafts.current, role });
+    void go({ kind: 'draft', key: drafts.current, role });
   };
 
   const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -149,7 +164,7 @@ export function RolesSettings() {
                 subtitle={role.id}
                 builtin={role.builtin}
                 active={target?.kind === 'existing' && target.id === role.id}
-                onSelect={() => go({ kind: 'existing', id: role.id })}
+                onSelect={() => void go({ kind: 'existing', id: role.id })}
               />
             </li>
           ))}

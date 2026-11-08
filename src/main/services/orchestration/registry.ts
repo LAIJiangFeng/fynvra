@@ -7,6 +7,7 @@ import {
   type Message,
   parseOrchestrationSnapshot,
   type RoleStore,
+  type Workflow,
   type Workspace,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
@@ -41,6 +42,8 @@ export interface OrchestrationRegistryOptions {
   runChecks?: RunChecksFn;
   fs?: CoreFs;
   checkPolicy?: CheckCommandPolicy;
+  /** 用户定义的工作流（生产为 workflows.json 注册表）；缺省时不能按工作流派发 */
+  workflows?: { list(): Promise<readonly Workflow[]> };
   log?: (message: string) => void;
 }
 
@@ -140,6 +143,8 @@ export function createOrchestrationRegistry(
       notifyChanged: options.notifyChanged,
       onMessagePosted: (message) => announce(workspace.id, message),
       checkPolicy: options.checkPolicy,
+      ...(options.workflows ? { workflows: options.workflows } : {}),
+      canLaunch: () => launcher !== unwiredLauncher,
       log: options.log,
     });
     services.set(workspace.id, service);

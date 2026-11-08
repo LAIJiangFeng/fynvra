@@ -53,8 +53,12 @@ export function NetworkProxySettings() {
             ))}
           </SelectContent>
         </Select>
+        {draft.mode === 'environment' && (
+          <p className="text-muted-foreground text-xs">{t('settings.network.environmentHint')}</p>
+        )}
         {draft.mode === 'manual' && (
           <>
+            <p className="text-muted-foreground text-xs">{t('settings.network.manualHint')}</p>
             <label htmlFor={`${id}-url`} className="text-sm">
               {t('settings.network.address')}
             </label>
@@ -67,16 +71,20 @@ export function NetworkProxySettings() {
               spellCheck={false}
               onChange={(event) => edit({ ...draft, url: event.target.value })}
             />
-            <p className="text-muted-foreground text-xs">{t('settings.network.manualHint')}</p>
             {!valid && draft.url !== '' && (
               <InlineMessage tone="error">{t('settings.network.invalid')}</InlineMessage>
             )}
           </>
         )}
         <div className="flex items-center justify-between gap-4">
-          <label htmlFor={`${id}-compat`} className="text-sm">
-            {t('settings.network.compatibility')}
-          </label>
+          <div className="min-w-0">
+            <label htmlFor={`${id}-compat`} className="text-sm">
+              {t('settings.network.compatibility')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {t('settings.network.compatibilityHint')}
+            </p>
+          </div>
           <Switch
             id={`${id}-compat`}
             checked={draft.gitCompatibility}
@@ -84,9 +92,8 @@ export function NetworkProxySettings() {
             onCheckedChange={(gitCompatibility) => edit({ ...draft, gitCompatibility })}
           />
         </div>
-        <p className="text-muted-foreground text-xs">{t('settings.network.compatibilityHint')}</p>
-        <p className="text-muted-foreground text-xs">{t('settings.network.effective')}</p>
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="mr-auto text-muted-foreground text-xs">{t('settings.network.effective')}</p>
           <Button
             size="sm"
             variant="outline"
@@ -104,6 +111,7 @@ export function NetworkProxySettings() {
               size="sm"
               variant="outline"
               disabled={disabled || !valid}
+              title={t('settings.network.testHint')}
               onClick={() => void state.test()}
             >
               {t('settings.network.test')}
@@ -113,7 +121,6 @@ export function NetworkProxySettings() {
             {t('common.save')}
           </Button>
         </div>
-        <p className="text-muted-foreground text-xs">{t('settings.network.testHint')}</p>
         <div aria-live="polite">
           {state.testing && <p className="text-sm">{t('settings.network.testing')}</p>}
           {state.saved && (

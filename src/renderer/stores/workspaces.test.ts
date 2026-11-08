@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspacesApi } from '../../preload/domains/workspaces';
 import type { WorkspaceUiApi } from '../../preload/domains/workspaceUi';
 
+const mocks = vi.hoisted(() => ({ confirm: vi.fn(async () => true) }));
+vi.mock('../lib/appDialog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/appDialog')>()),
+  confirmDialog: mocks.confirm,
+}));
+
 const workspace = (id: string): WorkspaceSummary => ({
   id,
   name: id,
@@ -40,9 +46,9 @@ async function setup() {
     })),
     save: vi.fn(async () => ({ ok: true as const })),
   } satisfies Pick<WorkspaceUiApi, 'selection' | 'load' | 'save'>;
-  const confirm = vi.fn(() => true);
+  const confirm = mocks.confirm;
+  confirm.mockReset().mockResolvedValue(true);
   vi.stubGlobal('window', {
-    confirm,
     fynvra: {
       workspaceUi,
       workspaces: api,
@@ -133,7 +139,7 @@ describe('工作区独立展开', () => {
   it('取消移除确认时保留项目和保存的标签', async () => {
     const { store, api, confirm } = await setup();
     store.getState().select('a');
-    confirm.mockReturnValue(false);
+    confirm.mockResolvedValue(false);
     await store.getState().remove('a');
     expect(confirm).toHaveBeenCalledOnce();
     expect(api.remove).not.toHaveBeenCalled();

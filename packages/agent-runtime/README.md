@@ -12,9 +12,10 @@
 | `src/tools/readonlyTools.ts` | pi 的 read / grep / find / ls + `git_readonly`（白名单） |
 | `src/tools/writePlanTool.ts` | `write_plan`（orchestrator，以及提供了 `planMode` 的非 worker 会话）：在 agent 进程里把计划写进 `<cwd>/.fynvra/plans/`，不经 Host |
 | `src/tools/writeDocTool.ts` | `write_doc`（仅 orchestrator）：计划模式下新建或整份替换一份 Markdown 文档，不经 Host |
+| `src/tools/web/` | `web_fetch`（所有策略与 worker 会话）：地址策略、抓取传输、HTML 转换、页面缓存，在 agent 进程里读取公开网页，不经 Host |
 | `src/tools/documentPath.ts` | `isDocumentPath` / `DOCUMENT_EXTENSIONS`：计划模式允许写的 Markdown 文档路径判定 |
 | `src/prompts/orchestratorPrompt.ts` | `ORCHESTRATOR_PROMPT`、`PLAN_MODE_PROMPT`、`DIRECT_PLAN_MODE_PROMPT`、`WORKER_CONTRACT_PROMPT` |
-| `src/approval/` | 审批门（`createApprovalGate`）：审批类别与档位、保护底线、计划模式下的只读命令判定（`isReadOnlyCommand`） |
+| `src/approval/` | 审批门（`createApprovalGate`）：审批类别（command / file-write / file-edit / mcp / network / plugin）与档位、保护底线、计划模式下的只读命令判定（`isReadOnlyCommand`） |
 | `src/events/normalize.ts` | pi 会话事件 → `FynvraSessionEvent`（带 `seq`） |
 | `src/host.ts` | `OrchestrationHost` / `WorkerHost` 契约 |
 | `src/pi/` | pi 适配层（升级复检点，见文末） |
@@ -25,11 +26,24 @@
 
 | `role.tools` | 会话里的工具 |
 |---|---|
-| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` + `write_doc` |
-| `readonly` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` |
-| `all` | pi 默认工具（read / bash / edit / write） |
+| `orchestrator` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + 编排工具（必须传 `host`）+ `write_plan` + `write_doc` + `web_fetch` |
+| `readonly` | `noTools: 'builtin'` + read / grep / find / ls / `git_readonly` + `web_fetch` |
+| `all` | pi 默认工具（read / bash / edit / write）+ `web_fetch` |
 
 `readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时再加 `write_plan`（见下文计划模式）。
+
+角色挂载的插件：`resourcePaths.extensions` 传给 `DefaultResourceLoader.additionalExtensionPaths`，仍保持 `noExtensions: true`；
+插件注册的工具叠加在上表之上，扩展加载错误并入 `warnings`（ARCHITECTURE §7.12）。
+
+`web_fetch { url, start_index?, max_chars? }`（契约见 ARCHITECTURE §5）：只发 GET，只接受 http/https；拦截本机、内网、
+链路本地（含云元数据）等地址，但放行 fake-ip 网段 `198.18.0.0/15`；直连时用自定义 `lookup` 固定校验过的 DNS 结果，
+走代理时本地预检目标域名；重定向最多 5 跳、逐跳校验；总超时 30 秒，解压后正文上限 5 MB。HTML 经 Readability 提取后
+转 Markdown，字符集按 header / BOM / meta 推断；正文包在 `--- BEGIN UNTRUSTED WEB CONTENT ---` / `--- END UNTRUSTED WEB CONTENT ---`
+之间，用 `start_index` 分页；每个 worker 进程一个内存 LRU 缓存。代理取会话加载时的 `commandEnv` 快照（无则 `process.env`）。
+`createRoleSession({ webFetch: { allowLoopback: true } })`（默认关闭）只放行回环目标（`localhost`、`*.localhost`、
+`127/8`、`::1`、`::ffff:127.x.x.x`）：URL 主机本身须是回环名或回环字面量，公网域名解析到回环仍拒绝；不允许公网重定向到本机；
+回环目标始终直连不走代理、不进缓存；内网、链路本地、云元数据等地址仍拦截。
+联网搜索（`web_search`）不做。
 
 传入 `workerHost` 的会话就是 worker：再加 `ask_coordinator` / `report_done`，系统提示词追加
 `WORKER_CONTRACT_PROMPT`。orchestrator 策略追加 `ORCHESTRATOR_PROMPT`。两者都排在 `role.systemPrompt` 之后，
@@ -52,6 +66,13 @@
 - 其他策略的 worker 会话（有 `workerHost`）忽略开关。
 
 关闭后提示词从下一次 run 起、拦截从下一次工具调用起恢复原样。
+
+审批类别：`command`（bash / powershell / run_checks）、`file-write` / `file-edit`（write / edit / apply_patch / write_doc）、
+`mcp`（MCP 工具）、`network`（`web_fetch`，详情为完整 URL）、`plugin`（插件注册的工具，详情为工具名和参数预览）。
+`plugin` 由审批门选项 `pluginTools?: () => ReadonlySet<string>`（每次实时读取）判定，只用于 `approvalKindOf` 判不出类别的工具；
+被插件覆盖的内置工具名仍按原类别。档位：`supervised` 审批 command / file-write / file-edit / mcp / network / plugin，
+`auto-edits` 审批 command / mcp / network / plugin，`full` 不审批（保护底线除外）。计划模式下 plugin 与 mcp 一样不论档位都要人确认，
+network 照档位处理。
 
 `isReadOnlyCommand(command)` 是保守的纯函数，拿不准就算非只读。bash 工具在 Windows 上也可能由 PowerShell 执行，
 所以同一条命令按 bash 和 PowerShell 两种读法各拆一遍，都只读才算只读：
@@ -113,7 +134,7 @@ worker 进程里只放一个转发代理。
 
 | 方法（工具） | Main 做什么 |
 |---|---|
-| `dispatchTask`（dispatch_task） | 建 Task；依赖都已完成时 `GitWorktreeManager.create({ slug, baseRef: 主 agent 所在分支 })` → 建 worker 会话（`roleId`，默认 worker）→ `renderBrief` 投递 → 建 Dispatch。依赖未完成只排队、不返回 `dispatch`，依赖完成后自动派发 |
+| `dispatchTask`（dispatch_task） | 建 Task；依赖都已完成时 `GitWorktreeManager.create({ slug, baseRef: 主 agent 所在分支 })` → 建 worker 会话（`roleId`，默认 worker）→ `renderBrief` 投递 → 建 Dispatch。依赖未完成只排队、不返回 `dispatch`，依赖完成后自动派发。带 `workflow`（与 `role` 互斥）时快照工作流定义并由 Main 自动推进各步（ARCHITECTURE §7.13） |
 | `listWorkers`（list_workers） | 本 Run 的 `listTasks` + 每个 task 的当前 Dispatch |
 | `waitForWorkers`（wait_for_workers） | `Inbox.waitFor` 等发给 coordinator 的消息：`until: 'any'` 收到 worker_done 即返回，`'all'` 等所有运行中的 dispatch settle；**question / escalation 一到就返回**（否则阻塞提问的 worker 与等待的主 agent 互等）。返回期间送达的消息并 ack；超时返回 `timedOut: true`，不是错误 |
 | `readWorkerOutput`（read_worker_output） | worker 输出的文本投影（如由它的 `FynvraSessionEvent` 拼出），`cursor` 是字符偏移；返回 `{ text, total, done }`，分页由工具负责 |

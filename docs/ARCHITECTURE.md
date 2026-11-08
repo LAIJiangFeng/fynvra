@@ -75,6 +75,7 @@ export interface Role {
   model?: { providerId: string; modelId: string; thinking?: ThinkingLevel };
   skillIds: string[];
   mcpServerIds: string[];
+  pluginIds?: string[];       // 挂载的插件 id（§7.12），缺省 []，去重保序（规则同 skillIds）；旧角色文件兼容
   tools: ToolPolicy;
   approvalMode: ApprovalMode;
 }
@@ -95,14 +96,43 @@ export interface Run { id: string; workspaceId: string; coordinatorSessionId: st
 export interface Task {
   id: string; runId: string; title: string; spec: string; roleId: string; status: TaskStatus; dependsOn: string[];
   mergedDiff?: { baseCommit: string; headCommit: string }; // 合并时固定 worker 的差异范围，清理 worktree / 分支后仍可查看
+  workflow?: TaskWorkflow;    // 工作流任务（§7.13）：派发时的定义快照与推进状态；roleId 始终等于当前步骤的角色
+}
+export interface TaskWorkflow {
+  id: string; name: string; steps: WorkflowStep[]; maxRounds: number; // steps 是派发时的图快照（拓扑序，带 needs）；旧快照缺 needs 时读入按列表顺序补成线性链
+  // 以下是串行引擎的推进状态；W2 并行引擎改为按节点持久化状态与待启动意图（§7.13）
+  step: number;               // 当前步骤下标
+  rounds: number;             // 已回退次数
+  history: { step: number; dispatchId: string; outcome: 'succeeded' | 'failed'; summary: string; at: number }[]; // 最近 30 条，摘要截断 2000 字
+  pending?: { step: number; feedback?: string }; // 推进意图，先写后启动，崩溃恢复用
 }
 export interface Dispatch {
   id: string; taskId: string; workerSessionId: string; worktreeId: string; branch: string;
   mode?: 'in-place';          // 工作区 vcs 为 none：worker 直接在工作区目录里干活，worktreeId / branch 为空串；缺省是 worktree 模式
+  nodeId?: string;            // 工作流节点 id：引擎为节点起的尝试才有（汇总 dispatch 没有）；旧快照缺省
+  // 未结算的尝试：普通任务同时最多一个；工作流任务按节点计，每个节点最多一个（双方都带 nodeId 且不同才可并存）。
+  // store 的 activeDispatch(taskId) 取其一，activeDispatches(taskId) 按插入顺序给出全部
   startedAt: number; settledAt?: number; outcome?: 'succeeded' | 'failed';
   summary?: string; filesModified?: string[];
 }
 export interface Worktree { id: string; workspaceId: string; path: string; branch: string; baseRef: string; baseCommit: string; }
+
+// 工作流（§7.13）：角色节点组成的有向无环图（沿用 step 命名，界面称「节点」）
+export interface WorkflowPosition { x: number; y: number } // 有限数，±100000
+export interface WorkflowStep {
+  id: string;                 // 工作流内唯一 slug
+  name: string;               // 显示名，如「开发」，≤ 60
+  roleId: string;             // 执行角色，不能是 tools: 'orchestrator' 的角色
+  instructions: string;       // 本节点说明，追加进任务书，≤ 4000
+  needs: string[];            // 上游节点 id，全部通过后才开始；[] = 起点。归一化输出总是带上
+  position?: WorkflowPosition; // 画布坐标；缺省时界面自动排版
+  onFail?: string;            // 报告 failed 时退回的节点 id，只能是自身或祖先；缺省 = 整个任务失败
+}
+export interface Workflow {
+  id: string; name: string; description?: string; // name ≤ 60，description ≤ 500
+  steps: WorkflowStep[];      // 1–20 个节点，按稳定拓扑序存放
+  maxRounds: number;          // 回退上限，0–10，默认 3
+}
 
 // 收件箱消息（worker → coordinator，coordinator → worker）
 export type MessageType = 'worker_done' | 'question' | 'reply' | 'escalation' | 'heartbeat' | 'instruction';
@@ -121,6 +151,7 @@ export interface Message {
   - 新启动的会话读取保存后的角色；已经启动的会话不热替换资源、不强制重启。工具权限和编排/worker 协议仍由运行时执行，不因修改参考提示词而移除。
 - `orchestration/`：`OrchestrationStore`（内存实现 + 可注入的 JSON 持久化）、状态迁移纯函数（task / dispatch 合法迁移表，非法迁移返回错误而不是抛异常）、`Inbox`（FIFO、ack、按类型过滤、`waitFor(predicate, timeoutMs)` Promise）。
 - `git/`：`GitWorktreeManager`（注入 `exec(cmd, args, cwd)`）：`create({ repoPath, workspaceId, slug, baseRef, worktreesRoot })` → 分支 `fynvra/<slug>`（冲突加后缀），路径 `<worktreesRoot>/<workspaceId>/<slug>`；`status`（dirty / ahead / behind）；`diff(worktree, baseCommit?, headRef?)`（headRef 默认 HEAD）；`remove`；`prune`；`merge({ repoPath, branch })` 走 `--no-ff`，返回 `{ ok, conflicts?: string[] }`，冲突时自动 `merge --abort`；`deleteBranch`。
+- 工作流：`Workflow` / `WorkflowStep` 类型与 `parseWorkflow(unknown)` 收窄校验（规则见 §7.13）；`workflows/graph.ts` 的纯函数图工具：`workflowTopologicalOrder`、`findWorkflowCycle`、`workflowParents` / `workflowChildren`、`workflowAncestors` / `workflowDescendants`、`workflowRoots` / `workflowSinks`、`workflowLevels`、`summarizeWorkflow`。
 - `briefs/`：任务书模板渲染（Target / Change / Constraints / Ownership / Acceptance 五段 + `report_done` 契约段）。
 
 ## 5. Agent 运行时（`packages/agent-runtime`，`@fynvra/agent-runtime`）
@@ -134,11 +165,11 @@ export interface Message {
     model: ResolvedModel;
     sessionManager: SessionManager;
     host: OrchestrationHost | null;     // tools: 'orchestrator' 必须提供，其他策略传 null
-    resourcePaths: { skills: string[]; mcpServers: McpServerConfig[] };
+    resourcePaths: { skills: string[]; mcpServers: McpServerConfig[]; extensions?: string[] }; // extensions：角色挂载的启用插件路径（§7.12）
     agentDir: string;                   // 必填：pi 的 agentDir，Fynvra 用 userData/agent（与用户的 ~/.pi 隔离）
     workerHost?: WorkerHost | null;     // 提供即为 worker 会话
     workerTools?: WorkerToolsOptions;   // ask_coordinator 的等待上限 askTimeoutMs（默认 10 分钟）
-    roles?: readonly RoleOption[];      // dispatch_task 可选的角色：role 参数的枚举与显示名匹配
+    roles?: readonly RoleOption[];      // spawn 时的角色清单：只用于 dispatch_task 的 role 描述与显示名归一（role 不是枚举，清单外的值交 Main 实时解析）
     inPlace?: boolean;                  // 工作区没有 git（§6）：orchestrator 追加非 git 模式说明，worker 换用不提交的契约
     planMode?: () => boolean;           // 计划模式（§7.10）：每次读取实时值，缺省视为关闭；worker 会话不生效，非 orchestrator 策略提供了就常驻 write_plan；orchestrator 策略的 write_doc 只在开启时可用
     settingsManager?: SettingsManager;  // 默认内存设置（不读 ~/.pi 与项目 .pi），enableInstallTelemetry: false
@@ -147,6 +178,8 @@ export interface Message {
     extensions?: readonly InlineExtension[]; // Fynvra 受控的附加扩展（当前为 Magic Context）；不由设置或文件发现产生
     approval?: ApprovalPolicyHooks;     // 按 role.approvalMode 拦截 tool_call 的人工审批通道；不提供时需审批的调用一律拒绝
   }
+  // 插件：resourcePaths.extensions 传给 DefaultResourceLoader 的 additionalExtensionPaths，仍保持 noExtensions: true
+  // （不发现磁盘上其他扩展）；扩展加载错误并入 RoleSession.warnings
   interface RoleSession {
     session: AgentSession;
     warnings: string[];                 // skill 路径缺失、MCP 服务器名非法等配置问题，供 Main 展示
@@ -161,14 +194,26 @@ export interface Message {
 
   - `tools: 'orchestrator'` → `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）+ 编排工具 + `write_plan` + `write_doc`（`write_doc` 只在计划模式开启时可用，审批门归为 `file-write`，§7.10）；
   - `tools: 'readonly'` → 同样 `noTools: 'builtin'`，只注入只读工具（read / grep / find / ls + `git_readonly`）；`'all'` → pi 默认工具。
+  - orchestrator / readonly / all 三种策略与 worker 会话都再注册内置 `web_fetch`（包括 all 策略没有 `commandEnv` 的分支），契约见下文。
   - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门：只放行目标全是 Markdown 文档的写改（§7.10）。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
-  - 审批门（`createApprovalGate`）：`supervised` 审批命令（bash / powershell / run_checks）、文件写改（write / edit / apply_patch）、MCP 工具；`auto-edits` 只审批命令与 MCP；`full` 放行普通操作。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止、通道缺失或断连按 deny，拒绝以可读文本作为工具结果返回模型。`allow` 放行一次；`allowSession` 按 kind + 工具名缓存，从 full 切回更严档位清空缓存；切档位不自动答复已有请求。
+  - `web_fetch { url, start_index?, max_chars? }`：读取用户给定的公开网页文本，在 agent 进程内执行，不经 Main。
+    - 参数：`url` 仅 http/https、≤ 2048 字符、不含用户名或密码；`start_index` 整数 ≥ 0（默认 0，分页继续读）；`max_chars` 默认 20000、上限 50000。
+    - 地址拦截：WHATWG `URL` 解析（规范化 IPv4 的各种写法）；拒绝 `localhost`、`*.localhost` 和不含点的单标签主机名（IP 字面量除外）；`node:net` 的 `BlockList` 拦截 IPv4 `0.0.0.0/8`、`10/8`、`100.64/10`、`127/8`、`169.254/16`（含云元数据）、`172.16/12`、`192.0.0/24`、`192.168/16`、`224/4`、`240/4`，IPv6 `::`、`::1`、`fc00::/7`、`fe80::/10`、`ff00::/8`，`::ffff:0:0/96`、`64:ff9b::/96`、`2002::/16` 取出内嵌 IPv4 后按同一规则判定。**不拦截 `198.18.0.0/15`**：Clash / Surge 的 fake-ip 默认用这个网段，拦截后 TUN 模式下所有网站都会失败。
+    - 直连（环境里没有适用该协议的代理变量）：给 `http(s).request` 传自定义 `lookup`，只连接校验通过的地址（固定 DNS 结果，防 DNS rebinding），兼容 `all: true` 与单地址两种回调。代理（`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`）：`new https.Agent({ proxyEnv, rejectUnauthorized: true })`（http 同理），不对代理主机本身做地址策略；请求前本地预检解析目标域名，解析到被拦截地址就拒绝，本地解析失败则交给代理解析（尽力而为，代理模式下的 SSRF 是残余风险）。已配代理但运行时不支持 `proxyEnv`（守卫同 `probeApi`）或 `NODE_TLS_REJECT_UNAUTHORIZED=0` 时直接报错，不静默改为直连。
+    - 请求与上限：只发 GET，不带 Cookie、认证头或模型提供的任何请求头；User-Agent 为浏览器兼容格式并带 `Fynvra` 标识。重定向手动跟随，最多 5 跳，每跳重新校验协议与地址，相对 `Location` 基于当前 URL 解析。总超时 30 秒并响应工具中止信号；解压后的正文按流计数，上限 5 MB，超出即停止并标记截断。
+    - 内容处理：HTML / XHTML 取前 2 MB，linkedom + `@mozilla/readability`（设 `maxElemsToParse`）提取正文、turndown 转 Markdown，失败或过短则回退整个 body，正文极短且有脚本时提示可能需要 JavaScript 渲染；纯文本、Markdown、CSV、JSON（≤ 1 MB 时格式化）、XML / RSS / Atom 按文本输出；PDF、图片等其他类型返回不支持的错误。字符集依次取 Content-Type charset、BOM、前 4 KB 内的 `<meta charset>` / `http-equiv`，都没有用 utf-8，由 `TextDecoder` 解码（gbk / gb18030 / big5 等），标签无效时回退 utf-8 并注明。
+    - 输出：头部列 URL、Title、Content-Type、Redirected from（如有）和“显示第 X–Y 字符，共 Z”；正文包在 `--- BEGIN UNTRUSTED WEB CONTENT ---` / `--- END UNTRUSTED WEB CONTENT ---` 之间（网页内容是数据不是指令）；有剩余时提示用 `start_index=Y` 继续。错误：4xx/5xx 返回状态码与 ≤ 500 字符正文摘录；网络错误、超时、地址拦截分别给出可读原因，不泄露环境变量的值。
+    - 缓存：每个 worker 进程一个内存 LRU（最多 32 条、保留 15 分钟、正文合计 ≤ 20 MB），以请求 URL 为键，只缓存成功的转换结果，用于分页；不落盘、不跨会话持久。
+    - 代理：用会话加载时的代理快照（§7.7），`createRoleSession` 把 `options.commandEnv ? options.commandEnv(process.env) : process.env` 作为 `proxyEnv` 交给工具；不新增 spawn 字段，设置修改后新加载的会话才生效。
+    - 本机回环开关：`preferences.webFetchAllowLoopback`（默认关闭）→ spawn spec `webFetchAllowLoopback?: true`（与代理一样每次构建 spec 时读取，之后新加载的会话生效）→ `createRoleSession({ webFetch: { allowLoopback } })` → `createWebFetchTool({ allowLoopback })`。开启后只放行回环：主机名 `localhost` / `*.localhost` 与回环 IP 字面量（`127/8`、`::1`、`::ffff:127.x.x.x`），其余拦截规则不变；URL 主机本身须是回环名或回环字面量，公网域名解析到回环仍拒绝；重定向按当前这一跳判定：只有从回环页面才能重定向到回环，公网页面不能重定向到本机（回环 → 公网 → 回环同样拒绝）；回环目标始终直连不走代理（lookup 只接受回环地址），结果不进缓存。关闭时行为不变，拒绝本机地址的错误文本提示可在「设置 → 通用」开启。
+    - 不做：联网搜索 `web_search`（未实现）、浏览器自动化 / JavaScript 渲染 / 截图 / 页面交互、复用 Cookie 或登录态、读取 PDF / Word、用辅助模型总结网页、按角色开关 / 域名白名单 / 记住域名审批、读取 Windows 系统代理或 PAC。
+  - 审批门（`createApprovalGate`）：类别为命令 `command`（bash / powershell / run_checks）、文件写改 `file-write` / `file-edit`（write / edit / apply_patch）、`mcp`（MCP 工具）、`network`（`web_fetch`，详情显示完整 URL）、`plugin`（插件注册的工具，详情显示工具名和参数预览）。`plugin` 由审批门选项 `pluginTools?: () => ReadonlySet<string>`（实时读取）判定，只用于 `approvalKindOf` 判不出类别的工具；被插件覆盖的内置工具名仍按原类别（如 bash 仍是 command）。`ApprovalKind` 在 runtime 与 shared 两边同形。档位：`supervised` 审批 command、file-write、file-edit、mcp、network、plugin；`auto-edits` 审批 command、mcp、network、plugin；`full` 放行普通操作。计划模式（§7.10）下 plugin 与 mcp 一样不论档位都要人确认，network 照档位处理。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）任何档位都要人确认，`allowSession` 不豁免；10 分钟未答复、回合中止、通道缺失或断连按 deny，拒绝以可读文本作为工具结果返回模型。`allow` 放行一次；`allowSession` 按 kind + 工具名缓存，从 full 切回更严档位清空缓存；切档位不自动答复已有请求。
   - worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main 登记，再发 `approval_request` 会话事件；请求等待 `allow` / `allowSession` / `deny`。Main 校验 session / request id、generation、有效期与一次响应，维持 `waiting-approval` 并推送 `sessions:approval-request`；Stop、超时、结算、销毁时撤下请求，迟到 / 重复 / 旧 generation 答复不能执行工具。OS 桌面审批通知继续遵循 `askAndApproval` 偏好并按 request id 去重，不等待启动静默期或合并窗口，聚焦当前会话也提醒一次；点击只定位会话。
   - Renderer 保留会话内审批卡和三档权限选择，只移除 App 顶部跨会话全局审批横幅及其详情弹窗（ApprovalAttention）。`tool_notice` 仅保留历史解析兼容，新执行路径不以通知替代审批。持久化 `waiting-approval` 沿用重启后归 idle 的恢复规则（原 worker 已不存在），不重放未执行的旧工具；实时等待状态保持真实审批状态。源码修改不会热更新已安装应用或原进程里的待答复调用。
 - 编排工具（仅 orchestrator 角色，pi `ToolDefinition`，参数 schema 完整类型，归一化先于校验）：
-  `dispatch_task { title, spec, role?, depends_on?, model?, thinking?, fast? }`、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
+  `dispatch_task { title, spec, role?, workflow?, depends_on?, model?, thinking?, fast? }`（`workflow` 与 `role` 互斥，见 §7.13；`role` 是普通字符串而非枚举，`workflow` 参数始终存在，即使 spawn 时没有工作流；spawn 时的清单只用于描述和名称归一，清单外的值原样交给 Main，按当前注册表实时解析：角色依次按 id → 不区分大小写的 id → 不区分大小写的名称匹配，找不到时错误列出可用的非编排角色 `id (名称)`，编排角色仍拒绝；工作流同理）、`list_workers`、`wait_for_workers { timeout_ms, until: 'any' | 'all' }`、`read_worker_output { dispatch_id, cursor? }`、`send_to_worker { dispatch_id, body }`、`review_diff { dispatch_id }`、`run_checks { dispatch_id, command }`、`merge_worktree { dispatch_id }`、`reject_work { dispatch_id, feedback }`、`cleanup_worktree { dispatch_id, abandon? }`。
   工具不直接操作 git / 进程，而是调用注入的 `OrchestrationHost` 接口（由 Main 实现）。`OrchestrationHost` 的方法名与上述工具一一对应。
   `write_plan { title, content, file? }`（§7.10）也注册给 orchestrator 策略的会话（`readonly` / `all` 策略的非 worker 会话提供了 `planMode` 时同样常驻），但不属于这组映射：它在 agent 进程内直接写 `<cwd>/.fynvra/plans/`，不经 `OrchestrationHost` / Main，不进 `ORCHESTRATION_TOOL_METHODS`，也不进审批门的分类。`write_doc { path, content }`（§7.10）只注册给 orchestrator 策略的会话，同样在 agent 进程内直接写文件、不经 `OrchestrationHost` / Main、不进 `ORCHESTRATION_TOOL_METHODS`；只在计划模式开启时可用，且与 `write_plan` 不同，审批门把它归为 `file-write`，按角色的审批档位处理。计划模式开启时（`createOrchestrationTools` 的 `planMode`）`dispatch_task` 返回错误、不调用 host，错误文本提示用 `write_doc` 写用户要的文档，其他编排工具不变。
   `model` / `thinking` / `fast` 仅按用户明确要求设置，可同时指定；公开 Fast 参数为可选 boolean `fast`，归一化兼容 `fast_mode` / `fastMode`，拒绝字符串 / 数字 / null 强转。
@@ -223,6 +268,11 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 提示词：Main 在 spawn 时按工作区给 spawn spec 带 `inPlace: true`，orchestrator 在工具说明后追加非 git 模式一段，
   worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 
+**工作流任务**（`dispatch_task` 带 `workflow`，定义与推进见 §7.13）：
+- 节点之间由 Main 在 `report_done` 结算后自动调度（并行、隔离与汇合合并见 §7.13），任务保持 `in-progress`。只有整张图全部通过（→ `in-review`）或失败（无可退回目标、超过回退上限、节点启动失败 → `failed`）时才向主 agent 发 `worker_done`；主 agent 照常对集成 worktree review_diff / run_checks / merge_worktree。
+- 对工作流任务（in-review 或 failed）执行 `reject_work`：从起点节点开始整图重跑，反馈写进各起点节点的任务书，`rounds` 归零、历史保留；现有守卫（待答复提问检查、dispatch 校验等）不变。
+- 崩溃恢复依赖持久化的节点状态与待启动意图：先写意图再启动节点；服务加载 / 对账时发现 in-progress、有未执行意图的任务，重新执行该推进，不能卡死在 in-progress。任务已被放弃 / 清理时不再推进。（W2 之前的串行引擎用 `Task.workflow.pending`。）
+
 ## 7. IPC 规则
 
 - 新增 IPC 三件事必须同步：`src/shared/types/ipc.ts` 通道常量（`domain:action`）、`src/main/ipc/<domain>.ts` handler 并在 `ipc/index.ts` 注册、`src/preload/index.ts` 按领域暴露 typed API。
@@ -240,9 +290,12 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - `files:list` 接收 `{ workspaceId, directoryId? }`，省略目录 id 时列出工作区根目录；`files:read` 接收 `{ workspaceId, fileId }`；`files:write` 接收 `{ workspaceId, fileId, version, text }`，版本是读取时的文件内容摘要。
 - Main 根据工作区记录定位根目录，为列出的条目签发不透明 id；Renderer 只能回传这些 id，展示用相对路径不能作为访问参数。
 - 每次读取重新校验真实路径位于登记的工作区内，拒绝跨工作区 id、失效条目及越界链接；符号链接只展示，不展开或预览。
-- UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 复用 GFM 渲染组件，支持编辑 / 预览 / 双栏；文件预览可呈现经 HTML 解析后白名单过滤的语义标签与对齐，不执行脚本或文档 CSS（聊天默认不解析 HTML）。相对图片按源文件目录在 Renderer 解析，通过所属工作区的 `files:list` 查找条目 id，再经 `files:read` 获取已校验的本地栅格图像；不传路径、不放宽 CSP，引用失败显示 alt。本地文档链接复用条目解析并在本工作区打开。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。独立 HTML / SVG 文件在文件树中仍仅按源码显示，不执行。
-- 聊天 assistant 的 Markdown 链接按消息 `sessionId` 绑定 workspace / cwd；原始 href 只按 AST 节点弱关联供受控按钮解析，DOM 只放行显式 http(s)，原始 HTML 仍不执行。仅显式点击时经 `files:list` / 已签发顶层 id 的 `files:resolve` 获取实际 root 并逐级按名称解析，不用缩写的 displayPath 猜根目录；普通文件复用原工作区 tab / hydration / 草稿，Markdown 默认预览。支持相对 cwd、Windows / POSIX 绝对路径、file URL、中文与空格编码和 `:line[:column]`；纯锚点、未知/危险协议、越界和网页 query/hash 明确报双语错误，不作为 DOM 导航。
-- 聊天中的 `.html` / `.htm`（忽略大小写）走 `files:open-html`，只收 `{ workspaceId, entryId }`，Main 重新检查登记 root、realpath、文件类型与扩展名，拒绝符号链接/网络主机，再由 `pathToFileURL` 编码后交给 `shell.openExternal`。没有任意路径/URL IPC、应用内 HTML 执行或本地 HTTP server。相对链接的 session cwd 不在文件服务 root 内时（含外部 worker worktree），明确提示不支持；没有可信 cleanup 映射时绝不回退主工作区同名文件，明确指向原 workspace 的绝对链接仍可打开。此变更仅涉及聊天链接组件/helper、files shared/Main/preload、字典与回归测试，不改变持久化、worktree 生命周期或 loading。
+- UTF-8 文本编辑最多 256 KiB，使用按需加载语言的 CodeMirror；Markdown 支持实时预览（默认）/ 源码 / 双栏，三者共用同一个 CodeMirror 实例与草稿（GFM 语言 + 代码块按语言高亮），切换经 reconfigure 保留文本、撤销历史与光标；实时预览在 CodeMirror 上加装饰：编辑器（含搜索面板）聚焦时选区所在行的元素显示源码，未聚焦时全部按渲染效果显示（焦点状态由 StateField 提供给行内 ViewPlugin 与块级 StateField），行内装饰由 ViewPlugin 只算可见区；顶层表格由 StateField 逐行替换为同步构建 DOM 的行 widget（同表共用按列内容宽度算出的 grid 列模板，单元格只用 createElement / 文本节点构建），激活行原位显示该行源码；顶层 HTML 块由 block widget 挂 React root 复用预览的 GFM 渲染组件与同一套 sanitize，提交后核对高度；图片只经下述本地图像解析，链接仅 Ctrl / Cmd+点击打开（规则同预览）；双栏为源码 + 只读渲染预览，预览复用 GFM 渲染组件；文件预览可呈现经 HTML 解析后白名单过滤的语义标签与对齐，不执行脚本或文档 CSS（聊天默认不解析 HTML）。相对图片按源文件目录在 Renderer 解析，通过所属工作区的 `files:list` 查找条目 id，再经 `files:read` 获取已校验的本地栅格图像；不传路径、不放宽 CSP，引用失败显示 alt。本地文档链接复用条目解析并在本工作区打开。PNG / JPEG / GIF / WebP 预览最多 2 MiB，其他二进制和超限文件显示说明。独立 HTML / SVG 文件在文件树中仍仅按源码显示，不执行。
+- PDF / DOCX / DOC 预览：按扩展名 + 魔数**同时**识别（`.pdf` 开头 `%PDF-`，`.docx` ZIP 头 `PK\x03\x04`，`.doc` OLE 头 `D0 CF 11 E0 A1 B1 1A E1`），不符时按原二进制处理；只对这三类把有界读取上限放宽到 32 MiB，超限显示“文件过大”。Main 返回 `{ kind: 'pdf'; data }`、`{ kind: 'docx'; data }`（`Uint8Array`，经结构化克隆传输，不转 base64）或 `{ kind: 'document-text'; format: 'doc'; text }`。PDF 在 Renderer 用 pdfjs-dist 渲染：动态 import 懒加载、`isEvalSupported: false`、中文所需 cMap 与标准字体打进渲染进程资源离线可用（不走 CDN），Worker 加载失败回退主线程模式。DOCX 在 Renderer 用 mammoth（懒加载）转 HTML，经 DOMPurify 白名单过滤（只留语义标签、表格与 data: 图片，去掉脚本、事件属性、样式表和外部资源；链接规则同 Markdown 预览）。DOC 在 Windows 上由 Main 调用本机 Word COM 转成 DOCX，再走同一条 mammoth + DOMPurify 渲染（`{ kind: 'docx'; convertedFrom: 'doc' }`）：只在 `files:read` 预览路径触发（保存前的冲突检查不启动 Word）；字节先复制到 `userData/cache/doc-preview/tmp/<随机>/`，Word 只打开这份副本，不在工作区产生锁文件或最近文件记录；PowerShell 用绝对路径，常量可读脚本写入同一临时目录的 `convert.ps1` 以 `-File` 执行（不用 `-EncodedCommand`），路径经环境变量传入，装有 Office PIA 导致参数绑定失败时改用 `InvokeMember` 晚绑定重试；打开前强制 `AutomationSecurity = 3` 禁用宏（失败即不打开），只读、不进最近文件、固定假密码使加密文档直接报错，不修改持久化的 `Options.*`；全局串行、同内容去重，90 秒超时结束 PowerShell 进程树及脚本报告的那个 WINWORD PID；结果按 sha256 缓存为 `<hash>.docx`（命中校验 PK 头与 32 MiB 上限，按 mtime 淘汰，至多 64 个 / 512 MiB）。非 Windows、无 Word（本次运行内记住）、转换失败或超时，回退为 Main 用 word-extractor 提取文字（`document-text` 带 `conversion: 'unavailable' | 'failed'`），只读显示并注明原因。文档里的外部链接或远程模板仍可能被 Word 访问。三种都不可保存：保存只接受 `text`，`document-text` 不是可编辑文本。不放宽 CSP、不开 `webPreferences.plugins`、不执行文档脚本；解析失败显示可读错误。只是应用内预览，不让 AI 工具读取 Word / PDF。
+- 预览内 Ctrl / Cmd+F：Markdown 双栏（焦点不在 CodeMirror 时）、DOCX、DOC 预览在预览区右上角打开查找条，不区分大小写、跨文本节点匹配，用 CSS Custom Highlight API（`CSS.highlights` + `::highlight()`）高亮，不修改 React 管理的 DOM、不插 `<mark>`；Esc 关闭并清除高亮。Markdown 实时预览与源码模式用 CodeMirror 自带搜索面板。PDF 页内查找不做。
+- 中央标签栏内容溢出时，纵向滚轮换算为横向滚动（按着 Ctrl、横向分量占优或无溢出时不拦截），拖拽排序不变。
+- 聊天 assistant 的 Markdown 链接按消息 `sessionId` 绑定 workspace / cwd；原始 href 只按 AST 节点弱关联供受控按钮解析，DOM 只放行显式 http(s)，原始 HTML 仍不执行。仅显式点击时经 `files:list` / 已签发顶层 id 的 `files:resolve` 获取实际 root 并逐级按名称解析，不用缩写的 displayPath 猜根目录；普通文件复用原工作区 tab / hydration / 草稿，Markdown 默认实时预览。支持相对 cwd、Windows / POSIX 绝对路径、file URL、中文与空格编码和 `:line[:column]`；纯锚点、未知/危险协议、越界和网页 query/hash 明确报双语错误，不作为 DOM 导航。
+- 聊天中的 `.html` / `.htm`（忽略大小写）走 `files:open-html`，只收 `{ workspaceId, entryId }`，Main 重新检查登记 root、realpath、文件类型与扩展名，拒绝符号链接/网络主机，再由 `pathToFileURL` 编码后交给 `shell.openExternal`。没有通用的任意路径/URL IPC、应用内 HTML 执行或本地 HTTP server。唯一例外是 `files:open-outside`：入参严格为 `{ sessionId, reference, action: 'open' | 'reveal' }`（拒绝多余键，reference ≤ 4096），仅在点击解析为工作区（或 worktree root）之外的绝对路径时使用；Main 要求会话存在（不校验 reference 是否出现在消息正文），按 `src/shared/chatFilePath.ts` 同一规则重新解析，只接受本平台绝对路径（Windows 盘符 / POSIX `/`），相对路径、UNC 与设备路径（`\\server`、`//server`、`\\?\`、`\\.\`）在解析、`path.resolve`、符号链接目标与 `realpath` 后均拒绝，路径须存在。目录用 `shell.openPath` 打开；文件 `reveal` 用 `showItemInFolder`；文件 `open` 仅白名单扩展名（png/jpg/jpeg/gif/webp/bmp/ico/tif/tiff/avif、pdf、txt/md/markdown/log/json/yaml/yml/toml/ini、mp3/wav/ogg/flac/m4a/mp4/mov/webm/mkv/avi、docx/xlsx/pptx，按 realpath 判断；svg/xml 可能由浏览器执行脚本、csv/tsv 有公式注入风险，不在白名单）交给 `shell.openPath`，其余一律只在文件夹中显示并返回 `revealed`，绝不执行可执行或脚本类文件；日志不写路径。相对链接的 session cwd 不在文件服务 root 内时（含外部 worker worktree），明确提示不支持；没有可信 cleanup 映射时绝不回退主工作区同名文件，明确指向原 workspace 的绝对链接仍可打开。此变更仅涉及聊天链接组件/helper、files shared/Main/preload、字典与回归测试，不改变持久化、worktree 生命周期或 loading。
 - Main 按文件串行保存，写前核对当前内容版本，冲突时保留磁盘与草稿；同目录临时文件写完后替换原文件。拒绝越界链接、二进制和超限写入；保留 UTF-8 BOM，编辑器沿用原文件的换行格式。
 - 未保存草稿不被目录刷新覆盖；切换对话、文件、工作区或折叠右栏不丢草稿；关闭标签及退出窗口前确认，取消退出不停止 agent 服务。保存中的新输入不能被旧保存响应覆盖。
 - 中央标签统一按工作区保存身份、类型、顺序和活动项；对话唯一不可关闭，文件 / diff / 终端可跨类型拖动混排，＋不参与排序。Main 在独立 `userData/workspace-ui/` 版本化文件中原子、串行保存，不写 `settings.json`。Renderer 完成 hydration 后才能写入，写入绑定窗口代际、租约与递增序号。
@@ -306,6 +359,8 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 改动层限于 shared 用量类型、Main 服务 / handler 与两个只读访问出口、Settings 用量页及中英文案；不新增依赖、价格覆盖、持久化设置或 agent 协议。
 
 ### 7.7 Git 与命令网络代理
+
+- 作用范围：命令 / Git 子进程与内置 `web_fetch`（§5，用会话加载时的环境快照）。不读 Windows 系统代理或 PAC；模型 API、MCP 和应用更新的流量仍不走这个设置。
 
 - 通用设置 `preferences.networkProxy` 仅包含模式（默认沿用进程环境）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
 - 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
@@ -396,6 +451,83 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - Renderer：`stores/settings.ts` 的 `useAppearanceStore`（仿通用偏好：只写改动的字段，先乐观更新，保存失败按 Main 重读并提示）；`lib/appearance.ts` 的 `bindDocumentAppearance`；`stores/terminals.ts` 的创建选项与 `bindTerminalAppearance`；`main.tsx` 启动时挂上这两个绑定，首帧等外观设置读回（与偏好共用 1 秒上限）；`components/terminal/TerminalPane.tsx` 的留白底色；`components/files/FileEditor.tsx` 的字号；`components/settings/AppearanceSettings.tsx`；`i18n/{zh-CN,en}.ts`。
 - 明确不做：界面配色方案（即现有的主题）、界面粗体字重、自定义配色导入、按工作区区分的设置、代码块与 diff 的独立字体设置、快捷键缩放。
 
+### 7.12 插件
+
+- 行为差异：
+  - 插件 = pi 包（目录 / npm / git），或单个 pi 扩展文件（`.ts` / `.js` / `.mjs`）。能力来自 pi 扩展机制（工具、命令、事件钩子）；包里的 skills / prompts 按 pi 包规则随之加载。只是 agent 侧能力，按角色挂载。
+  - 本地来源：Main 弹框选目录或扩展文件，一律 `copy`：复制到副本根目录后加载副本，原文件不动。不再新建 `link`；旧的 `link` 条目（以及没有 `mode` 的旧本地记录，按 `link` 处理）继续可用，不自动转换，可手动「转为副本」。
+  - 副本根目录：打包版 `~/.fynvra/plugins/`；开发版 `~/.fynvra-dev/plugins/`；开发版设了 `FYNVRA_USER_DATA_DIR` 时为 `<userData>/plugin-files/`。每个插件一个子目录 `<root>/<插件 id>/`，磁盘上已存在同名目录时改用 `<id>-2` 等，绝不覆盖已有目录。
+  - 复制规则（Main，`services/plugins/pluginCopies.ts`，只用 `node:fs/promises`）：单个文件复制为 `<目录>/<原文件名>`；目录递归复制，跳过 `.git`；符号链接 / junction 的真实路径在源目录内的跟随复制（pnpm 的 `node_modules`），指向源目录外、断链或回指上级目录（环）的跳过。上限 200 MB 或 2 万个文件，超出中止并报错。先复制到 `<root>/.tmp-<uuid>` 再 rename 成正式目录，失败清理临时目录且不登记；来源与副本根目录互相包含时拒绝。
+  - 卡片操作：打开文件夹、用…打开（目标列表复用 `workspaces:open-with-apps`）、作为工作区打开（`addDirectory(dir, { plain: true })`，link 指向文件时用其父目录，已是工作区则返回已有 id）；copy 可「从源文件重新复制」（新内容进临时目录，旧副本改名 `.old-<uuid>` 后换入，失败还原旧副本），link 可「转为副本」（`mode=copy`、`sourcePath=原 path`、`path=副本路径`）。打开类操作的目标：copy 为副本目录，其余为登记的 path。
+  - 移除：link 只删登记，绝不删用户目录。copy 与新装的 npm / git（`copyDirOf(root, path)` 能找到所在目录）直接稳健删除 `<root>/<dir>`，不调 pi。旧 npm / git 条目（path 在 `userData/agent/{npm,git}` 下）先 `remove(source)`；失败时仅当 path 严格位于 `agent/git/`（至少 `<host>/<路径>` 两层）或 `agent/npm/node_modules/`（`<包>` 或 `@scope/<包>`）内，才对该插件自己的目录稳健删除，否则不删任何文件并报错（只带错误码）。稳健删除（`services/plugins/pluginRemoval.ts`）：先校验目标是受管根目录内、属于单个插件的目录（副本根目录下恰好一层；不会是任何受管根目录本身；resolve 后比较，Windows 不分大小写），再 `fs.rm({ recursive, force, maxRetries: 5, retryDelay: 200 })`；Windows 上遇 EPERM / EACCES 时把整棵树改成可写（文件 0o666、目录 0o777，不跟随链接）后再试一次。仍删不掉（文件被占用等）时登记照删、角色绑定照解除，目录进待清理列表，返回 `{ ok: true, warning }`，界面显示提示而不报错。启动时（注册插件 handler 时，在会话加载插件之前，走同一串行锁）按列表逐条稳健删除：删前重新检查边界，边界不合法或仍是已登记插件目录的只移出不删；删掉或已不存在的移出，失败的留到下次；日志不带路径。删除成功后遍历角色，把含该 id 的 `pluginIds` 去掉后保存（内置角色写覆盖配置），有角色改动时广播一次 `roles:changed`；单个角色保存失败只记不带路径的 warning，不影响删除结果。
+  - npm `npm:<name>[@version]`、git `git:<host>/<path>[@ref]` 或 `https://` 仓库 URL：所有插件都在 `pluginCopyRoot()/<id>/` 下。Main 动态 import pi 的 `DefaultPackageManager`（用内存 `SettingsManager`，不写任何 pi settings 文件，不读 `~/.pi`），以副本根目录下的 `.tmp-<uuid>` 为 `agentDir` / `cwd` 执行 `install(source)`（user 作用域）；git 把 `getInstalledPath` 得到的仓库目录（含 pi 装好的依赖）rename 成 `<root>/<id>`，登记 `path = <root>/<id>`；npm 把整个 `<tmp>/npm` 前缀目录（含 node_modules）rename 成 `<root>/<id>`，登记 `path = <root>/<id>/node_modules/<包>`。`<id>` 沿用副本的唯一目录规则；安装路径不在临时目录内（如回退到全局 npm）算失败；失败不登记，rename 后登记失败删掉刚装好的目录；最后删除临时目录（删不掉的进待清理列表）。旧版装在 `userData/agent/{npm,git}` 下的条目仍可用、可删除。需要本机 npm / git，失败返回可读错误。
+  - source 校验：去首尾空白，≤ 500 字符，无换行 / 空字符，只接受上述形态；同一来源或同一本地路径不可重复登记。
+  - 设置页「设置 → 插件」：列表（名称、类型、旧引用条目的「引用」标签、当前加载路径 `path`（npm / git 的来源在悬停提示里）、启用开关、「…」操作菜单、移除）、添加本地（点击直接选择，不弹确认框，一律复制）、从 npm / git 安装（输入框 + 安装中状态，点击直接安装）；界面不显示风险提示。
+  - 角色挂载：`Role.pluginIds`（§4）；角色编辑器多选，样式同 MCP。改动对之后新加载的会话生效。
+  - 从本机导入（`services/plugins/piImport.ts`）：只在用户打开「从本机导入」（或点重新扫描）时只读扫描原生 pi 的 agent 目录（`PI_CODING_AGENT_DIR`，否则 `~/.pi/agent`，与模型服务导入的 `locate.ts` 一致），绝不执行或 import 扩展代码。来源：① `<agentDir>/extensions/` 下直接放的 `.ts` / `.js` / `.mjs` 文件，以及含 `index.ts` / `index.js` 的子目录（跳过点开头的项，跟随符号链接判断类型）；② `<agentDir>/settings.json` 的 `packages`（字符串或 `{ source }`）：`npm:` / `git:` / URL 形态的用 `parseRemotePluginSource` 校验，不合格的跳过并记一条只带个数的 warning，其余按本地路径相对 agentDir 解析（支持 `~/`）；③ settings.json 的 `extensions`：本地文件 / 目录路径，`+path` 去前缀，跳过 `builtin:*`、`-` / `!` 排除项与通配符。本地路径须是目录或扩展文件，不存在就静默跳过；settings.json 损坏只记一条只含文件名的 warning。同一路径 / 来源只列一次，最多 200 个候选（超出记 warning）。名字：文件名去扩展名、目录的 `package.json` name 或目录名（`pluginName`）、npm 包名、git 仓库名。
+  - 导入去重：已登记插件满足任一条即标 `duplicateOf: <已有插件名>`，不可勾选、导入时算失败：副本的 `sourcePath`（或本地条目的 `source`）等于候选路径；旧引用条目的 `path` 等于候选路径；npm / git 条目的 `source` 与候选来源相同。路径先 `resolve`，Windows 忽略大小写。
+  - 候选缓存：Main 保存 `{ id: randomUUID(), kind, path | source, … }`，每次扫描整体替换；Renderer 只拿到 `PluginImportCandidateView { id, name, kind, form?: 'file' | 'dir', display, duplicateOf? }`（`display` 为 `~` 缩写路径或来源串），导入只回传 id。
+- 所属层与必改文件：
+  - Main：插件注册表服务（登记、安装 / 卸载、启停）；角色资源解析把 `pluginIds` 解析为启用插件的路径（停用跳过；已删除跳过并记 warning）。
+  - IPC（领域 `plugins`）：`plugins:list`、`plugins:add-local`（无参数或 `{}`，拒绝任何键，Main 弹框后复制）、`plugins:install`（`{ source }`）、`plugins:remove`（id，并清理角色 `pluginIds`）、`plugins:toggle`（`{ id, enabled }`）、`plugins:reveal`（id）、`plugins:open-in`（`{ id, appId }`，行为同 `workspaces:open-in`）、`plugins:open-as-workspace`（id → `{ workspaceId }`）、`plugins:recopy`（id，仅 copy）、`plugins:convert-to-copy`（id，仅 link）、`plugins:scan-imports`（无参数或 `{}` → `{ candidates, warnings }`）、`plugins:import`（`{ ids: string[] }`，1–200 个 → `{ imported: string[], failed: { name, error }[] }`：在同一串行锁内逐个导入，本地候选走与 `plugins:add-local` 相同的校验 / 查重 / 复制 / 登记流程（不弹框），npm / git 候选走与 `plugins:install` 相同的安装流程，成功的照常扫描服务名；未知 id 或已标重复的候选算失败；某项失败不影响其他项；全部结束后有成功的才广播一次 `plugins:changed`）。入参 `unknown` 收窄、拒绝多余键；Renderer 只传 id / appId，路径一律由 Main 从注册表取；安装 / 卸载 / 添加本地 / 重新复制 / 转为副本串行，进行中再请求返回“忙”，成功后广播 `plugins:changed`。preload 按 §9.1 新增 `plugins` 领域文件。
+  - Renderer：「设置 → 插件」页、角色编辑器的插件多选、中英文案。
+  - 运行时：`SpawnSessionSpec.plugins: string[]` → piSession → `resourcePaths.extensions` → `DefaultResourceLoader.additionalExtensionPaths`；保持 `noExtensions: true`（不发现磁盘上其他扩展），扩展加载错误并入 `RoleSession.warnings`。会话加载后收集由插件路径加载的扩展所注册的工具名，传给审批门 `pluginTools`，归类 `plugin`（§5）。
+- 插件可见的模型服务：
+  - 下发：角色挂了插件时，Main（`ipc/sessions.ts` 的 `resolvePluginProviders`）把「设置 → 模型服务」里已启用、有 key、有模型的服务按服务 id 放进 `SpawnSessionSpec.pluginProviders`（`{ id, name, api, baseUrl, apiKey, models: { id, reasoning? }[] }`），再按 `providerMap` 下发别名：每条 `[名字, 服务 id]`，目标服务可用时加一条 `id: 名字`、内容复制自目标服务的条目（替换列表里同 id 的条目）；目标不可用（已删、停用、缺 key 或模型）时移除列表里 id 为该名字的条目，不回退到同名服务。同时下发 `SpawnSessionSpec.pluginRefs: { id, path }[]`（与 `plugins` 同序，由角色资源解析产出）。
+  - 注册：worker 的 `ModelRegistry.exposeProviders` 在 `createRoleSession` 之前按条目 id `registerProvider` + `setRuntimeApiKey`（只在内存），插件经 `ctx.modelRegistry` 按名字查到，与原生 pi 读 `models.json` 一致。与 pi 内置 provider、插件自己注册的 provider 同名时跳过并记 warning（映射到内置名也一样跳过）；新列表里没有的旧别名注销（spec 不带时不动）；别名不进能力推断用的目录。Fynvra 自己的模型仍走 `fynvra-` 运行时键。服务名规则（`isPluginProviderName`，`src/shared/types/plugins.ts`）：`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`，不以 `fynvra-` 开头（不分大小写）。
+  - 运行时识别（`src/agent/pluginLookups.ts`）：worker 包装共享 `ModelRuntime` 的 `getProvider` / `getAuth` / `getProviderAuthStatus` / `getModel`（pi `ModelRegistry` 外观层的转发目标），行为与返回值不变。第一个参数是符合服务名规则的字符串时，临时把 `Error.stackTraceLimit` 调到 50 取调用栈，帧路径规整（去 `file://`、`\` → `/`、Windows 转小写）后与会话 spawn 时登记的 `pluginRefs` 根路径（原路径与 `realpathSync.native`）比对：等于根路径（单文件插件）或以「根路径 + /」开头（目录插件）即归属该插件，取最内层匹配的帧；匹配不上（pi 内部调用）不记录。每个「插件 id + 名字」同进程只报一次：进程级事件 `{ type: 'plugin-provider-lookup', pluginId, name }`（不带路径）。拦截中的异常一律吞掉。局限：经定时器 / 事件回调发起、栈里已无插件帧的调用识别不到；`getAll()` 后自行过滤的用法无法拦截。
+  - 记录与关联：Main 收到事件后经 `onPluginProviderLookup` 写进 `PluginEntry.requestedProviders`（去重、按首次出现排序、每插件最多 20 个；只有变化时写盘并广播 `plugins:changed`；插件不存在时忽略）。`plugins.json` 顶层可选 `providerMap: { [插件里的服务名]: 服务 id }`，按名字全局生效（worker 进程多会话共用 runtime）；没有条目即「自动（同名服务）」。IPC：`plugins:list` 返回 `{ plugins, providerMap }`；`plugins:set-provider-mapping`（`{ name, serviceId: string | null }`，拒绝多余键；非 null 时须是已存在的模型服务 id；null 删除映射）→ `{ providerMap }`，变化时广播 `plugins:changed`。对之后新建的会话生效。
+  - 静态扫描（`services/plugins/providerScan.ts`，只用正则 + `node:fs/promises`，只读文本，绝不执行或 import 插件代码）：`extractProviderNames(source)` 先收集简单字符串常量 `const|let|var NAME[: Type] = '…'`（单 / 双引号或不含插值的反引号），再识别 `.getProvider(` / `.getProviderAuth(` / `.getApiKeyForProvider(` / `.getProviderAuthStatus(` 的第一个参数、带第二个参数的 `.find(x, …)` 的第一个参数、`.provider ===|== x` 及两边对调的写法；参数是字符串字面量或能解析成上述常量的标识符。结果按服务名规则过滤、去重、按首次出现排序、最多 20 个。`scanPluginProviders(path)`：单文件插件只扫该文件；目录插件递归扫 `.ts .mts .cts .js .mjs .cjs`，跳过 `*.d.ts`、`node_modules`、点开头的目录（含 `.git`），不跟随符号链接；最多 500 个文件、合计 5 MB，单个超过 1 MB 的不读。同时返回 `stamp`（被扫文件相对路径 + 大小 + mtime 的 sha256 前 32 位）；stamp 未变时只 stat 不读内容。局限：服务名经拼接、函数参数、对象属性、配置文件或环境变量传入的识别不到；常量按文件内名字解析，不跨文件、不分作用域；注释里的代码也会被识别。
+  - 扫描时机：`plugins:add-local`、`plugins:install`、`plugins:recopy`、`plugins:convert-to-copy` 成功后立即扫描并写入 `scannedProviders` / `scanStamp`（失败不影响操作，只记不带路径的 warning）；`plugins:list` 逐条检查，没有扫描记录或 stamp 变了就重新扫描写入（各条并行扫描，写入走注册表串行队列；写入时加载路径已变则丢弃），直接返回最新数据，不广播 `plugins:changed`（避免循环）。
+  - 手动服务名：`plugins:set-manual-providers`（`{ id, names: string[] }`，拒绝多余键；names 全部符合服务名规则、最多 20 个，去重保序；整组替换 `manualProviders`）→ `{ plugin }`，变化时广播 `plugins:changed`。
+  - 卡片「模型服务」显示 `scannedProviders`、`requestedProviders`、`manualProviders` 合并去重（保持各自顺序）；很多插件不用模型服务，列表为空时卡片上不显示任何内容，手动添加入口在卡片「…」菜单（「添加模型服务名」，卡片内原地出现输入框）；非空时为紧凑的 `text-xs` 灰色小标题「模型服务 · 改选后新会话生效」+ 同行右侧「+ 添加」文字按钮，无单独 footer 行；只有仅来自手动添加的行可删。状态为「未找到」的行可「新建服务」：打开 `ProviderDialog`（自定义默认值，名称预填服务名），保存后经 `onSaved(providerId)` 调 `plugins:set-provider-mapping`：id 与名字不同时关联到新 id，相同时清除映射。
+  - 安全边界：只对挂了插件的会话下发；key 只在 Main → worker 这一跳出现；插件代码能读到这些服务的地址和 key（与原生 pi 一致）；key 与完整路径不进日志、错误与事件；识别事件在 Main 按 registry id 与服务名规则收窄，只能往已登记插件的列表里追加有限个名字，不影响下发内容。
+- 持久化：`userData/plugins.json` = `{ version: 1, plugins: StoredPlugin[] }`，`StoredPlugin { id, name, source, kind: 'local' | 'npm' | 'git', path, enabled, installedAt, mode?: 'copy' | 'link', sourcePath?, requestedProviders?: string[], scannedProviders?: string[], scanStamp?: string, manualProviders?: string[] }`（三个名字列表各自去重、最多 20 个、须符合服务名规则；非法值丢弃），顶层可选 `providerMap?: Record<string, string>`（键须符合服务名规则、值须为 registry id、最多 100 条，非法条目丢弃不让文件失效；版本仍为 1，旧文件照常可读）；`path` 始终是实际加载的路径（copy 为副本，link 为原路径），`mode` / `sourcePath` 仅本地插件（`sourcePath` 仅 copy，为复制来源的原路径）；id 为名字派生的 slug（冲突加后缀）；原子写；文件损坏时报错，不静默清空。顶层另有可选 `pendingDeletes?: string[]`（待清理的插件目录，最多 50 条；只接受受管根目录内、属于单个插件的目录，非法值丢弃不让文件失效）。npm / git 包本体在 `pluginCopyRoot()/<id>/`（旧条目在 `userData/agent` 下）。
+- 安全边界：插件以用户权限执行任意代码。审批门只管工具调用，管不住插件加载时和钩子里的代码，靠用户自担信任。Renderer 只传 id 与 source 字符串，本地路径只由 Main 弹框或导入扫描产生；只在用户打开导入时读取 `~/.pi`（只读），不写 pi settings 文件。删除与覆盖只发生在受管根目录（副本根目录；旧的 `userData/agent/git`、`userData/agent/npm/node_modules`）内、属于该插件自己的目录，从不删受管根目录本身，从不改动原文件；另加最后一道保险（`services/plugins/protectedPaths.ts`）：被删路径 resolve 后（Windows 不分大小写）位于、等于或包含 `~/.pi` 或 pi 的 agent 目录（`PI_CODING_AGENT_DIR`，否则 `~/.pi/agent`）时一律拒绝删除，只记不带路径的 warning，覆盖稳健删除、待清理列表、启动清理、副本临时 / 旧目录清理与旧条目的 pi remove；复制有大小上限且不跟随指向源目录外的链接；复制 / 删除失败只报错误码，路径不进日志，错误文案不带注册表以外的路径。
+- 明确不做：插件市场 / 搜索、自动更新、界面插件、沙箱、项目级 `.pi` 包、资源筛选。
+
+### 7.13 工作流
+
+工作流是由角色节点组成的有向无环图：每个节点做什么、由哪个角色执行、依赖哪些上游节点。分阶段落地：W1 模型 / 校验 / 迁移 / 本契约，W2 并行执行引擎，W3 画布编辑器，W4 任务进度图。
+
+- 模型与校验（core，`parseWorkflow`，不抛异常，拒绝多余键，`null` 视同缺省）：
+  - 节点沿用 `WorkflowStep`（§4），新增 `needs: string[]`（上游 id，归一化输出总是带上）与可选 `position: { x, y }`（有限数，绝对值 ≤ 100000，缺省时界面自动排版）。
+  - 节点数 1–20；节点 id 在工作流内唯一；`needs` 只能引用已存在的节点，不能重复，不能指向自己；整张图不能有环，错误信息按依赖方向列出环上的节点（如 `a → b → c → a`）。
+  - `onFail` 只能是节点自身或它的祖先（经 `needs` 可传递到达的上游）。
+  - 输出的 `steps` 按稳定拓扑序排列（Kahn，同时可选的节点按原输入顺序取）。
+  - 兼容旧数据：输入里没有任何节点带 `needs` 时，按列表顺序转成线性链（第 i 个依赖第 i-1 个，第一个为 `[]`）；只要有一个节点带 `needs`，缺 `needs` 的节点视为起点 `[]`。旧任务快照（`Task.workflow.steps` 无 `needs`）读入时按同样规则补齐。
+  - 图工具（core 纯函数，W2 / W3 / W4 共用）：`workflowTopologicalOrder(steps) → steps[] | undefined`（有环为 undefined）、`findWorkflowCycle(steps) → id[] | undefined`、`workflowParents` / `workflowChildren(steps, id) → id[]`、`workflowAncestors` / `workflowDescendants(steps, id) → Set<id>`（不含自身）、`workflowRoots` / `workflowSinks(steps) → id[]`、`workflowLevels(steps) → id[][] | undefined`（最长路径分层）、`summarizeWorkflow(steps, label?) → string`。
+  - 文字摘要：每层的每个节点恰好依赖上一层全部节点时按层写成 `开发 → (测试 ‖ 安全审查) → 验收`（同层用 ` ‖ ` 并列，只有一层时不加括号）；否则按拓扑序逐个列出 `开发; 测试 ← 开发; 验收 ← 测试 + 安全审查`。
+- 派发：`dispatch_task` 可选 `workflow`（id，或不区分大小写的名称），与 `role` 互斥（同时给返回错误）。主 agent 会话的 spawn spec 带工作流清单（id、名称、说明、各节点名称 + 角色、`summary` 文字摘要，节点标签为 `名称 [角色]`），工具描述与 orchestrator 提示词显示摘要；用户说“用某工作流做某事”时传 `workflow`。清单只是 spawn 时的快照：`workflow` 参数始终存在（清单为空时描述说明可传之后新建的工作流），会话开始后新建的工作流按 id 或名称同样能派发。用户消息里的约定（orchestrator 提示词始终包含）：`/名称` 或 `/「名称」` 指定工作流（传 `workflow`、不传 `role`），`@名称` 或 `@「名称」` 指定角色（传 `role`，多个 `@` 各派一个任务）；名称不区分大小写，id 也可；对不上任何工作流 / 角色的 `/...`（如路径）、`@...`（如邮箱）按普通文本；明显是指令但名称未知时原样传入，Main 报未知后再问用户；这是用户的明确指令，优先于主 agent 自选角色。Main 派发时以注册表为准：工作流不存在、节点角色不存在或是编排类角色则返回错误；成功则把定义快照进 `Task.workflow`。之后编辑工作流不影响已派发的任务。
+- 执行语义（W2，Main `workflowEngine.ts`；调度决定是 core 的纯函数 `planWorkflow`）：
+  - 运行时状态（`Task.workflow`）：`nodes[]`（与 `steps` 一一对应：`status` 为 waiting / running / passed / failed / cancelled，`dispatchId`、`placement` 为 integration 或 isolated、隔离节点的 `worktreeId` 与 `merged`、待用的 `feedback`、失败原因 `failure`）、`launches[]`（启动意图：节点 + 预分配的 dispatchId + placement + 已建的节点 worktree）、`worktreeId`（集成 worktree）、`rounds`、按节点 id 记录的 `history`。旧快照（`step` 下标 + 单个 `pending`）读入时由 `isTaskWorkflow` 就地转换：当前步之前的节点通过、当前步运行中（引擎加载时按最近一次尝试补上 dispatch 与集成 worktree）、pending 转为等待节点上的反馈。
+  - 调度：节点的所有上游都通过（并已合回集成 worktree）后才可运行；每个工作流任务最多同时运行 4 个节点；同时可运行的节点按拓扑序启动。每个任务一个串行的推进循环：落实启动意图 → 合并通过的隔离节点 → `planWorkflow`（启动 / 等待 / 退回 / 结束）。
+  - 隔离（git 工作区）：任务派发时建集成 worktree（分支 `fynvra/<slug>`）。节点是当前唯一可运行的节点、且没有其他节点在运行 / 待启动 / 待合并时，直接在集成 worktree 里运行（线性工作流因此与串行引擎完全一致：同一 worktree，上一步会话空闲后释放再启动下一步，没有额外合并）；其余节点各自从集成分支当前 HEAD 分出节点 worktree，分支 `fynvra/<任务 slug>-<节点 id>`。由此集成 worktree 里任何时刻最多一个 worker。
+  - 汇合合并：隔离节点通过后记 `merged: false`；引擎等它的会话空闲并释放，节点 worktree 有未提交改动则该节点失败；否则在集成 worktree 里 `git merge --no-ff --no-edit <节点分支>`（不 rebase；先用 `git merge-base --is-ancestor` 判断已合并则跳过，保证幂等），串行进行；集成 worktree 里有 worker 时不合并。冲突时 abort，该节点失败、冲突文件列表作为反馈。合并后先记 `merged: true` 再删节点 worktree 与分支。
+  - 普通目录（vcs 为 none，in-place 模式）：不隔离，按拓扑序一次只跑一个节点。
+  - 失败（报告 failed、合并冲突 / 未提交改动、启动失败、会话确定已失败）：不再启动新节点，等运行中的节点结束、期间通过的节点照常合并后汇总。每个失败节点都设置了 `onFail` 且 `rounds < maxRounds` → 退回到这些目标中拓扑序最靠前的那个，`rounds + 1`，把该目标及其所有后代重置为等待（不在其下的失败节点及其后代也重置，带上各自的问题），其他已通过的节点保留；各失败节点的名称与总结合并作为目标的反馈；失败节点的节点 worktree 随之删除。否则整个任务记 `failed`，发 worker_done(failed)，正文含各节点状态与历程（失败节点的 worktree 保留，到 reject_work / abandon 时清理）。派发 / reject_work 启动首批节点失败时工具直接返回错误、任务回到原状。
+  - 成功：全部节点通过且合并完成后任务进入 `in-review`，发 worker_done(succeeded)：正文含图摘要、各节点状态与历程，改动文件取各节点并集。worker_done 的 dispatch（代表 dispatch）作用于集成 worktree：任务最后一次尝试就在集成 worktree（或普通目录）里时用它；否则（如末尾是并行节点、或整个工作流都没有节点在集成 worktree 里跑过）补一条已结算的汇总 Dispatch：`worktreeId` / `branch` 指向集成 worktree，`outcome` 为工作流结果，`summary` 汇总各节点，`filesModified` 为并集，`workerSessionId` 沿用最近结算节点的会话。它是该任务最新的 dispatch，`review_diff` / `run_checks` / `merge_worktree` / `cleanup_worktree` / `reject_work` 按现有规则作用于集成 worktree。
+  - `reject_work`（in-review 或 failed，现有保护条件不变）：清理遗留的节点 worktree，从起点节点开始整图重跑，全部节点重置为等待，反馈写进起点节点任务书，`rounds` 归零、历史保留。
+  - abandon（`cleanup_worktree { abandon: true }`，可传任一运行中节点或代表 dispatch）：所有进行中的节点尝试按 failed 结算、节点记为 cancelled、启动意图清空；停掉所有节点会话，清理所有节点 worktree / 分支与集成 worktree。
+  - 崩溃恢复：先写启动意图（含预分配的 dispatchId）再建节点 worktree（建好即写进意图）、再起会话，会话起来后同步落库 Dispatch 与节点 running。服务加载 / 对账时推进所有 in-progress 的工作流任务：意图里的 dispatch 已存在则只补状态、不重复启动，否则复用已建的 worktree 重新启动；通过未合并的节点补做合并（幂等）；全部结束却未汇总的补做汇总。运行中节点的会话确定已失败时（`sessionFailure`）该节点按 failed 结算；对账逐个检查任务的全部未结算尝试（并行节点各一个），不属于运行中节点或待启动意图的孤儿尝试会话已死时只结算它自己。abandon / reject_work 重跑前结算任务全部未结算尝试、停掉全部节点会话。
+- 任务书：原 spec + 「工作流 X · 节点 <名称>」+ 本节点说明 + 判定契约（通过 → `report_done succeeded`；发现需要退回的问题 → `failed`，summary 写清问题与复现）+ 已完成上游节点的摘要 / 退回反馈。
+- 编排工具显示：`list_workers` / `dispatch_task` 对工作流任务显示工作流名、图摘要、回退次数 `r/max`，每个节点一行（状态 waiting / starting / running / merging / passed / failed / cancelled、名称、角色、dispatch_id、是否在自己的 worktree）；运行中不再单列任务级 dispatch，结束后单列代表 dispatch；`wait_for_workers` 把整体未结束的工作流任务算作仍在运行；`send_to_worker` / `read_worker_output` 接受该任务任一活动节点的 dispatch；`ask_coordinator` 转给主 agent 的问题带上工作流名和节点名；工具说明与提示词里的工作流显示成图的文字摘要。
+- 设置页（W3）「设置 → 工作流」：
+  - 画布编辑器：`@xyflow/react` 画布 + `@dagrejs/dagre` 自动排版。节点卡片显示名称、角色和说明首行；从节点拖出连线建立依赖（写进下游的 `needs`），会形成环的连线被拒绝；删除连线 / 节点时同步更新 `needs` 与失效的 `onFail`；拖动节点写 `position`。
+  - 侧栏编辑选中节点：名称、角色下拉（排除编排类角色）、说明、失败退回目标（只列自身与祖先）。失败退回在画布上用红色虚线从节点指向目标。
+  - 其他：自动排版、三个预设模板（空白、线性「开发 → 测试 → 审核」、并行「开发 → (测试 ‖ 安全审查) → 验收」）、工作流名称 / 说明 / 回退上限；列表页每个工作流显示文字摘要。保存仍走 `workflows:save`，由 Main 用 `parseWorkflow` 校验。
+  - 公共组件：可复用的 `WorkflowGraph`，分只读与可编辑两种模式，W4 复用只读模式。
+- 任务进度图（W4）：编排面板里工作流任务显示只读流程图，按节点状态着色（等待 / 运行中 / 通过 / 失败），点击节点查看对应 worker 的输出。
+- 所属层与必改文件：
+  - core：`Workflow` / `WorkflowStep` / `Task.workflow` 类型、`parseWorkflow` 与图工具；编排状态与任务书渲染的工作流推进。
+  - Main：工作流注册表服务；编排服务的调度、合并与恢复；主 agent spawn spec 带工作流清单与摘要。
+  - IPC（领域 `workflows`）：`workflows:list`、`workflows:save`（整份 Workflow，新建或替换）、`workflows:remove`（id）。保存只校验结构，角色是否存在在派发时检查（设置页对不存在 / 编排类角色给出提示）。
+  - agent-runtime：`dispatch_task` 的 `workflow` 参数与互斥校验、工具描述与 orchestrator 提示词。
+  - Renderer：「设置 → 工作流」画布编辑器、编排面板的进度图与历史、中英文案。
+- 持久化：`userData/workflows.json` = `{ version: 1, workflows: Workflow[] }`（≤ 50 个），原子写。版本号不变：旧条目（无 `needs`）读入时由 `parseWorkflow` 转成线性链，下次保存整份写成新形状。任务里的快照与推进状态随编排快照 `userData/orchestration/<workspaceId>.json` 保存。
+- 安全边界：入参 `unknown` 收窄、拒绝多余键；编排类角色不能当节点角色；节点数、并发数、回退次数有上限，历史与摘要有界；各节点 worker 的工具、审批和验收合并规则与普通派发相同。
+- 明确不做：条件分支（除 `onFail` 外）、跨任务工作流、节点级模型覆盖、内置测试 / 审核角色、子图与循环。
+
 ## 8. 分阶段
 
 - **Wave 1（并行三张卡）**：`app-shell`（Electron 骨架 + settings + IPC 约定 + 布局壳）、`core-domain`（packages/core）、`agent-runtime`（packages/agent-runtime）。
@@ -445,7 +577,7 @@ export interface ChatMessage {
   toolCalls: ChatToolCall[]; createdAt: number; streaming: boolean;
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }
-export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp';
+export type ApprovalKind = 'command' | 'file-edit' | 'file-write' | 'mcp' | 'network' | 'plugin';
 export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
 export interface ApprovalRequest {
   id: string; sessionId: string; kind: ApprovalKind; title: string; detail: string; expiresAt: number;
@@ -592,4 +724,5 @@ export interface McpServerEntry { id: string; name: string; transport: 'stdio' |
 export interface McpServerEntryView extends McpServerEntry { envKeys: string[]; headerKeys: string[]; }
 ```
 settings-ui 还提供 `src/main/services/providers/resolveModel.ts` 导出 `createModelResolver(): ModelResolver`（形状同 9.5）。
-持久化：`userData/providers.json`（含明文 key，仅 Main）、`userData/skills.json`、`userData/mcp.json`、`userData/roles/<id>.json`。
+持久化：`userData/providers.json`（含明文 key，仅 Main）、`userData/skills.json`、`userData/mcp.json`、`userData/roles/<id>.json`、`userData/plugins.json`（§7.12）、`userData/workflows.json`（§7.13）。
+模型服务「从本机导入」（`src/main/services/providers/import/`，只读，只在用户打开导入并勾选来源时读取）：来源依次为 Claude Code（`~/.claude/settings.json`）、Codex（`~/.codex/config.toml` + `auth.json`）、CC Switch（`~/.cc-switch/cc-switch.db` 的副本）、pi（`<agent-dir>/models.json` + `auth.json`，`<agent-dir>` = `PI_CODING_AGENT_DIR`，缺省 `~/.pi/agent`；平时不读 `~/.pi`）。pi 只导入协议受支持且有模型的 provider，名称取 provider 键名；只覆盖内置服务地址等不完整的条目跳过并提示。key 优先取 auth.json 里 `type: 'api_key'` 的条目，其次 models.json 的 `apiKey`；`$NAME` / `${NAME}` 取环境变量（缺失则视为无 key 并提示），`$$` / `$!` 转义；`!command` 形式的 key **绝不执行**，视为无 key 并提示手动填写。明文 key 只在 Main 内存，Renderer 只拿脱敏候选；warning 不带 key 与配置原文。

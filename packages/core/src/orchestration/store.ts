@@ -2,6 +2,7 @@ import { type CoreFs, isNotFoundError } from '../fs';
 import { isDispatchOutcome, isMessageType, isTaskStatus, isThinkingLevel } from '../guards';
 import { errorMessage, parentDir, writeFileAtomic } from '../internal/files';
 import type { Dispatch, Message, Run, Task, Worktree } from '../types';
+import { isTaskWorkflow } from '../workflows/taskWorkflow';
 import { canTransitionTask, isDispatchSettled } from './transitions';
 
 /** {@link EntityTable.update} 的补丁：给出的字段覆盖原值，值为 `undefined` 的字段被删除；`id` 不可改。 */
@@ -46,7 +47,8 @@ export interface OrchestrationSnapshot {
  *
  * 表级不变量：
  * - `tasks.update` 改 `status` 必须符合 {@link canTransitionTask}；
- * - 同一任务同时最多一个未结算的 dispatch；已结算的 dispatch 不可再改；`settledAt` 与 `outcome` 同时出现；
+ * - 同一任务同时最多一个未结算的 dispatch；例外：工作流节点尝试（带 `nodeId`）按节点计，
+ *   同一任务下 `nodeId` 互不相同的节点尝试可以同时未结算；已结算的 dispatch 不可再改；`settledAt` 与 `outcome` 同时出现；
  * - `status` / `outcome` / 消息 `type` 必须是合法枚举值。
  * 不校验跨表引用（如 `task.runId` 是否存在）。
  */
@@ -55,7 +57,7 @@ export interface OrchestrationStore {
   readonly runs: EntityTable<Run>;
   /** 任务；改 `status` 走迁移表。 */
   readonly tasks: EntityTable<Task>;
-  /** 任务尝试；同一任务最多一个未结算，结算后不可改。 */
+  /** 任务尝试；同一任务最多一个未结算（工作流任务按节点计），结算后不可改。 */
   readonly dispatches: EntityTable<Dispatch>;
   /** 仍登记在案（未清理）的 worktree。 */
   readonly worktrees: EntityTable<Worktree>;
@@ -63,8 +65,13 @@ export interface OrchestrationStore {
   readonly messages: EntityTable<Message>;
   /** 某次 run 的全部任务（插入顺序）。 */
   listTasks(runId: string): Task[];
-  /** 任务当前未结算的 dispatch（权威尝试）；没有返回 `undefined`。 */
+  /**
+   * 任务当前未结算的 dispatch（权威尝试）；没有返回 `undefined`。
+   * 工作流任务可能同时有多个（每节点一个），此时返回插入顺序的第一个；需要全部时用 {@link activeDispatches}。
+   */
   activeDispatch(taskId: string): Dispatch | undefined;
+  /** 任务全部未结算的 dispatch（插入顺序）。 */
+  activeDispatches(taskId: string): Dispatch[];
   /**
    * 还欠一次清理决定的尝试：属于该 run、已结算、worktree 仍登记在 `worktrees` 表里，
    * 且该 worktree 上没有进行中的后续尝试。同一 worktree 只报最近结算的那次。
@@ -179,6 +186,9 @@ function createTables(): Tables {
     if (!isDispatchSettled(next)) {
       for (const other of dispatches.values()) {
         if (other.id !== next.id && other.taskId === next.taskId && !isDispatchSettled(other)) {
+          const distinctNodes =
+            next.nodeId !== undefined && other.nodeId !== undefined && next.nodeId !== other.nodeId;
+          if (distinctNodes) continue;
           return `task ${next.taskId} already has an active dispatch (${other.id})`;
         }
       }
@@ -247,6 +257,12 @@ export class InMemoryOrchestrationStore implements OrchestrationStore {
       }
     }
     return undefined;
+  }
+
+  activeDispatches(taskId: string): Dispatch[] {
+    return this.dispatches.list(
+      (dispatch) => dispatch.taskId === taskId && !isDispatchSettled(dispatch)
+    );
   }
 
   reclaimableDispatches(runId: string): Dispatch[] {
@@ -350,6 +366,7 @@ const TASK_SCHEMA: Schema<Task> = {
     optional: (value) =>
       isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),
   },
+  workflow: { optional: isTaskWorkflow },
 };
 const DISPATCH_SCHEMA: Schema<Dispatch> = {
   id: isString,
@@ -358,6 +375,7 @@ const DISPATCH_SCHEMA: Schema<Dispatch> = {
   worktreeId: isString,
   branch: isString,
   mode: { optional: (value) => value === 'in-place' },
+  nodeId: { optional: isString },
   startedAt: isNumber,
   settledAt: { optional: isNumber },
   outcome: { optional: isDispatchOutcome },

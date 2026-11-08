@@ -225,7 +225,7 @@ describe('聊天链接按签发 id 解析与打开', () => {
     expect(store.getState().selectedId).toBe(note.id);
     expect(store.getState().previews[note.id]).toMatchObject({
       draft: 'unsaved draft',
-      mode: 'preview',
+      mode: 'live',
     });
     expect(api.read).toHaveBeenCalledTimes(1);
   });

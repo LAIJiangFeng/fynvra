@@ -1,6 +1,9 @@
 import { asRecord } from './guards';
 
-/** Only command subprocesses use this setting; never model/MCP/update traffic. */
+/**
+ * Used by command/Git subprocesses and the built-in web reader (web_fetch); never by model/MCP/update
+ * traffic.
+ */
 export type NetworkProxy =
   | { mode: 'environment'; gitCompatibility: boolean }
   | { mode: 'manual'; url: string; gitCompatibility: boolean };

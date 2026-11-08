@@ -7,7 +7,9 @@ import type {
   FynvraSessionEventBody,
   Role,
   ThinkingLevel,
+  Workflow,
 } from '@fynvra/core';
+import { summarizeWorkflow } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { supportsFastMode } from '@shared/modelFast';
 import type {
@@ -16,10 +18,12 @@ import type {
   AgentMcpServer,
   AgentRoleOption,
   AgentWorkerEvent,
+  AgentWorkflowOption,
   HostCallResult,
   LogLevel,
   ModelQuery,
   ModelsDescribedResult,
+  PluginProviderSpec,
   ResolvedModelSpec,
   SessionIdentity,
   SpawnSessionSpec,
@@ -61,6 +65,10 @@ export interface RoleSource {
 export interface RoleResources {
   skills: string[];
   mcpServers: AgentMcpServer[];
+  /** 插件路径（pi 包目录或扩展文件）；缺省等价于 [] */
+  plugins?: string[];
+  /** 与 plugins 同序的插件 id 与路径，agent 据此识别哪个插件在按名字找模型服务 */
+  pluginRefs?: SpawnSessionSpec['pluginRefs'];
   instructionFile?: SpawnSessionSpec['instructionFile'];
   /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
   warnings: string[];
@@ -95,6 +103,17 @@ export interface AgentHostDeps {
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
+  /** 是否允许 web_fetch 访问本机回环地址（生产为 preferences.webFetchAllowLoopback）；缺省关闭 */
+  resolveWebFetchAllowLoopback?(): boolean;
+  /**
+   * 插件可见的模型服务（生产为 providers.json 里已启用、有 key、有模型的服务，带 key 明文）；
+   * 只在角色挂了插件时读取并下发。缺省不下发
+   */
+  resolvePluginProviders?(): Promise<PluginProviderSpec[]>;
+  /** agent 报告插件按名字找了一个模型服务（生产为写进 plugins.json 的 requestedProviders）；缺省忽略 */
+  onPluginProviderLookup?(pluginId: string, name: string): void;
+  /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
+  listWorkflows?(): Promise<readonly Workflow[]>;
   workerOptions?: Pick<
     WorkerClientOptions,
     'readyTimeoutMs' | 'maxRestarts' | 'restartWindowMs' | 'restartDelayMs'
@@ -555,8 +574,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const resources = await resolveResources(role);
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
+      const workflows = role.tools === 'orchestrator' ? await workflowOptions(stored.id) : [];
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
+      const webFetchAllowLoopback = deps.resolveWebFetchAllowLoopback?.() === true;
+      const pluginProviders = resources.plugins?.length
+        ? await pluginProvidersFor(stored.id)
+        : undefined;
       const compactionStrategy = resolveCompactionStrategy();
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
@@ -571,9 +595,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           skills: resources.skills,
           ...(resources.instructionFile ? { instructionFile: resources.instructionFile } : {}),
           mcpServers: resources.mcpServers,
+          ...(resources.plugins?.length ? { plugins: resources.plugins } : {}),
+          ...(resources.plugins?.length && resources.pluginRefs?.length
+            ? { pluginRefs: resources.pluginRefs }
+            : {}),
+          ...(pluginProviders ? { pluginProviders } : {}),
           worker: stored.dispatchId !== undefined,
           roles,
+          ...(workflows.length > 0 ? { workflows } : {}),
           ...(networkProxy ? { networkProxy } : {}),
+          ...(webFetchAllowLoopback ? { webFetchAllowLoopback: true as const } : {}),
           ...(shellPath ? { shellPath } : {}),
           compactionStrategy,
           compactionTimeoutMs: compactionTimeoutMsOf({
@@ -588,6 +619,35 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       };
     } catch (error) {
       return fail(translate('agent.startFailed', { error: errorMessage(error) }));
+    }
+  }
+
+  /** 插件可见的模型服务；读不到时记 warning 并按不带处理（不让会话启动失败） */
+  async function pluginProvidersFor(sessionId: string): Promise<PluginProviderSpec[] | undefined> {
+    if (!deps.resolvePluginProviders) return undefined;
+    try {
+      return await deps.resolvePluginProviders();
+    } catch {
+      // 不带原始错误：读 providers.json 的解析错误可能引用文件片段（含 key）
+      log('warn', `session ${sessionId}: model services for plugins unavailable`);
+      return undefined;
+    }
+  }
+
+  /** 工作流清单；读不到（如 workflows.json 损坏）时记 warning 并按空清单继续 */
+  async function workflowOptions(sessionId: string): Promise<AgentWorkflowOption[]> {
+    if (!deps.listWorkflows) return [];
+    try {
+      return (await deps.listWorkflows()).map((workflow) => ({
+        id: workflow.id,
+        name: workflow.name,
+        ...(workflow.description ? { description: workflow.description } : {}),
+        steps: workflow.steps.map((step) => ({ name: step.name, roleId: step.roleId })),
+        summary: summarizeWorkflow(workflow.steps, (step) => `${step.name} [${step.roleId}]`),
+      }));
+    } catch (error) {
+      log('warn', `session ${sessionId}: could not read workflows: ${errorMessage(error)}`);
+      return [];
     }
   }
 
@@ -949,6 +1009,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       case 'log':
         log(event.level, `[agent] ${event.message}`);
         return;
+      case 'plugin-provider-lookup':
+        try {
+          deps.onPluginProviderLookup?.(event.pluginId, event.name);
+        } catch {
+          log('warn', `failed to record a model service lookup of plugin ${event.pluginId}`);
+        }
+        return;
     }
   }
 
@@ -1040,9 +1107,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!state.respawn) continue;
       state.respawn = false;
       if (state.spec && deps.store.get(sessionId)) {
+        const { webFetchAllowLoopback: _previous, ...spec } = state.spec;
         spawnWith(sessionId, state, {
-          ...state.spec,
+          ...spec,
           networkProxy: deps.resolveNetworkProxy?.(),
+          ...(deps.resolveWebFetchAllowLoopback?.() === true
+            ? { webFetchAllowLoopback: true as const }
+            : {}),
         });
       }
     }

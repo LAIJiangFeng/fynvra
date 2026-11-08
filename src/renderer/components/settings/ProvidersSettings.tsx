@@ -203,11 +203,29 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
         {provider.models.length === 0 ? (
           <span className="text-muted-foreground text-xs">{t('settings.providers.noModels')}</span>
         ) : (
-          provider.models.slice(0, MAX_MODEL_BADGES).map((model) => (
-            <Badge key={model.id} variant="outline" title={model.id}>
-              {model.name}
-            </Badge>
-          ))
+          provider.models.slice(0, MAX_MODEL_BADGES).map((model) => {
+            const sameName = model.name === model.id;
+            return (
+              <Badge
+                key={model.id}
+                variant="outline"
+                className="max-w-full justify-start"
+                title={sameName ? model.id : `${model.name} · ${model.id}`}
+              >
+                <span className="min-w-0 truncate">
+                  {sameName ? (
+                    <span className="font-mono">{model.id}</span>
+                  ) : (
+                    <>
+                      {model.name}
+                      {' · '}
+                      <span className="font-mono text-muted-foreground">{model.id}</span>
+                    </>
+                  )}
+                </span>
+              </Badge>
+            );
+          })
         )}
         {extraModels > 0 && <Badge variant="outline">+{extraModels}</Badge>}
       </div>

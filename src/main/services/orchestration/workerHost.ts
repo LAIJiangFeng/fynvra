@@ -3,7 +3,10 @@ import {
   type Inbox,
   isDispatchSettled,
   type OrchestrationStore,
+  recordWorkflowNodeReport,
   settleDispatch,
+  workflowNodeOfDispatch,
+  workflowStep,
 } from '@fynvra/core';
 import { ABORTED, fail, guard, untilAborted } from './hostResult';
 
@@ -14,6 +17,11 @@ export interface WorkerHostDeps {
   runId: string;
   dispatchId: string;
   now?: () => number;
+  /**
+   * 工作流任务的推进：reportDone 把节点结果落库后调用，异步执行、不阻塞 report_done。
+   * 缺省时等服务加载或对账时恢复。
+   */
+  advanceWorkflow?: (taskId: string) => void;
 }
 
 // 正阻塞在 ask_coordinator 里等答复的问题：question 消息 id → 提问的 worker 会话。
@@ -74,6 +82,14 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
     if (run === undefined || task.runId !== run.id) {
       return fail(`dispatch ${dispatchId} does not belong to run ${runId}`);
     }
+    if (task.workflow !== undefined) {
+      // 工作流：可能有多个节点同时运行，绑定在运行中节点上的 dispatch 才是当前尝试
+      const node = workflowNodeOfDispatch(task.workflow, dispatch.id);
+      if (node?.status !== 'running') {
+        return fail(`dispatch ${dispatch.id} is not a running node of workflow task ${task.id}`);
+      }
+      return { ok: true as const, dispatch, task, run };
+    }
     const current = store.dispatches.list((entry) => entry.taskId === task.id).at(-1);
     if (current?.id !== dispatch.id) {
       return fail(`dispatch ${dispatch.id} was superseded by ${current?.id}`);
@@ -88,14 +104,20 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
         if (body === '') return fail('question must not be empty');
         const found = context();
         if (!found.ok) return found;
-        const { dispatch, run } = found;
+        const { dispatch, task, run } = found;
+        // 工作流节点的提问带上工作流名与节点名，主 agent 才分得清是哪个节点在问
+        const node = task.workflow && workflowNodeOfDispatch(task.workflow, dispatch.id);
+        const where =
+          task.workflow && node
+            ? `[Workflow "${task.workflow.name}" · node "${workflowStep(task.workflow, node.id)?.name ?? node.id}"] `
+            : '';
         const posted = inbox.post({
           runId: run.id,
           dispatchId: dispatch.id,
           from: dispatch.workerSessionId,
           to: run.coordinatorSessionId,
           type: 'question',
-          body,
+          body: `${where}${body}`,
         });
         if (!posted.ok) return posted;
         const questionId = posted.message.id;
@@ -144,6 +166,23 @@ export function createWorkerHost(deps: WorkerHostDeps): WorkerHost {
         const { id: _id, ...patch } = settled.dispatch;
         const updated = store.dispatches.update(dispatch.id, patch);
         if (!updated.ok) return updated;
+        if (task.workflow !== undefined) {
+          // 工作流：节点结果落库、任务保持 in-progress，再由引擎异步合并 / 调度 / 汇总；
+          // 主 agent 只在整个工作流结束时收到引擎投的 worker_done
+          const next = recordWorkflowNodeReport(task.workflow, {
+            dispatchId: dispatch.id,
+            outcome,
+            summary,
+            at: settled.dispatch.settledAt ?? now(),
+          });
+          if (next === undefined) {
+            return fail(`dispatch ${dispatch.id} is not a running node of task ${task.id}`);
+          }
+          const kept = store.tasks.update(task.id, { workflow: next });
+          if (!kept.ok) return kept;
+          deps.advanceWorkflow?.(task.id);
+          return { ok: true };
+        }
         const status = outcome === 'succeeded' ? 'in-review' : 'failed';
         const moved = store.tasks.update(task.id, { status });
         if (!moved.ok) return moved;

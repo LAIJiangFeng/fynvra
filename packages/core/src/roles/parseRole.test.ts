@@ -9,6 +9,7 @@ const valid = {
   model: { providerId: 'anthropic', modelId: 'claude-opus-5-5', thinking: 'high' },
   skillIds: ['tdd', 'vitest'],
   mcpServerIds: ['github'],
+  pluginIds: [],
   tools: 'all',
   approvalMode: 'supervised',
 };
@@ -71,6 +72,7 @@ describe('parseRole', () => {
         name: 'Reviewer',
         skillIds: [],
         mcpServerIds: [],
+        pluginIds: [],
         tools: 'readonly',
         approvalMode: 'full',
       },

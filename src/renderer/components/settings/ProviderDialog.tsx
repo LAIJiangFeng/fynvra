@@ -56,9 +56,12 @@ export interface ProviderEditing {
 export function ProviderDialog({
   editing,
   onClose,
+  onSaved,
 }: {
   editing: ProviderEditing | null;
   onClose: () => void;
+  /** 保存成功后调用（先于 onClose），参数是保存后的服务 id */
+  onSaved?: (providerId: string) => void;
 }) {
   // 关闭动画期间 editing 已清空，沿用上一次的内容避免弹窗闪成空白
   const [shown, setShown] = useState(editing);
@@ -73,13 +76,23 @@ export function ProviderDialog({
     >
       {/* 展开「拉取模型列表」后内容变高：限高滚动，矮窗口里也够得着保存按钮 */}
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
-        {shown && <ProviderForm key={shown.key} initial={shown.draft} onDone={onClose} />}
+        {shown && (
+          <ProviderForm key={shown.key} initial={shown.draft} onDone={onClose} onSaved={onSaved} />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () => void }) {
+function ProviderForm({
+  initial,
+  onDone,
+  onSaved,
+}: {
+  initial: ProviderDraft;
+  onDone: () => void;
+  onSaved?: (providerId: string) => void;
+}) {
   const upsert = useProvidersStore((state) => state.upsert);
   const described = useProvidersStore((state) => state.modelOptions);
   const loadModelOptions = useProvidersStore((state) => state.loadModelOptions);
@@ -130,8 +143,10 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
     setSaving(true);
     const saved = await upsert(result.input);
     setSaving(false);
-    if (saved.ok) onDone();
-    else setError(saved.error);
+    if (saved.ok) {
+      onSaved?.(saved.provider.id);
+      onDone();
+    } else setError(saved.error);
   };
 
   const keyPlaceholder =

@@ -53,6 +53,7 @@ export interface WindowApi {
 
 /** 按领域分组的全部能力；刻意不提供通用 invoke / send。 */
 export interface FynvraApi {
+  appDialog: import('./domains/appDialog').AppDialogApi;
   updates: import('./domains/updates').UpdatesApi;
   settings: SettingsApi;
   workspaceUi: import('./domains/workspaceUi').WorkspaceUiApi;
@@ -64,9 +65,11 @@ export interface FynvraApi {
   sessions: import('./domains/sessions').SessionsApi;
   providers: import('./domains/providers').ProvidersApi;
   roles: import('./domains/roles').RolesApi;
+  workflows: import('./domains/workflows').WorkflowsApi;
   skills: import('./domains/skills').SkillsApi;
   instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
+  plugins: import('./domains/plugins').PluginsApi;
   notifications: import('./domains/notifications').NotificationsApi;
   usage: import('./domains/usage').UsageApi;
 }

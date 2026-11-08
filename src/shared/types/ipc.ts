@@ -61,6 +61,8 @@ export const IPC_CHANNELS = {
   FILES_RESOLVE: 'files:resolve',
   /** 仅将工作区内已签发的 HTML 文件交给默认浏览器 */
   FILES_OPEN_HTML: 'files:open-html',
+  /** 聊天里工作区外的绝对路径：白名单扩展名用系统应用打开，其余只在文件夹中显示 */
+  FILES_OPEN_OUTSIDE: 'files:open-outside',
 
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',
@@ -152,6 +154,12 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：角色已变更 */
   ROLES_CHANGED: 'roles:changed',
 
+  // --- workflows ---
+  WORKFLOWS_LIST: 'workflows:list',
+  /** 参数是整份 Workflow，Main 经 parseWorkflow 收窄；新建或按 id 整份替换 */
+  WORKFLOWS_SAVE: 'workflows:save',
+  WORKFLOWS_REMOVE: 'workflows:remove',
+
   // --- skills ---
   SKILLS_LIST: 'skills:list',
   /** 无参时 Main 弹目录选择框；传 candidateIds 时登记 skills:scan 找到的技能。Renderer 不传路径 */
@@ -177,6 +185,36 @@ export const IPC_CHANNELS = {
   MCP_IMPORT: 'mcp:import',
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
+
+  // --- plugins ---
+  PLUGINS_LIST: 'plugins:list',
+  /** 无参数（或 `{}`）：Main 弹框选目录或扩展文件，复制到副本目录后登记；Renderer 不传路径 */
+  PLUGINS_ADD_LOCAL: 'plugins:add-local',
+  /** id：用系统文件管理器打开插件所在位置 */
+  PLUGINS_REVEAL: 'plugins:reveal',
+  /** `{ id, appId }`：用「用…打开」目标打开插件目录（目标列表复用 workspaces:open-with-apps） */
+  PLUGINS_OPEN_IN: 'plugins:open-in',
+  /** id：把插件目录按普通目录挂为工作区，返回 workspaceId */
+  PLUGINS_OPEN_AS_WORKSPACE: 'plugins:open-as-workspace',
+  /** id：仅 copy 模式，从来源重新复制覆盖副本 */
+  PLUGINS_RECOPY: 'plugins:recopy',
+  /** id：仅 link 模式，把原路径复制成副本并改为 copy 模式 */
+  PLUGINS_CONVERT_TO_COPY: 'plugins:convert-to-copy',
+  /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
+  PLUGINS_INSTALL: 'plugins:install',
+  /** 无参数（或 `{}`）：只读扫描原生 pi 的扩展与包，返回候选视图；候选缓存在 Main，每次扫描替换 */
+  PLUGINS_SCAN_IMPORTS: 'plugins:scan-imports',
+  /** `{ ids }`：按扫描缓存里的候选 id 逐个导入（本地复制、npm / git 安装）；Renderer 不传路径 */
+  PLUGINS_IMPORT: 'plugins:import',
+  /** id：删除插件，并从所有角色的 pluginIds 中移除（有改动时广播 roles:changed） */
+  PLUGINS_REMOVE: 'plugins:remove',
+  PLUGINS_TOGGLE: 'plugins:toggle',
+  /** `{ name, serviceId: string | null }`：插件里的服务名改用哪个模型服务；null 恢复「自动（同名）」 */
+  PLUGINS_SET_PROVIDER_MAPPING: 'plugins:set-provider-mapping',
+  /** `{ id, names: string[] }`：整组替换某插件手动添加的服务名（合法、去重、最多 20 个） */
+  PLUGINS_SET_MANUAL_PROVIDERS: 'plugins:set-manual-providers',
+  /** Main → Renderer：插件列表已变更 */
+  PLUGINS_CHANGED: 'plugins:changed',
 
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',
@@ -205,6 +243,14 @@ export const IPC_CHANNELS = {
   WORKSPACE_UI_SAVE: 'workspaceui:save',
   WORKSPACE_UI_FLUSH: 'workspaceui:flush',
   WORKSPACE_UI_FLUSHED: 'workspaceui:flushed',
+
+  // --- app dialog ---
+  /** Main → Renderer：用应用内对话框显示提示框（AppMessageBoxRequest） */
+  APP_DIALOG_REQUEST: 'appdialog:request',
+  /** Renderer → Main：已接手显示（参数为 requestId）；Main 约 3 秒收不到就回退原生对话框 */
+  APP_DIALOG_SHOWN: 'appdialog:shown',
+  /** Renderer → Main：用户的选择 `{ requestId, response }`；只接受目标窗口的回复 */
+  APP_DIALOG_RESPOND: 'appdialog:respond',
 
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */

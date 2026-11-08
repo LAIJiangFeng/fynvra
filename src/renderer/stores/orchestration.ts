@@ -46,7 +46,22 @@ export type DiffEntry =
   | { status: 'ready'; data: ReviewDiffData; refreshing: boolean }
   | { status: 'error'; error: string };
 
+/** 从对话卡片发起的「在任务面板里打开这个任务」请求；由 OrchestrationPanel 执行后清掉。 */
+export interface TaskFocusRequest {
+  workspaceId: string;
+  taskId: string;
+  /** 工作流节点：抽屉里把输出切到该节点最新一次尝试 */
+  nodeId?: string;
+  /** 递增序号：同一请求重复发出也能区分 */
+  seq: number;
+}
+
 export interface OrchestrationState {
+  /** 待执行的聚焦请求；面板未挂载时保留，挂载后执行 */
+  focusRequest: TaskFocusRequest | null;
+  focusTask(request: Omit<TaskFocusRequest, 'seq'>): void;
+  /** 面板执行完请求后清掉（只清同一序号，避免吞掉更新的请求） */
+  clearFocusRequest(seq: number): void;
   /** 按 workspace 缓存的快照 */
   snapshots: Record<string, SnapshotEntry>;
   /** 按 dispatch 缓存的 worker 输出 */
@@ -105,6 +120,7 @@ export function createOrchestrationStore(
   const outputRuntimes = new Map<string, OutputRuntime>();
   const diffRuns = new Map<string, Promise<void>>();
   let subscribed = false;
+  let focusSeq = 0;
 
   return create<OrchestrationState>()((set, get) => {
     const patchSnapshot = (workspaceId: string, patch: Partial<SnapshotEntry>) =>
@@ -210,6 +226,16 @@ export function createOrchestrationStore(
       snapshots: {},
       outputs: {},
       diffs: {},
+      focusRequest: null,
+
+      focusTask(request) {
+        focusSeq += 1;
+        set({ focusRequest: { ...request, seq: focusSeq } });
+      },
+
+      clearFocusRequest(seq) {
+        if (get().focusRequest?.seq === seq) set({ focusRequest: null });
+      },
 
       watchWorkspace(workspaceId) {
         // 第一次进入视图时订阅；store 与窗口同寿命，不退订
@@ -446,7 +472,10 @@ export function dispatchesOf(view: OrchestrationSnapshotView | null, taskId: str
   return index.get(taskId) ?? NO_DISPATCHES;
 }
 
-/** 进行中的尝试（未结算，与 core `OrchestrationStore.activeDispatch` 同义）；都已结算时为 undefined。 */
+/**
+ * 进行中的尝试（未结算）；都已结算时为 undefined。工作流任务可能有多个节点同时进行，
+ * 此时取最近开始的那个（各节点的状态看 `task.workflow.nodes`）。
+ */
 export function activeDispatchOf(
   view: OrchestrationSnapshotView | null,
   taskId: string

@@ -100,6 +100,7 @@ export function GeneralSettings() {
       <LanguageSection />
       <ShellsSection />
       <NetworkProxySettings />
+      <WebFetchSection />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>
@@ -523,6 +524,35 @@ function DaysSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// --- web fetch ---
+/** web_fetch 是否允许访问本机回环地址（preferences.webFetchAllowLoopback）：之后新加载的会话生效 */
+function WebFetchSection() {
+  const allowLoopback = useGeneralPreferencesStore((state) => state.webFetchAllowLoopback);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const t = useT();
+  const id = useId();
+  return (
+    <section>
+      <SectionHeader title={t('settings.webFetch.title')} />
+      <ul className="divide-y rounded-lg border">
+        <li className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <label htmlFor={id} className="font-medium text-sm">
+              {t('settings.webFetch.allowLoopback')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">{t('settings.webFetch.hint')}</p>
+          </div>
+          <Switch
+            id={id}
+            checked={allowLoopback}
+            onCheckedChange={(checked) => void update({ webFetchAllowLoopback: checked })}
+          />
+        </li>
+      </ul>
+    </section>
   );
 }
 

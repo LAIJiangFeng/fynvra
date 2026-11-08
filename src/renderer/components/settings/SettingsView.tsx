@@ -7,9 +7,11 @@ import {
   type LucideIcon,
   Palette,
   Plug,
+  Puzzle,
   SlidersHorizontal,
   Sparkles,
   UserCog,
+  Workflow,
   X,
 } from 'lucide-react';
 import { type ComponentType, useEffect, useRef } from 'react';
@@ -24,11 +26,13 @@ import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { PluginsSettings } from './PluginsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
 import { UsageSettings } from './UsageSettings';
+import { WorkflowsSettings } from './WorkflowsSettings';
 
 /** 页头只有页名（字典 settings.sections.<value>），不加副标题 */
 interface SectionSpec {
@@ -44,9 +48,11 @@ const SECTIONS: SectionSpec[] = [
   { value: 'notifications', icon: Bell, Component: NotificationSettings },
   { value: 'providers', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
+  { value: 'workflows', icon: Workflow, Component: WorkflowsSettings, wide: true },
   { value: 'instructions', icon: FileText, Component: InstructionsSettings },
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
+  { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
   { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },

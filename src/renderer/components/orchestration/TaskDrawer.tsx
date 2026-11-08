@@ -1,6 +1,6 @@
-import type { Dispatch, Task } from '@fynvra/core';
+import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
 import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -8,11 +8,19 @@ import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { dispatchesOf, latestDispatchOf } from '@/stores/orchestration';
-import { RoleBadge, SectionTitle, StatusBadge, StatusDot } from './common';
+import {
+  RoleBadge,
+  SectionTitle,
+  StatusBadge,
+  StatusDot,
+  WorkflowProgress,
+  workflowNodeDispatchId,
+} from './common';
 import { formatClock, formatDuration } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
 import { WorkerOutput } from './WorkerOutput';
+import { WorkflowRunGraph } from './WorkflowRunGraph';
 
 /**
  * 任务详情：盖在面板上的抽屉（非模态，Esc 或「返回」关闭）。只读：合并 / 打回是主 agent 的事，
@@ -24,12 +32,15 @@ export function TaskDrawer({
   onClose,
   onOpenTask,
   onReview,
+  focusNode,
 }: {
   view: OrchestrationSnapshotView;
   task: Task;
   onClose: () => void;
   onOpenTask: (taskId: string) => void;
   onReview: (dispatchId: string) => void;
+  /** 从对话里请求定位的工作流节点；`seq` 变化时把输出切到该节点最新一次尝试 */
+  focusNode?: { nodeId: string; seq: number } | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -39,10 +50,32 @@ export function TaskDrawer({
   const inPlace = latest?.mode === 'in-place';
   const reviewable =
     latest && !inPlace && (task.status === 'in-review' || task.status === 'completed');
+  // 在流程图里点选的节点及其尝试；没有时输出区显示最新一次尝试
+  const [picked, setPicked] = useState<{ nodeId: string; dispatchId: string } | null>(null);
+  const pickedValid = picked && dispatches.some((dispatch) => dispatch.id === picked.dispatchId);
+  const outputId = pickedValid ? picked.dispatchId : latest?.id;
+  const outputRef = useRef<HTMLDivElement>(null);
+  const pickedName =
+    pickedValid && task.workflow && Array.isArray(task.workflow.steps)
+      ? (task.workflow.steps.find((step) => step.id === picked.nodeId)?.name ?? picked.nodeId)
+      : null;
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
+
+  // 只在请求序号变化时定位一次，之后快照更新不再覆盖用户在图里的选择
+  const focusSeq = focusNode?.seq;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 按请求序号触发
+  useEffect(() => {
+    if (!focusNode || !task.workflow) return;
+    const dispatchId = workflowNodeDispatchId(task.workflow, dispatches, focusNode.nodeId);
+    if (!dispatchId) return;
+    setPicked({ nodeId: focusNode.nodeId, dispatchId });
+    window.requestAnimationFrame(() =>
+      outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    );
+  }, [focusSeq]);
 
   return (
     <div
@@ -82,6 +115,7 @@ export function TaskDrawer({
               </span>
             )}
           </div>
+          {task.workflow && <WorkflowProgress workflow={task.workflow} className="mt-1.5" />}
         </div>
         {reviewable && (
           <Button
@@ -101,6 +135,20 @@ export function TaskDrawer({
         {task.dependsOn.length > 0 && (
           <DependencySection view={view} task={task} onOpenTask={onOpenTask} />
         )}
+        {task.workflow && (
+          <WorkflowRunGraph
+            workflow={task.workflow}
+            dispatches={dispatches}
+            selectedNodeId={pickedValid ? picked.nodeId : null}
+            onOpenOutput={(nodeId, dispatchId) => {
+              setPicked({ nodeId, dispatchId });
+              window.requestAnimationFrame(() =>
+                outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+              );
+            }}
+          />
+        )}
+        {task.workflow && <WorkflowHistory workflow={task.workflow} />}
         <section aria-label={t('orchestration.attempts')}>
           <SectionTitle>
             {t('orchestration.attemptsCount', { count: dispatches.length })}
@@ -119,7 +167,28 @@ export function TaskDrawer({
           <SectionTitle>{t('orchestration.messages')}</SectionTitle>
           <MessageStream view={view} dispatches={dispatches} />
         </section>
-        {latest && <WorkerOutput key={latest.id} dispatchId={latest.id} />}
+        {outputId && (
+          <div ref={outputRef} className="flex flex-col gap-1">
+            {pickedName !== null && (
+              <p className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="truncate">
+                  {t('orchestration.workflow.viewingNode', { name: pickedName })}
+                </span>
+                {outputId !== latest?.id && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-5 shrink-0 px-1.5 text-[11px]"
+                    onClick={() => setPicked(null)}
+                  >
+                    {t('orchestration.workflow.viewLatest')}
+                  </Button>
+                )}
+              </p>
+            )}
+            <WorkerOutput key={outputId} dispatchId={outputId} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -165,6 +234,52 @@ function MarkdownLite({ text }: { text: string }) {
       </p>
     );
   });
+}
+
+/** 工作流各步的结算记录（最近 30 条），新的在下。 */
+function WorkflowHistory({ workflow }: { workflow: TaskWorkflow }) {
+  const t = useT();
+  // 旧快照可能缺少字段
+  const history = Array.isArray(workflow.history) ? workflow.history : [];
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
+  return (
+    <section aria-label={t('orchestration.workflow.history')}>
+      <SectionTitle>{t('orchestration.workflow.history')}</SectionTitle>
+      {history.length === 0 ? (
+        <p className="text-muted-foreground text-xs">{t('orchestration.workflow.historyEmpty')}</p>
+      ) : (
+        <ol className="flex flex-col gap-2">
+          {history.map((entry) => (
+            <li key={`${entry.dispatchId}:${entry.at}`} className="text-xs">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium">
+                  {t('orchestration.workflow.entry', {
+                    step: steps.findIndex((step) => step.id === entry.nodeId) + 1,
+                    stepName: steps.find((step) => step.id === entry.nodeId)?.name ?? '?',
+                  })}
+                </span>
+                {entry.outcome === 'failed' ? (
+                  <Badge variant="destructive">{t('orchestration.outcome.failed')}</Badge>
+                ) : (
+                  <Badge className="border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                    {t('orchestration.outcome.succeeded')}
+                  </Badge>
+                )}
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {formatClock(entry.at)}
+                </span>
+              </div>
+              {entry.summary && (
+                <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap break-words text-muted-foreground">
+                  {entry.summary}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 function DependencySection({

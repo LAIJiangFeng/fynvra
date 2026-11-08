@@ -1,14 +1,25 @@
 import type { WorkspaceFileEntry } from '@shared/types/files';
 import { FileCode2, Loader2, RefreshCw, Save } from 'lucide-react';
-import { lazy, Suspense, useDeferredValue, useEffect, useEffectEvent } from 'react';
+import {
+  lazy,
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type FileMode, type FilesStore, isFileDirty, isMarkdown } from '@/stores/files';
 import { FileMarkdownPreview } from './FileMarkdownPreview';
+import { PreviewFindBar } from './PreviewFindBar';
 
 const FileEditor = lazy(() => import('./FileEditor'));
-const MODES: FileMode[] = ['edit', 'preview', 'split'];
+const PdfPreview = lazy(() => import('./PdfPreview'));
+const DocxPreview = lazy(() => import('./DocxPreview'));
+const MODES: FileMode[] = ['live', 'edit', 'split'];
 
 export function FilePane({
   file,
@@ -27,9 +38,29 @@ export function FilePane({
   const preview = current?.preview;
   const markdown = isMarkdown(file.name);
   const dirty = isFileDirty(current);
+  const mode = current?.mode;
+  const findable =
+    (preview?.kind === 'text' && markdown && mode === 'split') ||
+    preview?.kind === 'docx' ||
+    preview?.kind === 'document-text';
+  const previewRef = useRef<HTMLElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findSignal, setFindSignal] = useState(0);
   const save = useEffectEvent(() => {
     void store.getState().saveFile(file.id);
   });
+  /** Ctrl/Cmd+F：双栏仅在焦点不在编辑器时打开查找条；实时预览和源码模式交给 CodeMirror */
+  const openFind = useEffectEvent((event: KeyboardEvent) => {
+    if (!findable) return;
+    if (mode === 'split' && document.activeElement?.closest('.cm-editor')) return;
+    event.preventDefault();
+    setFindOpen(true);
+    setFindSignal((signal) => signal + 1);
+  });
+  // 切换文件（标签失活）、离开双栏模式或预览不可用时关闭查找条
+  useEffect(() => {
+    if (!active || !findable) setFindOpen(false);
+  }, [active, findable]);
   useEffect(() => {
     if (!active) return;
     const onKey = (event: KeyboardEvent) => {
@@ -38,6 +69,14 @@ export function FilePane({
         if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         event.preventDefault();
         save();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === 'f'
+      ) {
+        if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        openFind(event);
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -126,7 +165,14 @@ export function FilePane({
           </Button>
         </div>
       ) : !preview ? (
-        <FileMessage loading title={t('common.loading')} />
+        <FileMessage
+          loading
+          title={t(
+            window.fynvra.window.platform === 'win32' && /\.doc$/i.test(file.name)
+              ? 'files.document.docConverting'
+              : 'common.loading'
+          )}
+        />
       ) : preview.kind === 'unsupported' ? (
         <FileMessage title={t(`files.${preview.reason}`)} description={t('files.limits')} />
       ) : preview.kind === 'image' ? (
@@ -137,6 +183,50 @@ export function FilePane({
             className="mx-auto max-w-full rounded border bg-muted/30"
           />
         </div>
+      ) : preview.kind === 'pdf' ? (
+        <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+          <PdfPreview data={preview.data} />
+        </Suspense>
+      ) : preview.kind === 'docx' || preview.kind === 'document-text' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {(preview.kind === 'document-text' || preview.convertedFrom === 'doc') && (
+            <p className="shrink-0 border-b bg-muted/40 px-4 py-1.5 text-muted-foreground text-xs">
+              {t(
+                preview.kind === 'docx'
+                  ? 'files.document.docConverted'
+                  : preview.conversion === 'unavailable'
+                    ? 'files.document.docNoWord'
+                    : preview.conversion === 'failed'
+                      ? 'files.document.docConvertFailed'
+                      : 'files.document.docNotice'
+              )}
+            </p>
+          )}
+          <div className="relative min-h-0 flex-1">
+            <article
+              ref={previewRef}
+              tabIndex={-1}
+              aria-label={t('files.document.wordPreview')}
+              className="h-full overflow-auto bg-background px-6 py-4 outline-none"
+            >
+              {preview.kind === 'docx' ? (
+                <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+                  <DocxPreview data={preview.data} />
+                </Suspense>
+              ) : (
+                <pre className="mx-auto max-w-3xl whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">
+                  {preview.text}
+                </pre>
+              )}
+            </article>
+            <PreviewFindBar
+              containerRef={previewRef}
+              open={findOpen}
+              focusSignal={findSignal}
+              onClose={() => setFindOpen(false)}
+            />
+          </div>
+        </div>
       ) : (
         <div
           className={cn(
@@ -146,32 +236,35 @@ export function FilePane({
               'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] @min-[42rem]:grid-cols-2 @min-[42rem]:grid-rows-[minmax(0,1fr)]'
           )}
         >
-          <div
-            className={cn(
-              'min-h-0 min-w-0 overflow-hidden',
-              markdown && current.mode === 'preview' && 'hidden'
-            )}
-          >
+          <div className="min-h-0 min-w-0 overflow-hidden">
             <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
               <FileEditor
-                name={file.name}
+                file={file}
+                store={store}
+                live={markdown && current.mode === 'live'}
                 value={current.draft}
                 source={preview.text}
                 onChange={(text) => store.getState().editFile(file.id, text)}
               />
             </Suspense>
           </div>
-          {markdown && (
-            <article
-              aria-label={t('files.markdownPreview')}
-              className={cn(
-                'min-h-0 min-w-0 overflow-auto bg-background px-6 py-4',
-                current.mode === 'edit' && 'hidden',
-                current.mode === 'split' && 'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
-              )}
-            >
-              <FileMarkdownPreview key={preview.version} file={file} store={store} text={draft} />
-            </article>
+          {markdown && current.mode === 'split' && (
+            <div className="relative min-h-0 min-w-0 border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l">
+              <article
+                ref={previewRef}
+                tabIndex={-1}
+                aria-label={t('files.markdownPreview')}
+                className="h-full overflow-auto bg-background px-6 py-4 outline-none"
+              >
+                <FileMarkdownPreview key={preview.version} file={file} store={store} text={draft} />
+              </article>
+              <PreviewFindBar
+                containerRef={previewRef}
+                open={findOpen}
+                focusSignal={findSignal}
+                onClose={() => setFindOpen(false)}
+              />
+            </div>
           )}
         </div>
       )}

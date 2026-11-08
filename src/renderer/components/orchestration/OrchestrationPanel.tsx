@@ -90,6 +90,14 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const [runId, setRunId] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [review, setReview] = useState<{ dispatchId: string; sessionKey: string } | null>(null);
+  // 对话卡片请求定位的节点；只交给同一个任务的抽屉
+  const [drawerFocus, setDrawerFocus] = useState<{
+    taskId: string;
+    nodeId: string;
+    seq: number;
+  } | null>(null);
+  const focusRequest = useOrchestrationStore((state) => state.focusRequest);
+  const clearFocusRequest = useOrchestrationStore((state) => state.clearFocusRequest);
   const activeSessionId = useSessionsStore((state) =>
     state.workspaceId === workspaceId ? state.activeSessionId : null
   );
@@ -122,6 +130,23 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const run = runs.find((candidate) => candidate.id === runId) ?? runs[0];
   const openTask = openTaskId ? view?.tasks.find((task) => task.id === openTaskId) : undefined;
   const taskCount = run && view ? view.tasks.filter((task) => task.runId === run.id).length : 0;
+
+  // 执行对话里的「查看任务 / 节点」：切到任务页、选中所在 run、打开抽屉；快照到了再执行
+  useEffect(() => {
+    if (!focusRequest || focusRequest.workspaceId !== workspaceId || !view) return;
+    clearFocusRequest(focusRequest.seq);
+    const task = view.tasks.find((candidate) => candidate.id === focusRequest.taskId);
+    if (!task) return;
+    setTab('tasks');
+    setRunId(task.runId);
+    returnFocus.current = null;
+    setOpenTaskId(task.id);
+    setDrawerFocus(
+      focusRequest.nodeId
+        ? { taskId: task.id, nodeId: focusRequest.nodeId, seq: focusRequest.seq }
+        : null
+    );
+  }, [focusRequest, view, workspaceId, clearFocusRequest]);
 
   const closeDrawer = () => {
     setOpenTaskId(null);
@@ -262,6 +287,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
           view={view}
           task={openTask}
           onClose={closeDrawer}
+          focusNode={drawerFocus?.taskId === openTask.id ? drawerFocus : null}
           onOpenTask={setOpenTaskId}
           onReview={(dispatchId) => {
             setReview({ dispatchId, sessionKey: currentKey });

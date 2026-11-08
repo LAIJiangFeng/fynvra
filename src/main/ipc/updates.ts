@@ -1,9 +1,10 @@
 import { errorMessage } from '@shared/guards';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { UpdateResult } from '@shared/types/updates';
-import { dialog, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { translate } from '../i18n';
 import { getUpdateService } from '../services/updates';
+import { showAppMessageBox } from './appDialog';
 
 /** 更新入口不接受 Renderer 指定下载地址、版本或安装命令。 */
 export function registerUpdateHandlers(): void {
@@ -13,7 +14,7 @@ export function registerUpdateHandlers(): void {
     [IPC_CHANNELS.UPDATES_CHECK, 'check'],
     [IPC_CHANNELS.UPDATES_INSTALL, 'install'],
   ] as const) {
-    ipcMain.handle(channel, async (_event, ...args: unknown[]): Promise<UpdateResult> => {
+    ipcMain.handle(channel, async (event, ...args: unknown[]): Promise<UpdateResult> => {
       if (args.length > 0) return { ok: false, error: translate('common.invalidArgs') };
       try {
         const service = getUpdateService();
@@ -25,7 +26,7 @@ export function registerUpdateHandlers(): void {
           }
           confirming = true;
           try {
-            const { response } = await dialog.showMessageBox({
+            const response = await showAppMessageBox(BrowserWindow.fromWebContents(event.sender), {
               type: 'question',
               title: translate('updates.installTitle'),
               message: translate('updates.installMessage', { version: state.version ?? '' }),

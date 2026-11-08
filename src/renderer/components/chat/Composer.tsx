@@ -14,6 +14,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -47,6 +48,7 @@ import {
   selectStatusOf,
   useSessionsStore,
 } from '@/stores/sessions';
+import { useWorkflowsStore } from '@/stores/workflows';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { caretOnLineEdge } from './caretLine';
 import { ImagePreview } from './ImagePreview';
@@ -59,12 +61,20 @@ import {
   toDraft,
   up,
 } from './inputHistory';
+import {
+  MentionHighlight,
+  MentionMenu,
+  type MentionOption,
+  useMentionOptions,
+} from './MentionMenu';
 import { ModelPicker } from './ModelPicker';
+import { applyMention, filterMentionTargets, findMentionTrigger, mentionKind } from './mentions';
 import { PlanModeToggle } from './PlanModeToggle';
 import { ReplySuggestionGhost } from './ReplySuggestionGhost';
 import { isOrchestratorRole, useRoles } from './roles';
 
-type Caret = 'start' | 'end';
+/** 换内容后的光标：开头、末尾或具体位置 */
+type Caret = 'start' | 'end' | number;
 
 /** DOM adapter for the pure boundary check (node tests intentionally have no DOM types). */
 function caretOnVisualLineEdge(input: HTMLTextAreaElement, edge: 'first' | 'last'): boolean {
@@ -230,6 +240,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const pendingCaret = useRef<{ sessionId: string; caret: Caret; focus?: boolean } | null>(null);
   /** 图片或撤回操作的提示；每次设成新对象，同样的提示再出现也重新计时 */
   const [composerHint, setComposerHint] = useState<{ text: string } | null>(null);
+  /** 输入框的选区（`/` `@` 菜单按光标前的文字判断）与是否聚焦 */
+  const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const [focused, setFocused] = useState(false);
+  /** Esc 关掉的引用：记下符号位置，换一处或删掉后再出现 */
+  const [dismissedMention, setDismissedMention] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionListId = useId();
+  const refreshWorkflows = useWorkflowsStore((state) => state.refresh);
 
   // 历史来源：这个会话里 user 的消息，含 history 回放的与这次发出去的（都在 store 的时间线里）
   const sent = useMemo(
@@ -239,6 +257,41 @@ export function Composer({ sessionId }: { sessionId: string }) {
         .map((message) => ({ text: message.text, images: message.images ?? [] })),
     [messages]
   );
+
+  // `/` 选工作流、`@` 选角色：只在编排会话里，符号在开头或空白之后，筛选词不含空白和 `/`
+  const orchestrator = roleId !== undefined && isOrchestratorRole(roleId, roles);
+  const { options: mentionOptions, workflowsLoaded } = useMentionOptions(orchestrator);
+  const mentionTrigger =
+    orchestrator && focused && !browsing
+      ? findMentionTrigger(draft, selection.start, selection.end)
+      : null;
+  const mentionKindOpen = mentionTrigger ? mentionKind(mentionTrigger.symbol) : null;
+  const mentionAll = mentionKindOpen
+    ? mentionOptions.filter((option) => option.kind === mentionKindOpen)
+    : [];
+  const mentionMatches = mentionTrigger
+    ? filterMentionTargets(mentionAll, mentionTrigger.query)
+    : [];
+  // 有匹配项时显示列表；一项都没有时只在刚输入符号时提示「还没有…」，否则关闭（Enter 照常发送）
+  const mentionOpen =
+    mentionTrigger !== null &&
+    dismissedMention !== mentionTrigger.start &&
+    (mentionMatches.length > 0 ||
+      (mentionAll.length === 0 &&
+        mentionTrigger.query === '' &&
+        (mentionKindOpen === 'role' || workflowsLoaded)));
+  const mentionListOpen = mentionOpen && mentionMatches.length > 0;
+  const activeMention = Math.min(mentionIndex, Math.max(mentionMatches.length - 1, 0));
+  const mentionStart = mentionTrigger?.start ?? null;
+
+  // 换一处引用时回到第一项，并刷新工作流列表（设置页改过后无推送）
+  useEffect(() => {
+    setMentionIndex(0);
+    if (mentionStart === null) setDismissedMention(null);
+  }, [mentionStart]);
+  useEffect(() => {
+    if (mentionKindOpen === 'workflow') void refreshWorkflows();
+  }, [mentionKindOpen, refreshWorkflows]);
 
   const busy = isBusy(status) || compacting || recovering;
   // 灰字只在空闲、没队列 / 审批 / 图片、没翻历史且草稿恰好是建议前缀时显示；它不进 draft，也不影响 canSend
@@ -289,8 +342,25 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const placeCaret = (caret: Caret) => {
     const element = input.current;
     if (!element) return;
-    const position = caret === 'start' ? 0 : element.value.length;
+    const position =
+      caret === 'start'
+        ? 0
+        : caret === 'end'
+          ? element.value.length
+          : Math.min(caret, element.value.length);
     element.setSelectionRange(position, position);
+    setSelection({ start: position, end: position });
+  };
+
+  /** 选中菜单项：把「符号 + 筛选词」换成 token 加空格，光标放在空格之后 */
+  const pickMention = (option: MentionOption) => {
+    if (!mentionTrigger) return;
+    const next = applyMention(draft, mentionTrigger, selection.start, option.name);
+    history.current = null;
+    setBrowsing(false);
+    pendingCaret.current = { sessionId, caret: next.caret, focus: true };
+    setSelection({ start: next.caret, end: next.caret });
+    setDraft(sessionId, next.text);
   };
 
   /** 换成历史里的另一条（或回到草稿） */
@@ -403,6 +473,31 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     const textarea = event.currentTarget;
+    // `/` `@` 菜单打开时先处理它的按键：↑↓ 移动、Enter / Tab 选中、Esc 关闭（不翻历史、不碰灰字建议）
+    if (mentionOpen && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDismissedMention(mentionTrigger?.start ?? null);
+        return;
+      }
+      if (mentionListOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        const count = mentionMatches.length;
+        setMentionIndex((activeMention + (event.key === 'ArrowDown' ? 1 : count - 1)) % count);
+        return;
+      }
+      const picked = mentionMatches[activeMention];
+      if (
+        mentionListOpen &&
+        picked &&
+        !event.shiftKey &&
+        (event.key === 'Enter' || event.key === 'Tab')
+      ) {
+        event.preventDefault();
+        pickMention(picked);
+        return;
+      }
+    }
     // → 只在灰字可见、无修饰键、无选区且光标在末尾时采纳为草稿；不发送、不写历史
     if (
       ghostVisible &&
@@ -539,6 +634,19 @@ export function Composer({ sessionId }: { sessionId: string }) {
           </p>
         )}
         <div className="relative">
+          {mentionOpen && mentionKindOpen && (
+            <MentionMenu
+              id={mentionListId}
+              kind={mentionKindOpen}
+              options={mentionMatches}
+              activeIndex={activeMention}
+              onPick={pickMention}
+              onHover={setMentionIndex}
+            />
+          )}
+          {orchestrator && (
+            <MentionHighlight textarea={input} draft={draft} targets={mentionOptions} />
+          )}
           <ReplySuggestionGhost
             textarea={input}
             draft={draft}
@@ -551,6 +659,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
             rows={1}
             aria-label={t('chat.message')}
             aria-keyshortcuts={hints.ariaKeyShortcuts}
+            aria-autocomplete={orchestrator ? 'list' : undefined}
+            aria-controls={mentionListOpen ? mentionListId : undefined}
+            aria-activedescendant={
+              mentionListOpen ? `${mentionListId}-${activeMention}` : undefined
+            }
             title={hints.title}
             placeholder={ghostVisible ? '' : placeholder}
             className="field-sizing-content relative z-10 max-h-60 min-h-11 resize-none border-0 bg-transparent px-4 py-3 shadow-none focus-visible:ring-0 dark:bg-transparent"
@@ -559,7 +672,19 @@ export function Composer({ sessionId }: { sessionId: string }) {
               history.current = null;
               setBrowsing(false);
               setDraft(sessionId, event.target.value);
+              setSelection({
+                start: event.target.selectionStart,
+                end: event.target.selectionEnd,
+              });
             }}
+            onSelect={(event) =>
+              setSelection({
+                start: event.currentTarget.selectionStart,
+                end: event.currentTarget.selectionEnd,
+              })
+            }
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             onCompositionStart={() => {

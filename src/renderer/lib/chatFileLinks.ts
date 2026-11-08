@@ -1,20 +1,27 @@
+import {
+  hasControl,
+  isAbsoluteChatPath,
+  nativeChatPath,
+  parseChatFilePath,
+} from '@shared/chatFilePath';
 import type { SessionSummary } from '@shared/types/chat';
-import type { FileError, WorkspaceFileEntry } from '@shared/types/files';
+import type { OutsideFileError, WorkspaceFileEntry } from '@shared/types/files';
 import type { FilesApi } from '../../preload/domains/files';
 
 export type ChatFileContext = Pick<SessionSummary, 'id' | 'workspaceId' | 'cwd' | 'worktreeId'>;
 export type ChatLinkError =
-  | FileError
-  | 'invalidLink'
+  | OutsideFileError
   | 'unsupportedRoot'
-  | 'unsupportedParameters'
   | 'truncated'
-  | 'sessionUnavailable'
   | 'tabLimit'
   | 'restartRequired';
 
+/** outsidePath：工作区外文件的本机路径，错误文案里展示给用户。 */
 export class ChatFileLinkError extends Error {
-  constructor(readonly code: ChatLinkError) {
+  constructor(
+    readonly code: ChatLinkError,
+    readonly outsidePath?: string
+  ) {
     super(code);
   }
 }
@@ -22,8 +29,6 @@ export class ChatFileLinkError extends Error {
 const fail = (code: ChatLinkError): never => {
   throw new ChatFileLinkError(code);
 };
-const hasControl = (text: string) =>
-  Array.from(text).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
 
 /** 只有显式 http(s) 能成为 DOM href；本地及被拒绝的链接都走按钮。 */
 export function externalChatLink(reference: string): string | null {
@@ -36,60 +41,10 @@ export function externalChatLink(reference: string): string | null {
   }
 }
 
-/** 不支持网页 query/hash；编码过的 %23 / %3F 仍是文件名，不是展示参数。 */
+/** 规则见 `@shared/chatFilePath`（Main 的 files:open-outside 用同一规则重新解析）。 */
 export function chatFilePath(reference: string): string {
-  if (
-    !reference ||
-    reference.length > 4096 ||
-    reference.trim() !== reference ||
-    hasControl(reference) ||
-    reference.startsWith('#')
-  )
-    return fail('invalidLink');
-  if (/[?#]/.test(reference)) return fail('unsupportedParameters');
-  let path = reference;
-  const fileUrl = /^file:/i.test(path);
-  if (fileUrl) {
-    try {
-      const url = new URL(path);
-      if (
-        url.protocol !== 'file:' ||
-        (url.hostname && url.hostname !== 'localhost') ||
-        url.username ||
-        url.password ||
-        url.port
-      )
-        return fail('invalidLink');
-      path = url.pathname;
-    } catch {
-      return fail('invalidLink');
-    }
-  }
-  try {
-    path = decodeURIComponent(path).replace(/\\/g, '/');
-    if (fileUrl) path = path.replace(/^\/(?=[a-z]:\/)/i, '');
-  } catch {
-    return fail('invalidLink');
-  }
-  // 带扩展名的 path:line 可以与 URI 区分；未知协议绝不退化成文件名。
-  if (
-    /^[a-z][a-z\d+.-]*:/i.test(path) &&
-    !/^[a-z]:\//i.test(path) &&
-    !/^[^:]+\.[^:]+:\d+(?::\d+)?$/.test(path)
-  )
-    return fail('invalidLink');
-  // 定位仅用于显示；打开文件不改变现有编辑器的光标/草稿。
-  path = path.replace(/:\d+(?::\d+)?$/, '');
-  const withoutDrive = path.replace(/^[a-z]:\//i, '');
-  if (
-    !path ||
-    hasControl(path) ||
-    path.startsWith('//') ||
-    withoutDrive.includes(':') ||
-    path.startsWith('~')
-  )
-    return fail('invalidLink');
-  return path;
+  const parsed = parseChatFilePath(reference);
+  return parsed.ok ? parsed.path : fail(parsed.error);
 }
 
 interface AbsolutePath {
@@ -200,18 +155,61 @@ export async function resolveChatFile(
   return fail('entryNotFound');
 }
 
+export type ChatLinkTarget =
+  | { kind: 'inside'; entry: WorkspaceFileEntry }
+  /** path：本机写法的绝对路径，只用于展示 / 复制，打开时 Main 由原始 reference 重新解析 */
+  | { kind: 'outside'; path: string };
+
+/** 工作区内解析为签发条目；指向工作区（或 worktree root）之外的绝对路径归为 outside，其余错误不变。 */
+export async function locateChatFile(
+  api: Pick<FilesApi, 'list' | 'resolve'>,
+  context: ChatFileContext,
+  reference: string
+): Promise<ChatLinkTarget> {
+  const path = chatFilePath(reference);
+  try {
+    return { kind: 'inside', entry: await resolveChatFile(api, context, reference) };
+  } catch (error) {
+    if (
+      error instanceof ChatFileLinkError &&
+      (error.code === 'outsideWorkspace' || error.code === 'unsupportedRoot') &&
+      isAbsoluteChatPath(path)
+    )
+      return { kind: 'outside', path: nativeChatPath(path) };
+    throw error;
+  }
+}
+
+/** 工作区外的文件只传会话 id 与原始 reference，由 Main 重新解析校验后打开或在文件夹中显示。 */
+export async function openOutsideChatFile(
+  api: Partial<Pick<FilesApi, 'openOutside'>>,
+  context: ChatFileContext,
+  reference: string,
+  path: string,
+  action: 'open' | 'reveal'
+): Promise<{ revealed: boolean }> {
+  if (!api.openOutside) return fail('restartRequired');
+  const result = await api.openOutside({ sessionId: context.id, reference, action });
+  if (!result.ok) throw new ChatFileLinkError(result.error, path);
+  return { revealed: !!result.revealed };
+}
+
 /** 工作区在点击时绑定；异步期间切换工作区不会改变任何请求的归属。 */
 export async function openChatFileLink(
-  api: Pick<FilesApi, 'list' | 'resolve' | 'openHtml'>,
+  api: Pick<FilesApi, 'list' | 'resolve' | 'openHtml'> & Partial<Pick<FilesApi, 'openOutside'>>,
   context: ChatFileContext,
   reference: string,
   openFile: (workspaceId: string, entry: WorkspaceFileEntry) => Promise<void>,
   isCurrent: () => boolean = () => true
-): Promise<void> {
-  const entry = await resolveChatFile(api, context, reference);
-  if (!isCurrent()) return;
+): Promise<{ revealed: boolean }> {
+  const target = await locateChatFile(api, context, reference);
+  if (!isCurrent()) return { revealed: false };
+  if (target.kind === 'outside')
+    return openOutsideChatFile(api, context, reference, target.path, 'open');
+  const { entry } = target;
   if (/\.html?$/i.test(entry.name)) {
     const result = await api.openHtml({ workspaceId: context.workspaceId, entryId: entry.id });
     if (!result.ok) fail(result.error);
   } else await openFile(context.workspaceId, entry);
+  return { revealed: false };
 }

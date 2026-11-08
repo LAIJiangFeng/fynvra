@@ -7,6 +7,8 @@ import {
   type Role,
   type Task,
   THINKING_LEVELS,
+  workflowNodeLabel,
+  workflowProgressLine,
 } from '@fynvra/core';
 import type {
   CleanupWorktreeInput,
@@ -64,9 +66,27 @@ const MAX_LISTED_FILES = 50;
 
 export type RoleOption = Pick<Role, 'id' | 'name' | 'description'>;
 
+/** 可用的工作流（Main 在 spawn 时从注册表读取的清单） */
+export interface WorkflowOption {
+  id: string;
+  name: string;
+  description?: string;
+  steps: readonly { name: string; roleId: string }[];
+  /** 图的文字摘要；有值时工具描述显示它而不是按顺序列出步骤 */
+  summary?: string;
+}
+
 export interface OrchestrationToolsOptions {
-  /** 可派发的角色。提供时 `role` 参数是枚举，并支持按显示名（不区分大小写）匹配 */
+  /**
+   * 会话开始时的角色清单：只用于工具描述和把已知名称归一为 id；`role` 是普通字符串，
+   * 清单之外的值原样交给 Main，按当前注册表实时解析（id 或名称）。
+   */
   roles?: readonly RoleOption[];
+  /**
+   * 会话开始时的工作流清单：只用于工具描述和名称归一；`workflow` 参数始终存在，
+   * 清单之外的值原样交给 Main，按当前注册表实时解析。
+   */
+  workflows?: readonly WorkflowOption[];
   /**
    * 计划模式的实时开关（宿主持有，随时可变），每次 dispatch_task 调用时读取：为 true 时 dispatch_task
    * 不调用 Host，直接返回错误。其他编排工具不受影响，已经在跑的 worker 照常处理。缺省视为关闭。
@@ -89,6 +109,7 @@ export function createOrchestrationTools(
   options: OrchestrationToolsOptions = {}
 ): ToolDefinition[] {
   const roles = options.roles ?? [];
+  const workflows = options.workflows ?? [];
   const planMode = options.planMode ?? (() => false);
   return [
     tool({
@@ -105,13 +126,13 @@ export function createOrchestrationTools(
         'Delegate every code change with dispatch_task; never edit files or run write commands yourself.',
         'Independent tasks can be dispatched back to back so their workers run in parallel; use depends_on only for real ordering constraints.',
       ],
-      parameters: dispatchTaskSchema(roles),
+      parameters: dispatchTaskSchema(roles, workflows),
       executionMode: 'sequential',
-      normalize: (raw) => normalizeDispatchArgs(raw, roles),
+      normalize: (raw) => normalizeDispatchArgs(raw, roles, workflows),
       run: async (params, signal) => {
         // 计划模式：每次调用都重新读开关，开着就直接拒绝，不调用 Host
         if (planMode()) return errorResult('dispatch_task', PLAN_MODE_DISPATCH_REFUSAL);
-        const input = parseDispatchArgs(params, roles);
+        const input = parseDispatchArgs(params, roles, workflows);
         if (!input.ok) return errorResult('dispatch_task', input.error);
         const result = await host.dispatchTask(input.value, signal);
         if (!result.ok) return errorResult('dispatch_task', result.error);
@@ -338,6 +359,18 @@ export function createOrchestrationTools(
         };
         const result = await host.rejectWork(payload, signal);
         if (!result.ok) return errorResult('reject_work', result.error);
+        if (result.workflowRestarted) {
+          return textResult(
+            [
+              `## Workflow restarted · dispatch ${code(payload.dispatchId)}`,
+              `- message_id: ${code(result.messageId)}`,
+              `- new dispatch_id: ${code(result.workflowRestarted.dispatchId)} (a start node)`,
+              '',
+              'The whole workflow graph runs again from its start nodes in the same task worktree, with your feedback in the start node briefs. You will be woken automatically only when the whole workflow finishes or fails.',
+            ].join('\n'),
+            result
+          );
+        }
         return textResult(
           [
             `## Feedback sent · dispatch ${code(payload.dispatchId)}`,
@@ -432,11 +465,34 @@ function dispatchRefSchema() {
   return Type.Object({ dispatch_id: dispatchIdParam() }, { additionalProperties: false });
 }
 
-function dispatchTaskSchema(roles: readonly RoleOption[]) {
+function describeWorkflow(workflow: WorkflowOption): string {
+  const name = workflow.name !== workflow.id ? ` (${workflow.name})` : '';
+  const steps =
+    workflow.summary ?? workflow.steps.map((step) => `${step.name} [${step.roleId}]`).join(' → ');
+  return `${workflow.id}${name}: ${steps}${workflow.description ? ` — ${oneLine(workflow.description)}` : ''}`;
+}
+
+function workflowParam(workflows: readonly WorkflowOption[]) {
+  const available =
+    workflows.length > 0
+      ? `Available when this session started: ${workflows.map(describeWorkflow).join('; ')}. Workflows the user created later in Settings also work, by id or name.`
+      : 'No workflows existed when this session started; you can still pass the id or name of a workflow the user created in Settings since.';
+  return Type.String({
+    description:
+      'Run the task through a user-defined workflow (id or case-insensitive name) instead of a single worker. ' +
+      'Only set it when the user asks for a workflow (e.g. /name); do not combine with role (each step has its own role). ' +
+      available,
+  });
+}
+
+function dispatchTaskSchema(
+  roles: readonly RoleOption[],
+  workflows: readonly WorkflowOption[] = []
+) {
   const roleDescription =
     roles.length > 0
-      ? `Role id of the worker. Default "${DEFAULT_ROLE_ID}". Available: ${roles.map(describeRole).join('; ')}`
-      : `Role id of the worker. Default "${DEFAULT_ROLE_ID}" (plain worker without extra prompt, skills or MCP).`;
+      ? `Role id or case-insensitive name of the worker. Default "${DEFAULT_ROLE_ID}". Available when this session started: ${roles.map(describeRole).join('; ')}. Roles the user created later in Settings also work, by id or name.`
+      : `Role id or case-insensitive name of the worker. Default "${DEFAULT_ROLE_ID}" (plain worker without extra prompt, skills or MCP). Roles the user created in Settings also work.`;
   return Type.Object(
     {
       title: Type.String({
@@ -448,14 +504,8 @@ function dispatchTaskSchema(roles: readonly RoleOption[]) {
           "Complete task brief in Markdown; it is the worker's only context. Cover Target, Change, " +
           'Constraints, Ownership (files and directories it may change) and Acceptance (commands that must pass).',
       }),
-      role: Type.Optional(
-        roles.length > 0
-          ? StringEnum(
-              roles.map((role) => role.id),
-              { description: roleDescription }
-            )
-          : Type.String({ description: roleDescription })
-      ),
+      // 不用 enum：会话开始后新建的角色也要能通过 schema 校验，存在性由 Main 实时判断
+      role: Type.Optional(Type.String({ description: roleDescription })),
       depends_on: Type.Optional(
         Type.Array(Type.String(), {
           description:
@@ -484,6 +534,7 @@ function dispatchTaskSchema(roles: readonly RoleOption[]) {
             'Can be combined with model and thinking; does not guarantee provider acceleration.',
         })
       ),
+      workflow: Type.Optional(workflowParam(workflows)),
     },
     { additionalProperties: false }
   );
@@ -517,15 +568,43 @@ function normalizeRole(value: unknown, roles: readonly RoleOption[]): unknown {
   return match ? match.id : wanted;
 }
 
-function normalizeDispatchArgs(raw: unknown, roles: readonly RoleOption[]): ArgRecord {
+/** 工作流按 id 或名称（不区分大小写）归一为 id；空值视同未传，认不出的原样留给校验 */
+function normalizeWorkflow(value: unknown, workflows: readonly WorkflowOption[]): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return value;
+  const wanted = value.trim();
+  if (!wanted) return undefined;
+  const lower = wanted.toLowerCase();
+  const match =
+    workflows.find((workflow) => workflow.id.toLowerCase() === lower) ??
+    workflows.find((workflow) => workflow.name.trim().toLowerCase() === lower);
+  return match ? match.id : wanted;
+}
+
+function normalizeDispatchArgs(
+  raw: unknown,
+  roles: readonly RoleOption[],
+  workflows: readonly WorkflowOption[] = []
+): ArgRecord {
   const args = asRecord(raw);
   const title = trimmed(pick(args, 'title'));
   const fast = [args.fast, args.fast_mode, args.fastMode].find((value) => value !== undefined);
+  const workflow = normalizeWorkflow(
+    pick(args, 'workflow', 'workflow_id', 'workflowId'),
+    workflows
+  );
+  const rawRole = pick(args, 'role', 'role_id', 'roleId');
+  // 指定了工作流时不补默认角色：保留「模型是否显式传了 role」，以便按互斥报错
+  const explicitRole =
+    rawRole === undefined || rawRole === null || (typeof rawRole === 'string' && !rawRole.trim())
+      ? undefined
+      : normalizeRole(rawRole, roles);
   return compact({
     title:
       typeof title === 'string' ? truncateHeadChars(oneLine(title), TITLE_MAX_CHARS).text : title,
     spec: trimmed(pick(args, 'spec')),
-    role: normalizeRole(pick(args, 'role', 'role_id', 'roleId'), roles),
+    role: workflow === undefined ? normalizeRole(rawRole, roles) : explicitRole,
+    ...(workflow === undefined ? {} : { workflow }),
     depends_on: stringList(pick(args, 'depends_on', 'dependsOn')) ?? [],
     model: emptyToUndefined(trimmed(pick(args, 'model', 'model_id', 'modelId'))),
     thinking: normalizeThinking(
@@ -551,21 +630,30 @@ function normalizeThinking(value: unknown): unknown {
 
 function parseDispatchArgs(
   params: unknown,
-  roles: readonly RoleOption[]
+  roles: readonly RoleOption[],
+  workflows: readonly WorkflowOption[] = []
 ): Parsed<DispatchTaskInput> {
-  const args = normalizeDispatchArgs(params, roles);
+  const args = normalizeDispatchArgs(params, roles, workflows);
   const title = requiredText(args.title, 'title');
   if (!title.ok) return title;
   const spec = requiredText(args.spec, 'spec');
   if (!spec.ok) return spec;
-  const role = requiredText(args.role, 'role');
-  if (!role.ok) return role;
-  if (roles.length > 0 && !roles.some((candidate) => candidate.id === role.value)) {
-    return {
-      ok: false,
-      error: `unknown role "${role.value}". Available: ${roles.map((r) => r.id).join(', ')}`,
-    };
+  if (args.workflow !== undefined) {
+    if (typeof args.workflow !== 'string') {
+      return { ok: false, error: 'workflow must be a workflow id or name' };
+    }
+    if (args.role !== undefined) {
+      return {
+        ok: false,
+        error:
+          'workflow and role cannot be combined: each workflow step runs with its own role. Pass only workflow, or only role.',
+      };
+    }
+    // 存在性以 Main 的注册表为准（清单是 spawn 时的快照，可能已过时）
   }
+  // 角色存在性同样以 Main 的注册表为准（会话开始后新建的角色不在清单里）
+  const role = requiredText(args.workflow !== undefined ? DEFAULT_ROLE_ID : args.role, 'role');
+  if (!role.ok) return role;
   if (!isStringArray(args.depends_on)) {
     return { ok: false, error: 'depends_on must be an array of task ids' };
   }
@@ -589,6 +677,7 @@ function parseDispatchArgs(
       ...(args.model !== undefined ? { model: args.model } : {}),
       ...(thinking !== undefined ? { thinking } : {}),
       ...(args.fast !== undefined ? { fastMode: args.fast } : {}),
+      ...(typeof args.workflow === 'string' ? { workflowId: args.workflow } : {}),
     },
   };
 }
@@ -718,6 +807,7 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
       `- task_id: ${code(task.id)}`,
       `- title: ${task.title}`,
       `- role: ${task.roleId}`,
+      ...workflowLines(task),
       ...modelLines(task),
       `- status: ${task.status}`,
       `- depends_on: ${task.dependsOn.map(code).join(', ') || 'none'}`,
@@ -732,6 +822,7 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
     `- dispatch_id: ${code(dispatch.id)}`,
     `- title: ${task.title}`,
     `- role: ${task.roleId}`,
+    ...workflowLines(task),
     ...modelLines(task),
     inPlace
       ? '- works in: the workspace directory itself (no git: no worktree or branch)'
@@ -741,7 +832,29 @@ function formatDispatched(task: Task, dispatch: Dispatch | undefined): string {
     inPlace
       ? 'No git: the worker edits files directly in the workspace directory, and every running worker shares it. Dispatch one task at a time unless their files are strictly disjoint. You know nothing about its result until its worker_done message arrives; you will be woken automatically when it reports.'
       : 'The worker runs in the background in its own worktree. You know nothing about its result until its worker_done message arrives; you will be woken automatically when it reports, so keep working with the user or dispatch more tasks.',
+    ...(task.workflow
+      ? [
+          '',
+          'Workflow: Fynvra schedules the nodes automatically along the graph (parallel nodes in their own worktrees, merged back into this task worktree). You receive worker_done only when the whole workflow finishes (every node passed) or fails; its dispatch_id covers the combined result for review_diff / run_checks / merge_worktree.',
+        ]
+      : []),
   ].join('\n');
+}
+
+/** 工作流任务的进度：工作流名、图摘要、回退次数，每个节点一行（状态、名称、角色、dispatch_id）；普通任务没有 */
+function workflowLines(task: Task): string[] {
+  const workflow = task.workflow;
+  if (!workflow) return [];
+  const launching = new Map(workflow.launches.map((launch) => [launch.nodeId, launch]));
+  const nodes = workflow.steps.map((step) => {
+    const node = workflow.nodes.find((entry) => entry.id === step.id);
+    const launch = launching.get(step.id);
+    const status = launch ? 'starting' : node ? workflowNodeLabel(node) : 'waiting';
+    const dispatch = node?.dispatchId && !launch ? ` · dispatch_id: ${code(node.dispatchId)}` : '';
+    const own = (launch?.placement ?? node?.placement) === 'isolated' ? ' · own worktree' : '';
+    return `  - ${status} · ${step.name} · role: ${step.roleId}${dispatch}${own}`;
+  });
+  return [`- ${workflowProgressLine(workflow)}`, '- nodes:', ...nodes];
 }
 
 function formatWorkers(workers: readonly WorkerEntry[]): string {
@@ -752,6 +865,7 @@ function formatWorkers(workers: readonly WorkerEntry[]): string {
     const lines = [
       `### ${code(task.id)} · ${task.title}`,
       `- status: ${task.status} · role: ${task.roleId}`,
+      ...workflowLines(task),
       ...modelLines(task),
     ];
     if (task.dependsOn.length > 0)
@@ -760,6 +874,9 @@ function formatWorkers(workers: readonly WorkerEntry[]): string {
       lines.push('- not started yet (waiting for dependencies)');
       return lines.join('\n');
     }
+    // 运行中的工作流看节点行；结束后这里的 dispatch 代表整个工作流（集成 worktree）
+    if (task.workflow && task.status === 'in-progress') return lines.join('\n');
+    if (task.workflow) lines.push('- whole-workflow result (use it for review / merge / reject):');
     lines.push(
       dispatch.mode === 'in-place'
         ? `- dispatch_id: ${code(dispatch.id)} · in place (no git)`

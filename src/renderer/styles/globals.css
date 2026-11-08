@@ -114,3 +114,105 @@
 @utility no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* 预览查找高亮（CSS Custom Highlight API，见 PreviewFindBar） */
+::highlight(fynvra-find) {
+  background-color: oklch(0.905 0.182 98.111 / 55%);
+  color: inherit;
+}
+
+::highlight(fynvra-find-current) {
+  background-color: oklch(0.769 0.188 70.08);
+  color: oklch(0.141 0.005 285.823);
+}
+
+.dark ::highlight(fynvra-find) {
+  background-color: oklch(0.795 0.184 86.047 / 35%);
+  color: inherit;
+}
+
+.dark ::highlight(fynvra-find-current) {
+  background-color: oklch(0.769 0.188 70.08);
+  color: oklch(0.141 0.005 285.823);
+}
+
+/* React Flow（工作流流程图）：颜色一律取应用主题变量，明暗随主题切换 */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color: var(--border);
+  --xy-edge-stroke: var(--muted-foreground);
+  --xy-edge-stroke-selected: var(--foreground);
+  --xy-connectionline-stroke: var(--ring);
+  --xy-handle-background-color: var(--muted-foreground);
+  --xy-handle-border-color: var(--card);
+  --xy-edge-label-background-color: var(--card);
+  --xy-edge-label-color: var(--muted-foreground);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--accent-foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: 0 0 0 1px var(--border);
+  --xy-selection-background-color: color-mix(in oklch, var(--ring) 15%, transparent);
+  --xy-selection-border: 1px dotted var(--ring);
+}
+
+.react-flow .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}
+
+/* 可编辑画布的出入口圆点：可见 14px，透明外圈把点击范围扩到 28px（只读与 fail 圆点不带此类） */
+.react-flow .react-flow__handle.workflow-handle {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--card);
+  cursor: crosshair;
+  transition:
+    width 120ms ease,
+    height 120ms ease,
+    background-color 120ms ease;
+}
+
+.react-flow .react-flow__handle.workflow-handle::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 100%;
+}
+
+.react-flow .react-flow__handle.workflow-handle:hover,
+.react-flow .react-flow__handle.workflow-handle.connectingfrom {
+  width: 18px;
+  height: 18px;
+  background-color: var(--primary);
+}
+
+/* 拖出连线时：所有可落点的入口高亮，吸附到的入口、鼠标下的目标卡片更显眼 */
+.workflow-connecting
+  .react-flow__node:not(.workflow-connect-source)
+  .react-flow__handle.workflow-handle-in {
+  background-color: var(--ring);
+}
+
+.workflow-connecting .react-flow__handle.workflow-handle-in.connectingto {
+  width: 18px;
+  height: 18px;
+  background-color: var(--primary);
+}
+
+.workflow-connecting .react-flow__node:not(.workflow-connect-source):hover .workflow-node-card {
+  box-shadow:
+    0 0 0 1px var(--background),
+    0 0 0 3px var(--ring);
+}
+
+/* 失败退回：红色虚线 */
+.react-flow__edge.workflow-fail-edge .react-flow__edge-path {
+  stroke: var(--destructive);
+  stroke-dasharray: 6 4;
+}
+
+.react-flow__edge.workflow-fail-edge.selected .react-flow__edge-path {
+  stroke-width: 2.5;
+}

@@ -26,11 +26,13 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld).toHaveBeenCalledTimes(1);
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
+      'appDialog',
       'files',
       'instructions',
       'mcp',
       'notifications',
       'orchestration',
+      'plugins',
       'providers',
       'roles',
       'sessions',
@@ -40,6 +42,7 @@ describe('preload bridge', () => {
       'updates',
       'usage',
       'window',
+      'workflows',
       'workspaceUi',
       'workspaces',
     ]);
@@ -183,6 +186,7 @@ describe('preload bridge', () => {
       'duplicate',
       'list',
       'openHtml',
+      'openOutside',
       'read',
       'remove',
       'rename',
