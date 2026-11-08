@@ -145,10 +145,12 @@ describe('createOrchestrationTools', () => {
     }
   });
 
-  it('lists the available roles as an enum when roles are provided', () => {
+  it('lists the available roles in the role description when roles are provided', () => {
     const tool = toolByName(createOrchestrationTools(createHost(), { roles }), 'dispatch_task');
-    const role = (tool.parameters as { properties: { role: { enum?: string[] } } }).properties.role;
-    expect(role.enum).toEqual(['worker', 'test-engineer']);
+    const role = (tool.parameters as { properties: { role: { description?: string } } }).properties
+      .role;
+    expect(role.description).toContain('worker');
+    expect(role.description).toContain('test-engineer');
   });
 });
 
@@ -251,12 +253,11 @@ describe('dispatch_task', () => {
     expect(host.dispatchTask).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects unknown roles before reaching the host', async () => {
+  it('passes roles outside the session snapshot to the host for live resolution', async () => {
     const host = createHost();
     const tool = toolByName(createOrchestrationTools(host, { roles }), 'dispatch_task');
-    const run = await runTool(tool, { title: 'x', spec: 'y', role: 'designer' });
-    expect(run.isError).toBe(true);
-    expect(host.dispatchTask).not.toHaveBeenCalled();
+    await runTool(tool, { title: 'x', spec: 'y', role: 'designer' });
+    expect(host.dispatchTask.mock.calls[0]?.[0]).toMatchObject({ roleId: 'designer' });
   });
 
   it('requires a non-empty title and spec', async () => {
