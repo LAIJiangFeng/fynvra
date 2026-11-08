@@ -27,7 +27,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -351,6 +351,8 @@ function PluginActions({
   const targets = useWorkspacesStore((state) => state.openWithTargets);
   const loadOpenWithApps = useWorkspacesStore((state) => state.loadOpenWithApps);
   const [busy, setBusy] = useState(false);
+  /** 选了「添加模型服务名」时菜单关闭不把焦点还给「…」按钮，留给刚出现的输入框；其他项不变 */
+  const keepFocusOnClose = useRef(false);
   const t = useT();
   const onError = (text: string) => onStatus({ tone: 'error', text });
 
@@ -408,7 +410,14 @@ function PluginActions({
       >
         {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        finalFocus={() => {
+          if (!keepFocusOnClose.current) return true;
+          keepFocusOnClose.current = false;
+          return false;
+        }}
+      >
         <DropdownMenuItem onClick={async () => report(await reveal(plugin.id))}>
           <FolderOpen />
           {t('settings.plugins.reveal')}
@@ -441,7 +450,12 @@ function PluginActions({
           <FolderTree />
           {t('settings.plugins.openAsWorkspace')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={onAddServiceName}>
+        <DropdownMenuItem
+          onClick={() => {
+            keepFocusOnClose.current = true;
+            onAddServiceName();
+          }}
+        >
           <Plus />
           {t('settings.plugins.manualAdd')}
         </DropdownMenuItem>
@@ -726,6 +740,12 @@ function ManualNameForm({
 }) {
   const setManualProviders = usePluginsStore((state) => state.setManualProviders);
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  // 从「…」菜单打开时，菜单关闭比输入框挂载晚：等下一帧再聚焦一次
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const [inputError, setInputError] = useState<string | null>(null);
   const t = useT();
 
@@ -761,6 +781,7 @@ function ManualNameForm({
         }}
       >
         <Input
+          ref={inputRef}
           autoFocus
           value={input}
           maxLength={64}
