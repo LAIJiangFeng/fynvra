@@ -1207,24 +1207,21 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     plugins: {
       title: 'Plugins',
-      subtitle: 'pi extensions or pi packages; once attached to a role, new sessions load them',
+      subtitle: 'pi extensions or packages; attach to a role to use in new sessions',
       warning:
-        'Plugins run arbitrary code with your user permissions and can read the URLs and keys of enabled model services. Only install trusted sources',
+        'Plugins can run any code and read enabled model service keys. Only install trusted sources',
       addLocal: 'Add local plugin',
-      installPlaceholder:
-        'npm:<name>[@version], git:<host>/<path>[@ref] or an https:// repository URL',
+      installPlaceholder: 'npm:<name>, git:<host>/<path> or an https:// repository URL',
       install: 'Install',
       installing: 'Installing…',
-      installHint:
-        'Requires npm or git on this computer; installs into the app data folder and leaves ~/.pi alone',
+      installHint: 'Requires npm or git; ~/.pi is left untouched',
       empty: 'No plugins yet',
       kinds: { local: 'Local', npm: 'npm', git: 'git' },
-      removeConsequence:
-        'Roles that use it will stop loading it; local plugins are only unregistered, files are kept',
+      removeConsequence: 'Roles stop loading it; local plugin files are kept',
       removing: 'Removing…',
       confirmTitle: 'Add plugin?',
       confirmInstall: 'About to install: {source}',
-      confirmLocal: 'Next, choose a plugin folder or an extension file (.ts / .js / .mjs)',
+      confirmLocal: 'Next, pick a plugin folder or extension file (.ts / .js / .mjs)',
       continue: 'I trust this source, continue',
       added: 'Added plugin "{name}"',
     },
