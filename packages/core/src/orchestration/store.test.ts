@@ -160,8 +160,10 @@ describe('invariants', () => {
 
   it('工作流任务按节点计：不同 nodeId 可并存，同一节点或缺 nodeId 仍拒绝', () => {
     const store = seeded();
-    store.dispatches.update('dispatch_1', settled);
     const node = (id: string, nodeId?: string) => ({ ...dispatch, id, nodeId });
+    // 已有的未结算 dispatch 没有 nodeId：带 nodeId 的也不能并存
+    expect(store.dispatches.insert(node('d_early', 'ui')).ok).toBe(false);
+    store.dispatches.update('dispatch_1', settled);
     expect(store.dispatches.insert(node('d_ui', 'ui')).ok).toBe(true);
     expect(store.dispatches.insert(node('d_be', 'backend')).ok).toBe(true);
     expect(store.dispatches.insert(node('d_ui2', 'ui')).ok).toBe(false);
