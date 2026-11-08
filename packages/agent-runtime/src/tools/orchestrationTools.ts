@@ -77,9 +77,15 @@ export interface WorkflowOption {
 }
 
 export interface OrchestrationToolsOptions {
-  /** 可派发的角色。提供时 `role` 参数是枚举，并支持按显示名（不区分大小写）匹配 */
+  /**
+   * 会话开始时的角色清单：只用于工具描述和把已知名称归一为 id；`role` 是普通字符串，
+   * 清单之外的值原样交给 Main，按当前注册表实时解析（id 或名称）。
+   */
   roles?: readonly RoleOption[];
-  /** 可用的工作流；非空时 dispatch_task 多一个 `workflow` 参数（id 或不区分大小写的名称） */
+  /**
+   * 会话开始时的工作流清单：只用于工具描述和名称归一；`workflow` 参数始终存在，
+   * 清单之外的值原样交给 Main，按当前注册表实时解析。
+   */
   workflows?: readonly WorkflowOption[];
   /**
    * 计划模式的实时开关（宿主持有，随时可变），每次 dispatch_task 调用时读取：为 true 时 dispatch_task
@@ -467,11 +473,15 @@ function describeWorkflow(workflow: WorkflowOption): string {
 }
 
 function workflowParam(workflows: readonly WorkflowOption[]) {
+  const available =
+    workflows.length > 0
+      ? `Available when this session started: ${workflows.map(describeWorkflow).join('; ')}. Workflows the user created later in Settings also work, by id or name.`
+      : 'No workflows existed when this session started; you can still pass the id or name of a workflow the user created in Settings since.';
   return Type.String({
     description:
       'Run the task through a user-defined workflow (id or case-insensitive name) instead of a single worker. ' +
-      'Only set it when the user asks for a workflow; do not combine with role (each step has its own role). ' +
-      `Available: ${workflows.map(describeWorkflow).join('; ')}`,
+      'Only set it when the user asks for a workflow (e.g. /name); do not combine with role (each step has its own role). ' +
+      available,
   });
 }
 
@@ -481,8 +491,8 @@ function dispatchTaskSchema(
 ) {
   const roleDescription =
     roles.length > 0
-      ? `Role id of the worker. Default "${DEFAULT_ROLE_ID}". Available: ${roles.map(describeRole).join('; ')}`
-      : `Role id of the worker. Default "${DEFAULT_ROLE_ID}" (plain worker without extra prompt, skills or MCP).`;
+      ? `Role id or case-insensitive name of the worker. Default "${DEFAULT_ROLE_ID}". Available when this session started: ${roles.map(describeRole).join('; ')}. Roles the user created later in Settings also work, by id or name.`
+      : `Role id or case-insensitive name of the worker. Default "${DEFAULT_ROLE_ID}" (plain worker without extra prompt, skills or MCP). Roles the user created in Settings also work.`;
   return Type.Object(
     {
       title: Type.String({
@@ -494,14 +504,8 @@ function dispatchTaskSchema(
           "Complete task brief in Markdown; it is the worker's only context. Cover Target, Change, " +
           'Constraints, Ownership (files and directories it may change) and Acceptance (commands that must pass).',
       }),
-      role: Type.Optional(
-        roles.length > 0
-          ? StringEnum(
-              roles.map((role) => role.id),
-              { description: roleDescription }
-            )
-          : Type.String({ description: roleDescription })
-      ),
+      // 不用 enum：会话开始后新建的角色也要能通过 schema 校验，存在性由 Main 实时判断
+      role: Type.Optional(Type.String({ description: roleDescription })),
       depends_on: Type.Optional(
         Type.Array(Type.String(), {
           description:
@@ -530,7 +534,7 @@ function dispatchTaskSchema(
             'Can be combined with model and thinking; does not guarantee provider acceleration.',
         })
       ),
-      ...(workflows.length > 0 ? { workflow: Type.Optional(workflowParam(workflows)) } : {}),
+      workflow: Type.Optional(workflowParam(workflows)),
     },
     { additionalProperties: false }
   );
@@ -585,10 +589,10 @@ function normalizeDispatchArgs(
   const args = asRecord(raw);
   const title = trimmed(pick(args, 'title'));
   const fast = [args.fast, args.fast_mode, args.fastMode].find((value) => value !== undefined);
-  const workflow =
-    workflows.length > 0
-      ? normalizeWorkflow(pick(args, 'workflow', 'workflow_id', 'workflowId'), workflows)
-      : undefined;
+  const workflow = normalizeWorkflow(
+    pick(args, 'workflow', 'workflow_id', 'workflowId'),
+    workflows
+  );
   const rawRole = pick(args, 'role', 'role_id', 'roleId');
   // 指定了工作流时不补默认角色：保留「模型是否显式传了 role」，以便按互斥报错
   const explicitRole =
@@ -647,14 +651,9 @@ function parseDispatchArgs(
     }
     // 存在性以 Main 的注册表为准（清单是 spawn 时的快照，可能已过时）
   }
+  // 角色存在性同样以 Main 的注册表为准（会话开始后新建的角色不在清单里）
   const role = requiredText(args.workflow !== undefined ? DEFAULT_ROLE_ID : args.role, 'role');
   if (!role.ok) return role;
-  if (roles.length > 0 && !roles.some((candidate) => candidate.id === role.value)) {
-    return {
-      ok: false,
-      error: `unknown role "${role.value}". Available: ${roles.map((r) => r.id).join(', ')}`,
-    };
-  }
   if (!isStringArray(args.depends_on)) {
     return { ok: false, error: 'depends_on must be an array of task ids' };
   }

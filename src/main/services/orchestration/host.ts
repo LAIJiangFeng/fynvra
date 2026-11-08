@@ -32,6 +32,7 @@ import {
   type Message,
   newId,
   type OrchestrationStore,
+  type Role,
   type RoleStore,
   type Run,
   restartTaskWorkflow,
@@ -482,8 +483,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       workflow = snapshotTaskWorkflow(found.workflow);
       roleId = workflow.steps[0]?.roleId ?? '';
     } else {
-      const role = await roles.get(input.roleId);
-      if (role === undefined) return fail(`unknown role "${input.roleId}"`);
+      const found = await findRole(input.roleId);
+      if (!found.ok) return found;
+      const role = found.role;
       if (role.tools === 'orchestrator') {
         return fail(`role "${role.id}" is an orchestrator role and cannot run a worker`);
       }
@@ -531,6 +533,27 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return { ok: true, task: unwrap(store.tasks.insert(task)).value };
     }
     return start(task, true);
+  }
+
+  /**
+   * 按 id（先精确、再不区分大小写）或不区分大小写的名称在当前角色注册表里找角色：会话开始后新建的角色也能派发。
+   * 是否编排角色由调用方判断。
+   */
+  async function findRole(raw: string): Promise<HostResult<{ role: Role }>> {
+    const wanted = raw.trim();
+    if (wanted === '') return fail('role must be a role id or name');
+    const list = await roles.list();
+    const lower = wanted.toLowerCase();
+    const role =
+      list.find((entry) => entry.id === wanted) ??
+      list.find((entry) => entry.id.toLowerCase() === lower) ??
+      list.find((entry) => entry.name?.trim().toLowerCase() === lower);
+    if (role !== undefined) return { ok: true, role };
+    const available = list
+      .filter((entry) => entry.tools !== 'orchestrator')
+      .map((entry) => `${entry.id} (${entry.name})`)
+      .join(', ');
+    return fail(`unknown role "${wanted}". Available: ${available || 'none'}`);
   }
 
   /**
