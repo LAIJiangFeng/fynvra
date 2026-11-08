@@ -1,3 +1,4 @@
+import { providerApiLabel } from '@shared/modelCatalog';
 import { localPluginMode, type PluginEntry, type PluginMode } from '@shared/types/plugins';
 import {
   AppWindow,
@@ -452,7 +453,7 @@ function AvailableProviders() {
                   {' · '}
                   {provider.name}
                   {' · '}
-                  {provider.api}
+                  {providerApiLabel(provider.api)}
                 </span>
               </span>
               <CopyButton text={provider.id} label={t('settings.providers.copyServiceId')} />
