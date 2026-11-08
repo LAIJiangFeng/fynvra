@@ -114,6 +114,7 @@ describe('参数视图', () => {
     expect(dispatchTaskView({ title: '拆分', depends_on: ['task_1', 2] })).toEqual({
       title: '拆分',
       role: 'worker',
+      workflow: '',
       dependsOn: ['task_1'],
       spec: '',
     });
