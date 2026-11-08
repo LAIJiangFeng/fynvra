@@ -357,6 +357,13 @@ export const en: MessagesShape<typeof zhCN> = {
         'Local file links do not support queries or # anchors yet. Use a file link without parameters',
       sessionUnavailable:
         'The session for this message was not found. Reopen the session and retry',
+      openFailed: 'The system could not open this file',
+      notFound: 'File not found',
+      withPath: '{message}: {path}',
+      open: 'Open',
+      reveal: 'Show in folder',
+      copyPath: 'Copy path',
+      revealed: 'Shown in folder',
     },
     copyCode: 'Copy code',
     thinking: 'Thinking…',
