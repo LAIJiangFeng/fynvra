@@ -1243,7 +1243,7 @@ export const en: MessagesShape<typeof zhCN> = {
       convertToCopy: 'Convert to copy',
       converted: '"{name}" is now a copy. Later edits will not affect the original',
       requestedTitle: 'Model services used',
-      requestedEmpty: 'Model services used by the plugin appear here after it runs',
+      requestedEmpty: 'Model services the plugin uses appear after it runs',
       requestedNameHint: 'Service name written in the plugin code',
       requestedSelect: 'Choose a model service for {name}',
       requestedAuto: 'Auto · {name}',

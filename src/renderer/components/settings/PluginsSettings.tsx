@@ -477,100 +477,102 @@ function RequestedProviders({
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
   }, [plugins]);
 
+  if (names.length === 0) {
+    return (
+      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedEmpty')}</p>
+    );
+  }
+
   return (
     <div className="mt-2">
       <p className="mb-1 font-medium text-xs">{t('settings.plugins.requestedTitle')}</p>
-      {names.length === 0 ? (
-        <p className="text-muted-foreground text-xs">{t('settings.plugins.requestedEmpty')}</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {names.map((name) => {
-            const mapped = Object.hasOwn(providerMap, name) ? providerMap[name] : undefined;
-            const auto = providers.find((provider) => provider.id === name);
-            const target = mapped ? providers.find((provider) => provider.id === mapped) : auto;
-            const items = [
-              {
-                value: AUTO_VALUE,
-                label: auto
-                  ? t('settings.plugins.requestedAuto', { name: auto.name })
-                  : t('settings.plugins.requestedAutoMissing'),
-              },
-              ...providers.map((provider) => ({
-                value: provider.id,
-                label: `${provider.name} · ${providerHost(provider)}`,
-              })),
-            ];
-            if (mapped && !target) {
-              items.push({ value: mapped, label: t('settings.plugins.requestedMissing') });
-            }
-            const state = !target ? 'missing' : isUsable(target) ? 'usable' : 'unavailable';
-            return (
-              <li key={name}>
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-28 shrink-0 truncate font-mono text-muted-foreground text-xs"
-                    title={t('settings.plugins.requestedNameHint')}
+      <ul className="flex flex-col gap-1.5">
+        {names.map((name) => {
+          const mapped = Object.hasOwn(providerMap, name) ? providerMap[name] : undefined;
+          const auto = providers.find((provider) => provider.id === name);
+          const target = mapped ? providers.find((provider) => provider.id === mapped) : auto;
+          const items = [
+            {
+              value: AUTO_VALUE,
+              label: auto
+                ? t('settings.plugins.requestedAuto', { name: auto.name })
+                : t('settings.plugins.requestedAutoMissing'),
+            },
+            ...providers.map((provider) => ({
+              value: provider.id,
+              label: `${provider.name} · ${providerHost(provider)}`,
+            })),
+          ];
+          if (mapped && !target) {
+            items.push({ value: mapped, label: t('settings.plugins.requestedMissing') });
+          }
+          const state = !target ? 'missing' : isUsable(target) ? 'usable' : 'unavailable';
+          return (
+            <li key={name}>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-28 shrink-0 truncate font-mono text-muted-foreground text-xs"
+                  title={t('settings.plugins.requestedNameHint')}
+                >
+                  {name}
+                </span>
+                <Select
+                  items={items}
+                  value={mapped ?? AUTO_VALUE}
+                  onValueChange={async (next) => {
+                    if (typeof next !== 'string') return;
+                    const result = await setProviderMapping(
+                      name,
+                      next === AUTO_VALUE ? null : next
+                    );
+                    if (!result.ok) onError(result.error);
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    aria-label={t('settings.plugins.requestedSelect', { name })}
                   >
-                    {name}
-                  </span>
-                  <Select
-                    items={items}
-                    value={mapped ?? AUTO_VALUE}
-                    onValueChange={async (next) => {
-                      if (typeof next !== 'string') return;
-                      const result = await setProviderMapping(
-                        name,
-                        next === AUTO_VALUE ? null : next
-                      );
-                      if (!result.ok) onError(result.error);
-                    }}
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="min-w-0 flex-1"
-                      aria-label={t('settings.plugins.requestedSelect', { name })}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {items.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <span
-                    className={
-                      state === 'usable'
-                        ? 'flex shrink-0 items-center gap-1 text-emerald-600 text-xs'
-                        : 'flex shrink-0 items-center gap-1 text-amber-600 text-xs'
-                    }
-                  >
-                    {state === 'usable' ? (
-                      <CircleCheck className="size-3.5" />
-                    ) : (
-                      <CircleAlert className="size-3.5" />
-                    )}
-                    {t(
-                      state === 'usable'
-                        ? 'settings.plugins.requestedUsable'
-                        : state === 'missing'
-                          ? 'settings.plugins.requestedMissing'
-                          : 'settings.plugins.requestedUnavailable'
-                    )}
-                  </span>
-                </div>
-                {shared.has(name) && (
-                  <p className="mt-0.5 text-muted-foreground text-xs">
-                    {t('settings.plugins.requestedShared')}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {items.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span
+                  className={
+                    state === 'usable'
+                      ? 'flex shrink-0 items-center gap-1 text-emerald-600 text-xs'
+                      : 'flex shrink-0 items-center gap-1 text-amber-600 text-xs'
+                  }
+                >
+                  {state === 'usable' ? (
+                    <CircleCheck className="size-3.5" />
+                  ) : (
+                    <CircleAlert className="size-3.5" />
+                  )}
+                  {t(
+                    state === 'usable'
+                      ? 'settings.plugins.requestedUsable'
+                      : state === 'missing'
+                        ? 'settings.plugins.requestedMissing'
+                        : 'settings.plugins.requestedUnavailable'
+                  )}
+                </span>
+              </div>
+              {shared.has(name) && (
+                <p className="mt-0.5 text-muted-foreground text-xs">
+                  {t('settings.plugins.requestedShared')}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
       <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedFooter')}</p>
     </div>
   );

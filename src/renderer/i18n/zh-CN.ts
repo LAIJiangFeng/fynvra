@@ -1189,7 +1189,7 @@ export const zhCN = {
       convertToCopy: '转为副本',
       converted: '「{name}」已转为副本，之后的修改不影响原文件',
       requestedTitle: '需要的模型服务',
-      requestedEmpty: '插件运行后会在这里显示它用到的模型服务',
+      requestedEmpty: '运行后显示插件用到的模型服务',
       requestedNameHint: '插件代码里写的服务名',
       requestedSelect: '为 {name} 选择模型服务',
       requestedAuto: '自动 · {name}',
