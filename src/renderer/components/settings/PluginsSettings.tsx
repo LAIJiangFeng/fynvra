@@ -23,21 +23,12 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
-  ShieldAlert,
   Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,10 +59,10 @@ import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
 
 type Status = { tone: 'error' | 'success'; text: string };
-/** 待确认的添加：本地（确认后 Main 弹框）或远程来源 */
-type Pending = { kind: 'local' } | { kind: 'remote'; source: string };
+/** 添加目标：本地（Main 弹框选择并复制）或远程来源 */
+type Target = { kind: 'local' } | { kind: 'remote'; source: string };
 
-/** 设置 → 插件：添加本地插件、从 npm / git 安装，启用 / 停用 / 移除。添加前都要确认风险提示。 */
+/** 设置 → 插件：添加本地插件（一律复制）、从 npm / git 安装，启用 / 停用 / 移除。 */
 export function PluginsSettings() {
   const plugins = usePluginsStore((state) => state.plugins);
   const loaded = usePluginsStore((state) => state.loaded);
@@ -79,20 +70,15 @@ export function PluginsSettings() {
   const addLocal = usePluginsStore((state) => state.addLocal);
   const install = usePluginsStore((state) => state.install);
   const [source, setSource] = useState('');
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [localMode, setLocalMode] = useState<PluginMode>('copy');
   const [working, setWorking] = useState<'local' | 'remote' | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const t = useT();
 
-  const proceed = async () => {
-    const target = pending;
-    setPending(null);
-    if (!target || working) return;
+  const proceed = async (target: Target) => {
+    if (working) return;
     setStatus(null);
     setWorking(target.kind);
-    const result =
-      target.kind === 'local' ? await addLocal(localMode) : await install(target.source);
+    const result = target.kind === 'local' ? await addLocal() : await install(target.source);
     setWorking(null);
     if (result.ok) {
       if (target.kind === 'remote') setSource('');
@@ -114,10 +100,7 @@ export function PluginsSettings() {
           size="sm"
           variant="outline"
           disabled={working !== null}
-          onClick={() => {
-            setLocalMode('copy');
-            setPending({ kind: 'local' });
-          }}
+          onClick={() => void proceed({ kind: 'local' })}
         >
           {working === 'local' ? <Loader2 className="animate-spin" /> : <FolderPlus />}
           {t('settings.plugins.addLocal')}
@@ -125,16 +108,12 @@ export function PluginsSettings() {
       </SectionHeader>
 
       <p className="mb-3 text-muted-foreground text-sm">{t('settings.plugins.subtitle')}</p>
-      <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-        <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
-        <span>{t('settings.plugins.warning')}</span>
-      </div>
 
       <form
         className="mb-1 flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          if (trimmed && working === null) setPending({ kind: 'remote', source: trimmed });
+          if (trimmed && working === null) void proceed({ kind: 'remote', source: trimmed });
         }}
       >
         <Input
@@ -170,52 +149,6 @@ export function PluginsSettings() {
           ))}
         </ul>
       )}
-
-      <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('settings.plugins.confirmTitle')}</DialogTitle>
-            <DialogDescription>{t('settings.plugins.warning')}</DialogDescription>
-          </DialogHeader>
-          {pending && (
-            <p className="break-all text-sm">
-              {pending.kind === 'remote'
-                ? t('settings.plugins.confirmInstall', { source: pending.source })
-                : t('settings.plugins.confirmLocal')}
-            </p>
-          )}
-          {pending?.kind === 'local' && (
-            <fieldset className="flex flex-col gap-2 text-sm">
-              {(['copy', 'link'] as const).map((mode) => (
-                <label key={mode} className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="radio"
-                    name="plugin-local-mode"
-                    className="mt-1"
-                    checked={localMode === mode}
-                    onChange={() => setLocalMode(mode)}
-                  />
-                  <span>
-                    {t(
-                      mode === 'copy'
-                        ? 'settings.plugins.modeCopyOption'
-                        : 'settings.plugins.modeLinkOption'
-                    )}
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPending(null)}>
-              {t('common.cancel')}
-            </Button>
-            <Button type="button" onClick={() => void proceed()}>
-              {t('settings.plugins.continue')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   );
 }
@@ -242,21 +175,15 @@ function PluginRow({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-sm">{plugin.name}</span>
           <Badge variant="outline">{t(`settings.plugins.kinds.${plugin.kind}`)}</Badge>
-          {mode && <Badge variant="outline">{t(`settings.plugins.modes.${mode}`)}</Badge>}
+          {mode === 'link' && <Badge variant="outline">{t('settings.plugins.linked')}</Badge>}
           {!plugin.enabled && <Badge>{t('common.disabled')}</Badge>}
         </div>
-        {mode === 'copy' ? (
-          <p
-            className="truncate text-muted-foreground text-xs"
-            title={plugin.sourcePath ?? plugin.source}
-          >
-            {t('settings.plugins.sourceLabel', { path: plugin.sourcePath ?? plugin.source })}
-          </p>
-        ) : (
-          <p className="truncate font-mono text-muted-foreground text-xs" title={plugin.source}>
-            {plugin.source}
-          </p>
-        )}
+        <p
+          className="truncate font-mono text-muted-foreground text-xs"
+          title={plugin.kind === 'local' ? plugin.path : `${plugin.path}\n${plugin.source}`}
+        >
+          {plugin.path}
+        </p>
         <RequestedProviders
           plugin={plugin}
           adding={addingName}

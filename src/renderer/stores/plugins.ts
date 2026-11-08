@@ -1,6 +1,6 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
-import type { PluginEntry, PluginMode, PluginProviderMap } from '@shared/types/plugins';
+import type { PluginEntry, PluginProviderMap } from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   PluginActionResult,
@@ -19,8 +19,8 @@ export interface PluginsState {
   loaded: boolean;
   error: string | null;
   refresh(): Promise<void>;
-  /** Main 弹框选择目录或扩展文件；copy 复制一份，link 引用原文件；不传路径 */
-  addLocal(mode: PluginMode): Promise<PluginAddResult>;
+  /** Main 弹框选择目录或扩展文件，一律复制一份；不传路径 */
+  addLocal(): Promise<PluginAddResult>;
   install(source: string): Promise<PluginAddResult>;
   remove(id: string): Promise<PluginRemoveResult>;
   toggle(id: string, enabled: boolean): Promise<PluginToggleResult>;
@@ -81,10 +81,10 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
     }
   },
 
-  async addLocal(mode) {
+  async addLocal() {
     let result: PluginAddResult;
     try {
-      result = await api.addLocal({ mode });
+      result = await api.addLocal();
     } catch (error) {
       result = { ok: false, code: 'failed', error: errorMessage(error) };
     }

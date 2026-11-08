@@ -4,12 +4,10 @@ import { dirname, join, resolve } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
-  isPluginMode,
   isPluginProviderName,
   localPluginMode,
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
-  type PluginMode,
   parseRemotePluginSource,
   type SetPluginManualProvidersInput,
   type SetPluginProviderMappingInput,
@@ -56,6 +54,7 @@ import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegist
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { showAppMessageBox } from './appDialog';
 import { getProviderStore } from './providers';
+import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
@@ -114,13 +113,12 @@ export function registerPluginHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.PLUGINS_ADD_LOCAL,
     async (event, raw: unknown): Promise<PluginAddResult> => {
-      const mode = parseAddLocal(raw);
-      if (!mode) {
+      if (!isEmptyArgs(raw)) {
         return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
       }
       return exclusive(busyResult, async () => {
         try {
-          return await addLocal(event.sender, mode);
+          return await addLocal(event.sender);
         } catch (error) {
           return { ok: false, code: 'failed', error: errorMessage(error) };
         }
@@ -392,13 +390,11 @@ function parseManualProviders(raw: unknown): SetPluginManualProvidersInput | nul
   return { id, names: [...new Set(names as string[])] };
 }
 
-/** 不传参数视为 `{ mode: 'copy' }`（兼容旧调用）；只接受 `mode` 一个键 */
-function parseAddLocal(raw: unknown): PluginMode | null {
-  if (raw === undefined) return 'copy';
+/** plugins:add-local 不带参数：只接受 undefined 或空对象 `{}` */
+function isEmptyArgs(raw: unknown): boolean {
+  if (raw === undefined) return true;
   const record = asRecord(raw);
-  if (!record || Object.keys(record).some((key) => key !== 'mode')) return null;
-  if (record.mode === undefined) return 'copy';
-  return isPluginMode(record.mode) ? record.mode : null;
+  return record !== null && Object.keys(record).length === 0;
 }
 
 /**
@@ -458,29 +454,15 @@ function busyResult(): { ok: false; code: 'busy'; error: string } {
 }
 
 /**
- * copy：校验、查重后复制到副本根目录再登记（登记失败删掉刚复制的副本），原文件不动；
- * link：只登记原路径（开发模式，修改与原文件同步）。
+ * 本地插件一律复制：校验、查重后复制到副本根目录再登记（登记失败删掉刚复制的副本），原文件不动。
+ * 旧版登记的 link 条目仍可用，可经 convertToCopy 转为副本。
  */
-async function addLocal(sender: Electron.WebContents, mode: PluginMode): Promise<PluginAddResult> {
+async function addLocal(sender: Electron.WebContents): Promise<PluginAddResult> {
   const picked = await pickLocalPlugin(sender);
   if (!picked) return { ok: false, code: 'canceled', error: translate('common.canceled') };
   const checked = await inspectLocalPlugin(picked);
   if (!checked.ok) return { ok: false, code: 'invalid', error: checked.error };
   const plugins = getPluginRegistry();
-  if (mode === 'link') {
-    const added = await plugins.add({
-      name: checked.name,
-      source: checked.path,
-      kind: 'local',
-      path: checked.path,
-      mode: 'link',
-    });
-    if (!added.ok) return { ok: false, code: 'invalid', error: added.error };
-    const plugin = await scanAfterChange(added.plugin);
-    sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-    return { ok: true, plugin };
-  }
-
   const duplicate = await plugins.findDuplicate({ source: checked.path, path: checked.path });
   if (duplicate) {
     return {
@@ -601,7 +583,7 @@ async function installRemote(source: string, kind: 'npm' | 'git'): Promise<Plugi
 
 /**
  * link 插件只删登记，绝不删除用户的目录或文件；copy 插件先删副本目录（仅当它 resolve 后在副本根目录内，
- * 否则不删任何文件）；npm / git 插件先经 pi 卸载，成功后再删登记。
+ * 否则不删任何文件）；npm / git 插件先经 pi 卸载，成功后再删登记。删除成功后从所有角色的 pluginIds 中移除。
  */
 async function removePlugin(id: string): Promise<PluginRemoveResult> {
   const plugins = getPluginRegistry();
@@ -627,7 +609,35 @@ async function removePlugin(id: string): Promise<PluginRemoveResult> {
   }
   await plugins.remove(id);
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+  await unbindFromRoles(id);
   return { ok: true };
+}
+
+/**
+ * 把已删除的插件从所有角色的 pluginIds 中去掉；有角色改动就广播一次 roles:changed。
+ * 单个角色失败只记 warning（不带路径），不影响删除结果：会话启动时本就会跳过不存在的插件。
+ */
+async function unbindFromRoles(id: string): Promise<void> {
+  let changed = false;
+  try {
+    const roles = getRoleStore();
+    for (const role of await roles.list()) {
+      if (!role.pluginIds?.includes(id)) continue;
+      try {
+        const result = await roles.save({
+          ...role,
+          pluginIds: role.pluginIds.filter((pluginId) => pluginId !== id),
+        });
+        if (result.ok) changed = true;
+        else console.warn(`[plugins] failed to unbind ${id} from role ${role.id}`);
+      } catch {
+        console.warn(`[plugins] failed to unbind ${id} from role ${role.id}`);
+      }
+    }
+  } catch {
+    console.warn(`[plugins] failed to list roles while unbinding ${id}`);
+  }
+  if (changed) sendToAllWindows(IPC_CHANNELS.ROLES_CHANGED);
 }
 
 /** 只接受 `name` 与 `serviceId` 两个键；serviceId 为 null 或 registry id */

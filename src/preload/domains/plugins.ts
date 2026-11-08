@@ -1,7 +1,6 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type {
   PluginEntry,
-  PluginMode,
   PluginProviderMap,
   SetPluginManualProvidersInput,
   SetPluginProviderMappingInput,
@@ -30,11 +29,11 @@ export type PluginOpenAsWorkspaceResult = IpcResult<{ workspaceId: string }>;
 
 export interface PluginsApi {
   list(): Promise<PluginListResult>;
-  /** Main 弹框选择插件目录或扩展文件（.ts / .js / .mjs），复制（缺省）或引用后登记；不传路径 */
-  addLocal(input?: { mode: PluginMode }): Promise<PluginAddResult>;
+  /** Main 弹框选择插件目录或扩展文件（.ts / .js / .mjs），复制到副本目录后登记；不传路径 */
+  addLocal(): Promise<PluginAddResult>;
   /** 安装 `npm:<name>[@version]`、`git:<host>/<path>[@ref]` 或 `https://` 仓库 URL */
   install(input: { source: string }): Promise<PluginAddResult>;
-  /** 引用的本地插件只删登记；副本连同副本目录一起删；npm / git 插件先卸载再删登记 */
+  /** 引用的本地插件只删登记；副本连同副本目录一起删；npm / git 插件先卸载再删登记；并从角色的 pluginIds 中移除 */
   remove(id: string): Promise<PluginRemoveResult>;
   toggle(input: { id: string; enabled: boolean }): Promise<PluginToggleResult>;
   /** 用系统文件管理器打开插件所在位置 */
@@ -61,7 +60,7 @@ type Subscribe = (channel: string, listener: (...args: unknown[]) => void) => ()
 export function createPluginsApi(ipc: Invoker, subscribe: Subscribe): PluginsApi {
   return {
     list: () => ipc.invoke(IPC_CHANNELS.PLUGINS_LIST),
-    addLocal: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_ADD_LOCAL, input ?? { mode: 'copy' }),
+    addLocal: () => ipc.invoke(IPC_CHANNELS.PLUGINS_ADD_LOCAL),
     install: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_INSTALL, input),
     remove: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_REMOVE, id),
     toggle: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_TOGGLE, input),
