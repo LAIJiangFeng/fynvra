@@ -32,6 +32,7 @@ describe('preload bridge', () => {
       'mcp',
       'notifications',
       'orchestration',
+      'plugins',
       'providers',
       'roles',
       'sessions',
@@ -41,6 +42,7 @@ describe('preload bridge', () => {
       'updates',
       'usage',
       'window',
+      'workflows',
       'workspaceUi',
       'workspaces',
     ]);
@@ -184,6 +186,7 @@ describe('preload bridge', () => {
       'duplicate',
       'list',
       'openHtml',
+      'openOutside',
       'read',
       'remove',
       'rename',

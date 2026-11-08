@@ -11,6 +11,7 @@ it('文件出口按 id 读取与保存，不转发路径', async () => {
     'duplicate',
     'list',
     'openHtml',
+    'openOutside',
     'read',
     'remove',
     'rename',
