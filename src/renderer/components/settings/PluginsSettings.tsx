@@ -20,6 +20,7 @@ import {
   FolderTree,
   Loader2,
   PackagePlus,
+  Plus,
   Puzzle,
   RefreshCw,
   ShieldAlert,
@@ -230,6 +231,7 @@ function PluginRow({
   const remove = usePluginsStore((state) => state.remove);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [addingName, setAddingName] = useState(false);
   const t = useT();
   const mode = localPluginMode(plugin);
   const onError = (text: string) => onStatus({ tone: 'error', text });
@@ -255,7 +257,12 @@ function PluginRow({
             {plugin.source}
           </p>
         )}
-        <RequestedProviders plugin={plugin} onError={onError} />
+        <RequestedProviders
+          plugin={plugin}
+          adding={addingName}
+          onAddingChange={setAddingName}
+          onError={onError}
+        />
         {confirmingRemove && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">
@@ -304,7 +311,12 @@ function PluginRow({
           if (!result.ok) onError(result.error);
         }}
       />
-      <PluginActions plugin={plugin} mode={mode} onStatus={onStatus} />
+      <PluginActions
+        plugin={plugin}
+        mode={mode}
+        onStatus={onStatus}
+        onAddServiceName={() => setAddingName(true)}
+      />
       <Button
         variant="ghost"
         size="icon-xs"
@@ -323,10 +335,13 @@ function PluginActions({
   plugin,
   mode,
   onStatus,
+  onAddServiceName,
 }: {
   plugin: PluginEntry;
   mode: PluginMode | null;
   onStatus: (status: Status) => void;
+  /** 在卡片里原地打开「添加模型服务名」输入框 */
+  onAddServiceName: () => void;
 }) {
   const reveal = usePluginsStore((state) => state.reveal);
   const openIn = usePluginsStore((state) => state.openIn);
@@ -426,6 +441,10 @@ function PluginActions({
           <FolderTree />
           {t('settings.plugins.openAsWorkspace')}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={onAddServiceName}>
+          <Plus />
+          {t('settings.plugins.manualAdd')}
+        </DropdownMenuItem>
         {mode && <DropdownMenuSeparator />}
         {mode === 'copy' && (
           <DropdownMenuItem onClick={() => void runRecopy()}>
@@ -478,14 +497,19 @@ function newServiceDraft(name: string): ProviderDraft | null {
 }
 
 /**
- * 卡片里「需要的模型服务」：添加时扫描代码识别的、运行时按名查找过的和手动添加的服务名，
- * 每个名字可下拉改选实际使用的服务；未找到的可直接新建
+ * 卡片里的「模型服务」：添加时扫描代码识别的、运行时按名查找过的和手动添加的服务名，
+ * 每个名字可下拉改选实际使用的服务；未找到的可直接新建。列表为空且不在手动添加时什么也不显示
+ * （很多插件不用模型服务），手动添加的入口在卡片「…」菜单里
  */
 function RequestedProviders({
   plugin,
+  adding,
+  onAddingChange,
   onError,
 }: {
   plugin: PluginEntry;
+  adding: boolean;
+  onAddingChange: (adding: boolean) => void;
   onError: (text: string) => void;
 }) {
   const plugins = usePluginsStore((state) => state.plugins);
@@ -500,9 +524,6 @@ function RequestedProviders({
     ...(plugin.scannedProviders ?? []),
     ...(plugin.requestedProviders ?? []),
   ]);
-  const [adding, setAdding] = useState(false);
-  const [input, setInput] = useState('');
-  const [inputError, setInputError] = useState<string | null>(null);
   const [creating, setCreating] = useState<(ProviderEditing & { name: string }) | null>(null);
   const sessions = useRef(0);
 
@@ -516,34 +537,6 @@ function RequestedProviders({
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
   }, [plugins]);
-
-  const openAdd = () => {
-    setAdding(true);
-    setInput('');
-    setInputError(null);
-  };
-
-  const submitAdd = async () => {
-    const name = input.trim();
-    if (!isPluginProviderName(name)) {
-      setInputError(t('settings.plugins.manualInvalid'));
-      return;
-    }
-    if (names.includes(name)) {
-      setInputError(t('settings.plugins.manualExists'));
-      return;
-    }
-    if (manual.length >= MAX_REQUESTED_PROVIDERS) {
-      setInputError(t('settings.plugins.manualFull', { max: MAX_REQUESTED_PROVIDERS }));
-      return;
-    }
-    const result = await setManualProviders(plugin.id, [...manual, name]);
-    if (!result.ok) {
-      setInputError(result.error);
-      return;
-    }
-    setAdding(false);
-  };
 
   const removeManual = async (name: string) => {
     const result = await setManualProviders(
@@ -567,78 +560,34 @@ function RequestedProviders({
   };
 
   const addForm = adding && (
-    <div className="mt-1.5">
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submitAdd();
-        }}
-      >
-        <Input
-          autoFocus
-          value={input}
-          maxLength={64}
-          placeholder={t('settings.plugins.manualPlaceholder')}
-          aria-invalid={inputError !== null}
-          className="h-7 max-w-56 font-mono text-xs"
-          onChange={(event) => {
-            setInput(event.target.value);
-            setInputError(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.stopPropagation();
-              setAdding(false);
-            }
-          }}
-        />
-        <Button type="submit" size="sm" className="h-7 px-2 text-xs">
-          {t('common.confirm')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          onClick={() => setAdding(false)}
-        >
-          {t('common.cancel')}
-        </Button>
-      </form>
-      {inputError && <p className="mt-0.5 text-destructive text-xs">{inputError}</p>}
-    </div>
-  );
-
-  const dialog = (
-    <ProviderDialog
-      editing={creating}
-      onClose={() => setCreating(null)}
-      onSaved={(providerId) => {
-        if (creating) void linkCreated(creating.name, providerId);
-      }}
+    <ManualNameForm
+      pluginId={plugin.id}
+      names={names}
+      manual={manual}
+      onDone={() => onAddingChange(false)}
     />
   );
 
-  if (names.length === 0) {
-    return (
-      <div className="mt-1">
-        <p className="text-muted-foreground text-xs">
-          {t('settings.plugins.requestedEmpty')}
-          {!adding && (
-            <button type="button" className="ml-2 text-primary hover:underline" onClick={openAdd}>
-              {t('settings.plugins.manualAdd')}
-            </button>
-          )}
-        </p>
-        {addForm}
-      </div>
-    );
-  }
+  if (names.length === 0) return addForm || null;
 
   return (
     <div className="mt-2">
-      <p className="mb-1 font-medium text-xs">{t('settings.plugins.requestedTitle')}</p>
+      <div className="mb-1 flex items-center gap-1 text-muted-foreground text-xs">
+        <span>{t('settings.plugins.requestedTitle')}</span>
+        {!adding && (
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            className="size-5"
+            aria-label={t('settings.plugins.manualAdd')}
+            title={t('settings.plugins.manualAdd')}
+            onClick={() => onAddingChange(true)}
+          >
+            <Plus />
+          </Button>
+        )}
+      </div>
       <ul className="flex flex-col gap-1.5">
         {names.map((name) => {
           const mapped = Object.hasOwn(providerMap, name) ? providerMap[name] : undefined;
@@ -686,6 +635,7 @@ function RequestedProviders({
                     size="sm"
                     className="min-w-0 flex-1"
                     aria-label={t('settings.plugins.requestedSelect', { name })}
+                    title={t('settings.plugins.requestedApplyHint')}
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -733,7 +683,7 @@ function RequestedProviders({
                     type="button"
                     size="icon-xs"
                     variant="ghost"
-                    className="shrink-0"
+                    className="size-6 shrink-0"
                     aria-label={t('settings.plugins.manualRemove', { name })}
                     title={t('settings.plugins.manualRemove', { name })}
                     onClick={() => void removeManual(name)}
@@ -751,16 +701,100 @@ function RequestedProviders({
           );
         })}
       </ul>
-      <div className="mt-1 flex items-center justify-between gap-2 text-xs">
-        <p className="text-muted-foreground">{t('settings.plugins.requestedFooter')}</p>
-        {!adding && (
-          <button type="button" className="shrink-0 text-primary hover:underline" onClick={openAdd}>
-            {t('settings.plugins.manualAddMore')}
-          </button>
-        )}
-      </div>
       {addForm}
-      {dialog}
+      <ProviderDialog
+        editing={creating}
+        onClose={() => setCreating(null)}
+        onSaved={(providerId) => {
+          if (creating) void linkCreated(creating.name, providerId);
+        }}
+      />
+    </div>
+  );
+}
+
+/** 卡片里原地出现的「添加模型服务名」小输入框；每次打开重新挂载，状态自动清空 */
+function ManualNameForm({
+  pluginId,
+  names,
+  manual,
+  onDone,
+}: {
+  pluginId: string;
+  /** 卡片上已显示的全部名字（查重用） */
+  names: readonly string[];
+  manual: readonly string[];
+  onDone: () => void;
+}) {
+  const setManualProviders = usePluginsStore((state) => state.setManualProviders);
+  const [input, setInput] = useState('');
+  const [inputError, setInputError] = useState<string | null>(null);
+  const t = useT();
+
+  const submit = async () => {
+    const name = input.trim();
+    if (!isPluginProviderName(name)) {
+      setInputError(t('settings.plugins.manualInvalid'));
+      return;
+    }
+    if (names.includes(name)) {
+      setInputError(t('settings.plugins.manualExists'));
+      return;
+    }
+    if (manual.length >= MAX_REQUESTED_PROVIDERS) {
+      setInputError(t('settings.plugins.manualFull', { max: MAX_REQUESTED_PROVIDERS }));
+      return;
+    }
+    const result = await setManualProviders(pluginId, [...manual, name]);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div className="mt-1.5">
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <Input
+          autoFocus
+          value={input}
+          maxLength={64}
+          placeholder={t('settings.plugins.manualPlaceholder')}
+          aria-label={t('settings.plugins.manualAdd')}
+          aria-invalid={inputError !== null}
+          className="h-7 max-w-56 font-mono text-xs"
+          onChange={(event) => {
+            setInput(event.target.value);
+            setInputError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              onDone();
+            }
+          }}
+        />
+        <Button type="submit" size="sm" className="h-7 px-2 text-xs">
+          {t('common.confirm')}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={onDone}
+        >
+          {t('common.cancel')}
+        </Button>
+      </form>
+      {inputError && <p className="mt-0.5 text-destructive text-xs">{inputError}</p>}
     </div>
   );
 }
