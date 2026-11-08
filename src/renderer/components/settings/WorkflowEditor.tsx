@@ -488,7 +488,7 @@ export function WorkflowEditor({
         </ul>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+      <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
         <Field label={t('settings.workflows.name')} htmlFor={`${id}-name`}>
           <Input
             id={`${id}-name`}
