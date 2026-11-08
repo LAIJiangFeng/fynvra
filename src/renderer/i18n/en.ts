@@ -1209,7 +1209,7 @@ export const en: MessagesShape<typeof zhCN> = {
       title: 'Plugins',
       subtitle: 'pi extensions or pi packages; once attached to a role, new sessions load them',
       warning:
-        'Plugins run arbitrary code with your user permissions. Only install trusted sources',
+        'Plugins run arbitrary code with your user permissions and can read the URLs and keys of enabled model services. Only install trusted sources',
       addLocal: 'Add local plugin',
       installPlaceholder:
         'npm:<name>[@version], git:<host>/<path>[@ref] or an https:// repository URL',

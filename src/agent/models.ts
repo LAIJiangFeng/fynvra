@@ -9,7 +9,7 @@ import {
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ResolvedModel } from '@fynvra/agent-runtime';
 import type { ThinkingLevel } from '@fynvra/core';
-import type { ModelQuery, ResolvedModelSpec } from '@shared/types/agent';
+import type { ModelQuery, PluginProviderSpec, ResolvedModelSpec } from '@shared/types/agent';
 import {
   type ModelThinkingCapability,
   pickThinkingLevel,
@@ -92,6 +92,12 @@ export interface ModelRegistry {
   resolve(spec: ResolvedModelSpec): Promise<ResolvedModel>;
   /** 模型的思考档位与来源：与 resolve 注册的是同一份定义，界面列出的档位就是 pi 接受的档位 */
   describe(query: ModelQuery): ModelThinkingCapability;
+  /**
+   * 把「设置 → 模型服务」按服务 id 注册成 pi provider（别名），插件经 ctx.modelRegistry 按名字找得到。
+   * 不覆盖 pi 内置目录里的 provider 与插件自己注册的 provider（跳过，返回其 id）；
+   * 之前注册过、这次列表里没有的别名会被注销。多次调用串行执行。
+   */
+  exposeProviders(providers: readonly PluginProviderSpec[]): Promise<{ skipped: string[] }>;
 }
 
 /**
@@ -106,8 +112,66 @@ export interface ModelRegistry {
 export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
   /** registerProvider 整体替换模型列表：同一 provider 的模型要累积 */
   const definitions = new Map<string, Map<string, ModelDefinition>>();
+  /** pi 内置目录的 provider（创建时快照）：注册同名别名会替换它们的整个目录 */
+  const builtin = new Set(runtime.getModels().map((model) => model.provider));
+  /** 本进程注册过的插件别名（Fynvra 服务 id） */
+  const aliases = new Set<string>();
+  const excluded = (provider: string) =>
+    provider.startsWith(MODEL_PROVIDER_PREFIX) || aliases.has(provider);
+  let exposing: Promise<unknown> = Promise.resolve();
+
+  async function expose(providers: readonly PluginProviderSpec[]): Promise<{ skipped: string[] }> {
+    const skipped: string[] = [];
+    const wanted = new Set(providers.map((provider) => provider.id));
+    // 对账：用户禁用或删除了的服务不再可见
+    for (const id of [...aliases]) {
+      if (wanted.has(id)) continue;
+      aliases.delete(id);
+      try {
+        runtime.unregisterProvider(id);
+        await runtime.removeRuntimeApiKey(id);
+      } catch {
+        skipped.push(id);
+      }
+    }
+    const registered = new Set(runtime.getRegisteredProviderIds());
+    for (const provider of providers) {
+      const { id } = provider;
+      const ownedByPlugin = registered.has(id) && !aliases.has(id);
+      if (id.startsWith(MODEL_PROVIDER_PREFIX) || builtin.has(id) || ownedByPlugin) {
+        skipped.push(id);
+        continue;
+      }
+      try {
+        runtime.registerProvider(id, {
+          name: provider.name,
+          api: provider.api as Api,
+          baseUrl: provider.baseUrl,
+          models: provider.models.map(
+            (model) =>
+              defineModel(
+                runtime,
+                { api: provider.api, modelId: model.id, reasoning: model.reasoning },
+                excluded
+              ).definition
+          ),
+        });
+        aliases.add(id);
+        // key 只放内存，不写 auth.json，也不经 pi 的配置值解析
+        await runtime.setRuntimeApiKey(id, provider.apiKey);
+      } catch {
+        skipped.push(id);
+      }
+    }
+    return { skipped };
+  }
 
   return {
+    exposeProviders(providers) {
+      const run = exposing.then(() => expose(providers));
+      exposing = run.catch(() => undefined);
+      return run;
+    },
     async resolve(spec) {
       const { providerId } = spec;
       // 不带前缀的名字可能就是 pi 内置的 provider（如 anthropic），注册会替换掉它的整个模型目录
@@ -123,7 +187,7 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
         );
       }
 
-      const { definition } = defineModel(runtime, spec);
+      const { definition } = defineModel(runtime, spec, excluded);
       const models = definitions.get(providerId) ?? new Map<string, ModelDefinition>();
       models.set(spec.modelId, definition);
       definitions.set(providerId, models);
@@ -141,7 +205,7 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
       return { runtime, model, ...(thinking ? { thinking } : {}) };
     },
     describe(query) {
-      const { definition, source } = defineModel(runtime, query);
+      const { definition, source } = defineModel(runtime, query, excluded);
       return { ...capabilityOf(definition), source };
     },
   };
@@ -156,9 +220,10 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
  */
 function defineModel(
   runtime: ModelRuntime,
-  spec: ModelQuery & Pick<ResolvedModelSpec, 'reasoning'>
+  spec: ModelQuery & Pick<ResolvedModelSpec, 'reasoning'>,
+  excluded: (provider: string) => boolean
 ): { definition: ModelDefinition; source: ThinkingSource } {
-  const catalog = catalogOf(runtime, spec.api);
+  const catalog = catalogOf(runtime, spec.api, excluded);
   const official = OFFICIAL_PROVIDERS[spec.api];
   const sameId = catalog.filter((model) => model.id === spec.modelId);
   const exact = sameId.find((model) => model.provider === official) ?? sameId[0];
@@ -173,11 +238,13 @@ function defineModel(
   return { definition: fallbackDefinition(spec, catalog), source: 'fallback' };
 }
 
-/** pi 目录里某个协议的模型（不含 fynvra 自己注册的运行时 provider） */
-function catalogOf(runtime: ModelRuntime, api: string): Model<Api>[] {
-  return runtime
-    .getModels()
-    .filter((model) => !model.provider.startsWith(MODEL_PROVIDER_PREFIX) && model.api === api);
+/** pi 目录里某个协议的模型（不含 fynvra 自己注册的运行时 provider 与插件别名） */
+function catalogOf(
+  runtime: ModelRuntime,
+  api: string,
+  excluded: (provider: string) => boolean
+): Model<Api>[] {
+  return runtime.getModels().filter((model) => !excluded(model.provider) && model.api === api);
 }
 
 /** 推断用的 id 规整：小写，去掉 […]（如 Claude Code 的 [1m]），反复去掉日期 / -latest / -preview 后缀 */
