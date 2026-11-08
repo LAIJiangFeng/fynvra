@@ -1027,15 +1027,14 @@ export const en: MessagesShape<typeof zhCN> = {
         'Can\'t link "{from}" → "{to}": "{to}" is already upstream of "{from}", so this would form a cycle',
       failCleared: 'Cleared {count} send-back target(s) that are no longer valid',
       deleteNodeConfirm:
-        'Delete node "{name}"? Its links and any send-backs pointing to it will be removed too.',
+        'Delete node "{name}"? Its links and any send-backs pointing to it will be removed too',
       deleteNodesConfirm:
-        'Delete {count} nodes? Their links and any send-backs pointing to them will be removed too.',
+        'Delete {count} nodes? Their links and any send-backs pointing to them will be removed too',
       onFail: 'On failure, go back to',
       noFallback: "Don't go back (task fails)",
       node: {
         title: 'Node',
-        empty:
-          'Select a node in the flow chart to edit its name, role, instructions and send-back.',
+        empty: 'Select a node in the flow chart to edit its name, role, instructions and send-back',
         name: 'Node name',
         role: 'Role',
         instructions: 'Node instructions',
@@ -1079,13 +1078,13 @@ export const en: MessagesShape<typeof zhCN> = {
         name: 'Develop → Test → Review',
         description: 'Test or review failures go back to Develop',
         develop: 'Develop',
-        developInstructions: 'Implement the brief and commit your changes.',
+        developInstructions: 'Implement the brief and commit your changes',
         test: 'Test',
         testInstructions:
-          'Write or run tests to verify the implementation. If you find defects, report failed and list the problems.',
+          'Write or run tests to verify the implementation. If you find defects, report failed and list the problems',
         review: 'Review',
         reviewInstructions:
-          'Review code quality and security vulnerabilities. If anything must be fixed, report failed and list the problems.',
+          'Review code quality and security vulnerabilities. If anything must be fixed, report failed and list the problems',
       },
       parallelPreset: {
         name: 'Develop → (Test ‖ Security review) → Accept',
@@ -1093,16 +1092,16 @@ export const en: MessagesShape<typeof zhCN> = {
           'Test and security review run in parallel after Develop, then Accept; any failure goes back to Develop',
         develop: 'Develop',
         developInstructions:
-          'Implement the brief and commit. In your summary, describe what changed, what it affects and how you checked it, for testing, security review and acceptance.',
+          'Implement the brief and commit. In your summary, describe what changed, what it affects and how you checked it, for testing, security review and acceptance',
         test: 'Test',
         testInstructions:
-          'Write or run tests for these changes, covering the main paths and edge cases. If you find defects, report failed with steps to reproduce, actual and expected results.',
+          'Write or run tests for these changes, covering the main paths and edge cases. If you find defects, report failed with steps to reproduce, actual and expected results',
         security: 'Security review',
         securityInstructions:
-          'Review these changes for security issues: input validation, authentication and permissions, injection, path traversal, secret leaks, risky dependencies. If anything must be fixed, report failed with the location and a suggested fix.',
+          'Review these changes for security issues: input validation, authentication and permissions, injection, path traversal, secret leaks, risky dependencies. If anything must be fixed, report failed with the location and a suggested fix',
         accept: 'Accept',
         acceptInstructions:
-          'Check the brief item by item, and use the test and security review results to confirm the work is ready to ship. If anything is missing or unresolved, report failed and list the gaps.',
+          'Check the brief item by item, and use the test and security review results to confirm the work is ready to ship. If anything is missing or unresolved, report failed and list the gaps',
       },
     },
     remoteModels: {
