@@ -452,19 +452,23 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 - 行为差异：
   - 插件 = pi 包（目录 / npm / git），或单个 pi 扩展文件（`.ts` / `.js` / `.mjs`）。能力来自 pi 扩展机制（工具、命令、事件钩子）；包里的 skills / prompts 按 pi 包规则随之加载。只是 agent 侧能力，按角色挂载。
-  - 本地来源：Main 弹框选目录或扩展文件，按绝对路径登记；不复制、不修改；移除只删登记，绝不删用户目录。
+  - 本地来源：Main 弹框选目录或扩展文件。默认 `copy`：复制到副本根目录后加载副本，原文件不动；可选 `link`（开发模式）：按绝对路径登记原文件，修改与原文件同步。旧的本地记录没有 `mode`，按 `link` 处理。
+  - 副本根目录：打包版 `~/.fynvra/plugins/`；开发版 `~/.fynvra-dev/plugins/`；开发版设了 `FYNVRA_USER_DATA_DIR` 时为 `<userData>/plugin-files/`。每个插件一个子目录 `<root>/<插件 id>/`，磁盘上已存在同名目录时改用 `<id>-2` 等，绝不覆盖已有目录。
+  - 复制规则（Main，`services/plugins/pluginCopies.ts`，只用 `node:fs/promises`）：单个文件复制为 `<目录>/<原文件名>`；目录递归复制，跳过 `.git`；符号链接 / junction 的真实路径在源目录内的跟随复制（pnpm 的 `node_modules`），指向源目录外、断链或回指上级目录（环）的跳过。上限 200 MB 或 2 万个文件，超出中止并提示改用引用模式。先复制到 `<root>/.tmp-<uuid>` 再 rename 成正式目录，失败清理临时目录且不登记；来源与副本根目录互相包含时拒绝。
+  - 卡片操作：打开文件夹、用…打开（目标列表复用 `workspaces:open-with-apps`）、作为工作区打开（`addDirectory(dir, { plain: true })`，link 指向文件时用其父目录，已是工作区则返回已有 id）；copy 可「从源文件重新复制」（新内容进临时目录，旧副本改名 `.old-<uuid>` 后换入，失败还原旧副本），link 可「转为副本」（`mode=copy`、`sourcePath=原 path`、`path=副本路径`）。打开类操作的目标：copy 为副本目录，其余为登记的 path。
+  - 移除：copy 先删副本目录（resolve 后须严格位于副本根目录内，否则不删任何文件），再删登记；link 只删登记，绝不删用户目录。
   - npm `npm:<name>[@version]`、git `git:<host>/<path>[@ref]` 或 `https://` 仓库 URL：Main 动态 import pi 的 `DefaultPackageManager`（`agentDir` = `userData/agent`，用内存 `SettingsManager`，不写任何 pi settings 文件，不读 `~/.pi`），`install(source)` 装到 pi 的 user 作用域，`getInstalledPath(source, 'user')` 取路径登记；移除时 `remove(source)` 后删登记。需要本机 npm / git，失败返回可读错误。
   - source 校验：去首尾空白，≤ 500 字符，无换行 / 空字符，只接受上述形态；同一来源或同一本地路径不可重复登记。
-  - 设置页「设置 → 插件」：列表（名称、来源、类型、启用开关、移除）、添加本地、从 npm / git 安装（输入框 + 安装中状态）。添加 / 安装前明确提示“插件会以你的用户权限执行任意代码，只安装可信来源”。
+  - 设置页「设置 → 插件」：列表（名称、来源、类型、副本 / 引用标签、启用开关、「…」操作菜单、移除）、添加本地（确认框里二选一：复制一份 / 引用原文件，默认复制）、从 npm / git 安装（输入框 + 安装中状态）；下方列出「插件可用的模型服务」（`ID · 名称 · 协议`，ID 可复制）。添加 / 安装前明确提示“插件会以你的用户权限执行任意代码，只安装可信来源”。
   - 角色挂载：`Role.pluginIds`（§4）；角色编辑器多选，样式同 MCP。改动对之后新加载的会话生效。
 - 所属层与必改文件：
   - Main：插件注册表服务（登记、安装 / 卸载、启停）；角色资源解析把 `pluginIds` 解析为启用插件的路径（停用跳过；已删除跳过并记 warning）。
-  - IPC（领域 `plugins`）：`plugins:list`、`plugins:add-local`（无参，Main 弹框）、`plugins:install`（`{ source }`）、`plugins:remove`（id）、`plugins:toggle`（`{ id, enabled }`）。入参 `unknown` 收窄、拒绝多余键；安装 / 卸载串行，进行中再请求返回“忙”。preload 按 §9.1 新增 `plugins` 领域文件。
+  - IPC（领域 `plugins`）：`plugins:list`、`plugins:add-local`（`{ mode: 'copy' | 'link' }`，不传视为 copy，Main 弹框）、`plugins:install`（`{ source }`）、`plugins:remove`（id）、`plugins:toggle`（`{ id, enabled }`）、`plugins:reveal`（id）、`plugins:open-in`（`{ id, appId }`，行为同 `workspaces:open-in`）、`plugins:open-as-workspace`（id → `{ workspaceId }`）、`plugins:recopy`（id，仅 copy）、`plugins:convert-to-copy`（id，仅 link）。入参 `unknown` 收窄、拒绝多余键；Renderer 只传 id / mode / appId，路径一律由 Main 从注册表取；安装 / 卸载 / 添加本地 / 重新复制 / 转为副本串行，进行中再请求返回“忙”，成功后广播 `plugins:changed`。preload 按 §9.1 新增 `plugins` 领域文件。
   - Renderer：「设置 → 插件」页、角色编辑器的插件多选、中英文案。
   - 运行时：`SpawnSessionSpec.plugins: string[]` → piSession → `resourcePaths.extensions` → `DefaultResourceLoader.additionalExtensionPaths`；保持 `noExtensions: true`（不发现磁盘上其他扩展），扩展加载错误并入 `RoleSession.warnings`。会话加载后收集由插件路径加载的扩展所注册的工具名，传给审批门 `pluginTools`，归类 `plugin`（§5）。
 - 插件可见的模型服务：角色挂了插件时，Main 把「设置 → 模型服务」里已启用、有 key、有模型的服务放进 `SpawnSessionSpec.pluginProviders`（`{ id, name, api, baseUrl, apiKey, models: { id, reasoning? }[] }`）；worker 的 `ModelRegistry.exposeProviders` 在 `createRoleSession` 之前按服务 id `registerProvider` + `setRuntimeApiKey`（只在内存），插件经 `ctx.modelRegistry` 按名字查到，与原生 pi 读 `models.json` 一致。与 pi 内置 provider、插件自己注册的 provider 同名时跳过并记 warning；新列表里没有的旧别名注销（spec 不带时不动）；别名不进能力推断用的目录。Fynvra 自己的模型仍走 `fynvra-` 运行时键。安全边界：只对挂了插件的会话下发；插件代码能读到这些服务的地址和 key（与原生 pi 一致）；key 不进日志、错误与 provider 名。
-- 持久化：`userData/plugins.json` = `{ version: 1, plugins: StoredPlugin[] }`，`StoredPlugin { id, name, source, kind: 'local' | 'npm' | 'git', path, enabled, installedAt }`；id 为名字派生的 slug（冲突加后缀）；原子写；文件损坏时报错，不静默清空。npm / git 包本体由 pi 包管理器装在 `userData/agent` 下。
-- 安全边界：插件以用户权限执行任意代码。审批门只管工具调用，管不住插件加载时和钩子里的代码，靠安装时提示与用户自担信任。Renderer 只传 id 与 source 字符串，本地路径只由 Main 弹框产生；不读 `~/.pi`，不写 pi settings 文件。
+- 持久化：`userData/plugins.json` = `{ version: 1, plugins: StoredPlugin[] }`，`StoredPlugin { id, name, source, kind: 'local' | 'npm' | 'git', path, enabled, installedAt, mode?: 'copy' | 'link', sourcePath? }`；`path` 始终是实际加载的路径（copy 为副本，link 为原路径），`mode` / `sourcePath` 仅本地插件（`sourcePath` 仅 copy，为复制来源的原路径）；id 为名字派生的 slug（冲突加后缀）；原子写；文件损坏时报错，不静默清空。npm / git 包本体由 pi 包管理器装在 `userData/agent` 下。
+- 安全边界：插件以用户权限执行任意代码。审批门只管工具调用，管不住插件加载时和钩子里的代码，靠安装时提示与用户自担信任。Renderer 只传 id 与 source 字符串，本地路径只由 Main 弹框产生；不读 `~/.pi`，不写 pi settings 文件。删除与覆盖只发生在副本根目录内，从不改动原文件；复制有大小上限且不跟随指向源目录外的链接；复制 / 删除失败只报错误码，路径不进日志，错误文案不带注册表以外的路径。
 - 明确不做：插件市场 / 搜索、自动更新、界面插件、沙箱、项目级 `.pi` 包、资源筛选。
 
 ### 7.13 工作流
