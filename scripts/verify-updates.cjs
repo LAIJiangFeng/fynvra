@@ -82,11 +82,28 @@ if (!process.versions.electron) {
     child.once('exit', () => activeWorkers.delete(child));
     return child;
   };
-  dialog.showMessageBox = async () => ({ response: installChoice, checkboxChecked: false });
-  dialog.showMessageBoxSync = () => {
-    fileConfirmations += 1;
-    return discardChoice;
+  // 产品走应用内对话框（showAppMessageBox）；Renderer 未及时确认时回退原生对话框。
+  // 原生 stub 作为兜底应答，避免真实模态框卡住 CI，并记录实际走的路径。
+  const UNSAVED_TITLE = '文件修改尚未保存';
+  const INSTALL_TITLE = '安装 Fynvra 更新';
+  const dialogPaths = new Set();
+  const nativeCalls = { install: 0, file: 0 };
+  const answerNative = (args) => {
+    const options = args.at(-1) ?? {};
+    dialogPaths.add('native');
+    if (options.title === UNSAVED_TITLE) {
+      nativeCalls.file += 1;
+      fileConfirmations += 1;
+      return discardChoice;
+    }
+    nativeCalls.install += 1;
+    return installChoice;
   };
+  dialog.showMessageBox = async (...args) => ({
+    response: answerNative(args),
+    checkboxChecked: false,
+  });
+  dialog.showMessageBoxSync = (...args) => answerNative(args);
   const checks = [];
   const requests = [];
   const errors = [];
@@ -150,6 +167,7 @@ if (!process.versions.electron) {
       assert.equal(installCalls, 1);
       assert.equal(errors.length, 0, errors.join('\n'));
       checks.push('明确放弃未保存文件后，等待 agent 退出才调用安装器');
+      checks.push(`确认对话框实际路径: ${[...dialogPaths].join(' + ') || '无'}`);
       assert.equal(readFileSync(join(base, 'workspace/notes.txt'), 'utf8'), '原始文件\n');
       writeFileSync(
         join(base, 'report.json'),
@@ -160,6 +178,7 @@ if (!process.versions.electron) {
             arch: process.arch,
             runtimeRoot,
             checks,
+            dialogPaths: [...dialogPaths],
             requests,
             installCalls,
             rendererErrors: errors,
@@ -200,6 +219,26 @@ if (!process.versions.electron) {
         const expression = `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.getBoundingClientRect().height > 0 && e.textContent.trim() === ${JSON.stringify(text)})`;
         await waitFor(`!!(${expression})`, text);
         await evaluate(`(${expression}).click()`);
+      };
+      // 应用内确认框：只在包含 title 的 alertdialog 内按文字点按钮（设置页也有同名按钮）。
+      // 若 Renderer 未接手而回退原生，stub 已按 installChoice / discardChoice 应答。
+      const answerDialog = async (title, buttonText, kind, { waitClose = true } = {}) => {
+        const before = nativeCalls[kind];
+        const dialogExpr = `[...document.querySelectorAll('[role="alertdialog"]')].find(e => !e.hasAttribute('data-closed') && e.textContent.includes(${JSON.stringify(title)}))`;
+        const buttonExpr = `[...(${dialogExpr})?.querySelectorAll('button') ?? []].find(e => e.textContent.trim() === ${JSON.stringify(buttonText)})`;
+        const start = Date.now();
+        while (Date.now() - start < 30000) {
+          if (nativeCalls[kind] > before) return 'native';
+          if (await evaluate(`!!(${buttonExpr})`)) {
+            dialogPaths.add('in-app');
+            if (kind === 'file') fileConfirmations += 1;
+            await evaluate(`(${buttonExpr}).click()`);
+            if (waitClose) await waitFor(`!(${dialogExpr})`, `${title} 关闭`);
+            return 'in-app';
+          }
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+        throw new Error(`等待失败: ${title} 对话框`);
       };
       const stateIs = (status) =>
         `window.fynvra.updates.state().then(result => result.ok && result.state.status === ${JSON.stringify(status)})`;
@@ -284,6 +323,8 @@ if (!process.versions.electron) {
         checks.push('真实 HTTP 下载、哈希校验和缓存成功，界面显示安装按钮但不主动退出');
         await capture('updates-ready.png');
         await clickText('重启并安装');
+        // 原 installChoice = 1：取消
+        await answerDialog(INSTALL_TITLE, '取消', 'install');
         await waitFor(stateIs('downloaded'), '取消安装确认保留应用');
         assert.equal(installCalls, 0);
         checks.push('取消安装确认不启动安装器');
@@ -302,6 +343,9 @@ if (!process.versions.electron) {
         await waitFor(`document.body.innerText.includes('未保存')`, '文件草稿');
         installChoice = 0;
         await clickText('重启并安装');
+        await answerDialog(INSTALL_TITLE, '重启并安装', 'install');
+        // 原 discardChoice = 0：取消（按钮顺序：取消 / 保留草稿并离开 / 放弃修改并离开）
+        await answerDialog(UNSAVED_TITLE, '取消', 'file');
         await waitFor(stateIs('downloaded'), '取消文件退出回到待安装');
         assert(fileConfirmations > 0);
         assert.equal(installCalls, 0);
@@ -311,6 +355,9 @@ if (!process.versions.electron) {
         await capture('updates-canceled.png');
         discardChoice = 1;
         await clickText('重启并安装');
+        await answerDialog(INSTALL_TITLE, '重启并安装', 'install');
+        // 原 discardChoice = 1：保留草稿并离开；之后窗口关闭，不再等待对话框收起
+        await answerDialog(UNSAVED_TITLE, '保留草稿并离开', 'file', { waitClose: false });
       } catch (error) {
         if (!window.isDestroyed()) {
           console.error(await evaluate('document.body.innerText'));
