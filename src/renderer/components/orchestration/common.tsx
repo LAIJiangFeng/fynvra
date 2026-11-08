@@ -1,4 +1,4 @@
-import type { TaskStatus, TaskWorkflow, TaskWorkflowNodeStatus } from '@fynvra/core';
+import type { Dispatch, TaskStatus, TaskWorkflow, TaskWorkflowNodeStatus } from '@fynvra/core';
 import { Bot, Loader2, type LucideIcon, Workflow } from 'lucide-react';
 import type * as React from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -93,6 +93,24 @@ export function workflowNodeStatuses(
     }
   }
   return statuses;
+}
+
+/** 节点当前的尝试，没有时取历史里最近一次；只认本任务已存在的尝试（与流程图点节点同义）。 */
+export function workflowNodeDispatchId(
+  workflow: TaskWorkflow,
+  dispatches: readonly Dispatch[],
+  nodeId: string
+): string | undefined {
+  const known = new Set(dispatches.map((dispatch) => dispatch.id));
+  const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+  const history = Array.isArray(workflow.history) ? workflow.history : [];
+  const current = nodes.find((node) => node?.id === nodeId)?.dispatchId;
+  if (current && known.has(current)) return current;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const entry = history[index];
+    if (entry?.nodeId === nodeId && known.has(entry.dispatchId)) return entry.dispatchId;
+  }
+  return undefined;
 }
 
 /** 整个工作流的状态：有节点运行 / 待启动即运行中，其次失败、全部通过、取消，否则等待。 */

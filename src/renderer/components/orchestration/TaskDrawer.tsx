@@ -8,7 +8,14 @@ import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { dispatchesOf, latestDispatchOf } from '@/stores/orchestration';
-import { RoleBadge, SectionTitle, StatusBadge, StatusDot, WorkflowProgress } from './common';
+import {
+  RoleBadge,
+  SectionTitle,
+  StatusBadge,
+  StatusDot,
+  WorkflowProgress,
+  workflowNodeDispatchId,
+} from './common';
 import { formatClock, formatDuration } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
@@ -25,12 +32,15 @@ export function TaskDrawer({
   onClose,
   onOpenTask,
   onReview,
+  focusNode,
 }: {
   view: OrchestrationSnapshotView;
   task: Task;
   onClose: () => void;
   onOpenTask: (taskId: string) => void;
   onReview: (dispatchId: string) => void;
+  /** 从对话里请求定位的工作流节点；`seq` 变化时把输出切到该节点最新一次尝试 */
+  focusNode?: { nodeId: string; seq: number } | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -53,6 +63,19 @@ export function TaskDrawer({
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
+
+  // 只在请求序号变化时定位一次，之后快照更新不再覆盖用户在图里的选择
+  const focusSeq = focusNode?.seq;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 按请求序号触发
+  useEffect(() => {
+    if (!focusNode || !task.workflow) return;
+    const dispatchId = workflowNodeDispatchId(task.workflow, dispatches, focusNode.nodeId);
+    if (!dispatchId) return;
+    setPicked({ nodeId: focusNode.nodeId, dispatchId });
+    window.requestAnimationFrame(() =>
+      outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    );
+  }, [focusSeq]);
 
   return (
     <div
