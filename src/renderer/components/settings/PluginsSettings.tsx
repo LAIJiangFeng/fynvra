@@ -238,6 +238,8 @@ function PluginRow({
                 if (!result.ok) {
                   setConfirmingRemove(false);
                   onError(result.error);
+                } else if (result.warning) {
+                  onStatus({ tone: 'success', text: result.warning });
                 }
               }}
             >
