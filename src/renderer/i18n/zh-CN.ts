@@ -1196,8 +1196,6 @@ export const zhCN = {
       providersTitle: '插件可用的模型服务',
       providersHint: '插件代码里写的服务名要和这里的 ID 一致',
       providersEmpty: '没有已启用、填了密钥且有模型的服务',
-      copyId: '复制 ID {id}',
-      idCopied: '已复制 ID {id}',
     },
     instructions: {
       title: '指令文件',

@@ -2,7 +2,6 @@ import { localPluginMode, type PluginEntry, type PluginMode } from '@shared/type
 import {
   AppWindow,
   Code,
-  Copy,
   CopyPlus,
   Ellipsis,
   Folder,
@@ -17,6 +16,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
+import { CopyButton } from '@/components/chat/CopyButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -151,7 +151,7 @@ export function PluginsSettings() {
         </ul>
       )}
 
-      <AvailableProviders onStatus={setStatus} />
+      <AvailableProviders />
 
       <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <DialogContent>
@@ -427,7 +427,7 @@ function PluginActions({
 }
 
 /** 插件可用的模型服务：已启用、有 key、有模型；插件代码按 ID 引用服务 */
-function AvailableProviders({ onStatus }: { onStatus: (status: Status) => void }) {
+function AvailableProviders() {
   const providers = useProvidersStore((state) => state.providers);
   const t = useT();
   const usable = providers.filter(
@@ -445,7 +445,9 @@ function AvailableProviders({ onStatus }: { onStatus: (status: Status) => void }
           {usable.map((provider) => (
             <li key={provider.id} className="flex items-center gap-2 px-4 py-2 text-sm">
               <span className="min-w-0 flex-1 truncate">
-                <span className="font-mono">{provider.id}</span>
+                <span className="font-mono" title={t('settings.providers.serviceIdHint')}>
+                  {provider.id}
+                </span>
                 <span className="text-muted-foreground">
                   {' · '}
                   {provider.name}
@@ -453,27 +455,7 @@ function AvailableProviders({ onStatus }: { onStatus: (status: Status) => void }
                   {provider.api}
                 </span>
               </span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t('settings.plugins.copyId', { id: provider.id })}
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(provider.id);
-                    onStatus({
-                      tone: 'success',
-                      text: t('settings.plugins.idCopied', { id: provider.id }),
-                    });
-                  } catch (error) {
-                    onStatus({
-                      tone: 'error',
-                      text: error instanceof Error ? error.message : String(error),
-                    });
-                  }
-                }}
-              >
-                <Copy />
-              </Button>
+              <CopyButton text={provider.id} label={t('settings.providers.copyServiceId')} />
             </li>
           ))}
         </ul>

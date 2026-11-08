@@ -1250,8 +1250,6 @@ export const en: MessagesShape<typeof zhCN> = {
       providersTitle: 'Model services available to plugins',
       providersHint: 'Service names in plugin code must match these IDs',
       providersEmpty: 'No enabled service with a key and models',
-      copyId: 'Copy ID {id}',
-      idCopied: 'Copied ID {id}',
     },
     instructions: {
       title: 'Instruction files',
