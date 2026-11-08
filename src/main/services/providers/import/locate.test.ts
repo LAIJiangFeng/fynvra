@@ -24,13 +24,16 @@ afterEach(() => {
 });
 
 describe('locateImportSources', () => {
-  it('三个来源在 home 下的固定位置', () => {
+  it('各来源在 home 下的固定位置', () => {
     const home = join(base, 'home');
     expect(locateImportSources(home)).toEqual({
       claudeSettings: join(home, '.claude', 'settings.json'),
       codexConfig: join(home, '.codex', 'config.toml'),
       codexAuth: join(home, '.codex', 'auth.json'),
       ccSwitchDb: join(home, '.cc-switch', 'cc-switch.db'),
+      piModels: join(home, '.pi', 'agent', 'models.json'),
+      piAuth: join(home, '.pi', 'agent', 'auth.json'),
+      piSettings: join(home, '.pi', 'agent', 'settings.json'),
     });
   });
 });

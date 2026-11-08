@@ -201,7 +201,7 @@ describe('createProviderImporter', () => {
     await importer.scan({ sources: ['cc-switch', 'codex', 'codex'] });
     expect(scan).toHaveBeenLastCalledWith(['cc-switch', 'codex'], []);
     await importer.scan({});
-    expect(scan).toHaveBeenLastCalledWith(['claude-code', 'codex', 'cc-switch'], []);
+    expect(scan).toHaveBeenLastCalledWith(['claude-code', 'codex', 'cc-switch', 'pi'], []);
 
     const valid = crypto.randomUUID();
     for (const raw of [

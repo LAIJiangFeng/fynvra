@@ -51,6 +51,7 @@ export const IMPORT_SOURCES: ReadonlyArray<{
   { id: 'claude-code', label: 'Claude Code', path: '~/.claude/settings.json' },
   { id: 'codex', label: 'Codex', path: '~/.codex/config.toml' },
   { id: 'cc-switch', label: 'CC Switch', path: '~/.cc-switch/cc-switch.db' },
+  { id: 'pi', label: 'pi', path: '~/.pi/agent/models.json' },
 ];
 
 const ALL_SOURCE_IDS = IMPORT_SOURCES.map((source) => source.id);
@@ -59,7 +60,7 @@ export function sourceLabel(source: ProviderImportSource): string {
   return IMPORT_SOURCES.find((entry) => entry.id === source)?.label ?? source;
 }
 
-/** 开关一个来源；结果保持 Claude Code、Codex、CC Switch 的顺序。 */
+/** 开关一个来源；结果保持 Claude Code、Codex、CC Switch、pi 的顺序。 */
 export function toggleSource(
   current: readonly ProviderImportSource[],
   source: ProviderImportSource,
