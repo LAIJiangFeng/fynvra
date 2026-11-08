@@ -47,7 +47,7 @@ import { maskSecrets } from './secretMask';
 
 export type ImportStatus = { tone: 'success' | 'error'; text: string };
 
-/** 从本机 Claude Code / Codex / CC Switch 导入模型服务。每次打开（session 变化）重新扫描。 */
+/** 从本机 Claude Code / Codex / CC Switch / pi 导入模型服务。每次打开（session 变化）重新扫描。 */
 export function ProviderImportDialog({
   session,
   onClose,

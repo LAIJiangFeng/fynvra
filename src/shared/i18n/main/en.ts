@@ -339,6 +339,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     codexConfigInvalid: 'Codex config is not valid TOML; skipped',
     codexConfigInvalidAt: 'Codex config line {line} is not valid TOML; skipped',
     envMissingInConfig: 'env {key} not set; set the API key after import',
+    piBaseUrlOnly: '{subject}: only overrides a built-in provider URL; skipped',
+    piIncomplete: '{subject}: no supported API or models; skipped',
+    piCommandKey: '{subject}: key is a command, not imported; fill it in manually',
     variables:
       "{subject}: {places} reference variables; fynvra won't expand them, set real values after import",
     envPlace: 'env {key}',

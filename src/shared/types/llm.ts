@@ -23,8 +23,8 @@ export interface ModelProviderView extends ModelProvider {
   hasApiKey: boolean;
   apiKeyHint?: string;
 }
-/** 「从本机导入」的来源：~/.claude/settings.json、~/.codex/config.toml、~/.cc-switch/cc-switch.db */
-export type ProviderImportSource = 'claude-code' | 'codex' | 'cc-switch';
+/** 「从本机导入」的来源：~/.claude/settings.json、~/.codex/config.toml、~/.cc-switch/cc-switch.db、~/.pi/agent/models.json */
+export type ProviderImportSource = 'claude-code' | 'codex' | 'cc-switch' | 'pi';
 /** providers:scan-imports 扫到的候选（脱敏形态）；明文 key 留在 Main 的扫描缓存里 */
 export interface ProviderImportCandidate {
   /** 只在这一次扫描内有效，回传给 providers:import */
@@ -38,7 +38,7 @@ export interface ProviderImportCandidate {
   models: ModelEntry[];
   hasApiKey: boolean;
   apiKeyHint?: string;
-  /** CC Switch 里正在使用的那一个；Claude Code / Codex 读的就是生效中的配置 */
+  /** CC Switch 里正在使用的那一个；Claude Code / Codex 读的就是生效中的配置；pi 是 defaultProvider */
   isCurrent: boolean;
   /** 与已有服务（existing）或排在前面的候选（candidate）的地址和 key 都相同 */
   duplicate?: 'existing' | 'candidate';
