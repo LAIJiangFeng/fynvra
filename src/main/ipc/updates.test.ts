@@ -13,8 +13,9 @@ vi.mock('electron', () => ({
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
       mocks.handlers.set(channel, handler),
   },
-  dialog: { showMessageBox: mocks.confirm },
+  BrowserWindow: { fromWebContents: () => null },
 }));
+vi.mock('./appDialog', () => ({ showAppMessageBox: mocks.confirm }));
 vi.mock('../services/updates', () => ({ getUpdateService: () => mocks }));
 
 import { registerUpdateHandlers } from './updates';
@@ -48,10 +49,10 @@ describe('更新 IPC', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
   it('取消安装不退出，确认后才请求退出', async () => {
-    mocks.confirm.mockResolvedValueOnce({ response: 1 });
+    mocks.confirm.mockResolvedValueOnce(1);
     expect(await invoke(IPC_CHANNELS.UPDATES_INSTALL)).toMatchObject({ ok: true });
     expect(mocks.requestInstall).not.toHaveBeenCalled();
-    mocks.confirm.mockResolvedValueOnce({ response: 0 });
+    mocks.confirm.mockResolvedValueOnce(0);
     expect(await invoke(IPC_CHANNELS.UPDATES_INSTALL)).toMatchObject({ ok: true });
     expect(mocks.requestInstall).toHaveBeenCalledOnce();
   });
@@ -59,7 +60,7 @@ describe('更新 IPC', () => {
     mocks.getState.mockReturnValueOnce({ status: 'downloading' });
     expect(await invoke(IPC_CHANNELS.UPDATES_INSTALL)).toMatchObject({ ok: false });
     expect(mocks.confirm).not.toHaveBeenCalled();
-    let done!: (value: { response: number }) => void;
+    let done!: (value: number) => void;
     mocks.confirm.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -68,7 +69,7 @@ describe('更新 IPC', () => {
     );
     const first = invoke(IPC_CHANNELS.UPDATES_INSTALL);
     expect(await invoke(IPC_CHANNELS.UPDATES_INSTALL)).toMatchObject({ ok: false });
-    done({ response: 1 });
+    done(1);
     await first;
     mocks.check.mockImplementationOnce(() => {
       throw new Error('网络故障');

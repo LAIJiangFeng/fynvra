@@ -35,6 +35,7 @@ const tester: Role = {
   model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5', thinking: 'medium' },
   skillIds: ['pdf'],
   mcpServerIds: [],
+  pluginIds: [],
   tools: 'all',
   approvalMode: 'auto-edits',
 };
