@@ -36,7 +36,7 @@ export const en: MessagesShape<typeof zhCN> = {
     manualInstall:
       'This Mac build has no Apple Developer ID signature. Download new versions from GitHub Releases and install manually',
     automatic:
-      'Releases check for and download updates every 4 hours, then restart to install after you confirm.',
+      'Releases check for and download updates every 4 hours, then restart to install after you confirm',
     status: {
       idle: 'Will check for new versions automatically',
       checking: 'Checking for updates...',
@@ -746,7 +746,7 @@ export const en: MessagesShape<typeof zhCN> = {
     webFetch: {
       title: 'Web reader',
       allowLoopback: 'Allow web_fetch to access local addresses',
-      hint: 'Only localhost, 127.0.0.1 and ::1; still needs “Network access” approval. Applies to new sessions.',
+      hint: 'Only localhost, 127.0.0.1 and ::1; still needs “Network access” approval. Applies to new sessions',
     },
     network: {
       title: 'Git and command proxy',
@@ -754,16 +754,16 @@ export const en: MessagesShape<typeof zhCN> = {
       manual: 'Manual proxy',
       address: 'HTTP / HTTPS proxy address',
       scope:
-        'Used by Git, agent commands, new terminals and web_fetch. Model API, MCP and app updates are not affected.',
-      environmentHint: 'Uses inherited proxy environment variables, not the Windows system proxy.',
+        'Used by Git, agent commands, new terminals and web_fetch. Model API, MCP and app updates are not affected',
+      environmentHint: 'Uses inherited proxy environment variables, not the Windows system proxy',
       manualHint:
-        'HTTP/HTTPS proxies without credentials only. Inherited ALL_PROXY and NO_PROXY are ignored.',
+        'HTTP/HTTPS proxies without credentials only. Inherited ALL_PROXY and NO_PROXY are ignored',
       compatibility: 'Git compatibility mode',
-      compatibilityHint: 'Turn on if Git connections are unstable; uses HTTP/1.1 and protocol v0.',
-      effective: 'Applies to new Git operations, sessions and terminals after saving.',
-      invalid: 'Enter http(s)://host:port. Credentials and paths are not supported.',
+      compatibilityHint: 'Turn on if Git connections are unstable; uses HTTP/1.1 and protocol v0',
+      effective: 'Applies to new Git operations, sessions and terminals after saving',
+      invalid: 'Enter http(s)://host:port. Credentials and paths are not supported',
       test: 'Test connection',
-      testHint: 'Checks whether GitHub is reachable with the current values, without saving.',
+      testHint: 'Checks whether GitHub is reachable with the current values, without saving',
       testing: 'Testing connection…',
       saved: 'Saved. New sessions and terminals will use these settings',
       api: 'GitHub API HTTPS',
@@ -825,12 +825,12 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionSelected: 'Strategy selected in settings',
       compactionTimeout: 'Total native compaction wait limit (seconds)',
       compactionTimeoutHint:
-        '30–1800 seconds, default 600. On timeout, the session and messages are kept for manual retry.',
+        '30–1800 seconds, default 600. On timeout, the session and messages are kept for manual retry',
       compactionNative: 'pi native auto-compaction',
       compactionMagic: 'Magic Context (default)',
       compactionOff: 'Turn off auto-compaction',
       compactionHint:
-        'Magic Context tidies history in the background with the current model, adding extra requests. Applies to new sessions.',
+        'Magic Context tidies history in the background with the current model, adding extra requests. Applies to new sessions',
       off: 'Off',
       never: 'Never',
       days: '{days} {days|day|days}',
