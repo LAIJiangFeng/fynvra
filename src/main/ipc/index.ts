@@ -1,3 +1,4 @@
+import { registerAppDialogHandlers } from './appDialog';
 import { registerFilesHandlers } from './files';
 import { registerInstructionHandlers } from './instructions';
 import { registerMcpHandlers } from './mcp';
@@ -19,6 +20,7 @@ import { registerWorkspaceUiHandlers } from './workspaceUi';
 
 /** 注册全部 IPC handler；必须在创建窗口之前调用。 */
 export function registerIpcHandlers(): void {
+  registerAppDialogHandlers();
   registerUpdateHandlers();
   registerSettingsHandlers();
   registerWorkspaceHandlers();

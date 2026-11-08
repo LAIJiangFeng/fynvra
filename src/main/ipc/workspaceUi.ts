@@ -4,9 +4,10 @@ import { asRecord } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { parseWorkspaceUi, type UiFlushMode, type UiFlushReply } from '@shared/types/workspaceUi';
-import { app, type BrowserWindow, dialog, ipcMain, type WebContents } from 'electron';
+import { app, type BrowserWindow, ipcMain, type WebContents } from 'electron';
 import { translate } from '../i18n';
 import { createWorkspaceUiService } from '../services/workspaceUi';
+import { showAppMessageBox } from './appDialog';
 import { getFilesService } from './files';
 import { terminalBelongsTo } from './terminals';
 import { getWorkspaceService } from './workspaces';
@@ -155,7 +156,7 @@ export function prepareWorkspaceWindowClose(win: BrowserWindow): Promise<boolean
     const first = await requestFlush(win.webContents, 'check');
     if (!first.ok) {
       if (!win.isDestroyed())
-        dialog.showMessageBoxSync(win, {
+        await showAppMessageBox(win, {
           type: 'error',
           message: translate('workspaceUi.failed'),
           buttons: [translate('common.cancel')],
@@ -164,7 +165,7 @@ export function prepareWorkspaceWindowClose(win: BrowserWindow): Promise<boolean
     }
     let mode: UiFlushMode = 'keep';
     if (first.dirty) {
-      const choice = dialog.showMessageBoxSync(win, {
+      const choice = await showAppMessageBox(win, {
         type: 'warning',
         title: translate('files.unsavedTitle'),
         message: translate('files.unsavedMessage'),
@@ -176,6 +177,7 @@ export function prepareWorkspaceWindowClose(win: BrowserWindow): Promise<boolean
         ],
         defaultId: 0,
         cancelId: 0,
+        destructiveId: 2,
         noLink: true,
       });
       if (choice === 0) return false;
@@ -183,20 +185,20 @@ export function prepareWorkspaceWindowClose(win: BrowserWindow): Promise<boolean
     }
     const final = await requestFlush(win.webContents, mode);
     if (!final.ok && !win.isDestroyed())
-      dialog.showMessageBoxSync(win, {
+      await showAppMessageBox(win, {
         type: 'error',
         message: translate('workspaceUi.failed'),
         buttons: [translate('common.cancel')],
       });
     return final.ok;
   })()
-    .catch(() => {
+    .catch(async () => {
       if (!win.isDestroyed())
-        dialog.showMessageBoxSync(win, {
+        await showAppMessageBox(win, {
           type: 'error',
           message: translate('workspaceUi.failed'),
           buttons: [translate('common.cancel')],
-        });
+        }).catch(() => 0);
       return false;
     })
     .finally(() => preparing.delete(win));

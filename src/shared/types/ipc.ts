@@ -223,6 +223,14 @@ export const IPC_CHANNELS = {
   WORKSPACE_UI_FLUSH: 'workspaceui:flush',
   WORKSPACE_UI_FLUSHED: 'workspaceui:flushed',
 
+  // --- app dialog ---
+  /** Main → Renderer：用应用内对话框显示提示框（AppMessageBoxRequest） */
+  APP_DIALOG_REQUEST: 'appdialog:request',
+  /** Renderer → Main：已接手显示（参数为 requestId）；Main 约 3 秒收不到就回退原生对话框 */
+  APP_DIALOG_SHOWN: 'appdialog:shown',
+  /** Renderer → Main：用户的选择 `{ requestId, response }`；只接受目标窗口的回复 */
+  APP_DIALOG_RESPOND: 'appdialog:respond',
+
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
   USAGE_SUMMARY: 'usage:summary',

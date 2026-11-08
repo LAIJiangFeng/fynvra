@@ -26,6 +26,7 @@ import {
 import { readGitBranch } from '../services/sessions/branches';
 import { createWorkspaceService, type WorkspaceService } from '../services/workspaces';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { showAppMessageBox } from './appDialog';
 import { getSettingsFile } from './settings';
 import { closeWorkspaceTerminals } from './terminals';
 import { removeWorkspaceUi } from './workspaceUi';
@@ -281,8 +282,6 @@ async function askNestedDirectory(
     noLink: true,
   };
   const win = BrowserWindow.fromWebContents(sender);
-  const { response } = win
-    ? await dialog.showMessageBox(win, options)
-    : await dialog.showMessageBox(options);
+  const response = await showAppMessageBox(win, options);
   return response === 0 ? 'root' : response === 1 ? 'plain' : 'cancel';
 }

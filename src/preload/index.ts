@@ -1,5 +1,6 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createAppDialogApi } from './domains/appDialog';
 import { createFilesApi } from './domains/files';
 import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
@@ -29,6 +30,7 @@ function subscribe(channel: string, listener: (...args: unknown[]) => void): Uns
 }
 
 const api: FynvraApi = {
+  appDialog: createAppDialogApi(ipcRenderer, subscribe),
   updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: createSettingsApi(ipcRenderer, subscribe),
   workspaceUi: createWorkspaceUiApi(ipcRenderer, subscribe),
