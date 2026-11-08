@@ -201,6 +201,10 @@ export interface Dispatch {
   branch: string;
   /** 缺省是 worktree 模式。 */
   mode?: 'in-place';
+  /**
+   * 工作流节点 id；只有工作流引擎为节点起的尝试才有。同一任务下 `nodeId` 互不相同的节点尝试可以同时未结算。
+   */
+  nodeId?: string;
   /** 开始时间（epoch ms）。 */
   startedAt: number;
   /** 结算时间（epoch ms）；缺省表示仍在进行。 */
