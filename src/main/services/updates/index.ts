@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asRecord } from '@shared/guards';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { app, dialog } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 import { translate } from '../../i18n';
+import { showAppMessageBox } from '../../ipc/appDialog';
 import { sendToAllWindows } from '../../windows/createAppWindow';
 import { showDesktopNotification } from '../notifications/desktop';
 import { updateUnavailableReason } from './platform';
@@ -43,8 +44,26 @@ export function getUpdateService(): UpdateService {
     // 先让 IPC 的确认结果返回，再触发窗口退出。
     requestQuit: () => setImmediate(() => app.quit()),
     installFailed: (error) => {
-      dialog.showErrorBox(translate('updates.installFailed'), error);
-      setImmediate(() => app.quit());
+      // 有窗口时用应用内对话框（收不到 ack 会自动回退原生）；窗口已全部关闭时仍用原生错误框。
+      const win =
+        BrowserWindow.getFocusedWindow() ??
+        BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+      const quit = () => setImmediate(() => app.quit());
+      if (!win) {
+        dialog.showErrorBox(translate('updates.installFailed'), error);
+        quit();
+        return;
+      }
+      void showAppMessageBox(win, {
+        type: 'error',
+        message: translate('updates.installFailed'),
+        detail: error,
+        buttons: [translate('common.ok')],
+        defaultId: 0,
+        cancelId: 0,
+      })
+        .catch(() => 0)
+        .then(quit);
     },
   });
   return service;

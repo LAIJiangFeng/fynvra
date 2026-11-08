@@ -27,6 +27,7 @@ import {
 } from '../services/plugins/pluginSources';
 import { isRegistryId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
+import { showAppMessageBox } from './appDialog';
 
 let registry: PluginRegistry | null = null;
 
@@ -236,9 +237,7 @@ async function pickLocalPlugin(sender: Electron.WebContents): Promise<string | n
       cancelId: 2,
       noLink: true,
     };
-    const { response } = win
-      ? await dialog.showMessageBox(win, ask)
-      : await dialog.showMessageBox(ask);
+    const response = await showAppMessageBox(win, ask);
     if (response === 2) return null;
     properties = response === 0 ? ['openDirectory'] : ['openFile'];
   }

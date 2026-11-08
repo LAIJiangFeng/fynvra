@@ -51,6 +51,7 @@ export const en: MessagesShape<typeof zhCN> = {
   common: {
     close: 'Close',
     cancel: 'Cancel',
+    confirm: 'OK',
     create: 'Create',
     working: 'Working…',
     gotIt: 'OK',

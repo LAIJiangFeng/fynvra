@@ -1,4 +1,5 @@
 import { sidebarOpenOf } from '@shared/types/settings';
+import { AppDialogHost } from '@/components/layout/AppDialogHost';
 import { CloseWindowDialog } from '@/components/layout/CloseWindowDialog';
 import { MainArea } from '@/components/layout/MainArea';
 import { NoticeDialog } from '@/components/layout/NoticeDialog';
@@ -39,6 +40,7 @@ export function App() {
       <NoticeDialog />
       <SettingsView />
       <CloseWindowDialog />
+      <AppDialogHost />
       <KeybindingProvider />
     </TooltipProvider>
   );
