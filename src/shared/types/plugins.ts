@@ -79,6 +79,23 @@ export interface SetPluginManualProvidersInput {
   names: string[];
 }
 
+/**
+ * 「从本机导入」扫描到的一个候选（给 Renderer 的视图，不含路径以外的内部数据；导入只回传 id）。
+ * display：本地为 `~` 缩写的路径，npm / git 为来源串。form 仅本地：扩展文件或扩展目录 / 包目录。
+ */
+export interface PluginImportCandidateView {
+  id: string;
+  name: string;
+  kind: PluginKind;
+  form?: 'file' | 'dir';
+  display: string;
+  /** 已登记为这个插件（名字）时不可导入 */
+  duplicateOf?: string;
+}
+
+/** `plugins:import` 一次最多的候选 id 数 */
+export const MAX_PLUGIN_IMPORT_IDS = 200;
+
 /** 本地插件的实际模式（旧记录缺省为 link）；npm / git 插件返回 null */
 export function localPluginMode(entry: Pick<PluginEntry, 'kind' | 'mode'>): PluginMode | null {
   if (entry.kind !== 'local') return null;

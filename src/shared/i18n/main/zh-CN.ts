@@ -231,6 +231,11 @@ export const mainZhCN = {
     notCopy: '只有副本模式的插件能重新复制',
     notLink: '只有引用模式的插件能转为副本',
     openFailed: '打开插件失败：{error}',
+    importScanFailed: '扫描本机插件失败：{error}',
+    importSettingsCorrupt: 'pi 的 {file} 无法解析，已跳过其中声明的包',
+    importUnsupportedSources: 'pi 的 settings.json 里有 {count} 个包的来源不受支持，已跳过',
+    importTooMany: '候选太多，这里只列出了前 {max} 个',
+    importUnknown: '候选已失效，请重新扫描',
   },
   providers: {
     readFailed: '读取模型服务失败：{error}',

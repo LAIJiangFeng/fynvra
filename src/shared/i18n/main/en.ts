@@ -243,6 +243,12 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     notCopy: 'Only copied plugins can be re-copied',
     notLink: 'Only linked plugins can be converted to a copy',
     openFailed: 'Failed to open plugin: {error}',
+    importScanFailed: 'Failed to scan local plugins: {error}',
+    importSettingsCorrupt: "pi's {file} cannot be parsed; skipped the packages declared in it",
+    importUnsupportedSources:
+      "{count} package sources in pi's settings.json are not supported; skipped",
+    importTooMany: 'Too many items; only the first page of {max} is listed',
+    importUnknown: 'This item is no longer available; scan again',
   },
   providers: {
     readFailed: 'Failed to read providers: {error}',
