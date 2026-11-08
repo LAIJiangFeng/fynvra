@@ -7,11 +7,11 @@ type Handler = (event: { sender: unknown }, raw: unknown) => unknown;
 const mocks = vi.hoisted(() => ({ confirm: vi.fn(), handlers: new Map<string, Handler>() }));
 vi.mock('electron', () => ({
   app: {},
-  dialog: { showMessageBoxSync: mocks.confirm },
   ipcMain: {
     handle: (channel: string, handler: Handler) => mocks.handlers.set(channel, handler),
   },
 }));
+vi.mock('../ipc/appDialog', () => ({ showAppMessageBox: mocks.confirm }));
 vi.mock('../ipc/files', () => ({ getFilesService: vi.fn() }));
 vi.mock('../ipc/terminals', () => ({ terminalBelongsTo: vi.fn() }));
 vi.mock('../ipc/workspaces', () => ({ getWorkspaceService: vi.fn() }));
@@ -52,13 +52,13 @@ function setup() {
 describe('未保存文件的原生退出确认', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.confirm.mockReturnValue(0);
+    mocks.confirm.mockResolvedValue(0);
     registerWorkspaceUiHandlers();
   });
   afterEach(() => vi.useRealTimers());
 
   it.each([0, 1, 2])('默认取消，仅明确保留或放弃且落盘成功后重新加载：%s', async (choice) => {
-    mocks.confirm.mockReturnValue(choice);
+    mocks.confirm.mockResolvedValue(choice);
     const { win, owner, event, pending, reply } = setup();
     expect(owner.reload).not.toHaveBeenCalled();
     expect(event.preventDefault).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe('未保存文件的原生退出确认', () => {
   });
 
   it.each([1, 2])('保留或放弃的落盘失败仍阻止离开：%s', async (choice) => {
-    mocks.confirm.mockReturnValue(choice);
+    mocks.confirm.mockResolvedValue(choice);
     const { owner, event, pending, reply } = setup();
     reply('check', true, true);
     await vi.waitFor(() => expect(owner.send).toHaveBeenCalledTimes(2));
