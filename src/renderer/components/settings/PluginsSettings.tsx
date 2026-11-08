@@ -572,20 +572,19 @@ function RequestedProviders({
 
   return (
     <div className="mt-2">
-      <div className="mb-1 flex items-center gap-1 text-muted-foreground text-xs">
-        <span>{t('settings.plugins.requestedTitle')}</span>
+      <div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground text-xs">
+        <span className="truncate">
+          {t('settings.plugins.requestedTitle')} · {t('settings.plugins.requestedApplyHint')}
+        </span>
         {!adding && (
-          <Button
+          <button
             type="button"
-            size="icon-xs"
-            variant="ghost"
-            className="size-5"
-            aria-label={t('settings.plugins.manualAdd')}
+            className="shrink-0 text-primary hover:underline"
             title={t('settings.plugins.manualAdd')}
             onClick={() => onAddingChange(true)}
           >
-            <Plus />
-          </Button>
+            {t('settings.plugins.manualAddShort')}
+          </button>
         )}
       </div>
       <ul className="flex flex-col gap-1.5">
@@ -635,7 +634,6 @@ function RequestedProviders({
                     size="sm"
                     className="min-w-0 flex-1"
                     aria-label={t('settings.plugins.requestedSelect', { name })}
-                    title={t('settings.plugins.requestedApplyHint')}
                   >
                     <SelectValue />
                   </SelectTrigger>

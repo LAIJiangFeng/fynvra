@@ -1244,6 +1244,7 @@ export const en: MessagesShape<typeof zhCN> = {
       converted: '"{name}" is now a copy. Later edits will not affect the original',
       requestedTitle: 'Model services',
       manualAdd: 'Add model service name',
+      manualAddShort: '+ Add',
       manualPlaceholder: 'Service name in the plugin code',
       manualInvalid:
         'Use letters, digits, . _ - only, up to 64 characters, not starting with fynvra-',
