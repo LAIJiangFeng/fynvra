@@ -956,7 +956,7 @@ export const en: MessagesShape<typeof zhCN> = {
       description: 'Description',
       descriptionPlaceholder: 'Optional',
       maxRounds: 'Max send-backs',
-      maxRoundsHint: 'How many times failed nodes may send work back, {min}–{max}',
+      maxRoundsHint: 'From {min} to {max}',
       nodeCount: '{count} nodes',
       noChanges: 'No changes',
       saveBlocked: 'Fix {count} issue(s) before saving',

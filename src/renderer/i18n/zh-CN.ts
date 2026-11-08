@@ -914,7 +914,7 @@ export const zhCN = {
       description: '说明',
       descriptionPlaceholder: '可选',
       maxRounds: '回退上限',
-      maxRoundsHint: '节点失败退回的次数上限，{min}–{max}',
+      maxRoundsHint: '可设 {min}–{max} 次',
       nodeCount: '{count} 个节点',
       noChanges: '没有修改',
       saveBlocked: '还有 {count} 个问题，修正后才能保存',
