@@ -472,7 +472,10 @@ export function dispatchesOf(view: OrchestrationSnapshotView | null, taskId: str
   return index.get(taskId) ?? NO_DISPATCHES;
 }
 
-/** 进行中的尝试（未结算，与 core `OrchestrationStore.activeDispatch` 同义）；都已结算时为 undefined。 */
+/**
+ * 进行中的尝试（未结算）；都已结算时为 undefined。工作流任务可能有多个节点同时进行，
+ * 此时取最近开始的那个（各节点的状态看 `task.workflow.nodes`）。
+ */
 export function activeDispatchOf(
   view: OrchestrationSnapshotView | null,
   taskId: string

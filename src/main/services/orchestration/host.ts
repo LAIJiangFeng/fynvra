@@ -185,7 +185,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       (run) => run.workspaceId === workspace.id && run.coordinatorSessionId === coordinatorSessionId
     )[0];
 
-  /** 当前尝试；没有进行中的就是最近一次。 */
+  /**
+   * 当前尝试；没有进行中的就是最近一次。运行中的工作流可能同时有多个节点尝试，这里只取其一；
+   * 工作流任务的运行中节点一律经 {@link runningNodes} / `store.activeDispatches` 处理。
+   */
   const latestDispatch = (taskId: string): Dispatch | undefined =>
     store.activeDispatch(taskId) ?? store.dispatches.list((d) => d.taskId === taskId).at(-1);
 
@@ -854,7 +857,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       );
     }
     if (task.workflow !== undefined) {
-      return restartWorkflow(run, task as Task & { workflow: TaskWorkflow }, previous, feedback);
+      return restartWorkflow(run, task as Task & { workflow: TaskWorkflow }, feedback);
     }
 
     // 打回 = 同一 worktree（普通目录则是同一目录）、同一 worker 会话上的一次新尝试
@@ -932,7 +935,6 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   async function restartWorkflow(
     run: Run,
     task: Task & { workflow: TaskWorkflow },
-    previous: Dispatch,
     feedback: string
   ): Promise<HostResult<RejectWorkOutput>> {
     const engine = deps.workflowEngine;
@@ -941,19 +943,25 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail(`task ${task.id} is already starting a workflow step; try again shortly`);
     }
     const original = task.workflow;
+    // 按插入顺序的最后一次尝试判断期间有没有新尝试（结算不改变顺序）
+    const lastAttemptId = () =>
+      store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id;
+    const before = lastAttemptId();
     // 上一轮留下的节点 worktree（失败节点）不再需要：整图重跑会从集成 worktree 重新分出
     await engine.discardNodes(task.id);
     const latest = store.tasks.get(task.id);
-    if (latest?.status !== task.status || latestDispatch(task.id)?.id !== previous.id) {
+    if (latest?.status !== task.status || lastAttemptId() !== before) {
       return fail(`task ${task.id} changed while its workflow was restarting; call list_workers`);
     }
     const text = `Review feedback from your coordinator on the previous run of this workflow:\n\n${feedback}`;
     const restarted = restartTaskWorkflow(original, text);
+    // 上一轮不应残留未结算的节点尝试（会话已由 discardNodes 停掉）：按 failed 结算，重跑的同名节点才能启动
+    settleActive(task.id, 'Superseded: the coordinator restarted the workflow (reject_work).');
     const reopened = store.tasks.update(task.id, { status: 'in-progress', workflow: restarted });
     if (!reopened.ok) return reopened;
     const started = await engine.start(task.id, () => {
       const current = store.tasks.get(task.id);
-      if (current?.status === 'in-progress' && latestDispatch(task.id)?.id === previous.id) {
+      if (current?.status === 'in-progress' && lastAttemptId() === before) {
         store.tasks.update(task.id, { status: task.status, workflow: original });
       }
     });
@@ -980,19 +988,19 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     };
   }
 
-  /** 显式放弃：进行中的尝试（工作流是所有运行中的节点）按 failed 结算，已有的汇报保持原样。 */
-  function abandon(task: Task): void {
-    const reason = 'Abandoned by the coordinator (cleanup_worktree).';
-    const active =
-      task.workflow === undefined
-        ? [store.activeDispatch(task.id)].filter((entry) => entry !== undefined)
-        : store.dispatches.list((entry) => entry.taskId === task.id && !isDispatchSettled(entry));
-    for (const dispatch of active) {
+  /** 任务全部未结算的尝试（工作流是每个运行中节点一个）按 failed 结算，已有的汇报保持原样。 */
+  function settleActive(taskId: string, reason: string): void {
+    for (const dispatch of store.activeDispatches(taskId)) {
       const { id: _id, ...patch } = unwrap(
         settleDispatch(dispatch, 'failed', reason, undefined, now())
       ).dispatch;
       unwrap(store.dispatches.update(dispatch.id, patch));
     }
+  }
+
+  /** 显式放弃：进行中的尝试（工作流是所有运行中的节点）按 failed 结算，已有的汇报保持原样。 */
+  function abandon(task: Task): void {
+    settleActive(task.id, 'Abandoned by the coordinator (cleanup_worktree).');
     if (task.status !== 'abandoned') {
       // 工作流任务放弃时运行中的节点记为取消，并撤掉未执行的启动意图
       const workflow = store.tasks.get(task.id)?.workflow;

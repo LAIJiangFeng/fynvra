@@ -14,7 +14,7 @@ export type Launched = { worktree: Worktree | undefined; dispatch: Dispatch };
 export async function startAttemptSession(
   deps: { workspace: Workspace; launcher: WorkerSessionLauncher; now: () => number },
   task: Task,
-  input: { dispatchId: string; worktree: Worktree | undefined; brief: string }
+  input: { dispatchId: string; worktree: Worktree | undefined; brief: string; nodeId?: string }
 ): Promise<HostResult<{ dispatch: Dispatch }>> {
   const { worktree, dispatchId } = input;
   let started: Awaited<ReturnType<WorkerSessionLauncher['createWorkerSession']>>;
@@ -43,6 +43,7 @@ export async function startAttemptSession(
     worktreeId: worktree?.id ?? '',
     branch: worktree?.branch ?? '',
     ...(worktree ? {} : { mode: 'in-place' as const }),
+    ...(input.nodeId !== undefined ? { nodeId: input.nodeId } : {}),
     startedAt: deps.now(),
   };
   return { ok: true, dispatch };

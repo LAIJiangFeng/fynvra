@@ -158,6 +158,19 @@ describe('invariants', () => {
     expect(store.dispatches.insert({ ...dispatch, id: 'dispatch_2' }).ok).toBe(true);
   });
 
+  it('工作流任务按节点计：不同 nodeId 可并存，同一节点或缺 nodeId 仍拒绝', () => {
+    const store = seeded();
+    const node = (id: string, nodeId?: string) => ({ ...dispatch, id, nodeId });
+    // 已有的未结算 dispatch 没有 nodeId：带 nodeId 的也不能并存
+    expect(store.dispatches.insert(node('d_early', 'ui')).ok).toBe(false);
+    store.dispatches.update('dispatch_1', settled);
+    expect(store.dispatches.insert(node('d_ui', 'ui')).ok).toBe(true);
+    expect(store.dispatches.insert(node('d_be', 'backend')).ok).toBe(true);
+    expect(store.dispatches.insert(node('d_ui2', 'ui')).ok).toBe(false);
+    expect(store.dispatches.insert(node('d_plain')).ok).toBe(false);
+    expect(store.activeDispatches('task_1').map((entity) => entity.id)).toEqual(['d_ui', 'd_be']);
+  });
+
   it('已结算的 dispatch 不可再修改；settledAt 与 outcome 必须同时出现', () => {
     const store = seeded();
     const half = store.dispatches.update('dispatch_1', { settledAt: 30 });

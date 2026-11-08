@@ -158,6 +158,7 @@ function observeStore(
     messages: observe(store.messages, changed, messagePosted),
     listTasks: (runId) => store.listTasks(runId),
     activeDispatch: (taskId) => store.activeDispatch(taskId),
+    activeDispatches: (taskId) => store.activeDispatches(taskId),
     reclaimableDispatches: (runId) => store.reclaimableDispatches(runId),
     snapshot: () => store.snapshot(),
   };
@@ -308,13 +309,29 @@ export function createOrchestrationService(
       });
     }
   }
-  /** 工作流节点的会话确定已失败：该节点按 failed 结算（同 report_done failed），由引擎汇总。 */
+  /**
+   * 工作流节点的会话确定已失败：该节点按 failed 结算（同 report_done failed），由引擎汇总。
+   * 并行节点各有一个未结算的尝试：逐个检查运行中节点绑定的尝试和任务全部未结算的尝试。
+   * 没有绑定到运行中节点、也不属于待启动意图的孤儿尝试会话已死时只结算它自己（否则同一节点再也起不来）。
+   */
   function reconcileWorkflowNodes(sessionFailure: (sessionId: string) => string | undefined) {
     for (const task of store.tasks.list(
       (entry) => entry.status === 'in-progress' && entry.workflow !== undefined
     )) {
       if (task.workflow === undefined) continue;
-      for (const dispatchId of workflowRunningDispatchIds(task.workflow)) {
+      const running = workflowRunningDispatchIds(task.workflow);
+      const launching = new Set(task.workflow.launches.map((launch) => launch.dispatchId));
+      for (const orphan of store.activeDispatches(task.id)) {
+        if (running.includes(orphan.id) || launching.has(orphan.id)) continue;
+        if (pendingDispatches.has(orphan.id)) continue;
+        const reason = sessionFailure(orphan.workerSessionId);
+        if (!reason) continue;
+        const settled = settleDispatch(orphan, 'failed', reason, orphan.filesModified, now());
+        if (!settled.ok) continue;
+        const { id: _id, ...patch } = settled.dispatch;
+        if (store.dispatches.update(orphan.id, patch).ok) workflowEngine.advance(task.id);
+      }
+      for (const dispatchId of running) {
         const dispatch = store.dispatches.get(dispatchId);
         if (!dispatch || isDispatchSettled(dispatch) || pendingDispatches.has(dispatch.id))
           continue;
