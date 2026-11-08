@@ -7,6 +7,7 @@ import {
 import type { RemoteModelEntry } from '@shared/types/llm';
 import { CloudDownload, Plus, X } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useState } from 'react';
+import { CopyButton } from '@/components/chat/CopyButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -178,6 +179,27 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
           </Select>
         </Field>
       </div>
+
+      {initial.id ? (
+        <Field
+          label={t('settings.providers.serviceId')}
+          htmlFor={`${id}-service-id`}
+          hint={t('settings.providers.serviceIdStable')}
+        >
+          <div className="flex items-center gap-1">
+            <Input
+              id={`${id}-service-id`}
+              readOnly
+              value={initial.id}
+              spellCheck={false}
+              className="font-mono text-muted-foreground"
+            />
+            <CopyButton text={initial.id} label={t('settings.providers.copyServiceId')} />
+          </div>
+        </Field>
+      ) : (
+        <p className="text-muted-foreground text-xs">{t('settings.providers.serviceIdPending')}</p>
+      )}
 
       <Field
         label="Base URL"
