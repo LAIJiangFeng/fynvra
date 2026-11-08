@@ -1,6 +1,12 @@
-import { providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
+import { findCatalogProvider, providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelProviderView } from '@shared/types/llm';
-import { localPluginMode, type PluginEntry, type PluginMode } from '@shared/types/plugins';
+import {
+  isPluginProviderName,
+  localPluginMode,
+  MAX_REQUESTED_PROVIDERS,
+  type PluginEntry,
+  type PluginMode,
+} from '@shared/types/plugins';
 import {
   AppWindow,
   CircleAlert,
@@ -18,8 +24,9 @@ import {
   RefreshCw,
   ShieldAlert,
   Trash2,
+  X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,6 +62,8 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
+import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -451,7 +460,27 @@ function isUsable(provider: ModelProviderView): boolean {
   return provider.enabled && provider.hasApiKey && provider.models.length > 0;
 }
 
-/** 卡片里「需要的模型服务」：插件运行时按名查找过的服务，每个名字可下拉改选实际使用的服务 */
+/** 插件的服务名：扫描结果、运行时记录、手动添加三者合并去重，保持各自顺序 */
+function pluginProviderNames(entry: PluginEntry): string[] {
+  return [
+    ...new Set([
+      ...(entry.scannedProviders ?? []),
+      ...(entry.requestedProviders ?? []),
+      ...(entry.manualProviders ?? []),
+    ]),
+  ];
+}
+
+/** 「新建服务」的草稿：沿用「自定义」（OpenAI 兼容）新建时的默认值，名称预填为服务名 */
+function newServiceDraft(name: string): ProviderDraft | null {
+  const custom = findCatalogProvider('openai-compatible');
+  return custom ? { ...draftFromCatalog(custom), name } : null;
+}
+
+/**
+ * 卡片里「需要的模型服务」：添加时扫描代码识别的、运行时按名查找过的和手动添加的服务名，
+ * 每个名字可下拉改选实际使用的服务；未找到的可直接新建
+ */
 function RequestedProviders({
   plugin,
   onError,
@@ -462,24 +491,148 @@ function RequestedProviders({
   const plugins = usePluginsStore((state) => state.plugins);
   const providerMap = usePluginsStore((state) => state.providerMap);
   const setProviderMapping = usePluginsStore((state) => state.setProviderMapping);
+  const setManualProviders = usePluginsStore((state) => state.setManualProviders);
   const providers = useProvidersStore((state) => state.providers);
   const t = useT();
-  const names = plugin.requestedProviders ?? [];
+  const names = pluginProviderNames(plugin);
+  const manual = plugin.manualProviders ?? [];
+  const detected = new Set([
+    ...(plugin.scannedProviders ?? []),
+    ...(plugin.requestedProviders ?? []),
+  ]);
+  const [adding, setAdding] = useState(false);
+  const [input, setInput] = useState('');
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [creating, setCreating] = useState<(ProviderEditing & { name: string }) | null>(null);
+  const sessions = useRef(0);
 
   /** 被多个插件用到的名字 */
   const shared = useMemo(() => {
     const counts = new Map<string, number>();
     for (const entry of plugins) {
-      for (const name of new Set(entry.requestedProviders ?? [])) {
+      for (const name of pluginProviderNames(entry)) {
         counts.set(name, (counts.get(name) ?? 0) + 1);
       }
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
   }, [plugins]);
 
+  const openAdd = () => {
+    setAdding(true);
+    setInput('');
+    setInputError(null);
+  };
+
+  const submitAdd = async () => {
+    const name = input.trim();
+    if (!isPluginProviderName(name)) {
+      setInputError(t('settings.plugins.manualInvalid'));
+      return;
+    }
+    if (names.includes(name)) {
+      setInputError(t('settings.plugins.manualExists'));
+      return;
+    }
+    if (manual.length >= MAX_REQUESTED_PROVIDERS) {
+      setInputError(t('settings.plugins.manualFull', { max: MAX_REQUESTED_PROVIDERS }));
+      return;
+    }
+    const result = await setManualProviders(plugin.id, [...manual, name]);
+    if (!result.ok) {
+      setInputError(result.error);
+      return;
+    }
+    setAdding(false);
+  };
+
+  const removeManual = async (name: string) => {
+    const result = await setManualProviders(
+      plugin.id,
+      manual.filter((item) => item !== name)
+    );
+    if (!result.ok) onError(result.error);
+  };
+
+  const openCreate = (name: string) => {
+    const draft = newServiceDraft(name);
+    if (!draft) return;
+    sessions.current += 1;
+    setCreating({ key: sessions.current, draft, name });
+  };
+
+  /** 新服务 id 与服务名不同（如自动生成 sub2api-2）时关联过去；相同时清掉可能残留的失效映射 */
+  const linkCreated = async (name: string, providerId: string) => {
+    const result = await setProviderMapping(name, providerId === name ? null : providerId);
+    if (!result.ok) onError(result.error);
+  };
+
+  const addForm = adding && (
+    <div className="mt-1.5">
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitAdd();
+        }}
+      >
+        <Input
+          autoFocus
+          value={input}
+          maxLength={64}
+          placeholder={t('settings.plugins.manualPlaceholder')}
+          aria-invalid={inputError !== null}
+          className="h-7 max-w-56 font-mono text-xs"
+          onChange={(event) => {
+            setInput(event.target.value);
+            setInputError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setAdding(false);
+            }
+          }}
+        />
+        <Button type="submit" size="sm" className="h-7 px-2 text-xs">
+          {t('common.confirm')}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={() => setAdding(false)}
+        >
+          {t('common.cancel')}
+        </Button>
+      </form>
+      {inputError && <p className="mt-0.5 text-destructive text-xs">{inputError}</p>}
+    </div>
+  );
+
+  const dialog = (
+    <ProviderDialog
+      editing={creating}
+      onClose={() => setCreating(null)}
+      onSaved={(providerId) => {
+        if (creating) void linkCreated(creating.name, providerId);
+      }}
+    />
+  );
+
   if (names.length === 0) {
     return (
-      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedEmpty')}</p>
+      <div className="mt-1">
+        <p className="text-muted-foreground text-xs">
+          {t('settings.plugins.requestedEmpty')}
+          {!adding && (
+            <button type="button" className="ml-2 text-primary hover:underline" onClick={openAdd}>
+              {t('settings.plugins.manualAdd')}
+            </button>
+          )}
+        </p>
+        {addForm}
+      </div>
     );
   }
 
@@ -507,6 +660,7 @@ function RequestedProviders({
             items.push({ value: mapped, label: t('settings.plugins.requestedMissing') });
           }
           const state = !target ? 'missing' : isUsable(target) ? 'usable' : 'unavailable';
+          const removable = manual.includes(name) && !detected.has(name);
           return (
             <li key={name}>
               <div className="flex items-center gap-2">
@@ -563,6 +717,30 @@ function RequestedProviders({
                         : 'settings.plugins.requestedUnavailable'
                   )}
                 </span>
+                {state === 'missing' && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 px-2 text-xs"
+                    onClick={() => openCreate(name)}
+                  >
+                    {t('settings.plugins.createService')}
+                  </Button>
+                )}
+                {removable && (
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    className="shrink-0"
+                    aria-label={t('settings.plugins.manualRemove', { name })}
+                    title={t('settings.plugins.manualRemove', { name })}
+                    onClick={() => void removeManual(name)}
+                  >
+                    <X />
+                  </Button>
+                )}
               </div>
               {shared.has(name) && (
                 <p className="mt-0.5 text-muted-foreground text-xs">
@@ -573,7 +751,16 @@ function RequestedProviders({
           );
         })}
       </ul>
-      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedFooter')}</p>
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+        <p className="text-muted-foreground">{t('settings.plugins.requestedFooter')}</p>
+        {!adding && (
+          <button type="button" className="shrink-0 text-primary hover:underline" onClick={openAdd}>
+            {t('settings.plugins.manualAddMore')}
+          </button>
+        )}
+      </div>
+      {addForm}
+      {dialog}
     </div>
   );
 }
