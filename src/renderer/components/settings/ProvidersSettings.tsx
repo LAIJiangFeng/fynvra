@@ -2,6 +2,7 @@ import { MODEL_CATALOG, providerApiLabel, resolveBaseUrl } from '@shared/modelCa
 import type { ModelProviderView } from '@shared/types/llm';
 import { Boxes, ChevronDown, HardDriveDownload, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { CopyButton } from '@/components/chat/CopyButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -181,6 +182,13 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
             <span className="font-medium">{provider.name}</span>
             <Badge variant="outline">{providerApiLabel(provider.api)}</Badge>
             {!provider.enabled && <Badge>{t('common.disabled')}</Badge>}
+            <span
+              className="flex min-w-0 items-center text-muted-foreground text-xs"
+              title={t('settings.providers.serviceIdHint')}
+            >
+              <span className="truncate font-mono">ID: {provider.id}</span>
+              <CopyButton text={provider.id} label={t('settings.providers.copyServiceId')} />
+            </span>
           </div>
           <p className="mt-1 truncate text-muted-foreground text-xs">
             {maskSecrets(resolveBaseUrl(provider.api, provider.baseUrl))}
@@ -203,11 +211,29 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
         {provider.models.length === 0 ? (
           <span className="text-muted-foreground text-xs">{t('settings.providers.noModels')}</span>
         ) : (
-          provider.models.slice(0, MAX_MODEL_BADGES).map((model) => (
-            <Badge key={model.id} variant="outline" title={model.id}>
-              {model.name}
-            </Badge>
-          ))
+          provider.models.slice(0, MAX_MODEL_BADGES).map((model) => {
+            const sameName = model.name === model.id;
+            return (
+              <Badge
+                key={model.id}
+                variant="outline"
+                className="max-w-full justify-start"
+                title={sameName ? model.id : `${model.name} · ${model.id}`}
+              >
+                <span className="min-w-0 truncate">
+                  {sameName ? (
+                    <span className="font-mono">{model.id}</span>
+                  ) : (
+                    <>
+                      {model.name}
+                      {' · '}
+                      <span className="font-mono text-muted-foreground">{model.id}</span>
+                    </>
+                  )}
+                </span>
+              </Badge>
+            );
+          })
         )}
         {extraModels > 0 && <Badge variant="outline">+{extraModels}</Badge>}
       </div>
