@@ -1,7 +1,10 @@
-import { providerApiLabel } from '@shared/modelCatalog';
+import { providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
+import type { ModelProviderView } from '@shared/types/llm';
 import { localPluginMode, type PluginEntry, type PluginMode } from '@shared/types/plugins';
 import {
   AppWindow,
+  CircleAlert,
+  CircleCheck,
   Code,
   CopyPlus,
   Ellipsis,
@@ -16,8 +19,7 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
-import { CopyButton } from '@/components/chat/CopyButton';
+import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,6 +41,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { confirmDialog } from '@/lib/appDialog';
@@ -152,8 +161,6 @@ export function PluginsSettings() {
         </ul>
       )}
 
-      <AvailableProviders />
-
       <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <DialogContent>
           <DialogHeader>
@@ -239,6 +246,7 @@ function PluginRow({
             {plugin.source}
           </p>
         )}
+        <RequestedProviders plugin={plugin} onError={onError} />
         {confirmingRemove && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">
@@ -427,40 +435,143 @@ function PluginActions({
   );
 }
 
-/** 插件可用的模型服务：已启用、有 key、有模型；插件代码按 ID 引用服务 */
-function AvailableProviders() {
+/** 自动（同名服务）在下拉框里的值；服务 id 只含小写字母、数字和 -，不会与之冲突 */
+const AUTO_VALUE = '__auto__';
+
+/** 下拉框里服务的地址：baseUrl 的 host，留空时用协议官方地址；解析失败显示协议名 */
+function providerHost(provider: ModelProviderView): string {
+  try {
+    return new URL(resolveBaseUrl(provider.api, provider.baseUrl)).host;
+  } catch {
+    return providerApiLabel(provider.api);
+  }
+}
+
+function isUsable(provider: ModelProviderView): boolean {
+  return provider.enabled && provider.hasApiKey && provider.models.length > 0;
+}
+
+/** 卡片里「需要的模型服务」：插件运行时按名查找过的服务，每个名字可下拉改选实际使用的服务 */
+function RequestedProviders({
+  plugin,
+  onError,
+}: {
+  plugin: PluginEntry;
+  onError: (text: string) => void;
+}) {
+  const plugins = usePluginsStore((state) => state.plugins);
+  const providerMap = usePluginsStore((state) => state.providerMap);
+  const setProviderMapping = usePluginsStore((state) => state.setProviderMapping);
   const providers = useProvidersStore((state) => state.providers);
   const t = useT();
-  const usable = providers.filter(
-    (provider) => provider.enabled && provider.hasApiKey && provider.models.length > 0
-  );
+  const names = plugin.requestedProviders ?? [];
+
+  /** 被多个插件用到的名字 */
+  const shared = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of plugins) {
+      for (const name of new Set(entry.requestedProviders ?? [])) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name));
+  }, [plugins]);
 
   return (
-    <div className="mt-6">
-      <h4 className="mb-1 font-medium text-sm">{t('settings.plugins.providersTitle')}</h4>
-      <p className="mb-2 text-muted-foreground text-xs">{t('settings.plugins.providersHint')}</p>
-      {usable.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t('settings.plugins.providersEmpty')}</p>
+    <div className="mt-2">
+      <p className="mb-1 font-medium text-xs">{t('settings.plugins.requestedTitle')}</p>
+      {names.length === 0 ? (
+        <p className="text-muted-foreground text-xs">{t('settings.plugins.requestedEmpty')}</p>
       ) : (
-        <ul className="divide-y rounded-lg border">
-          {usable.map((provider) => (
-            <li key={provider.id} className="flex items-center gap-2 px-4 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate">
-                <span className="font-mono" title={t('settings.providers.serviceIdHint')}>
-                  {provider.id}
-                </span>
-                <span className="text-muted-foreground">
-                  {' · '}
-                  {provider.name}
-                  {' · '}
-                  {providerApiLabel(provider.api)}
-                </span>
-              </span>
-              <CopyButton text={provider.id} label={t('settings.providers.copyServiceId')} />
-            </li>
-          ))}
+        <ul className="flex flex-col gap-1.5">
+          {names.map((name) => {
+            const mapped = Object.hasOwn(providerMap, name) ? providerMap[name] : undefined;
+            const auto = providers.find((provider) => provider.id === name);
+            const target = mapped ? providers.find((provider) => provider.id === mapped) : auto;
+            const items = [
+              {
+                value: AUTO_VALUE,
+                label: auto
+                  ? t('settings.plugins.requestedAuto', { name: auto.name })
+                  : t('settings.plugins.requestedAutoMissing'),
+              },
+              ...providers.map((provider) => ({
+                value: provider.id,
+                label: `${provider.name} · ${providerHost(provider)}`,
+              })),
+            ];
+            if (mapped && !target) {
+              items.push({ value: mapped, label: t('settings.plugins.requestedMissing') });
+            }
+            const state = !target ? 'missing' : isUsable(target) ? 'usable' : 'unavailable';
+            return (
+              <li key={name}>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-28 shrink-0 truncate font-mono text-muted-foreground text-xs"
+                    title={t('settings.plugins.requestedNameHint')}
+                  >
+                    {name}
+                  </span>
+                  <Select
+                    items={items}
+                    value={mapped ?? AUTO_VALUE}
+                    onValueChange={async (next) => {
+                      if (typeof next !== 'string') return;
+                      const result = await setProviderMapping(
+                        name,
+                        next === AUTO_VALUE ? null : next
+                      );
+                      if (!result.ok) onError(result.error);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="min-w-0 flex-1"
+                      aria-label={t('settings.plugins.requestedSelect', { name })}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {items.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span
+                    className={
+                      state === 'usable'
+                        ? 'flex shrink-0 items-center gap-1 text-emerald-600 text-xs'
+                        : 'flex shrink-0 items-center gap-1 text-amber-600 text-xs'
+                    }
+                  >
+                    {state === 'usable' ? (
+                      <CircleCheck className="size-3.5" />
+                    ) : (
+                      <CircleAlert className="size-3.5" />
+                    )}
+                    {t(
+                      state === 'usable'
+                        ? 'settings.plugins.requestedUsable'
+                        : state === 'missing'
+                          ? 'settings.plugins.requestedMissing'
+                          : 'settings.plugins.requestedUnavailable'
+                    )}
+                  </span>
+                </div>
+                {shared.has(name) && (
+                  <p className="mt-0.5 text-muted-foreground text-xs">
+                    {t('settings.plugins.requestedShared')}
+                  </p>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
+      <p className="mt-1 text-muted-foreground text-xs">{t('settings.plugins.requestedFooter')}</p>
     </div>
   );
 }
