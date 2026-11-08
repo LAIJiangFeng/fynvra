@@ -2,7 +2,6 @@ import { MODEL_CATALOG, providerApiLabel, resolveBaseUrl } from '@shared/modelCa
 import type { ModelProviderView } from '@shared/types/llm';
 import { Boxes, ChevronDown, HardDriveDownload, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { CopyButton } from '@/components/chat/CopyButton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -182,13 +181,6 @@ function ProviderCard({ provider, onEdit }: { provider: ModelProviderView; onEdi
             <span className="font-medium">{provider.name}</span>
             <Badge variant="outline">{providerApiLabel(provider.api)}</Badge>
             {!provider.enabled && <Badge>{t('common.disabled')}</Badge>}
-            <span
-              className="flex min-w-0 items-center text-muted-foreground text-xs"
-              title={t('settings.providers.serviceIdHint')}
-            >
-              <span className="truncate font-mono">ID: {provider.id}</span>
-              <CopyButton text={provider.id} label={t('settings.providers.copyServiceId')} />
-            </span>
           </div>
           <p className="mt-1 truncate text-muted-foreground text-xs">
             {maskSecrets(resolveBaseUrl(provider.api, provider.baseUrl))}
