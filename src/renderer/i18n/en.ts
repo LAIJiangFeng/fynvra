@@ -36,7 +36,7 @@ export const en: MessagesShape<typeof zhCN> = {
     manualInstall:
       'This Mac build has no Apple Developer ID signature. Download new versions from GitHub Releases and install manually',
     automatic:
-      'Installed releases check at startup and every 4 hours; updates download automatically and install after confirmation',
+      'Releases check for and download updates every 4 hours, then restart to install after you confirm.',
     status: {
       idle: 'Will check for new versions automatically',
       checking: 'Checking for updates...',
@@ -745,12 +745,8 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     webFetch: {
       title: 'Web reader',
-      allowLoopback: 'Allow web_fetch to access local addresses (localhost / 127.0.0.1 / ::1)',
-      approval: 'Still requires “Network access” approval; no longer asked in “Full access” mode',
-      exposure:
-        'Content from local services (dev servers, admin interfaces, proxy control ports, etc.) will enter the conversation',
-      blocked: 'Intranet and cloud metadata addresses are always blocked',
-      effective: 'Applies to sessions loaded afterwards',
+      allowLoopback: 'Allow web_fetch to access local addresses',
+      hint: 'Only localhost, 127.0.0.1 and ::1; still needs “Network access” approval. Applies to new sessions.',
     },
     network: {
       title: 'Git and command proxy',
@@ -758,18 +754,16 @@ export const en: MessagesShape<typeof zhCN> = {
       manual: 'Manual proxy',
       address: 'HTTP / HTTPS proxy address',
       scope:
-        'Applies to command/Git subprocesses (Git, agent shell commands including gh), new terminals, and the built-in web reader (web_fetch). Model API, MCP and app update traffic does not use this setting and keeps its own routing. Existing environment means inherited process variables, not the Windows system proxy',
+        'Used by Git, agent commands, new terminals and web_fetch. Model API, MCP and app updates are not affected.',
+      environmentHint: 'Uses inherited proxy environment variables, not the Windows system proxy.',
       manualHint:
-        'Only HTTP/HTTPS proxies without authentication are supported. One address is supplied for both HTTP and HTTPS. Manual mode clears inherited ALL_PROXY and NO_PROXY bypass rules. A command’s own explicit network settings may still override this',
+        'HTTP/HTTPS proxies without credentials only. Inherited ALL_PROXY and NO_PROXY are ignored.',
       compatibility: 'Git compatibility mode',
-      compatibilityHint: 'Use HTTP/1.1 and Git protocol v0. TLS verification is not weakened',
-      effective:
-        'After saving, new Git operations and commands run by the app use these settings. Agent commands use them when a session next starts or resumes, and terminals when newly opened. Existing sessions and terminals are not automatically restarted',
-      invalid:
-        'Enter an HTTP/HTTPS proxy URL without credentials, a path, query or fragment, and with a valid port',
+      compatibilityHint: 'Turn on if Git connections are unstable; uses HTTP/1.1 and protocol v0.',
+      effective: 'Applies to new Git operations, sessions and terminals after saving.',
+      invalid: 'Enter http(s)://host:port. Credentials and paths are not supported.',
       test: 'Test connection',
-      testHint:
-        'Tests the current draft without saving: GitHub API HTTPS and the public Fynvra repository HEAD. No push permission check. Some services may still fail',
+      testHint: 'Checks whether GitHub is reachable with the current values, without saving.',
       testing: 'Testing connection…',
       saved: 'Saved. New sessions and terminals will use these settings',
       api: 'GitHub API HTTPS',
@@ -831,12 +825,12 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionSelected: 'Strategy selected in settings',
       compactionTimeout: 'Total native compaction wait limit (seconds)',
       compactionTimeoutHint:
-        'Includes summary retries. 30–1800 seconds; default 600 seconds (10 minutes). Applies to newly loaded sessions; restart the app for already loaded sessions. On timeout, the conversation and pending messages are preserved for manual retry',
+        '30–1800 seconds, default 600. On timeout, the session and messages are kept for manual retry.',
       compactionNative: 'pi native auto-compaction',
       compactionMagic: 'Magic Context (default)',
       compactionOff: 'Turn off auto-compaction',
       compactionHint:
-        'Applies to newly loaded sessions. Magic Context uses the current model in the background, which may add model requests. Failures pause the session and preserve inputs for explicit recovery, without native fallback',
+        'Magic Context tidies history in the background with the current model, adding extra requests. Applies to new sessions.',
       off: 'Off',
       never: 'Never',
       days: '{days} {days|day|days}',
