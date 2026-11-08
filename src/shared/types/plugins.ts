@@ -1,17 +1,37 @@
 /** 插件来源类型：本地目录 / 扩展文件，或经 pi 包管理器安装的 npm / git 包 */
 export type PluginKind = 'local' | 'npm' | 'git';
 
-/** plugins.json 里的一条记录；path 是 pi 包目录或单个扩展文件（.ts / .js / .mjs）的绝对路径 */
+/** 本地插件的形态：copy 复制到 Fynvra 的副本目录后加载；link 直接加载原路径（开发模式） */
+export type PluginMode = 'copy' | 'link';
+
+/**
+ * plugins.json 里的一条记录；path 是实际加载的 pi 包目录或单个扩展文件（.ts / .js / .mjs）的绝对路径：
+ * copy 模式下是副本路径，link 模式下是原路径。
+ */
 export interface PluginEntry {
   id: string;
   name: string;
-  /** 本地插件为绝对路径；远程插件为用户输入的 npm: / git: / https:// 来源 */
+  /** 本地插件为原始绝对路径；远程插件为用户输入的 npm: / git: / https:// 来源 */
   source: string;
   kind: PluginKind;
   path: string;
   enabled: boolean;
   /** 登记时间（epoch ms） */
   installedAt: number;
+  /** 仅本地插件；旧记录没有该字段，按 link 处理 */
+  mode?: PluginMode;
+  /** 仅 copy 模式：复制来源的原始路径 */
+  sourcePath?: string;
+}
+
+/** 本地插件的实际模式（旧记录缺省为 link）；npm / git 插件返回 null */
+export function localPluginMode(entry: Pick<PluginEntry, 'kind' | 'mode'>): PluginMode | null {
+  if (entry.kind !== 'local') return null;
+  return entry.mode === 'copy' ? 'copy' : 'link';
+}
+
+export function isPluginMode(value: unknown): value is PluginMode {
+  return value === 'copy' || value === 'link';
 }
 
 /** 远程来源的最大长度（去首尾空白后） */

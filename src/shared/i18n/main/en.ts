@@ -230,6 +230,13 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     pickKindFile: 'Single extension file',
     pickTitle: 'Choose plugin',
     fileFilter: 'pi extensions',
+    copyFailed: 'Failed to copy plugin: {error}',
+    copyTooLarge: 'The plugin exceeds 200 MB or 20,000 files; use link mode instead',
+    sourceInCopyRoot: 'The plugin source overlaps the plugin copy folder and cannot be copied',
+    outsideCopyRoot: 'The copy is outside the plugin copy folder; the operation was refused',
+    notCopy: 'Only copied plugins can be re-copied',
+    notLink: 'Only linked plugins can be converted to a copy',
+    openFailed: 'Failed to open plugin: {error}',
   },
   providers: {
     readFailed: 'Failed to read providers: {error}',

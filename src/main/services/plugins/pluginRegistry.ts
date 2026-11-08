@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { asRecord } from '@shared/guards';
-import type { PluginEntry, PluginKind } from '@shared/types/plugins';
+import { isPluginMode, type PluginEntry, type PluginKind } from '@shared/types/plugins';
 import { translate } from '../../i18n';
 import { samePath } from '../gitRepository';
 import { isRegistryId, toSlug, uniqueId } from '../providers/jsonRegistry';
@@ -24,10 +24,16 @@ export interface PluginRegistry {
   /** 只删登记；返回被删的记录，id 不存在时返回 undefined。 */
   remove(id: string): Promise<PluginEntry | undefined>;
   setEnabled(id: string, enabled: boolean): Promise<PluginEntry | undefined>;
+  /** 只改本地插件的加载路径 / 模式 / 来源路径；id 不存在或不是本地插件时返回 undefined。 */
+  updateLocal(
+    id: string,
+    patch: { path: string; mode: 'copy'; sourcePath: string }
+  ): Promise<PluginEntry | undefined>;
 }
 
 /**
- * `userData/plugins.json`：`{ version: 1, plugins: PluginEntry[] }`，插件只存引用（本地插件不复制）。
+ * `userData/plugins.json`：`{ version: 1, plugins: PluginEntry[] }`。本地插件的 path 是副本（copy）或原路径（link），
+ * 复制本身由调用方完成（见 pluginCopies.ts）。
  * 读写串行、原子替换；与 skills.json / mcp.json 不同，文件损坏时报错而不是改名后按空表继续，
  * 避免用户的插件登记被静默清空。
  */
@@ -101,6 +107,10 @@ export function createPluginRegistry(options: {
           path: plugin.path,
           enabled: true,
           installedAt: now(),
+          ...(plugin.kind === 'local' && plugin.mode ? { mode: plugin.mode } : {}),
+          ...(plugin.kind === 'local' && plugin.mode === 'copy' && plugin.sourcePath
+            ? { sourcePath: plugin.sourcePath }
+            : {}),
         };
         return { next: [...entries, entry], result: { ok: true, plugin: entry } };
       }),
@@ -117,6 +127,14 @@ export function createPluginRegistry(options: {
         const current = entries[index];
         if (!current) return { result: undefined };
         const updated = { ...current, enabled };
+        return { next: entries.with(index, updated), result: updated };
+      }),
+    updateLocal: (id, patch) =>
+      transact((entries) => {
+        const index = entries.findIndex((entry) => entry.id === id);
+        const current = entries[index];
+        if (current?.kind !== 'local') return { result: undefined };
+        const updated: PluginEntry = { ...current, ...patch };
         return { next: entries.with(index, updated), result: updated };
       }),
   };
@@ -157,7 +175,7 @@ const KINDS: readonly PluginKind[] = ['local', 'npm', 'git'];
 export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { id, name, source, kind, path, enabled, installedAt } = record;
+  const { id, name, source, kind, path, enabled, installedAt, mode, sourcePath } = record;
   if (!isRegistryId(id) || typeof name !== 'string' || !name.trim()) return null;
   if (typeof source !== 'string' || !source.trim()) return null;
   if (typeof kind !== 'string' || !KINDS.includes(kind as PluginKind)) return null;
@@ -170,6 +188,11 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
     path,
     enabled: typeof enabled === 'boolean' ? enabled : true,
     installedAt: typeof installedAt === 'number' && Number.isFinite(installedAt) ? installedAt : 0,
+    // 旧的本地记录没有 mode：不补字段，读取时按 link 处理；copy 缺 sourcePath 也仍可加载副本
+    ...(kind === 'local' && isPluginMode(mode) ? { mode } : {}),
+    ...(kind === 'local' && mode === 'copy' && typeof sourcePath === 'string' && sourcePath.trim()
+      ? { sourcePath }
+      : {}),
   };
 }
 
