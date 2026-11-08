@@ -186,7 +186,7 @@ export const IPC_CHANNELS = {
 
   // --- plugins ---
   PLUGINS_LIST: 'plugins:list',
-  /** `{ mode }`（缺省 copy）：Main 弹框选目录或扩展文件，复制或引用后登记；Renderer 不传路径 */
+  /** 无参数（或 `{}`）：Main 弹框选目录或扩展文件，复制到副本目录后登记；Renderer 不传路径 */
   PLUGINS_ADD_LOCAL: 'plugins:add-local',
   /** id：用系统文件管理器打开插件所在位置 */
   PLUGINS_REVEAL: 'plugins:reveal',
@@ -200,6 +200,7 @@ export const IPC_CHANNELS = {
   PLUGINS_CONVERT_TO_COPY: 'plugins:convert-to-copy',
   /** `{ source }`：npm: / git: / https:// 来源，经 pi 包管理器安装到 user 作用域 */
   PLUGINS_INSTALL: 'plugins:install',
+  /** id：删除插件，并从所有角色的 pluginIds 中移除（有改动时广播 roles:changed） */
   PLUGINS_REMOVE: 'plugins:remove',
   PLUGINS_TOGGLE: 'plugins:toggle',
   /** `{ name, serviceId: string | null }`：插件里的服务名改用哪个模型服务；null 恢复「自动（同名）」 */
