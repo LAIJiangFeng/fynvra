@@ -334,7 +334,8 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
     const started = await startAttemptSession(
       { workspace, launcher, now },
       { ...task, roleId: step.roleId },
-      { dispatchId: launch.dispatchId, worktree, brief }
+      // nodeId 让同一任务下并行节点的尝试可以同时未结算（store 按节点校验）
+      { dispatchId: launch.dispatchId, worktree, brief, nodeId: launch.nodeId }
     );
     if (!started.ok) return { ok: false, error: started.error };
     // 必须紧跟在 launcher resolve 之后同步落库，中间不能有 await（同 host.start）：
@@ -551,7 +552,10 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
       if (first) next = { ...next, worktreeId: first.worktreeId };
     }
     if (orphan !== undefined) {
-      const last = attempts.at(-1);
+      // 带 nodeId 的尝试只归它自己的节点（并行节点各有各的）；旧快照没有 nodeId，按最近一次
+      const last = attempts
+        .filter((entry) => entry.nodeId === undefined || entry.nodeId === orphan.id)
+        .at(-1);
       next = {
         ...next,
         nodes: next.nodes.map((node): TaskWorkflowNodeState => {

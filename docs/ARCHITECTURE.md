@@ -109,6 +109,9 @@ export interface TaskWorkflow {
 export interface Dispatch {
   id: string; taskId: string; workerSessionId: string; worktreeId: string; branch: string;
   mode?: 'in-place';          // 工作区 vcs 为 none：worker 直接在工作区目录里干活，worktreeId / branch 为空串；缺省是 worktree 模式
+  nodeId?: string;            // 工作流节点 id：引擎为节点起的尝试才有（汇总 dispatch 没有）；旧快照缺省
+  // 未结算的尝试：普通任务同时最多一个；工作流任务按节点计，每个节点最多一个（双方都带 nodeId 且不同才可并存）。
+  // store 的 activeDispatch(taskId) 取其一，activeDispatches(taskId) 按插入顺序给出全部
   startedAt: number; settledAt?: number; outcome?: 'succeeded' | 'failed';
   summary?: string; filesModified?: string[];
 }
@@ -506,7 +509,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - 成功：全部节点通过且合并完成后任务进入 `in-review`，发 worker_done(succeeded)：正文含图摘要、各节点状态与历程，改动文件取各节点并集。worker_done 的 dispatch（代表 dispatch）作用于集成 worktree：任务最后一次尝试就在集成 worktree（或普通目录）里时用它；否则（如末尾是并行节点、或整个工作流都没有节点在集成 worktree 里跑过）补一条已结算的汇总 Dispatch：`worktreeId` / `branch` 指向集成 worktree，`outcome` 为工作流结果，`summary` 汇总各节点，`filesModified` 为并集，`workerSessionId` 沿用最近结算节点的会话。它是该任务最新的 dispatch，`review_diff` / `run_checks` / `merge_worktree` / `cleanup_worktree` / `reject_work` 按现有规则作用于集成 worktree。
   - `reject_work`（in-review 或 failed，现有保护条件不变）：清理遗留的节点 worktree，从起点节点开始整图重跑，全部节点重置为等待，反馈写进起点节点任务书，`rounds` 归零、历史保留。
   - abandon（`cleanup_worktree { abandon: true }`，可传任一运行中节点或代表 dispatch）：所有进行中的节点尝试按 failed 结算、节点记为 cancelled、启动意图清空；停掉所有节点会话，清理所有节点 worktree / 分支与集成 worktree。
-  - 崩溃恢复：先写启动意图（含预分配的 dispatchId）再建节点 worktree（建好即写进意图）、再起会话，会话起来后同步落库 Dispatch 与节点 running。服务加载 / 对账时推进所有 in-progress 的工作流任务：意图里的 dispatch 已存在则只补状态、不重复启动，否则复用已建的 worktree 重新启动；通过未合并的节点补做合并（幂等）；全部结束却未汇总的补做汇总。运行中节点的会话确定已失败时（`sessionFailure`）该节点按 failed 结算。
+  - 崩溃恢复：先写启动意图（含预分配的 dispatchId）再建节点 worktree（建好即写进意图）、再起会话，会话起来后同步落库 Dispatch 与节点 running。服务加载 / 对账时推进所有 in-progress 的工作流任务：意图里的 dispatch 已存在则只补状态、不重复启动，否则复用已建的 worktree 重新启动；通过未合并的节点补做合并（幂等）；全部结束却未汇总的补做汇总。运行中节点的会话确定已失败时（`sessionFailure`）该节点按 failed 结算；对账逐个检查任务的全部未结算尝试（并行节点各一个），不属于运行中节点或待启动意图的孤儿尝试会话已死时只结算它自己。abandon / reject_work 重跑前结算任务全部未结算尝试、停掉全部节点会话。
 - 任务书：原 spec + 「工作流 X · 节点 <名称>」+ 本节点说明 + 判定契约（通过 → `report_done succeeded`；发现需要退回的问题 → `failed`，summary 写清问题与复现）+ 已完成上游节点的摘要 / 退回反馈。
 - 编排工具显示：`list_workers` / `dispatch_task` 对工作流任务显示工作流名、图摘要、回退次数 `r/max`，每个节点一行（状态 waiting / starting / running / merging / passed / failed / cancelled、名称、角色、dispatch_id、是否在自己的 worktree）；运行中不再单列任务级 dispatch，结束后单列代表 dispatch；`wait_for_workers` 把整体未结束的工作流任务算作仍在运行；`send_to_worker` / `read_worker_output` 接受该任务任一活动节点的 dispatch；`ask_coordinator` 转给主 agent 的问题带上工作流名和节点名；工具说明与提示词里的工作流显示成图的文字摘要。
 - 设置页（W3）「设置 → 工作流」：
