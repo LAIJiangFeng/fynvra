@@ -244,7 +244,8 @@ describe('dispatchTask', () => {
 
   it('依赖异常（如角色仓库抛错）也返回错误结果而不是抛出', async () => {
     const roles = createFakeRoles();
-    roles.get = async () => {
+    // 派发按实时角色表解析角色（roles.list）
+    roles.list = async () => {
       throw new Error('roles dir unreadable');
     };
     const result = await makeHost({ roles }).dispatchTask({
