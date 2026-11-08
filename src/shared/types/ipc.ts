@@ -204,6 +204,8 @@ export const IPC_CHANNELS = {
   PLUGINS_TOGGLE: 'plugins:toggle',
   /** `{ name, serviceId: string | null }`：插件里的服务名改用哪个模型服务；null 恢复「自动（同名）」 */
   PLUGINS_SET_PROVIDER_MAPPING: 'plugins:set-provider-mapping',
+  /** `{ id, names: string[] }`：整组替换某插件手动添加的服务名（合法、去重、最多 20 个） */
+  PLUGINS_SET_MANUAL_PROVIDERS: 'plugins:set-manual-providers',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 
