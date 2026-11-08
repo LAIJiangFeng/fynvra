@@ -5,8 +5,10 @@ import { create } from 'zustand';
 import type {
   PluginActionResult,
   PluginAddResult,
+  PluginImportResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
+  PluginScanImportsResult,
   PluginSetManualProvidersResult,
   PluginSetProviderMappingResult,
   PluginToggleResult,
@@ -22,6 +24,10 @@ export interface PluginsState {
   /** Main 弹框选择目录或扩展文件，一律复制一份；不传路径 */
   addLocal(): Promise<PluginAddResult>;
   install(source: string): Promise<PluginAddResult>;
+  /** 只读扫描原生 pi 的扩展与包 */
+  scanImports(): Promise<PluginScanImportsResult>;
+  /** 导入扫描到的候选；只传 id */
+  importCandidates(ids: string[]): Promise<PluginImportResult>;
   remove(id: string): Promise<PluginRemoveResult>;
   toggle(id: string, enabled: boolean): Promise<PluginToggleResult>;
   reveal(id: string): Promise<IpcResult>;
@@ -100,6 +106,14 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
       result = { ok: false, code: 'failed', error: errorMessage(error) };
     }
     if (result.ok) await get().refresh();
+    return result;
+  },
+
+  scanImports: () => safely(() => api.scanImports()),
+
+  async importCandidates(ids) {
+    const result = await safely(() => api.importCandidates({ ids }));
+    if (result.ok && result.imported.length > 0) await get().refresh();
     return result;
   },
 
