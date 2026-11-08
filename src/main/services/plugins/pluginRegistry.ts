@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { asRecord } from '@shared/guards';
-import { isPluginMode, type PluginEntry, type PluginKind } from '@shared/types/plugins';
+import {
+  isPluginMode,
+  isPluginProviderName,
+  MAX_PROVIDER_MAP_ENTRIES,
+  MAX_REQUESTED_PROVIDERS,
+  type PluginEntry,
+  type PluginKind,
+  type PluginProviderMap,
+} from '@shared/types/plugins';
 import { translate } from '../../i18n';
 import { samePath } from '../gitRepository';
 import { isRegistryId, toSlug, uniqueId } from '../providers/jsonRegistry';
@@ -29,6 +37,18 @@ export interface PluginRegistry {
     id: string,
     patch: { path: string; mode: 'copy'; sourcePath: string }
   ): Promise<PluginEntry | undefined>;
+  /**
+   * 把插件运行时找过的服务名记进 requestedProviders（去重，最多 20 个，按首次出现排序）；
+   * 只有内容变了才写盘并返回 true，插件不存在时返回 false
+   */
+  recordRequestedProvider(id: string, name: string): Promise<boolean>;
+  /** 插件里的服务名 → 服务 id */
+  getProviderMap(): Promise<PluginProviderMap>;
+  /**
+   * 设置或删除（serviceId 为 null，恢复「自动（同名）」）一条映射；不校验服务是否存在（由调用方负责）。
+   * 内容变了才写盘并返回 true；名字或 id 不合法返回 false；超出条目上限时 reject
+   */
+  setProviderMapping(name: string, serviceId: string | null): Promise<boolean>;
 }
 
 /**
@@ -43,7 +63,7 @@ export function createPluginRegistry(options: {
   now?: () => number;
 }): PluginRegistry {
   const { filePath, platform = process.platform, now = Date.now } = options;
-  let cache: PluginEntry[] | null = null;
+  let cache: StoredPlugins | null = null;
   let tail: Promise<unknown> = Promise.resolve();
 
   const enqueue = <R>(task: () => Promise<R>): Promise<R> => {
@@ -51,17 +71,24 @@ export function createPluginRegistry(options: {
     tail = run.catch(() => undefined);
     return run;
   };
-  const load = async (): Promise<PluginEntry[]> => {
+  const loadState = async (): Promise<StoredPlugins> => {
     cache ??= await readPlugins(filePath);
     return cache;
   };
+  const load = async (): Promise<PluginEntry[]> => (await loadState()).plugins;
+  const save = async (next: StoredPlugins) => {
+    await writeJsonAtomic(filePath, {
+      version: FILE_VERSION,
+      plugins: next.plugins,
+      ...(Object.keys(next.providerMap).length > 0 ? { providerMap: next.providerMap } : {}),
+    });
+    cache = structuredClone(next);
+  };
   const transact = <R>(fn: (entries: PluginEntry[]) => { next?: PluginEntry[]; result: R }) =>
     enqueue(async () => {
-      const { next, result } = fn(structuredClone(await load()));
-      if (next) {
-        await writeJsonAtomic(filePath, { version: FILE_VERSION, plugins: next });
-        cache = structuredClone(next);
-      }
+      const state = await loadState();
+      const { next, result } = fn(structuredClone(state.plugins));
+      if (next) await save({ plugins: next, providerMap: state.providerMap });
       return result;
     });
   const duplicateOf = (entries: readonly PluginEntry[], source: string, path?: string) =>
@@ -137,20 +164,68 @@ export function createPluginRegistry(options: {
         const updated: PluginEntry = { ...current, ...patch };
         return { next: entries.with(index, updated), result: updated };
       }),
+    recordRequestedProvider: (id, name) =>
+      transact((entries) => {
+        if (!isPluginProviderName(name)) return { result: false };
+        const index = entries.findIndex((entry) => entry.id === id);
+        const current = entries[index];
+        const requested = current?.requestedProviders ?? [];
+        if (!current || requested.includes(name) || requested.length >= MAX_REQUESTED_PROVIDERS) {
+          return { result: false };
+        }
+        const updated: PluginEntry = { ...current, requestedProviders: [...requested, name] };
+        return { next: entries.with(index, updated), result: true };
+      }),
+    getProviderMap: () => enqueue(async () => ({ ...(await loadState()).providerMap })),
+    setProviderMapping: (name, serviceId) =>
+      enqueue(async () => {
+        if (!isPluginProviderName(name)) return false;
+        if (serviceId !== null && !isRegistryId(serviceId)) return false;
+        const state = await loadState();
+        const current = state.providerMap[name];
+        if (serviceId === null) {
+          if (current === undefined) return false;
+          const providerMap = { ...state.providerMap };
+          delete providerMap[name];
+          await save({ plugins: state.plugins, providerMap });
+          return true;
+        }
+        if (current === serviceId) return false;
+        if (
+          current === undefined &&
+          Object.keys(state.providerMap).length >= MAX_PROVIDER_MAP_ENTRIES
+        ) {
+          throw new Error(translate('plugins.providerMapFull', { max: MAX_PROVIDER_MAP_ENTRIES }));
+        }
+        await save({
+          plugins: state.plugins,
+          providerMap: { ...state.providerMap, [name]: serviceId },
+        });
+        return true;
+      }),
   };
 }
 
-async function readPlugins(filePath: string): Promise<PluginEntry[]> {
+interface StoredPlugins {
+  plugins: PluginEntry[];
+  /** 插件里的服务名 → 服务 id（见 {@link PluginRegistry.setProviderMapping}） */
+  providerMap: PluginProviderMap;
+}
+
+async function readPlugins(filePath: string): Promise<StoredPlugins> {
   let text: string;
   try {
     text = await readFile(filePath, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { plugins: [], providerMap: {} };
     throw error;
   }
   let raw: unknown;
+  let rawMap: unknown;
   try {
-    raw = asRecord(JSON.parse(text))?.plugins;
+    const file = asRecord(JSON.parse(text));
+    raw = file?.plugins;
+    rawMap = file?.providerMap;
   } catch {
     raw = undefined;
   }
@@ -167,7 +242,22 @@ async function readPlugins(filePath: string): Promise<PluginEntry[]> {
   if (entries.length < raw.length) {
     console.warn(`[plugins] ${filePath}：跳过 ${raw.length - entries.length} 条无效或重复的记录`);
   }
-  return entries;
+  return { plugins: entries, providerMap: parseProviderMap(rawMap) };
+}
+
+/** providerMap：非法条目丢弃，不让整个文件失效；超出上限的截掉 */
+export function parseProviderMap(raw: unknown): PluginProviderMap {
+  const record = asRecord(raw);
+  const map: PluginProviderMap = {};
+  if (!record) return map;
+  let count = 0;
+  for (const [name, serviceId] of Object.entries(record)) {
+    if (count >= MAX_PROVIDER_MAP_ENTRIES) break;
+    if (!isPluginProviderName(name) || !isRegistryId(serviceId)) continue;
+    map[name] = serviceId;
+    count++;
+  }
+  return map;
 }
 
 const KINDS: readonly PluginKind[] = ['local', 'npm', 'git'];
@@ -176,6 +266,7 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   const record = asRecord(raw);
   if (!record) return null;
   const { id, name, source, kind, path, enabled, installedAt, mode, sourcePath } = record;
+  const requestedProviders = parseRequestedProviders(record.requestedProviders);
   if (!isRegistryId(id) || typeof name !== 'string' || !name.trim()) return null;
   if (typeof source !== 'string' || !source.trim()) return null;
   if (typeof kind !== 'string' || !KINDS.includes(kind as PluginKind)) return null;
@@ -193,7 +284,19 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
     ...(kind === 'local' && mode === 'copy' && typeof sourcePath === 'string' && sourcePath.trim()
       ? { sourcePath }
       : {}),
+    ...(requestedProviders.length > 0 ? { requestedProviders } : {}),
   };
+}
+
+/** 非法与重复的名字丢弃，最多 {@link MAX_REQUESTED_PROVIDERS} 个 */
+function parseRequestedProviders(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const names: string[] = [];
+  for (const name of raw) {
+    if (names.length >= MAX_REQUESTED_PROVIDERS) break;
+    if (isPluginProviderName(name) && !names.includes(name)) names.push(name);
+  }
+  return names;
 }
 
 /** 先写同目录临时文件再 rename 覆盖，进程中途退出也不会留下半截文件。 */

@@ -1,7 +1,17 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { PluginEntry, PluginMode } from '@shared/types/plugins';
+import type {
+  PluginEntry,
+  PluginMode,
+  PluginProviderMap,
+  SetPluginProviderMappingInput,
+} from '@shared/types/plugins';
 
-export type PluginListResult = IpcResult<{ plugins: PluginEntry[] }>;
+/** providerMap：插件里的服务名 → 服务 id（全局，所有插件共用） */
+export type PluginListResult = IpcResult<{
+  plugins: PluginEntry[];
+  providerMap: PluginProviderMap;
+}>;
+export type PluginSetProviderMappingResult = IpcResult<{ providerMap: PluginProviderMap }>;
 /** busy：已有安装 / 卸载在进行；canceled：取消了选择框 */
 export type PluginAddResult =
   | { ok: true; plugin: PluginEntry }
@@ -35,6 +45,8 @@ export interface PluginsApi {
   recopy(id: string): Promise<PluginActionResult>;
   /** 仅引用：复制一份并改为副本模式 */
   convertToCopy(id: string): Promise<PluginActionResult>;
+  /** 插件里的服务名改用哪个模型服务（须是已存在的服务 id）；serviceId 为 null 恢复「自动（同名）」 */
+  setProviderMapping(input: SetPluginProviderMappingInput): Promise<PluginSetProviderMappingResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -54,6 +66,7 @@ export function createPluginsApi(ipc: Invoker, subscribe: Subscribe): PluginsApi
     openAsWorkspace: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_OPEN_AS_WORKSPACE, id),
     recopy: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_RECOPY, id),
     convertToCopy: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_CONVERT_TO_COPY, id),
+    setProviderMapping: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_SET_PROVIDER_MAPPING, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PLUGINS_CHANGED, () => callback()),
   };
 }
