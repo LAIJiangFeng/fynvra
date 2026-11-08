@@ -209,6 +209,7 @@ export const mainZhCN = {
     installedPathMissing: '安装完成但找不到安装目录',
     toolMissing: '未找到 {tool}，请先安装并确保它在 PATH 中',
     removeFailed: '移除插件失败：{error}',
+    removedPending: '已删除「{name}」，有文件正被占用，重启 Fynvra 后会自动清理',
     updateFailed: '更新插件失败：{error}',
     invalidProviderMapping:
       '无效的模型服务关联：名称须为 1–64 个字母、数字、“.”“_”或“-”，且不能以 fynvra- 开头',

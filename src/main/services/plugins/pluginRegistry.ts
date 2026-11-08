@@ -14,6 +14,7 @@ import {
 import { translate } from '../../i18n';
 import { samePath } from '../gitRepository';
 import { isRegistryId, toSlug, uniqueId } from '../providers/jsonRegistry';
+import { MAX_PENDING_DELETES } from './pluginRemoval';
 
 const FILE_VERSION = 1;
 const MAX_NAME_LENGTH = 200;
@@ -63,6 +64,12 @@ export interface PluginRegistry {
    * 内容变了才写盘并返回 true；名字或 id 不合法返回 false；超出条目上限时 reject
    */
   setProviderMapping(name: string, serviceId: string | null): Promise<boolean>;
+  /** 删除时没能删掉、等下次启动再清理的插件目录 */
+  listPendingDeletes(): Promise<string[]>;
+  /** 加入待清理列表（不合法的路径忽略；已在列表中不重复加；超过上限挤掉最早的） */
+  addPendingDelete(path: string): Promise<void>;
+  /** 从待清理列表移除（按 samePath 比较） */
+  dropPendingDeletes(paths: readonly string[]): Promise<void>;
 }
 
 /**
@@ -75,8 +82,15 @@ export function createPluginRegistry(options: {
   filePath: string;
   platform?: NodeJS.Platform;
   now?: () => number;
+  /** pendingDeletes 只接受这里返回 true 的路径（受管根目录内）；缺省一律不接受 */
+  isPendingDeleteAllowed?: (path: string) => boolean;
 }): PluginRegistry {
-  const { filePath, platform = process.platform, now = Date.now } = options;
+  const {
+    filePath,
+    platform = process.platform,
+    now = Date.now,
+    isPendingDeleteAllowed = () => false,
+  } = options;
   let cache: StoredPlugins | null = null;
   let tail: Promise<unknown> = Promise.resolve();
 
@@ -86,7 +100,7 @@ export function createPluginRegistry(options: {
     return run;
   };
   const loadState = async (): Promise<StoredPlugins> => {
-    cache ??= await readPlugins(filePath);
+    cache ??= await readPlugins(filePath, isPendingDeleteAllowed);
     return cache;
   };
   const load = async (): Promise<PluginEntry[]> => (await loadState()).plugins;
@@ -95,6 +109,7 @@ export function createPluginRegistry(options: {
       version: FILE_VERSION,
       plugins: next.plugins,
       ...(Object.keys(next.providerMap).length > 0 ? { providerMap: next.providerMap } : {}),
+      ...(next.pendingDeletes.length > 0 ? { pendingDeletes: next.pendingDeletes } : {}),
     });
     cache = structuredClone(next);
   };
@@ -102,7 +117,7 @@ export function createPluginRegistry(options: {
     enqueue(async () => {
       const state = await loadState();
       const { next, result } = fn(structuredClone(state.plugins));
-      if (next) await save({ plugins: next, providerMap: state.providerMap });
+      if (next) await save({ ...state, plugins: next });
       return result;
     });
   const duplicateOf = (entries: readonly PluginEntry[], source: string, path?: string) =>
@@ -230,7 +245,7 @@ export function createPluginRegistry(options: {
           if (current === undefined) return false;
           const providerMap = { ...state.providerMap };
           delete providerMap[name];
-          await save({ plugins: state.plugins, providerMap });
+          await save({ ...state, providerMap });
           return true;
         }
         if (current === serviceId) return false;
@@ -241,10 +256,28 @@ export function createPluginRegistry(options: {
           throw new Error(translate('plugins.providerMapFull', { max: MAX_PROVIDER_MAP_ENTRIES }));
         }
         await save({
-          plugins: state.plugins,
+          ...state,
           providerMap: { ...state.providerMap, [name]: serviceId },
         });
         return true;
+      }),
+    listPendingDeletes: () => enqueue(async () => [...(await loadState()).pendingDeletes]),
+    addPendingDelete: (path) =>
+      enqueue(async () => {
+        if (!isPendingDeleteAllowed(path)) return;
+        const state = await loadState();
+        if (state.pendingDeletes.some((item) => samePath(item, path, platform))) return;
+        const pendingDeletes = [...state.pendingDeletes, path].slice(-MAX_PENDING_DELETES);
+        await save({ ...state, pendingDeletes });
+      }),
+    dropPendingDeletes: (paths) =>
+      enqueue(async () => {
+        const state = await loadState();
+        const pendingDeletes = state.pendingDeletes.filter(
+          (item) => !paths.some((path) => samePath(item, path, platform))
+        );
+        if (pendingDeletes.length === state.pendingDeletes.length) return;
+        await save({ ...state, pendingDeletes });
       }),
   };
 }
@@ -253,22 +286,31 @@ interface StoredPlugins {
   plugins: PluginEntry[];
   /** 插件里的服务名 → 服务 id（见 {@link PluginRegistry.setProviderMapping}） */
   providerMap: PluginProviderMap;
+  /** 删除时被占用、留待启动时清理的插件目录（见 ipc/plugins.ts） */
+  pendingDeletes: string[];
 }
 
-async function readPlugins(filePath: string): Promise<StoredPlugins> {
+async function readPlugins(
+  filePath: string,
+  isPendingDeleteAllowed: (path: string) => boolean
+): Promise<StoredPlugins> {
   let text: string;
   try {
     text = await readFile(filePath, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { plugins: [], providerMap: {} };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { plugins: [], providerMap: {}, pendingDeletes: [] };
+    }
     throw error;
   }
   let raw: unknown;
   let rawMap: unknown;
+  let rawPending: unknown;
   try {
     const file = asRecord(JSON.parse(text));
     raw = file?.plugins;
     rawMap = file?.providerMap;
+    rawPending = file?.pendingDeletes;
   } catch {
     raw = undefined;
   }
@@ -285,7 +327,23 @@ async function readPlugins(filePath: string): Promise<StoredPlugins> {
   if (entries.length < raw.length) {
     console.warn(`[plugins] ${filePath}：跳过 ${raw.length - entries.length} 条无效或重复的记录`);
   }
-  return { plugins: entries, providerMap: parseProviderMap(rawMap) };
+  return {
+    plugins: entries,
+    providerMap: parseProviderMap(rawMap),
+    pendingDeletes: parsePendingDeletes(rawPending, isPendingDeleteAllowed),
+  };
+}
+
+/** pendingDeletes：非字符串、不在受管根目录内的丢弃，不让整个文件失效；最多 50 条 */
+function parsePendingDeletes(raw: unknown, isAllowed: (path: string) => boolean): string[] {
+  if (!Array.isArray(raw)) return [];
+  const paths: string[] = [];
+  for (const item of raw) {
+    if (paths.length >= MAX_PENDING_DELETES) break;
+    if (typeof item !== 'string' || !item.trim() || paths.includes(item)) continue;
+    if (isAllowed(item)) paths.push(item);
+  }
+  return paths;
 }
 
 /** providerMap：非法条目丢弃，不让整个文件失效；超出上限的截掉 */

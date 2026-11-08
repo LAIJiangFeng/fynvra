@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, lstat, mkdir, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { translate } from '../../i18n';
+import { refusePiProtectedDelete } from './protectedPaths';
 
 /** 副本上限：超过任一项就中止复制，提示改用引用模式 */
 export const MAX_COPY_BYTES = 200 * 1024 * 1024;
@@ -55,7 +56,7 @@ export async function copyPluginInto(
   try {
     await rename(staged.tmp, target);
   } catch (error) {
-    await rm(staged.tmp, { recursive: true, force: true });
+    await rmTree(staged.tmp);
     return { ok: false, error: copyFailed(error) };
   }
   return { ok: true, path: staged.fileName ? join(target, staged.fileName) : target };
@@ -76,17 +77,17 @@ export async function replaceCopy(
   try {
     await rename(copyDir, old);
   } catch (error) {
-    await rm(staged.tmp, { recursive: true, force: true });
+    await rmTree(staged.tmp);
     return { ok: false, error: copyFailed(error) };
   }
   try {
     await rename(staged.tmp, copyDir);
   } catch (error) {
     await rename(old, copyDir).catch(() => undefined);
-    await rm(staged.tmp, { recursive: true, force: true });
+    await rmTree(staged.tmp);
     return { ok: false, error: copyFailed(error) };
   }
-  await rm(old, { recursive: true, force: true }).catch(() => undefined);
+  await rmTree(old).catch(() => undefined);
   return { ok: true, path: staged.fileName ? join(copyDir, staged.fileName) : copyDir };
 }
 
@@ -94,7 +95,7 @@ export async function replaceCopy(
 export async function removeCopyDir(root: string, copyDir: string): Promise<void> {
   if (!isStrictlyInside(root, copyDir)) throw new Error(translate('plugins.outsideCopyRoot'));
   try {
-    await rm(copyDir, { recursive: true, force: true });
+    await rmTree(copyDir);
   } catch (error) {
     // 只报错误码，不带副本内部路径
     const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -121,7 +122,7 @@ async function stage(root: string, source: string): Promise<Staged> {
     await copyFile(realSource, join(tmp, fileName));
     return { ok: true, tmp, fileName };
   } catch (error) {
-    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+    await rmTree(tmp).catch(() => undefined);
     return {
       ok: false,
       error:
@@ -188,4 +189,12 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** 递归删除；位于原生 pi 目录（~/.pi、PI_CODING_AGENT_DIR）内的一律拒绝，只记不带路径的 warning */
+async function rmTree(path: string): Promise<void> {
+  if (refusePiProtectedDelete(path)) {
+    throw Object.assign(new Error('pi-protected'), { code: 'pi-protected' });
+  }
+  await rm(path, { recursive: true, force: true });
 }

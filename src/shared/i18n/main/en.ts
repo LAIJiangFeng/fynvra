@@ -221,6 +221,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     installedPathMissing: 'Installation finished but the install directory was not found',
     toolMissing: '{tool} was not found; install it and make sure it is on PATH',
     removeFailed: 'Failed to remove plugin: {error}',
+    removedPending:
+      'Deleted "{name}". Some files are in use and will be cleaned up after Fynvra restarts',
     updateFailed: 'Failed to update plugin: {error}',
     invalidProviderMapping:
       'Invalid model service mapping: the name must be 1–64 letters, digits, ".", "_" or "-" and must not start with "fynvra-"',

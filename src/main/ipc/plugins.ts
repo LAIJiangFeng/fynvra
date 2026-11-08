@@ -1,6 +1,7 @@
-import { lstat, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, rename, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
@@ -47,12 +48,20 @@ import {
 } from '../services/plugins/pluginCopies';
 import { createPluginRegistry, type PluginRegistry } from '../services/plugins/pluginRegistry';
 import {
+  legacyPluginDir,
+  type ManagedRoots,
+  managedRoots,
+  ownedPluginDir,
+  removeManagedDir,
+} from '../services/plugins/pluginRemoval';
+import {
   inspectLocalPlugin,
   loadPackageManager,
   PLUGIN_FILE_EXTENSIONS,
   packageManagerError,
   pluginName,
 } from '../services/plugins/pluginSources';
+import { refusePiProtectedDelete } from '../services/plugins/protectedPaths';
 import { scanPluginProviders } from '../services/plugins/providerScan';
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
@@ -66,8 +75,16 @@ let registry: PluginRegistry | null = null;
 
 /** Main 唯一的 plugins.json 句柄；会话按角色的 pluginIds 取插件路径也走这里。 */
 export function getPluginRegistry(): PluginRegistry {
-  registry ??= createPluginRegistry({ filePath: join(app.getPath('userData'), 'plugins.json') });
+  registry ??= createPluginRegistry({
+    filePath: join(app.getPath('userData'), 'plugins.json'),
+    isPendingDeleteAllowed: (path) => ownedPluginDir(pluginRoots(), path) !== null,
+  });
   return registry;
+}
+
+/** 允许删除插件目录的受管根目录（副本根目录 + 旧版 agent/git、agent/npm/node_modules） */
+function pluginRoots(): ManagedRoots {
+  return managedRoots(pluginCopyRoot(), agentDir());
 }
 
 /**
@@ -101,6 +118,12 @@ async function exclusive<T>(onBusy: () => T, task: () => Promise<T>): Promise<T>
 }
 
 export function registerPluginHandlers(): void {
+  // 启动时清理上次删除时被占用的目录；此时还没有会话加载插件
+  void exclusive(
+    () => undefined,
+    () => cleanPendingDeletes()
+  );
+
   ipcMain.handle(IPC_CHANNELS.PLUGINS_LIST, async (): Promise<PluginListResult> => {
     try {
       const plugins = getPluginRegistry();
@@ -199,7 +222,7 @@ export function registerPluginHandlers(): void {
           return {
             ok: false,
             code: 'failed',
-            error: translate('plugins.removeFailed', { error: errorMessage(error) }),
+            error: translate('plugins.removeFailed', { error: scanWarning(error) }),
           };
         }
       });
@@ -680,7 +703,11 @@ async function installRemote(source: string, kind: 'npm' | 'git'): Promise<Plugi
   return result;
 }
 
-/** 经 pi 包管理器安装并登记、扫描服务名；不广播，由调用方决定 */
+/**
+ * 经 pi 包管理器安装到副本根目录下的独立目录 `<root>/<id>` 并登记、扫描服务名；不广播，由调用方决定。
+ * 先以 `<root>/.tmp-<uuid>` 为 pi 的 agentDir 安装（与目标同盘，可直接 rename），再把 git 仓库目录或整个 npm 前缀目录
+ * （含 node_modules）rename 成 `<root>/<id>`；任一步失败都不登记并删掉已安装的内容，最后删除临时目录。
+ */
 async function registerRemote(source: string, kind: 'npm' | 'git'): Promise<PluginAddResult> {
   const plugins = getPluginRegistry();
   const duplicate = await plugins.findDuplicate({ source });
@@ -691,53 +718,191 @@ async function registerRemote(source: string, kind: 'npm' | 'git'): Promise<Plug
       error: translate('plugins.alreadyRegistered', { name: duplicate.name }),
     };
   }
-  const manager = await loadPackageManager(agentDir());
+  const root = pluginCopyRoot();
+  await mkdir(root, { recursive: true });
+  const tmp = join(root, `.tmp-${randomUUID()}`);
   try {
-    await manager.install(source);
-  } catch (error) {
-    return {
-      ok: false,
-      code: 'failed',
-      error: translate('plugins.installFailed', { error: packageManagerError(error, kind) }),
-    };
+    const manager = await loadPackageManager(tmp);
+    try {
+      await manager.install(source);
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.installFailed', { error: packageManagerError(error, kind) }),
+      };
+    }
+    const installed = manager.getInstalledPath(source, 'user');
+    // npm 可能回退到全局 node_modules：不在临时目录内的安装路径不接受
+    const from = kind === 'git' ? installed : join(tmp, 'npm');
+    if (!installed || !from || !isStrictlyInside(kind === 'git' ? tmp : from, installed)) {
+      return { ok: false, code: 'failed', error: translate('plugins.installedPathMissing') };
+    }
+    const name = await pluginName(installed);
+    const target = join(root, await freeCopyDirName(root, await expectedId(name)));
+    try {
+      await renameWithRetry(from, target);
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.installFailed', { error: scanWarning(error) }),
+      };
+    }
+    const path = kind === 'git' ? target : join(target, relative(from, installed));
+    let added: Awaited<ReturnType<PluginRegistry['add']>>;
+    try {
+      added = await plugins.add({ name, source, kind, path });
+    } catch (error) {
+      await discardDir(target);
+      throw error;
+    }
+    if (!added.ok) {
+      await discardDir(target);
+      return { ok: false, code: 'invalid', error: added.error };
+    }
+    return { ok: true, plugin: await scanAfterChange(added.plugin) };
+  } finally {
+    await discardDir(tmp);
   }
-  const path = manager.getInstalledPath(source, 'user');
-  if (!path) return { ok: false, code: 'failed', error: translate('plugins.installedPathMissing') };
-  const added = await plugins.add({ name: await pluginName(path), source, kind, path });
-  if (!added.ok) return { ok: false, code: 'invalid', error: added.error };
-  return { ok: true, plugin: await scanAfterChange(added.plugin) };
+}
+
+/** Windows 上杀毒 / 索引偶尔短暂占用刚写入的文件，rename 遇到 EPERM / EBUSY 时稍等重试 */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((done) => setTimeout(done, 200));
+    }
+  }
+}
+
+/** 尽力删除受管目录；删不掉就放进待清理列表，下次启动再删 */
+async function discardDir(dir: string): Promise<void> {
+  if (await tryRemoveDir(dir)) return;
+  await getPluginRegistry()
+    .addPendingDelete(dir)
+    .catch(() => undefined);
+}
+
+/** 稳健删除插件自己的目录（须在受管根目录内）；成功返回 true，失败只记错误码 */
+async function tryRemoveDir(dir: string): Promise<boolean> {
+  try {
+    await removeManagedDir(pluginRoots(), dir);
+    return true;
+  } catch (error) {
+    console.warn(`[plugins] failed to delete a plugin directory: ${scanWarning(error)}`);
+    return false;
+  }
 }
 
 /**
- * link 插件只删登记，绝不删除用户的目录或文件；copy 插件先删副本目录（仅当它 resolve 后在副本根目录内，
- * 否则不删任何文件）；npm / git 插件先经 pi 卸载，成功后再删登记。删除成功后从所有角色的 pluginIds 中移除。
+ * 按待清理列表逐条稳健删除：删前重新检查边界，仍是已登记插件目录的跳过并移出；删掉或已不存在的移出列表，
+ * 失败的留到下次。日志不带路径。
+ */
+async function cleanPendingDeletes(): Promise<void> {
+  try {
+    const plugins = getPluginRegistry();
+    const pending = await plugins.listPendingDeletes();
+    if (pending.length === 0) return;
+    const roots = pluginRoots();
+    const inUse = (await plugins.list()).map((entry) => ownDirOf(roots, entry));
+    const done: string[] = [];
+    for (const path of pending) {
+      const dir = ownedPluginDir(roots, path);
+      if (!dir || inUse.some((used) => used !== null && !relative(used, dir))) {
+        done.push(path);
+        continue;
+      }
+      try {
+        await removeManagedDir(roots, dir);
+        done.push(path);
+      } catch (error) {
+        console.warn(`[plugins] pending delete still failing: ${scanWarning(error)}`);
+      }
+    }
+    await plugins.dropPendingDeletes(done);
+    const left = pending.length - done.length;
+    if (left > 0) console.warn(`[plugins] ${left} pending plugin directories left for next start`);
+  } catch (error) {
+    console.warn(`[plugins] pending delete cleanup failed: ${scanWarning(error)}`);
+  }
+}
+
+/** 已登记插件在受管根目录内的自己的目录（link 条目与受管目录外的为 null） */
+function ownDirOf(roots: ManagedRoots, plugin: PluginEntry): string | null {
+  if (plugin.kind === 'local' && localPluginMode(plugin) !== 'copy') return null;
+  const copyDir = copyDirOf(roots.copyRoot, plugin.path);
+  if (copyDir) return copyDir;
+  return plugin.kind === 'local' ? null : legacyPluginDir(roots, plugin.kind, plugin.path);
+}
+
+/**
+ * link 插件只删登记，绝不删除用户的目录或文件。copy 插件与新装的 npm / git 插件（登记路径在副本根目录内）
+ * 直接稳健删除 `<root>/<dir>`。旧版 npm / git 条目（在 userData/agent 下）先经 pi 卸载，失败时仅当路径在
+ * agent/git 或 agent/npm/node_modules 内才稳健删除该插件自己的目录，否则不删任何文件并报错。
+ * 目录删不掉（文件被占用等）时登记照删、目录进待清理列表，返回 warning。之后从所有角色的 pluginIds 中移除。
  */
 async function removePlugin(id: string): Promise<PluginRemoveResult> {
   const plugins = getPluginRegistry();
   const plugin = await plugins.get(id);
   if (!plugin) return { ok: false, code: 'invalid', error: translate('plugins.notFound') };
-  if (plugin.kind !== 'local') {
+  const roots = pluginRoots();
+  let leftover: string | null = null;
+  const managedDir =
+    plugin.kind !== 'local' || localPluginMode(plugin) === 'copy'
+      ? copyDirOf(roots.copyRoot, plugin.path)
+      : null;
+  if (managedDir) {
+    if (!(await tryRemoveDir(managedDir))) leftover = managedDir;
+  } else if (plugin.kind !== 'local') {
+    // pi remove 会在 agentDir 下删文件：它或登记路径落在原生 pi 目录内时一律不删
+    if (refusePiProtectedDelete(agentDir()) || refusePiProtectedDelete(plugin.path)) {
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.uninstallFailed', { error: 'pi-protected' }),
+      };
+    }
     const manager = await loadPackageManager(agentDir());
     try {
       await manager.remove(plugin.source);
     } catch (error) {
-      return {
-        ok: false,
-        code: 'failed',
-        error: translate('plugins.uninstallFailed', {
-          error: packageManagerError(error, plugin.kind),
-        }),
-      };
+      const own = legacyPluginDir(roots, plugin.kind, plugin.path);
+      if (!own) {
+        return {
+          ok: false,
+          code: 'failed',
+          error: translate('plugins.uninstallFailed', {
+            error: uninstallError(error, plugin.kind),
+          }),
+        };
+      }
+      if (!(await tryRemoveDir(own))) leftover = own;
     }
-  } else if (localPluginMode(plugin) === 'copy') {
-    const root = pluginCopyRoot();
-    const dir = copyDirOf(root, plugin.path);
-    if (dir) await removeCopyDir(root, dir);
   }
   await plugins.remove(id);
+  if (leftover) {
+    await plugins.addPendingDelete(leftover).catch((error: unknown) => {
+      console.warn(`[plugins] failed to record pending delete: ${scanWarning(error)}`);
+    });
+  }
   sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
   await unbindFromRoles(id);
-  return { ok: true };
+  return leftover
+    ? { ok: true, warning: translate('plugins.removedPending', { name: plugin.name }) }
+    : { ok: true };
+}
+
+/** pi 卸载的错误：fs 错误只取错误码（其 message 带完整路径），其余走 packageManagerError */
+function uninstallError(error: unknown, kind: 'npm' | 'git'): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === 'string' && code !== 'ENOENT') return code;
+  return packageManagerError(error, kind);
 }
 
 /**
