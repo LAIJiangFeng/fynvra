@@ -64,9 +64,9 @@ const shellAdapter: FilesShell = {
  * 其余一律只在文件夹中显示，绝不执行可执行 / 脚本类文件。
  */
 const OUTSIDE_OPENABLE = new Set([
-  ...['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tif', 'tiff', 'avif'],
+  ...['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'tif', 'tiff', 'avif'],
   'pdf',
-  ...['txt', 'md', 'markdown', 'log', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'toml', 'ini'],
+  ...['txt', 'md', 'markdown', 'log', 'json', 'yaml', 'yml', 'toml', 'ini'],
   ...['mp3', 'wav', 'ogg', 'flac', 'm4a', 'mp4', 'mov', 'webm', 'mkv', 'avi'],
   ...['docx', 'xlsx', 'pptx'],
 ]);
