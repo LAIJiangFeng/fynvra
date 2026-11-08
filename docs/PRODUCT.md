@@ -84,7 +84,7 @@ Markdown 文件默认以实时预览打开：编辑时光标所在行显示 Mark
 ## 工程与安全边界
 - 分层构建：electron-vite 三段构建，结合 Zustand、Tailwind 4、Biome 与 Vitest；应用元数据通过 settings.json 持久化。
 - 进程隔离：明确 IPC 与 Agent Worker 的安全边界，会话 jsonl 为正文权威源（见 `AGENTS.md`）。
-- 资源配置：统一管理 Providers、Skills 与 MCP，支持扫描导入本机工具配置。
+- 资源配置：统一管理 Providers、Skills 与 MCP，支持扫描导入本机工具配置（模型服务可从 Claude Code、Codex、CC Switch、pi 导入；pi 中命令形式的 key 不会执行，需手动填写）。
 - 任务验收：内置差异查看、三档审批与 worktree 验收合并流程。
 
 ## 明确不做（v1）
