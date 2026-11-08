@@ -237,7 +237,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     pickTitle: 'Choose plugin',
     fileFilter: 'pi extensions',
     copyFailed: 'Failed to copy plugin: {error}',
-    copyTooLarge: 'The plugin exceeds 200 MB or 20,000 files; use link mode instead',
+    copyTooLarge: 'The plugin exceeds 200 MB or 20,000 files and cannot be copied',
     sourceInCopyRoot: 'The plugin source overlaps the plugin copy folder and cannot be copied',
     outsideCopyRoot: 'The copy is outside the plugin copy folder; the operation was refused',
     notCopy: 'Only copied plugins can be re-copied',
