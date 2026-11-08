@@ -181,22 +181,14 @@ function ProviderForm({ initial, onDone }: { initial: ProviderDraft; onDone: () 
       </div>
 
       {initial.id ? (
-        <Field
-          label={t('settings.providers.serviceId')}
-          htmlFor={`${id}-service-id`}
-          hint={t('settings.providers.serviceIdStable')}
-        >
-          <div className="flex items-center gap-1">
-            <Input
-              id={`${id}-service-id`}
-              readOnly
-              value={initial.id}
-              spellCheck={false}
-              className="font-mono text-muted-foreground"
-            />
+        <div className="grid min-w-0 gap-1.5">
+          <span className="font-medium text-sm">{t('settings.providers.serviceId')}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="select-all break-all font-mono text-sm">{initial.id}</span>
             <CopyButton text={initial.id} label={t('settings.providers.copyServiceId')} />
           </div>
-        </Field>
+          <p className="text-muted-foreground text-xs">{t('settings.providers.serviceIdStable')}</p>
+        </div>
       ) : (
         <p className="text-muted-foreground text-xs">{t('settings.providers.serviceIdPending')}</p>
       )}
