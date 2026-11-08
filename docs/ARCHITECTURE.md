@@ -462,6 +462,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - IPC（领域 `plugins`）：`plugins:list`、`plugins:add-local`（无参，Main 弹框）、`plugins:install`（`{ source }`）、`plugins:remove`（id）、`plugins:toggle`（`{ id, enabled }`）。入参 `unknown` 收窄、拒绝多余键；安装 / 卸载串行，进行中再请求返回“忙”。preload 按 §9.1 新增 `plugins` 领域文件。
   - Renderer：「设置 → 插件」页、角色编辑器的插件多选、中英文案。
   - 运行时：`SpawnSessionSpec.plugins: string[]` → piSession → `resourcePaths.extensions` → `DefaultResourceLoader.additionalExtensionPaths`；保持 `noExtensions: true`（不发现磁盘上其他扩展），扩展加载错误并入 `RoleSession.warnings`。会话加载后收集由插件路径加载的扩展所注册的工具名，传给审批门 `pluginTools`，归类 `plugin`（§5）。
+- 插件可见的模型服务：角色挂了插件时，Main 把「设置 → 模型服务」里已启用、有 key、有模型的服务放进 `SpawnSessionSpec.pluginProviders`（`{ id, name, api, baseUrl, apiKey, models: { id, reasoning? }[] }`）；worker 的 `ModelRegistry.exposeProviders` 在 `createRoleSession` 之前按服务 id `registerProvider` + `setRuntimeApiKey`（只在内存），插件经 `ctx.modelRegistry` 按名字查到，与原生 pi 读 `models.json` 一致。与 pi 内置 provider、插件自己注册的 provider 同名时跳过并记 warning；新列表里没有的旧别名注销（spec 不带时不动）；别名不进能力推断用的目录。Fynvra 自己的模型仍走 `fynvra-` 运行时键。安全边界：只对挂了插件的会话下发；插件代码能读到这些服务的地址和 key（与原生 pi 一致）；key 不进日志、错误与 provider 名。
 - 持久化：`userData/plugins.json` = `{ version: 1, plugins: StoredPlugin[] }`，`StoredPlugin { id, name, source, kind: 'local' | 'npm' | 'git', path, enabled, installedAt }`；id 为名字派生的 slug（冲突加后缀）；原子写；文件损坏时报错，不静默清空。npm / git 包本体由 pi 包管理器装在 `userData/agent` 下。
 - 安全边界：插件以用户权限执行任意代码。审批门只管工具调用，管不住插件加载时和钩子里的代码，靠安装时提示与用户自担信任。Renderer 只传 id 与 source 字符串，本地路径只由 Main 弹框产生；不读 `~/.pi`，不写 pi settings 文件。
 - 明确不做：插件市场 / 搜索、自动更新、界面插件、沙箱、项目级 `.pi` 包、资源筛选。

@@ -1156,7 +1156,8 @@ export const zhCN = {
     plugins: {
       title: '插件',
       subtitle: 'pi 扩展或 pi 包；在角色里挂载后，新会话会加载它们',
-      warning: '插件会以你的用户权限执行任意代码，只安装可信来源',
+      warning:
+        '插件会以你的用户权限执行任意代码，并能读取已启用模型服务的地址和密钥，只安装可信来源',
       addLocal: '添加本地插件',
       installPlaceholder: 'npm:<包名>[@版本]、git:<主机>/<路径>[@ref] 或 https:// 仓库地址',
       install: '安装',

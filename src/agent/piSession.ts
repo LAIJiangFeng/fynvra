@@ -11,7 +11,7 @@ import {
 import type { MagicContextFallbackReason, Role } from '@fynvra/core';
 import { supportsFastMode, withFastServiceTier } from '@shared/modelFast';
 import { commandEnvironment } from '@shared/networkProxy';
-import type { AgentMcpServer, ResolvedModelSpec } from '@shared/types/agent';
+import type { AgentMcpServer, PluginProviderSpec, ResolvedModelSpec } from '@shared/types/agent';
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/settings';
 import { createContextRecovery } from './contextRecovery';
@@ -56,6 +56,8 @@ export interface PiSessionFactoryOptions {
   agentDir: string;
   /** 注册 provider 并取 pi 的模型；思考档位按模型的可选集合落定（见 models.ts） */
   resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
+  /** 把 spec.pluginProviders 按服务 id 注册给插件查找（见 models.ts 的 exposeProviders）；只在 spec 带了时调用 */
+  exposePluginProviders?(providers: readonly PluginProviderSpec[]): Promise<void>;
   /** 事件 listener 抛出的异常（被 subscribeNormalized 兜住，不打断 pi 的 jsonl 持久化） */
   onListenerError?: (error: unknown) => void;
   /** 脱敏的压缩生命周期日志（session / generation / operation / deadline / result）。 */
@@ -73,6 +75,8 @@ export interface PiSessionFactoryOptions {
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
   return async ({ identity, spec, host, workerHost, approval }) => {
     const model = await options.resolveModel(withRoleThinking(spec.model, spec.role));
+    // 插件在 createRoleSession 里加载，此前先让它们按服务 id 找得到模型服务
+    if (spec.pluginProviders) await options.exposePluginProviders?.(spec.pluginProviders);
     const sessionManager = SessionManager.open(
       spec.sessionFile,
       dirname(spec.sessionFile),

@@ -33,6 +33,20 @@ const supervisor = new SessionSupervisor({
   openSession: createPiSessionFactory({
     agentDir,
     resolveModel: async (spec) => (await modelRegistry()).resolve(spec),
+    // 失败只记 warning，不让会话启动失败；只记服务 id，不记地址与 key
+    exposePluginProviders: async (providers) => {
+      try {
+        const { skipped } = await (await modelRegistry()).exposeProviders(providers);
+        if (skipped.length > 0) {
+          log(
+            'warn',
+            `model services skipped for plugins (name taken by pi or a plugin, or update failed): ${skipped.join(', ')}`
+          );
+        }
+      } catch {
+        log('warn', 'failed to expose model services to plugins');
+      }
+    },
     onContextLog: (message) => log('info', `context ${message}`),
     onListenerError: (error) =>
       log('error', `session event listener failed: ${errorMessage(error)}`),

@@ -98,6 +98,26 @@ export interface AgentWorkflowOption {
   summary?: string;
 }
 
+/**
+ * 插件可见的模型服务（「设置 → 模型服务」里已启用、有 key、有模型的服务）：worker 按服务 id 注册成 pi provider，
+ * 插件经 ctx.modelRegistry 按名字查找（与原生 pi 读 models.json 一致）。只对挂了插件的会话下发；
+ * key 明文只在 Main → worker 这一跳出现。
+ */
+export interface PluginProviderSpec {
+  /** Fynvra 服务 id（registry id 规则，不以 `fynvra-` 开头） */
+  id: string;
+  name: string;
+  api: string;
+  baseUrl: string;
+  apiKey: string;
+  models: { id: string; reasoning?: boolean }[];
+}
+
+/** 与 Main jsonRegistry 的 REGISTRY_ID 相同（shared 不能 import Main） */
+const PLUGIN_PROVIDER_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+const MAX_PLUGIN_PROVIDERS = 64;
+const MAX_PLUGIN_PROVIDER_MODELS = 512;
+
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
 export interface SpawnSessionSpec {
   /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
@@ -116,6 +136,8 @@ export interface SpawnSessionSpec {
   mcpServers: AgentMcpServer[];
   /** 角色挂载的插件（pi 包目录或扩展文件）的绝对路径；缺失按 `[]`，兼容旧消息 */
   plugins?: string[];
+  /** 插件可见的模型服务；只有挂了插件的会话才带（见 {@link PluginProviderSpec}） */
+  pluginProviders?: PluginProviderSpec[];
   /** Main reads the selected file on every spawn; worker never accesses its source path. */
   instructionFile?: { name: string; content: string };
   /** 由编排派发的 worker 会话：加 ask_coordinator / report_done，背后是 Main 的 WorkerHost */
@@ -677,6 +699,53 @@ function parseWorkflowOption(raw: unknown): AgentWorkflowOption | null {
   };
 }
 
+/** 非法条目丢弃，不让整条 spawn 失效；超出上限的截掉 */
+function parsePluginProviders(raw: unknown): PluginProviderSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const providers: PluginProviderSpec[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (providers.length >= MAX_PLUGIN_PROVIDERS) break;
+    const provider = parsePluginProvider(item);
+    if (!provider || seen.has(provider.id)) continue;
+    seen.add(provider.id);
+    providers.push(provider);
+  }
+  return providers;
+}
+
+function parsePluginProvider(raw: unknown): PluginProviderSpec | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const { id, name, api, baseUrl, apiKey } = record;
+  if (typeof id !== 'string' || !PLUGIN_PROVIDER_ID.test(id) || id.startsWith('fynvra-')) {
+    return null;
+  }
+  if (
+    !isNonEmptyString(api) ||
+    !isNonEmptyString(baseUrl) ||
+    !isNonEmptyString(apiKey) ||
+    !Array.isArray(record.models)
+  ) {
+    return null;
+  }
+  const models: PluginProviderSpec['models'] = [];
+  const modelIds = new Set<string>();
+  for (const entry of record.models) {
+    if (models.length >= MAX_PLUGIN_PROVIDER_MODELS) break;
+    const model = asRecord(entry);
+    if (!model || !isNonEmptyString(model.id) || modelIds.has(model.id)) continue;
+    if (!isOptional(model.reasoning, isBoolean)) continue;
+    modelIds.add(model.id);
+    models.push({
+      id: model.id,
+      ...(model.reasoning !== undefined ? { reasoning: model.reasoning as boolean } : {}),
+    });
+  }
+  if (models.length === 0) return null;
+  return { id, name: isNonEmptyString(name) ? name : id, api, baseUrl, apiKey, models };
+}
+
 function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
@@ -729,6 +798,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     skills,
     mcpServers,
     ...(plugins.length > 0 ? { plugins } : {}),
+    ...(record.pluginProviders !== undefined
+      ? { pluginProviders: parsePluginProviders(record.pluginProviders) }
+      : {}),
     worker,
     roles,
     ...(workflows.length > 0 ? { workflows } : {}),

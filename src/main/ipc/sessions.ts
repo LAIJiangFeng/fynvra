@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
+import { resolveBaseUrl } from '@shared/modelCatalog';
 import { isApprovalDecision } from '@shared/types/agent';
 import {
   type ChatImage,
@@ -140,6 +141,25 @@ function createAppAgentHost(): AgentHostService {
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
+    // 只在角色挂了插件时调用：已启用、有 key、有模型的服务按服务 id 暴露给插件（与原生 pi 的 models.json 一致）
+    resolvePluginProviders: async () =>
+      (await getProviderStore().list()).flatMap((provider) =>
+        provider.enabled && provider.apiKey && provider.models.length > 0
+          ? [
+              {
+                id: provider.id,
+                name: provider.name,
+                api: provider.api,
+                baseUrl: resolveBaseUrl(provider.api, provider.baseUrl),
+                apiKey: provider.apiKey,
+                models: provider.models.map((model) => ({
+                  id: model.id,
+                  ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+                })),
+              },
+            ]
+          : []
+      ),
     listWorkflows: () => getWorkflowRegistry().list(),
     broadcast: sendToAllWindows,
   });
