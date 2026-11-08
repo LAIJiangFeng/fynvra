@@ -61,6 +61,8 @@ export const IPC_CHANNELS = {
   FILES_RESOLVE: 'files:resolve',
   /** 仅将工作区内已签发的 HTML 文件交给默认浏览器 */
   FILES_OPEN_HTML: 'files:open-html',
+  /** 聊天里工作区外的绝对路径：白名单扩展名用系统应用打开，其余只在文件夹中显示 */
+  FILES_OPEN_OUTSIDE: 'files:open-outside',
 
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_TOGGLE_MAXIMIZE: 'window:toggle-maximize',

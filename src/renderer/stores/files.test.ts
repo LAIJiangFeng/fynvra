@@ -62,6 +62,7 @@ const fakeApi = () => ({
   copy: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
   resolve: vi.fn(async (): Promise<ResolveResult> => ({ ok: true, path: 'D:/repo/b.ts' })),
   openHtml: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
+  openOutside: vi.fn(async (): Promise<MutationResult> => ({ ok: true })),
 });
 
 function deferred<T>() {

@@ -78,6 +78,43 @@ export interface EntryRefRequest {
   entryId: string;
 }
 
+/**
+ * 打开聊天里指向工作区外的本地文件 / 目录（files:open-outside）。只收会话 id 与原始链接，
+ * Main 重新解析、校验，不信任 Renderer 的结论。
+ */
+export interface OpenOutsideRequest {
+  sessionId: string;
+  reference: string;
+  action: 'open' | 'reveal';
+}
+export type OutsideFileError =
+  | FileError
+  | 'invalidLink'
+  | 'unsupportedParameters'
+  | 'sessionUnavailable'
+  | 'openFailed';
+/** revealed：未直接打开（非白名单扩展名），改为在文件夹中显示。 */
+export type OpenOutsideResult =
+  | { ok: true; revealed?: boolean }
+  | { ok: false; error: OutsideFileError };
+
+export function parseOpenOutsideRequest(raw: unknown): OpenOutsideRequest | null {
+  const input = asRecord(raw);
+  if (
+    !input ||
+    Object.keys(input).some((key) => !['sessionId', 'reference', 'action'].includes(key)) ||
+    typeof input.sessionId !== 'string' ||
+    !input.sessionId ||
+    input.sessionId.length > 200 ||
+    typeof input.reference !== 'string' ||
+    !input.reference ||
+    input.reference.length > 4096 ||
+    (input.action !== 'open' && input.action !== 'reveal')
+  )
+    return null;
+  return { sessionId: input.sessionId, reference: input.reference, action: input.action };
+}
+
 type Result<T> = ({ ok: true } & T) | { ok: false; error: FileError };
 export type DirectoryResult = Result<{ entries: WorkspaceFileEntry[]; truncated: boolean }>;
 export type FileResult = Result<{ preview: FilePreview }>;

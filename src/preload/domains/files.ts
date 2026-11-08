@@ -9,6 +9,8 @@ import type {
   FileWriteRequest,
   FileWriteResult,
   MutationResult,
+  OpenOutsideRequest,
+  OpenOutsideResult,
   RenameEntryRequest,
   ResolveResult,
 } from '@shared/types/files';
@@ -26,6 +28,7 @@ export interface FilesApi {
   copy(input: EntryRefRequest): Promise<MutationResult>;
   resolve(input: EntryRefRequest): Promise<ResolveResult>;
   openHtml(input: EntryRefRequest): Promise<MutationResult>;
+  openOutside(input: OpenOutsideRequest): Promise<OpenOutsideResult>;
 }
 
 export function createFilesApi(ipc: {
@@ -71,5 +74,11 @@ export function createFilesApi(ipc: {
       ipc.invoke(IPC_CHANNELS.FILES_RESOLVE, entryRef(input)) as Promise<ResolveResult>,
     openHtml: (input) =>
       ipc.invoke(IPC_CHANNELS.FILES_OPEN_HTML, entryRef(input)) as Promise<MutationResult>,
+    openOutside: ({ sessionId, reference, action }) =>
+      ipc.invoke(IPC_CHANNELS.FILES_OPEN_OUTSIDE, {
+        sessionId,
+        reference,
+        action,
+      }) as Promise<OpenOutsideResult>,
   };
 }
