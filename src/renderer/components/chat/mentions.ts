@@ -96,8 +96,7 @@ function matchAt(
     if (close < 0) return null;
     const inner = text.slice(position + 1, close).toLowerCase();
     const target = candidates.find(
-      (candidate) =>
-        candidate.name.toLowerCase() === inner || candidate.id.toLowerCase() === inner
+      (candidate) => candidate.name.toLowerCase() === inner || candidate.id.toLowerCase() === inner
     );
     return target ? { length: close + 1 - position, target } : null;
   }
