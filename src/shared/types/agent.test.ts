@@ -679,7 +679,7 @@ describe('parseAgentWorkerEvent', () => {
         ['an empty request id', { requestId: '' }],
         ['a numeric tool call id', { toolCallId: 1 }],
         ['an empty tool name', { toolName: '' }],
-        ['an unknown kind', { kind: 'network' }],
+        ['an unknown kind', { kind: 'telepathy' }],
         ['an inherited kind', { kind: 'toString' }],
         ['a missing title', { title: undefined }],
         ['a null detail', { detail: null }],
