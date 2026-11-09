@@ -236,22 +236,26 @@ export function FilePane({
               'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] @min-[42rem]:grid-cols-2 @min-[42rem]:grid-rows-[minmax(0,1fr)]'
           )}
         >
-          {!(markdown && current.mode === 'preview') && (
-            <div className="min-h-0 min-w-0 overflow-hidden">
-              <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
-                <FileEditor
-                  name={file.name}
-                  value={current.draft}
-                  source={preview.text}
-                  onChange={(text) => store.getState().editFile(file.id, text)}
-                />
-              </Suspense>
-            </div>
-          )}
-          {markdown && current.mode !== 'edit' && (
+          <div
+            className={cn(
+              'min-h-0 min-w-0 overflow-hidden',
+              markdown && current.mode === 'preview' && 'hidden'
+            )}
+          >
+            <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+              <FileEditor
+                name={file.name}
+                value={current.draft}
+                source={preview.text}
+                onChange={(text) => store.getState().editFile(file.id, text)}
+              />
+            </Suspense>
+          </div>
+          {markdown && (
             <div
               className={cn(
                 'relative min-h-0 min-w-0',
+                current.mode === 'edit' && 'hidden',
                 current.mode === 'split' && 'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
               )}
             >
