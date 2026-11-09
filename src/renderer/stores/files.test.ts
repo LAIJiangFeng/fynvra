@@ -195,10 +195,10 @@ describe('文件预览状态', () => {
     expect(store.getState().previews.a?.draft).toBe('新输入');
   });
 
-  it('Markdown 默认实时预览，可切换双栏且各文件模式独立', async () => {
+  it('Markdown 默认渲染预览，可切换双栏且各文件模式独立', async () => {
     const store = createFilesStore(fakeApi(), 'ws');
     await store.getState().openFile({ ...file('md'), name: 'README.md' });
-    expect(store.getState().previews.md?.mode).toBe('live');
+    expect(store.getState().previews.md?.mode).toBe('preview');
     store.getState().setMode('md', 'split');
     await store.getState().openFile(file('a'));
     expect(store.getState().previews.a?.mode).toBe('edit');
