@@ -145,10 +145,9 @@ export const zhCN = {
     readonly: '只读',
     closeFile: '关闭 {name}',
     editor: '编辑 {name}',
-    liveLinkHint: 'Ctrl/Cmd + 点击打开链接',
     markdownPreview: 'Markdown 预览',
     viewMode: '文件查看模式',
-    modes: { live: '实时预览', edit: '源码', split: '双栏' },
+    modes: { preview: '预览', edit: '源码', split: '双栏' },
     find: {
       label: '在预览中查找',
       placeholder: '查找',

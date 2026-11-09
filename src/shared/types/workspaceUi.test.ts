@@ -7,6 +7,16 @@ const terminal = {
   number: 1,
 };
 
+describe('restored file tab mode', () => {
+  it("maps the retired 'live' mode to 'preview'", () => {
+    const tab = { kind: 'file', id: '00000000-0000-4000-8000-000000000002', mode: 'live' };
+    expect(parseWorkspaceUi({ tabs: [tab] }, 'workspace')?.tabs[1]).toMatchObject({
+      ...tab,
+      mode: 'preview',
+    });
+  });
+});
+
 describe('restored terminal screen safety', () => {
   it('removes every C0/C1 control except tab and newline, preserving Unicode text', () => {
     const controls = Array.from({ length: 160 }, (_, code) =>
