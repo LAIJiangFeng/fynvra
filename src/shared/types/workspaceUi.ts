@@ -12,7 +12,7 @@ export type WorkspaceTabSource =
 export interface SavedFileTab {
   kind: 'file';
   id: string;
-  mode: 'live' | 'edit' | 'split';
+  mode: 'edit' | 'preview' | 'split';
   draft?: { text: string; base: TextFilePreview };
   /** Only returned by Main. Never accepted as a file access argument. */
   entry?: WorkspaceFileEntry;
@@ -113,8 +113,8 @@ export function parseWorkspaceUi(raw: unknown, workspaceId: string): WorkspaceUi
       const file: SavedFileTab = {
         kind: 'file',
         id: tab.id,
-        // 旧快照的只读 'preview' 模式已并入实时预览。
-        mode: (tab.mode === 'preview' ? 'live' : (tab.mode ?? 'edit')) as SavedFileTab['mode'],
+        // 已撤销的实时预览留下的 'live' 恢复为预览，标签和草稿不丢。
+        mode: (tab.mode === 'live' ? 'preview' : (tab.mode ?? 'edit')) as SavedFileTab['mode'],
       };
       if (tab.draft !== undefined) {
         const draft = asRecord(tab.draft),
