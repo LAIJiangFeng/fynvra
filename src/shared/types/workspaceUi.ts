@@ -107,13 +107,14 @@ export function parseWorkspaceUi(raw: unknown, workspaceId: string): WorkspaceUi
     if (tab.kind === 'file') {
       if (
         !uuid(tab.id) ||
-        (tab.mode !== undefined && !['edit', 'preview', 'split'].includes(String(tab.mode)))
+        (tab.mode !== undefined && !['live', 'edit', 'preview', 'split'].includes(String(tab.mode)))
       )
         return null;
       const file: SavedFileTab = {
         kind: 'file',
         id: tab.id,
-        mode: (tab.mode ?? 'edit') as SavedFileTab['mode'],
+        // 已撤销的实时预览留下的 'live' 恢复为预览，标签和草稿不丢。
+        mode: (tab.mode === 'live' ? 'preview' : (tab.mode ?? 'edit')) as SavedFileTab['mode'],
       };
       if (tab.draft !== undefined) {
         const draft = asRecord(tab.draft),
