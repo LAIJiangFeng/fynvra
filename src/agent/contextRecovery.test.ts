@@ -7,7 +7,16 @@ import { createRoleSession, subscribeNormalized } from '@fynvra/agent-runtime';
 import type { ContextRuntimeSnapshot, FynvraSessionEvent } from '@fynvra/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { projectHistory } from '../main/services/sessions/history';
+import { createCompactionFallbackExtension } from './compactionFallback';
 import { createContextRecovery } from './contextRecovery';
+
+interface Extra {
+  /** Stand-in for magic.assertReady(): may switch the gate to fallback and throw, like piSession. */
+  magicReady?: (fallBack: () => void) => AbortSignal;
+  /** Install the compaction fallback chain as the session's compaction hook. */
+  chain?: boolean;
+  beforeOpen?: (manager: SessionManager) => void;
+}
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -18,7 +27,8 @@ afterEach(async () => {
 async function setup(
   seed = true,
   maxRetries = 0,
-  strategy: 'native' | 'magic-context' | 'off' = 'native'
+  strategy: 'native' | 'magic-context' | 'off' = 'native',
+  extra: Extra = {}
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'fynvra-context-'));
   const faux = fauxProvider({
@@ -43,7 +53,9 @@ async function setup(
       answer.usage = { ...answer.usage, input: 9000, output: 20, totalTokens: 9020 };
       manager.appendMessage(answer);
     }
+  extra.beforeOpen?.(manager);
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
+  const resolved = { runtime, model: faux.getModel() };
   const options: Parameters<typeof createRoleSession>[0] = {
     role: {
       id: 'worker',
@@ -56,17 +68,32 @@ async function setup(
     cwd: dir,
     agentDir: dir,
     host: null,
-    model: { runtime, model: faux.getModel() },
+    model: resolved,
     sessionManager: manager,
     resourcePaths: { skills: [], mcpServers: [] },
+    ...(extra.chain
+      ? {
+          extensions: [
+            createCompactionFallbackExtension({
+              getModel: () => resolved,
+              active: () => true,
+              timeoutMs: 30_000,
+            }),
+          ],
+        }
+      : {}),
     settingsManager: SettingsManager.inMemory({
-      compaction: { enabled: true, reserveTokens: 2000, keepRecentTokens: 500 },
+      compaction: {
+        enabled: strategy !== 'magic-context',
+        reserveTokens: 2000,
+        keepRecentTokens: 500,
+      },
       retry: { enabled: maxRetries > 0, maxRetries, baseDelayMs: 1000 },
       enableInstallTelemetry: false,
     }),
   };
   const created = await createRoleSession(options);
-  const monitored = monitor(created, strategy);
+  const monitored = monitor(created, strategy, extra.magicReady);
   return {
     ...monitored,
     manager,
@@ -78,7 +105,8 @@ async function setup(
       return {
         ...monitor(
           await createRoleSession({ ...options, sessionManager: restoredManager }),
-          strategy
+          strategy,
+          extra.magicReady
         ),
         manager: restoredManager,
       };
@@ -87,7 +115,8 @@ async function setup(
 }
 function monitor(
   created: Awaited<ReturnType<typeof createRoleSession>>,
-  strategy: 'native' | 'magic-context' | 'off' = 'native'
+  strategy: 'native' | 'magic-context' | 'off' = 'native',
+  magicReady?: Extra['magicReady']
 ) {
   const session = created.session;
   const events: FynvraSessionEvent[] = [];
@@ -97,6 +126,7 @@ function monitor(
     timeoutMs: 30_000,
     contextWindow: () => session.model?.contextWindow ?? 0,
     log: () => {},
+    ...(magicReady ? { magicReady: () => magicReady(() => recovery.fallBack()) } : {}),
   });
   const subscription = subscribeNormalized(
     session,
@@ -470,19 +500,75 @@ describe('native compaction recovery with the installed SDK and an offline provi
     expect(env.events.slice(eventCount).some((e) => e.type === 'context_runtime')).toBe(false);
   });
 
-  it('keeps Magic as the configured engine and requires recovery after failure', async () => {
-    const env = await setup(false, 0, 'magic-context');
+  it('switches a stopped Magic session to the fallback chain without locking it', async () => {
+    let ready = true;
+    const env = await setup(false, 0, 'magic-context', {
+      magicReady: (fallBack) => {
+        if (ready) return new AbortController().signal;
+        fallBack();
+        throw new Error('Magic Context is unavailable.');
+      },
+    });
     expect(env.latest()).toMatchObject({
       configuredStrategy: 'magic-context',
       effectiveStrategy: 'magic-context',
     });
     expect(env.latest().context.compactionThresholdTokens).toBeUndefined();
-    env.recovery.failMagic();
+    expect(env.session.autoCompactionEnabled).toBe(false);
+    env.faux.setResponses([
+      fauxAssistantMessage('magic answer'),
+      fauxAssistantMessage('fallback answer'),
+    ]);
+    await env.recovery.prompt('while magic works');
+    // Magic stops at the next request: the request continues instead of being blocked.
+    ready = false;
+    await env.recovery.prompt('after magic stopped');
+    expect(env.faux.state.callCount).toBe(2);
+    expect(env.session.autoCompactionEnabled).toBe(true);
     expect(env.latest()).toMatchObject({
       configuredStrategy: 'magic-context',
-      effectiveStrategy: 'magic-context',
-      recoveryRequired: true,
-      compactionTimeoutMs: 30_000,
+      effectiveStrategy: 'native',
+      recoveryRequired: false,
+      pendingPromptCount: 0,
+      context: { compactionThresholdTokens: 8000 },
+    });
+    const jsonl = await readFile(join(env.dir, 'session.jsonl'), 'utf8');
+    expect(jsonl).toContain('after magic stopped');
+    expect(jsonl).toContain('fallback answer');
+    expect(env.events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('recovers an old blocked Magic checkpoint through the fallback chain', async () => {
+    const env = await setup(true, 0, 'magic-context', {
+      chain: true,
+      magicReady: (fallBack) => {
+        fallBack();
+        throw new Error('Magic Context is unavailable.');
+      },
+      beforeOpen: (manager) => {
+        manager.appendCustomEntry('fynvra-context-recovery', {
+          blocked: true,
+          resume: false,
+          pending: [{ text: 'held before upgrade' }],
+        });
+      },
+    });
+    expect(env.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 1 });
+    env.faux.setResponses([
+      // The model summary fails for good; the local summary still compacts.
+      fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'invalid summary request' }),
+      fauxAssistantMessage('answer after recovery'),
+    ]);
+    await env.recovery.retryCompaction();
+    const compactions = env.manager.getEntries().filter((e) => e.type === 'compaction');
+    expect(compactions).toHaveLength(1);
+    expect(JSON.stringify(compactions[0])).toContain('compacted locally without a model');
+    const jsonl = await readFile(join(env.dir, 'session.jsonl'), 'utf8');
+    expect(jsonl).toContain('answer after recovery');
+    expect(env.latest()).toMatchObject({
+      effectiveStrategy: 'native',
+      recoveryRequired: false,
+      pendingPromptCount: 0,
     });
   });
 

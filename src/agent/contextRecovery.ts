@@ -34,8 +34,11 @@ export function createContextRecovery({
   magicReady,
 }: Options) {
   let events: Pick<NormalizedSubscription, 'emit' | 'cancelCompaction'> | undefined;
-  const effective = strategy;
+  let effective = strategy;
   const usesMagic = strategy === 'magic-context';
+  // Magic stopped for this session: pass context through and compact with the fallback chain.
+  let magicFallback = false;
+  const magicActive = () => usesMagic && !magicFallback;
   let compaction: CompactionState | undefined;
   let retry: ContextRuntimeSnapshot['retry'];
   let blocked = false;
@@ -157,20 +160,35 @@ export function createContextRecovery({
     events?.cancelCompaction(source);
   }
   function requestBlocked() {
-    return disposed || stopped || (blocked && !(usesMagic && recovering && !recoveryFailed));
+    return disposed || stopped || (blocked && !(magicActive() && recovering && !recoveryFailed));
+  }
+  function overThreshold() {
+    const tokens = session.getContextUsage()?.tokens;
+    const { reserveTokens } = session.settingsManager.getCompactionSettings(session.model);
+    return tokens == null || tokens > contextWindow() - reserveTokens;
   }
   if (usesMagic) {
     const transform = session.agent.transformContext;
     session.agent.transformContext = async (messages, signal) => {
-      if (requestBlocked() || !magicReady || !transform) throw new Error(BLOCKED);
-      const generation = magicReady();
-      const result = await transform(messages, signal);
-      // SDK extension errors can be swallowed. The vendor reports them to our gate;
-      // check again after hooks, and reject transformations from an interrupted generation.
-      if (generation.aborted || signal?.aborted || requestBlocked()) throw new Error(BLOCKED);
-      magicReady();
-      if (recovering) magicPrepared = true;
-      return result;
+      if (requestBlocked()) throw new Error(BLOCKED);
+      // Suspended Magic hooks are inert; other extensions' context hooks still run.
+      const passThrough = async () => (transform ? transform(messages, signal) : messages);
+      if (magicFallback) return passThrough();
+      try {
+        if (!magicReady || !transform) throw new Error(BLOCKED);
+        const generation = magicReady();
+        const result = await transform(messages, signal);
+        // SDK extension errors can be swallowed. The vendor reports them to our gate;
+        // check again after hooks, and reject transformations from an interrupted generation.
+        if (generation.aborted || signal?.aborted || requestBlocked()) throw new Error(BLOCKED);
+        magicReady();
+        if (recovering) magicPrepared = true;
+        return result;
+      } catch (error) {
+        // Magic stopped during this request: continue on the fallback chain instead of locking.
+        if (magicFallback && !signal?.aborted && !requestBlocked()) return passThrough();
+        throw error;
+      }
     };
   }
   const prepare = session.agent.prepareRequest;
@@ -188,7 +206,7 @@ export function createContextRecovery({
       cancel(stopSource);
     }
     if (disposed) return;
-    if (usesMagic && recovering) {
+    if (magicActive() && recovering) {
       // Normalized provider errors are final: transient attempts settle only after SDK retries.
       if (
         event.type === 'error' ||
@@ -260,7 +278,7 @@ export function createContextRecovery({
           }
         });
       } else {
-        if (usesMagic && recovering) {
+        if (magicActive() && recovering) {
           // Observe cancellation here, but let the SDK finish retries before deciding the outcome.
           lastAssistantAborted = event.stopReason === 'aborted';
         }
@@ -291,7 +309,7 @@ export function createContextRecovery({
     });
   }
   async function drain(duringRecovery = false) {
-    const allowed = () => !blocked || (duringRecovery && usesMagic && !recoveryFailed);
+    const allowed = () => !blocked || (duringRecovery && magicActive() && !recoveryFailed);
     if (running || (recovering && !duringRecovery) || !allowed() || stopped || disposed) return;
     running = true;
     try {
@@ -320,19 +338,18 @@ export function createContextRecovery({
     },
     onEvent,
     publish,
-    failMagic() {
-      if (disposed || !usesMagic) return;
-      blocked = true;
-      recoveryFailed = true;
-      resume ||= running || !session.isIdle;
-      try {
-        checkpoint();
-      } catch {
-        writeLog('Magic recovery checkpoint could not be written; requests remain blocked.');
-      }
-      cancel('exception');
+    /**
+     * Magic stopped for this session (any reason): do not lock. Pass context through and let pi
+     * compact with the fallback chain (threshold before the next request, overflow with retry).
+     * Lasts for the session's lifetime; a new Magic binding is created only on reload.
+     */
+    fallBack() {
+      if (disposed || !usesMagic || magicFallback) return;
+      magicFallback = true;
+      effective = 'native';
+      session.setAutoCompactionEnabled(true);
+      writeLog('magic-context stopped; switched to the compaction fallback chain');
       publish();
-      events?.emit({ type: 'error', source: 'compaction', message: BLOCKED });
     },
     async prompt(text: string, images?: ChatImage[], steer = false) {
       const input: PendingInput = { text, ...(images?.length ? { images } : {}), submitted: false };
@@ -359,21 +376,28 @@ export function createContextRecovery({
       try {
         // A previous attempt may have committed the summary before exit/Stop. Reuse that boundary;
         // compacting the already compacted projection again can fail with "session too small".
-        if (usesMagic) {
+        if (magicActive()) {
           // Main reloads the plugin before this explicit operation. Do not treat an old
           // native checkpoint (or plugin readiness alone) as successful compaction.
           if (!magicReady) throw new Error(BLOCKED);
-          magicReady();
-        } else if (!resumeCompactionId) {
+          try {
+            magicReady();
+          } catch (error) {
+            // An unready plugin switches the session to the fallback chain (handled below).
+            if (!magicFallback) throw error;
+          }
+        }
+        // After a Magic fallback, compact only when needed: a small session has nothing to compact.
+        if (!magicActive() && !resumeCompactionId && (!usesMagic || overThreshold())) {
           await session.compact();
           if (compaction?.phase !== 'succeeded') return;
         }
         if (stopped || disposed) return;
         // Native needs a committed summary. Magic validates context before any provider request;
         // its durable lock remains set through validation and any interrupted run's resumption.
-        if (!usesMagic) blocked = false;
+        if (!magicActive()) blocked = false;
         checkpoint();
-        if (usesMagic && pending.length === 0 && !resume) {
+        if (magicActive() && pending.length === 0 && !resume) {
           // An idle/startup failure has no interrupted task to resume. Validate the actual
           // projection (even when empty) through the same guarded hooks, without inventing
           // an input, replacing agent history, or starting a provider turn.
@@ -384,20 +408,20 @@ export function createContextRecovery({
           await session.sendCustomMessage(
             {
               customType: 'fynvra-compaction-resume',
-              content: usesMagic
+              content: magicActive()
                 ? 'Resume the interrupted turn from the existing conversation using Magic Context. Do not repeat completed work.'
                 : 'Context compaction completed. Resume the interrupted turn from the existing conversation.',
               display: false,
             },
             { triggerTurn: true }
           );
-          if (!stopped && !recoveryFailed && (!blocked || (usesMagic && magicPrepared))) {
+          if (!stopped && !recoveryFailed && (!blocked || (magicActive() && magicPrepared))) {
             resume = false;
           }
         }
         await drain(true);
         completed =
-          (!blocked || (usesMagic && magicPrepared)) &&
+          (!blocked || (magicActive() && magicPrepared)) &&
           !recoveryFailed &&
           !stopped &&
           !disposed &&

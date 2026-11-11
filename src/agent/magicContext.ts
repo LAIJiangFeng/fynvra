@@ -140,7 +140,7 @@ export interface MagicContextCompaction {
   attach(piSessionId: string): void;
   /** Reject requests until the plugin is ready; return the current cancellation generation. */
   assertReady(): AbortSignal;
-  /** Stop unsafe requests and retain this session for explicit recovery. */
+  /** Stop Magic for this session; the host switches it to the compaction fallback chain. */
   suspend(reason: MagicContextFallbackReason): void;
   /** Stop/model changes invalidate current operations without treating cancellation as failure. */
   interrupt(): void;
@@ -149,7 +149,7 @@ export interface MagicContextCompaction {
 }
 
 export interface MagicContextCompactionOptions {
-  /** Called once when this session must stop for explicit Magic recovery (never native fallback). */
+  /** Called once when Magic stops for this session; the host then uses the fallback chain. */
   onFallback?: (reason: MagicContextFallbackReason) => void;
 }
 
@@ -175,8 +175,11 @@ export function createMagicContextCompaction(
     name: 'fynvra-magic-context',
     hidden: true,
     factory: async (pi) => {
-      // Defense for manual SDK compaction as well as startup failure before vendor hooks exist.
-      pi.on('session_before_compact', async () => ({ cancel: true }));
+      // Magic owns context while healthy. Once suspended, the session's fallback chain compacts.
+      const ownsCompaction = () => runner?.suspended !== true;
+      pi.on('session_before_compact', async () =>
+        ownsCompaction() ? { cancel: true } : undefined
+      );
       const host = prepareHost();
       if (!host.ok) {
         warnings.push(host.warning);
@@ -207,6 +210,16 @@ export function createMagicContextCompaction(
             };
           }
           if (property === BOOT_OK_SYMBOL) return bootStatus === 'ready';
+          // The vendor always cancels native compaction; let the fallback chain run after suspension.
+          if (property === 'on') {
+            return (event: string, handler: (...args: unknown[]) => unknown) =>
+              (pi.on as (event: string, handler: (...args: unknown[]) => unknown) => unknown)(
+                event,
+                event === 'session_before_compact'
+                  ? (...args: unknown[]) => (ownsCompaction() ? handler(...args) : undefined)
+                  : handler
+              );
+          }
           const value = Reflect.get(pi, property, pi);
           return typeof value === 'function' ? value.bind(pi) : value;
         },
@@ -466,7 +479,7 @@ function noteHistorianFailure(
   if (runner.failureStreak >= TRANSIENT_FAILURE_LIMIT) suspendSession(sessionId, 'runtime');
 }
 
-function isTransientModelError(message: string): boolean {
+export function isTransientModelError(message: string): boolean {
   // Auth, quota and balance problems do not heal by retrying.
   if (
     /\b40[13]\b|unauthori[sz]ed|forbidden|invalid api key|quota|insufficient|余额|欠费/i.test(
@@ -479,14 +492,14 @@ function isTransientModelError(message: string): boolean {
   );
 }
 
-function isContextOverflowError(message: string): boolean {
+export function isContextOverflowError(message: string): boolean {
   return /context_length_exceeded|maximum context length|context window|context length|too many tokens|prompt is too long|input is too long|request entity too large|\b413\b|(?:超出|超过).{0,12}(?:上下文|长度)|上下文.{0,12}(?:超出|超过|过长|太长)/i.test(
     message
   );
 }
 
 /** Conservative token estimate from UTF-8 bytes (see HISTORIAN_BYTES_PER_TOKEN). */
-function estimatePromptTokens(text: string): number {
+export function estimatePromptTokens(text: string): number {
   return Math.ceil(Buffer.byteLength(text, 'utf8') / HISTORIAN_BYTES_PER_TOKEN);
 }
 
@@ -777,7 +790,7 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
 }
 
 /** Enforce the deadline even if a provider neglects to settle after abort. */
-function withAbort<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
+export function withAbort<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => {
       signal.removeEventListener('abort', abort);
