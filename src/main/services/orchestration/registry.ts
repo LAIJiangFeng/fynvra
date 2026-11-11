@@ -151,10 +151,41 @@ export function createOrchestrationRegistry(
     return service;
   };
 
+  const reopening = new Set<string>();
+  const findWorkspace = (workspaceId: string): Workspace | undefined =>
+    options.listWorkspaces().find((candidate) => candidate.id === workspaceId);
+  /**
+   * 服务创建时固定了工作区的 vcs（原地 / worktree）。vcs 变了（如用户 git init）且服务空闲时，
+   * 像退出时一样先落盘再按新记录重开；不空闲就继续用旧模式，下一次 serviceFor 再看。
+   */
+  const reopenIfVcsChanged = (existing: OrchestrationService): void => {
+    const id = existing.workspace.id;
+    const stale = () =>
+      services.get(id) === existing &&
+      existing.isIdle() &&
+      findWorkspace(id)?.vcs !== undefined &&
+      findWorkspace(id)?.vcs !== existing.workspace.vcs;
+    if (reopening.has(id) || !stale()) return;
+    reopening.add(id);
+    void existing
+      .flush()
+      .then(() => {
+        const workspace = findWorkspace(id);
+        if (!stale() || workspace === undefined) return;
+        services.delete(id);
+        open(workspace);
+      })
+      .catch((error: unknown) => log(`reopen ${id} failed: ${errorMessage(error)}`))
+      .finally(() => reopening.delete(id));
+  };
+
   const serviceFor = (workspaceId: string): OrchestrationService | undefined => {
     const existing = services.get(workspaceId);
-    if (existing !== undefined) return existing;
-    const workspace = options.listWorkspaces().find((candidate) => candidate.id === workspaceId);
+    if (existing !== undefined) {
+      reopenIfVcsChanged(existing);
+      return existing;
+    }
+    const workspace = findWorkspace(workspaceId);
     return workspace === undefined ? undefined : open(workspace);
   };
 

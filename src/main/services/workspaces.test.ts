@@ -98,6 +98,82 @@ describe('createWorkspaceService', () => {
     expect(settings.read().workspaces).toHaveLength(1);
   });
 
+  describe('refreshVcs', () => {
+    const mount = async (current: { value: DirectoryInspection }) => {
+      let clock = 0;
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect: async () => current.value,
+        newId: () => 'ws-1',
+        platform: 'linux',
+        now: () => (clock += 10_000),
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      return workspaces;
+    };
+
+    it('目录 git init 成为仓库根目录后 none → git，并记下默认分支', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      current.value = repo('/home/dev/notes', 'notes');
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]).toEqual({
+        id: 'ws-1',
+        name: 'notes',
+        repoPath: '/home/dev/notes',
+        vcs: 'git',
+        defaultBranch: 'main',
+      });
+    });
+
+    it('在外层仓库里的普通目录（not-repo-root）保持 none', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      current.value = { ok: false, code: 'not-repo-root', repoRoot: '/home/dev', error: 'x' };
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]?.vcs).toBe('none');
+    });
+
+    it('git → none 只在目录已不是仓库时；出错不动', async () => {
+      const current = { value: repo('/home/dev/notes', 'notes') };
+      const workspaces = await mount(current);
+      current.value = { ok: false, code: 'failed', error: 'gone' };
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]?.vcs).toBe('git');
+      current.value = plainDir('/home/dev/notes');
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]).toEqual({
+        id: 'ws-1',
+        name: 'notes',
+        repoPath: '/home/dev/notes',
+        vcs: 'none',
+      });
+    });
+
+    it('没变化时不写 settings', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      const update = vi.spyOn(settings, 'update');
+      await workspaces.refreshVcs();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('5 秒内不重复检测', async () => {
+      const inspect = vi.fn(async () => plainDir('/home/dev/notes'));
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect,
+        newId: () => 'ws-1',
+        platform: 'linux',
+        now: () => 1_000,
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      await workspaces.refreshVcs();
+      await workspaces.refreshVcs();
+      expect(inspect).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('普通目录按 vcs: none 挂入，没有默认分支', async () => {
     const result = await service(plainDir('/home/dev/notes')).addDirectory('/home/dev/notes');
     expect(result).toEqual({

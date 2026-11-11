@@ -113,6 +113,8 @@ export interface OrchestrationService {
   coordinatorWork(sessionId: string): CoordinatorWork;
   /** 确认已投递的消息（尽力而为，幂等）。 */
   ackMessages(ids: readonly string[]): void;
+  /** 状态已加载且没有排队 / 进行中 / 待审的任务、没有运行中的工作流节点：可以换掉服务（如工作区 vcs 变了）。 */
+  isIdle(): boolean;
 }
 
 function observe<T extends { id: string }>(
@@ -486,6 +488,19 @@ export function createOrchestrationService(
       await ready;
       await persist();
     },
+
+    isIdle: () =>
+      loaded &&
+      pendingDispatches.size === 0 &&
+      store.tasks.list(
+        (task) =>
+          task.status === 'todo' ||
+          task.status === 'in-progress' ||
+          task.status === 'in-review' ||
+          (task.workflow !== undefined &&
+            (task.workflow.launches.length > 0 ||
+              task.workflow.nodes.some((node) => node.status === 'running')))
+      ).length === 0,
 
     pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
 
