@@ -133,6 +133,11 @@ export interface Preferences {
    * 内网、链路本地、云元数据等地址始终拦截；之后新加载的会话生效。
    */
   webFetchAllowLoopback?: boolean;
+  /**
+   * 危险操作需要确认：开启时保护底线（rm -rf、git push 等）在 full 档也要人确认；缺省或 false 为关闭（读取用 `=== true`）。
+   * 只影响 full 档，已打开的会话立即生效。
+   */
+  confirmDangerousActions?: boolean;
   /** User-picked applications for the workspace menu; Main verifies new executable paths. */
   openWithApps?: OpenWithApp[];
   theme: ThemeMode;
@@ -567,6 +572,9 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(typeof record?.webFetchAllowLoopback === 'boolean'
       ? { webFetchAllowLoopback: record.webFetchAllowLoopback }
       : {}),
+    ...(typeof record?.confirmDangerousActions === 'boolean'
+      ? { confirmDangerousActions: record.confirmDangerousActions }
+      : {}),
     theme: isThemeMode(theme) ? theme : DEFAULT_PREFERENCES.theme,
     sidePanelOpen:
       typeof sidePanelOpen === 'boolean' ? sidePanelOpen : DEFAULT_PREFERENCES.sidePanelOpen,
@@ -678,8 +686,9 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         patch.sidebarOpen = value;
         break;
       case 'webFetchAllowLoopback':
+      case 'confirmDangerousActions':
         if (typeof value !== 'boolean') return null;
-        patch.webFetchAllowLoopback = value;
+        patch[key] = value;
         break;
       case 'notifications': {
         const notifications = parseNotificationPreferencesPatch(value);

@@ -772,6 +772,11 @@ export const zhCN = {
       keybindings: '快捷键',
       usage: '用量',
     },
+    dangerousActions: {
+      title: '安全',
+      confirm: '危险操作需要确认',
+      hint: '开启后，完全放行模式下 rm -rf、git push 等危险操作仍需你确认；关闭则全部自动执行',
+    },
     webFetch: {
       title: '网页读取',
       allowLoopback: '允许 web_fetch 访问本机地址',

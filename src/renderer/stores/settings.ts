@@ -151,7 +151,13 @@ window.fynvra.settings.onChanged(() => {
 type GeneralPatch = Partial<
   SessionPreferences &
     TimelinePreferences &
-    Pick<Preferences, 'compactionStrategy' | 'compactionTimeoutMs' | 'webFetchAllowLoopback'>
+    Pick<
+      Preferences,
+      | 'compactionStrategy'
+      | 'compactionTimeoutMs'
+      | 'webFetchAllowLoopback'
+      | 'confirmDangerousActions'
+    >
 >;
 
 export interface GeneralPreferencesState {
@@ -162,6 +168,8 @@ export interface GeneralPreferencesState {
   compactionTimeoutMs: number;
   /** web_fetch 是否允许访问本机回环地址；缺省关闭 */
   webFetchAllowLoopback: boolean;
+  /** 完全放行档下危险操作是否仍要确认；缺省关闭 */
+  confirmDangerousActions: boolean;
   /** 最近一次保存失败的原因 */
   error: string | null;
   load(): Promise<void>;
@@ -176,6 +184,7 @@ function resolveGeneral(preferences: GeneralPatch) {
     compaction: compactionStrategyOf(preferences),
     compactionTimeoutMs: compactionTimeoutMsOf(preferences),
     webFetchAllowLoopback: preferences.webFetchAllowLoopback === true,
+    confirmDangerousActions: preferences.confirmDangerousActions === true,
   };
 }
 
@@ -207,6 +216,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
           compactionStrategy: state.compaction,
           compactionTimeoutMs: state.compactionTimeoutMs,
           webFetchAllowLoopback: state.webFetchAllowLoopback,
+          confirmDangerousActions: state.confirmDangerousActions,
           ...patch,
         })
       );

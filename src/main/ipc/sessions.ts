@@ -56,7 +56,7 @@ import { getOrchestrationRegistry } from './orchestration';
 import { getPluginRegistry } from './plugins';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
-import { getSettingsFile } from './settings';
+import { getSettingsFile, onConfirmDangerousActionsChanged } from './settings';
 import { getSkillRegistry } from './skills';
 import { getWorkflowRegistry } from './workflows';
 import { getWorkspaceService } from './workspaces';
@@ -72,7 +72,11 @@ let archiveSweeper: ArchiveSweeper | null = null;
 
 /** Main 内唯一的会话 / agent worker 管理者；userData 路径在启动早期才确定，所以延迟创建 */
 export function getAgentHost(): AgentHostService {
-  agentHost ??= createAppAgentHost();
+  if (!agentHost) {
+    const host = createAppAgentHost();
+    agentHost = host;
+    onConfirmDangerousActionsChanged((enabled) => host.setConfirmDangerousActions(enabled));
+  }
   return agentHost;
 }
 
@@ -145,6 +149,8 @@ function createAppAgentHost(): AgentHostService {
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
+    resolveConfirmDangerousActions: () =>
+      getSettingsFile().read().preferences.confirmDangerousActions === true,
     resolvePluginProviders,
     // 插件运行时按名字找过的服务记进 plugins.json；内容变了才广播
     onPluginProviderLookup: (pluginId, name) => {
