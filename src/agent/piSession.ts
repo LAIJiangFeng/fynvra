@@ -19,7 +19,7 @@ import type {
 } from '@shared/types/agent';
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/settings';
-import { createCompactionFallbackExtension } from './compactionFallback';
+import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
@@ -115,17 +115,17 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       options.onContextLog?.(
         `session=${identity.sessionId} generation=${identity.generation} ${message}`
       );
-    // Native always compacts through the fallback chain; Magic only after it stopped.
-    const fallbackCompaction =
+    // Native always compacts through the method chain; Magic only after it stopped.
+    const compactionChain =
       strategy === 'off'
         ? undefined
-        : createCompactionFallbackExtension({
+        : createCompactionChainExtension({
             getModel: () => activeModel,
+            getSessionManager: () => sessionManager,
             active: () => strategy === 'native' || magicFailed,
-            timeoutMs,
             log: logContext,
           });
-    const extensions = [magic?.extension, fallbackCompaction].filter((ext) => ext !== undefined);
+    const extensions = [magic?.extension, compactionChain].filter((ext) => ext !== undefined);
     magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
     // 计划模式的实时开关：spawn 时按 spec 初始化，运行中由 set-plan-mode 改写；createRoleSession 每次 run / dispatch_task 读取

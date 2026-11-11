@@ -9,6 +9,8 @@ import type { CompactionStrategy } from '@shared/types/settings';
 
 const CHECKPOINT = 'fynvra-context-recovery';
 const BLOCKED = 'Context recovery required. Retry context recovery before continuing.';
+const COMPACTION_FAILED =
+  'Context compaction failed; the conversation is kept. Send a message to try again.';
 interface PendingInput {
   text: string;
   images?: ChatImage[];
@@ -43,6 +45,9 @@ export function createContextRecovery({
   let retry: ContextRuntimeSnapshot['retry'];
   let blocked = false;
   let stopped = false;
+  // A failed compaction ends the current turn (no auto-continuation with the oversized context);
+  // the next submitted input clears it and triggers compaction again.
+  let turnStopped = false;
   let stopSource: NonNullable<CompactionState['cancelSource']> = 'user';
   let disposed = false;
   let recovering = false;
@@ -160,7 +165,27 @@ export function createContextRecovery({
     events?.cancelCompaction(source);
   }
   function requestBlocked() {
-    return disposed || stopped || (blocked && !(magicActive() && recovering && !recoveryFailed));
+    return (
+      disposed ||
+      stopped ||
+      turnStopped ||
+      (blocked && !(magicActive() && recovering && !recoveryFailed))
+    );
+  }
+  /** Requests and automatic compaction stay off until the next input, so the turn cannot loop. */
+  function stopTurn() {
+    turnStopped = true;
+    session.setAutoCompactionEnabled(false);
+  }
+  function gateError() {
+    return new Error(turnStopped && !stopped && !blocked ? COMPACTION_FAILED : BLOCKED);
+  }
+  /** Compaction deadline outside explicit recovery: end this compaction and turn, not the session. */
+  function timeoutCompaction() {
+    clearTimer();
+    stopTurn();
+    session.abortCompaction();
+    events?.cancelCompaction('timeout');
   }
   function overThreshold() {
     const tokens = session.getContextUsage()?.tokens;
@@ -170,7 +195,7 @@ export function createContextRecovery({
   if (usesMagic) {
     const transform = session.agent.transformContext;
     session.agent.transformContext = async (messages, signal) => {
-      if (requestBlocked()) throw new Error(BLOCKED);
+      if (requestBlocked()) throw gateError();
       // Suspended Magic hooks are inert; other extensions' context hooks still run.
       const passThrough = async () => (transform ? transform(messages, signal) : messages);
       if (magicFallback) return passThrough();
@@ -180,7 +205,7 @@ export function createContextRecovery({
         const result = await transform(messages, signal);
         // SDK extension errors can be swallowed. The vendor reports them to our gate;
         // check again after hooks, and reject transformations from an interrupted generation.
-        if (generation.aborted || signal?.aborted || requestBlocked()) throw new Error(BLOCKED);
+        if (generation.aborted || signal?.aborted || requestBlocked()) throw gateError();
         magicReady();
         if (recovering) magicPrepared = true;
         return result;
@@ -193,10 +218,10 @@ export function createContextRecovery({
   }
   const prepare = session.agent.prepareRequest;
   session.agent.prepareRequest = async (request, signal) => {
-    if (requestBlocked()) throw new Error(BLOCKED);
+    if (requestBlocked()) throw gateError();
     const result = await prepare?.(request, signal);
     // prepareRequest/prepareNextTurn may have attempted compaction and returned the old projection.
-    if (requestBlocked() || signal?.aborted) throw new Error(BLOCKED);
+    if (requestBlocked() || signal?.aborted) throw gateError();
     return result || undefined;
   };
 
@@ -223,7 +248,7 @@ export function createContextRecovery({
             `operation=${compaction.operationId} start reason=${compaction.reason} deadline=${compaction.deadlineAt}`
           );
           timer = setTimeout(
-            () => cancel('timeout'),
+            () => (recovering ? cancel('timeout') : timeoutCompaction()),
             Math.max(0, compaction.deadlineAt - Date.now())
           );
         }
@@ -240,19 +265,14 @@ export function createContextRecovery({
             .findLast((entry) => entry.type === 'compaction')?.id;
           checkpoint();
         }
+        // A failed compaction does not lock the session (oh-my-pi): the history is intact, pi
+        // does not auto-continue the turn, and the next message triggers compaction again.
         if (compaction.phase !== 'succeeded' && !magicOwns) {
           resumeCompactionId = undefined;
-          blocked = true;
-          resume = true;
-          checkpoint();
-          session.clearQueue();
-          void session.abort().catch(() => undefined);
           if (compaction.cancelSource !== 'user' && compaction.cancelSource !== 'shutdown') {
-            events?.emit({
-              type: 'error',
-              source: 'compaction',
-              message: compaction.errorMessage ?? BLOCKED,
-            });
+            stopTurn();
+            // Fixed text: provider errors may echo prompt content.
+            events?.emit({ type: 'error', source: 'compaction', message: COMPACTION_FAILED });
           }
         }
       }
@@ -288,6 +308,10 @@ export function createContextRecovery({
   }
   async function submit(input: PendingInput, steer = false) {
     input.submitted = true;
+    if (turnStopped) {
+      turnStopped = false;
+      session.setAutoCompactionEnabled(effective === 'native');
+    }
     const images: ImageContent[] | undefined = input.images?.map((image) => ({
       type: 'image',
       ...image,

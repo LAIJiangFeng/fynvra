@@ -1,9 +1,7 @@
-import type { Message } from '@earendil-works/pi-ai';
 import {
   type CompactionResult,
   convertToLlm,
-  type InlineExtension,
-  type SessionBeforeCompactEvent,
+  estimateTokens,
   serializeConversation,
 } from '@earendil-works/pi-coding-agent';
 import type { ResolvedModel } from '@fynvra/agent-runtime';
@@ -13,27 +11,24 @@ import {
   isContextOverflowError,
   isTransientModelError,
   withAbort,
-} from './magicContext';
+} from '../magicContext';
+import type { CompactionContext, Preparation } from './types';
 
 /**
- * Compaction fallback chain (after oh-my-pi): a robust model summary that folds oversized
- * history into windows, then a deterministic local summary that cannot fail. Used as the
- * `session_before_compact` result for native sessions and for Magic sessions after Magic stopped.
+ * Soft compaction (oh-my-pi "soft"): an LLM summary that cannot be broken by size. History
+ * that does not fit is folded into windows (each updating the carried summary), a single
+ * oversized message is truncated, a provider overflow halves the budget and re-plans, and
+ * transient errors are retried with backoff. No reasoning is requested.
  */
-
-type Preparation = SessionBeforeCompactEvent['preparation'];
 
 /** Use only this share of the advertised window, like oh-my-pi. */
 const WINDOW_SAFETY = 0.8;
 const FRAMING_TOKENS = 1_024;
 const MAX_SUMMARY_TOKENS = 16_384;
-/** Below this input budget a model summary is not worth sending; the local summary takes over. */
+/** Below this input budget a summary is not worth sending; the method fails. */
 const MIN_WINDOW_TOKENS = 1_024;
 const TRANSIENT_RETRIES = 2;
-const LOCAL_REQUEST_CHARS = 300;
-const LOCAL_REQUESTS_TOTAL_CHARS = 6_000;
-const LOCAL_PREVIOUS_SUMMARY_CHARS = 12_000;
-const LOCAL_MAX_FILES = 100;
+const MAX_FILES = 100;
 
 const SYSTEM_PROMPT =
   'You are a context summarization assistant. Read the conversation between a user and an AI assistant and write a structured checkpoint summary. Do NOT continue the conversation or answer its questions. Output ONLY the summary.';
@@ -44,45 +39,32 @@ const INSTRUCTION = [
 ].join('\n');
 const UPDATE_INSTRUCTION = `Update the summary in <previous-summary> with the NEW conversation above. Keep all still-relevant information, move finished items to Done, and add new progress, decisions and context.\n${INSTRUCTION}`;
 
-export interface FallbackOptions {
-  signal: AbortSignal;
-  /** Deadline for the model part; on expiry the local summary is used. */
-  deadlineMs?: number;
-  /** Base backoff for transient provider errors (doubles per retry). */
-  retryDelayMs?: number;
-  log?(message: string): void;
+export async function soft(ctx: CompactionContext): Promise<CompactionResult> {
+  const { preparation } = ctx;
+  const summarized = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
+  const carried = await robustSummary(preparation, ctx.model, ctx);
+  const { readFiles, modifiedFiles } = fileLists(preparation);
+  const summary = carried + formatFiles(readFiles, modifiedFiles);
+  // pi's chars/4 estimate, the same one tokensBefore uses.
+  const removed =
+    summarized.reduce((sum, message) => sum + estimateTokens(message), 0) +
+    Math.ceil((preparation.previousSummary?.length ?? 0) / 4);
+  return {
+    summary,
+    firstKeptEntryId: preparation.firstKeptEntryId,
+    tokensBefore: preparation.tokensBefore,
+    estimatedTokensAfter:
+      Math.max(0, preparation.tokensBefore - removed) + Math.ceil(summary.length / 4),
+    details: { readFiles, modifiedFiles },
+  };
 }
 
-/** Model summary, then local summary. Throws only when the caller's signal aborted. */
-export async function fallbackCompaction(
-  preparation: Preparation,
-  resolved: ResolvedModel,
-  options: FallbackOptions
-): Promise<CompactionResult> {
-  const signal = options.deadlineMs
-    ? AbortSignal.any([options.signal, AbortSignal.timeout(options.deadlineMs)])
-    : options.signal;
-  try {
-    return await robustSummary(preparation, resolved, { ...options, signal });
-  } catch (error) {
-    options.signal.throwIfAborted();
-    // Error kinds only: provider messages may echo prompt content.
-    const kind = signal.aborted
-      ? 'timeout'
-      : isContextOverflowError(errorMessage(error))
-        ? 'overflow'
-        : 'error';
-    options.log?.(`compaction fallback: model summary failed (${kind}); using local summary`);
-    return localSummary(preparation);
-  }
-}
-
-/** Fold the history into budget-sized windows, each updating the carried summary. */
+/** Fold the history into budget-sized windows; returns the final carried summary text. */
 export async function robustSummary(
   preparation: Preparation,
   resolved: ResolvedModel,
-  options: FallbackOptions
-): Promise<CompactionResult> {
+  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>
+): Promise<string> {
   const { model } = resolved;
   const window = model.contextWindow;
   const maxTokens = Math.floor(
@@ -128,80 +110,8 @@ export async function robustSummary(
     }
     index = end;
   }
-  const { readFiles, modifiedFiles } = fileLists(preparation);
-  return {
-    summary: (carried ?? '') + formatFiles(readFiles, modifiedFiles),
-    firstKeptEntryId: preparation.firstKeptEntryId,
-    tokensBefore: preparation.tokensBefore,
-    details: { readFiles, modifiedFiles },
-  };
-}
-
-/** Deterministic summary from the preparation alone; used when no model summary is possible. */
-export function localSummary(preparation: Preparation): CompactionResult {
-  const requests: string[] = [];
-  let total = 0;
-  const messages = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== 'user') continue;
-    const text = userText(message as Message)
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!text) continue;
-    const clipped =
-      text.length > LOCAL_REQUEST_CHARS ? `${text.slice(0, LOCAL_REQUEST_CHARS)}…` : text;
-    if (total + clipped.length > LOCAL_REQUESTS_TOTAL_CHARS) break;
-    requests.push(`- ${clipped}`);
-    total += clipped.length;
-  }
-  requests.reverse();
-  const lines = [
-    'Earlier conversation history was compacted locally without a model (summary generation failed). Details from that part of the conversation may be missing; re-read files when needed.',
-  ];
-  if (preparation.previousSummary) {
-    lines.push(
-      '',
-      '## Previous summary',
-      preparation.previousSummary.slice(0, LOCAL_PREVIOUS_SUMMARY_CHARS)
-    );
-  }
-  if (requests.length) lines.push('', '## User requests (oldest first)', ...requests);
-  const { readFiles, modifiedFiles } = fileLists(preparation);
-  // shortcut: the kept tail is not elided; if it alone overflows the window, the next request
-  // fails and recovery stays explicit. Elide kept tool outputs when that shows up in practice.
-  return {
-    summary: lines.join('\n') + formatFiles(readFiles, modifiedFiles),
-    firstKeptEntryId: preparation.firstKeptEntryId,
-    tokensBefore: preparation.tokensBefore,
-    details: { readFiles, modifiedFiles },
-  };
-}
-
-/** `session_before_compact` hook that answers with the fallback chain while `active()`. */
-export function createCompactionFallbackExtension(options: {
-  getModel(): ResolvedModel;
-  active(): boolean;
-  /** Host compaction timeout; the model part gets a share of it so the local summary fits. */
-  timeoutMs: number;
-  log?(message: string): void;
-}): InlineExtension {
-  return {
-    name: 'fynvra-compaction-fallback',
-    hidden: true,
-    factory: (pi) => {
-      pi.on('session_before_compact', async (event) => {
-        if (!options.active()) return;
-        return {
-          compaction: await fallbackCompaction(event.preparation, options.getModel(), {
-            signal: event.signal,
-            deadlineMs: Math.max(1, Math.floor(options.timeoutMs * 0.75)),
-            ...(options.log ? { log: options.log } : {}),
-          }),
-        };
-      });
-    },
-  };
+  if (!carried) throw new Error('nothing to summarize');
+  return carried;
 }
 
 class OverflowError extends Error {}
@@ -211,7 +121,7 @@ async function summarizeWindow(
   conversation: string,
   previous: string | undefined,
   maxTokens: number,
-  options: FallbackOptions
+  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>
 ): Promise<string> {
   const { signal } = options;
   const prompt = `<conversation>\n${conversation}\n</conversation>\n\n${
@@ -261,9 +171,8 @@ async function summarizeWindow(
       transient = isTransientModelError(failure);
     }
     if (isContextOverflowError(failure)) throw new OverflowError('context overflow');
-    if (attempt >= TRANSIENT_RETRIES || !transient) {
-      throw new Error('summary request failed');
-    }
+    // Fixed text: provider messages may echo prompt content.
+    if (attempt >= TRANSIENT_RETRIES || !transient) throw new Error('summary request failed');
     await sleep((options.retryDelayMs ?? 1_000) * 2 ** attempt, signal);
   }
 }
@@ -272,15 +181,6 @@ function truncate(text: string, budgetTokens: number): string {
   // estimatePromptTokens counts 2 UTF-8 bytes per token; a UTF-16 unit is at most 3 bytes.
   const keep = Math.max(0, Math.floor((budgetTokens * 2) / 3) - 80);
   return `${text.slice(0, keep)}\n[… ${text.length - keep} characters truncated for compaction …]`;
-}
-
-function userText(message: Message): string {
-  if (message.role !== 'user') return '';
-  if (typeof message.content === 'string') return message.content;
-  return message.content
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join(' ');
 }
 
 function fileLists(preparation: Preparation): { readFiles: string[]; modifiedFiles: string[] } {
@@ -294,7 +194,7 @@ function fileLists(preparation: Preparation): { readFiles: string[]; modifiedFil
 
 function formatFiles(readFiles: string[], modifiedFiles: string[]): string {
   const block = (tag: string, files: string[]) =>
-    files.length ? `\n\n<${tag}>\n${files.slice(0, LOCAL_MAX_FILES).join('\n')}\n</${tag}>` : '';
+    files.length ? `\n\n<${tag}>\n${files.slice(0, MAX_FILES).join('\n')}\n</${tag}>` : '';
   return block('read-files', readFiles) + block('modified-files', modifiedFiles);
 }
 
