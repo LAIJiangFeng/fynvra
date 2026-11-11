@@ -39,10 +39,27 @@ const INSTRUCTION = [
 ].join('\n');
 const UPDATE_INSTRUCTION = `Update the summary in <previous-summary> with the NEW conversation above. Keep all still-relevant information, move finished items to Done, and add new progress, decisions and context.\n${INSTRUCTION}`;
 
+/** Prompts of one summary flavour; `update` folds a later window into the carried text. */
+export interface SummaryPrompts {
+  system: string;
+  instruction: string;
+  update: string;
+}
+
+const SOFT_PROMPTS: SummaryPrompts = {
+  system: SYSTEM_PROMPT,
+  instruction: INSTRUCTION,
+  update: UPDATE_INSTRUCTION,
+};
+
 export async function soft(ctx: CompactionContext): Promise<CompactionResult> {
+  return summaryResult(ctx, await robustSummary(ctx.preparation, ctx.model, ctx));
+}
+
+/** Wrap summary text (plus the file lists) as a pi compaction result for `preparation`. */
+export function summaryResult(ctx: CompactionContext, carried: string): CompactionResult {
   const { preparation } = ctx;
   const summarized = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
-  const carried = await robustSummary(preparation, ctx.model, ctx);
   const { readFiles, modifiedFiles } = fileLists(preparation);
   const summary = carried + formatFiles(readFiles, modifiedFiles);
   // pi's chars/4 estimate, the same one tokensBefore uses.
@@ -63,7 +80,8 @@ export async function soft(ctx: CompactionContext): Promise<CompactionResult> {
 export async function robustSummary(
   preparation: Preparation,
   resolved: ResolvedModel,
-  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>
+  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>,
+  prompts: SummaryPrompts = SOFT_PROMPTS
 ): Promise<string> {
   const { model } = resolved;
   const window = model.contextWindow;
@@ -81,7 +99,7 @@ export async function robustSummary(
   let scale = 1;
   let index = 0;
   while (index < pieces.length) {
-    const fixed = estimatePromptTokens(SYSTEM_PROMPT + UPDATE_INSTRUCTION + (carried ?? ''));
+    const fixed = estimatePromptTokens(prompts.system + prompts.update + (carried ?? ''));
     const budget = Math.floor(
       (window * WINDOW_SAFETY - maxTokens - FRAMING_TOKENS - fixed) * scale
     );
@@ -102,7 +120,14 @@ export async function robustSummary(
       end = index + 1;
     }
     try {
-      carried = await summarizeWindow(resolved, chunk.join('\n\n'), carried, maxTokens, options);
+      carried = await summarizeWindow(
+        resolved,
+        chunk.join('\n\n'),
+        carried,
+        maxTokens,
+        options,
+        prompts
+      );
     } catch (error) {
       if (!(error instanceof OverflowError)) throw error;
       scale /= 2;
@@ -121,13 +146,14 @@ async function summarizeWindow(
   conversation: string,
   previous: string | undefined,
   maxTokens: number,
-  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>
+  options: Pick<CompactionContext, 'signal' | 'retryDelayMs'>,
+  prompts: SummaryPrompts
 ): Promise<string> {
   const { signal } = options;
   const prompt = `<conversation>\n${conversation}\n</conversation>\n\n${
     previous
-      ? `<previous-summary>\n${previous}\n</previous-summary>\n\n${UPDATE_INSTRUCTION}`
-      : INSTRUCTION
+      ? `<previous-summary>\n${previous}\n</previous-summary>\n\n${prompts.update}`
+      : prompts.instruction
   }`;
   for (let attempt = 0; ; attempt++) {
     let failure: string;
@@ -137,7 +163,7 @@ async function summarizeWindow(
         resolved.runtime.completeSimple(
           resolved.model,
           {
-            systemPrompt: SYSTEM_PROMPT,
+            systemPrompt: prompts.system,
             messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
           },
           {
