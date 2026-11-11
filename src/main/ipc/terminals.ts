@@ -1,5 +1,6 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import type { AvailableShell } from '@shared/types/settings';
 import type { TerminalEvent } from '@shared/types/terminal';
 import { parseWorkspaceId } from '@shared/types/workspace';
 import { MAX_UI_TABS } from '@shared/types/workspaceUi';
@@ -7,7 +8,12 @@ import { app, ipcMain, type WebContents } from 'electron';
 import type { IPty } from 'node-pty';
 import { translate } from '../i18n';
 import { savedCommandEnvironment } from '../services/commandNetwork';
-import { availableShells, resolveTerminalShell, shellDetectionDeps } from '../services/shells';
+import {
+  availableShells,
+  resolveTerminalShell,
+  type ShellDetectionDeps,
+  shellDetectionDeps,
+} from '../services/shells';
 import { terminalShellIntegration } from '../services/terminalShellIntegration';
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
@@ -15,6 +21,21 @@ import { getWorkspaceService } from './workspaces';
 const terminals = new Map<string, { owner: WebContents; workspaceId: string; pty: IPty }>();
 const owners = new WeakMap<WebContents, { generation: number }>();
 const pending = new Map<string, { owner: WebContents; workspaceId: string; canceled: boolean }>();
+
+/** 检测可用 shell 要起多次 where.exe（Windows 上同步卡 Main）：结果缓存一分钟，新装的 shell 最多晚这么久被看到 */
+const SHELLS_CACHE_MS = 60_000;
+let shellsCache: { at: number; shells: Promise<AvailableShell[]> } | undefined;
+
+function cachedShells(deps: ShellDetectionDeps): Promise<AvailableShell[]> {
+  if (!shellsCache || Date.now() - shellsCache.at >= SHELLS_CACHE_MS) {
+    const shells = availableShells(deps);
+    shellsCache = { at: Date.now(), shells };
+    shells.catch(() => {
+      if (shellsCache?.shells === shells) shellsCache = undefined;
+    });
+  }
+  return shellsCache.shells;
+}
 
 export function terminalBelongsTo(id: string, owner: WebContents, workspaceId: string): boolean {
   const terminal = terminals.get(id) ?? pending.get(id);
@@ -115,7 +136,7 @@ export function registerTerminalHandlers(): void {
       const { spawn } = await import('node-pty');
       const preference = getSettingsFile().read().preferences.terminalShell;
       const deps = shellDetectionDeps();
-      const shells = preference ? await availableShells(deps) : [];
+      const shells = preference ? await cachedShells(deps) : [];
       const shell = terminalShellIntegration(
         resolveTerminalShell(preference, shells, deps),
         deps.platform

@@ -271,6 +271,25 @@ describe('会话与时间线偏好', () => {
   });
 });
 
+describe('confirmDangerousActions', () => {
+  it('缺省与非法值都读作关闭，不影响其他偏好', () => {
+    expect(parsePreferences({}).confirmDangerousActions === true).toBe(false);
+    for (const value of ['yes', 1, null]) {
+      const parsed = parsePreferences({ theme: 'dark', confirmDangerousActions: value });
+      expect(parsed.confirmDangerousActions === true).toBe(false);
+      expect(parsed.theme).toBe('dark');
+    }
+    expect(parsePreferences({ confirmDangerousActions: true }).confirmDangerousActions).toBe(true);
+  });
+
+  it('patch 只接受布尔值', () => {
+    expect(parsePreferencesPatch({ confirmDangerousActions: true })).toEqual({
+      confirmDangerousActions: true,
+    });
+    expect(parsePreferencesPatch({ confirmDangerousActions: 'true' })).toBeNull();
+  });
+});
+
 describe('parsePreferencesPatch（IPC 入参收窄）', () => {
   it('接受已知字段的合法部分更新', () => {
     expect(parsePreferencesPatch({ theme: 'dark' })).toEqual({ theme: 'dark' });

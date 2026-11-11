@@ -19,6 +19,8 @@ import { parseUnifiedDiff } from '../../renderer/components/orchestration/diff';
 import { nodeExec } from './orchestration/nodeExec';
 import { untrackedPatch } from './orchestration/queries';
 import { parseSessionChangesInput, readSessionChanges } from './sessionChanges';
+import { createSettingsFile } from './settingsFile';
+import { createWorkspaceService } from './workspaces';
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 30_000 });
 const git = (cwd: string, ...args: string[]) =>
@@ -275,6 +277,25 @@ describe('current conversation changes (real Git)', () => {
     for (let index = 0; index < 201; index++)
       writeFileSync(join(repo, `file-${index}.txt`), 'draft');
     await expect(read()).rejects.toThrow('200-file preview limit');
+  });
+
+  it('re-detects git first: a plain workspace whose folder became a repo root reads as git', async () => {
+    const settings = createSettingsFile({ filePath: join(root, 'settings.json') });
+    const workspaces = createWorkspaceService({ settings });
+    const added = await workspaces.addDirectory(repo, { plain: true });
+    if (!added.ok) throw new Error(added.error);
+    const id = added.workspace.id;
+    const result = await readSessionChanges(
+      {
+        ...deps,
+        workspace: (key) => workspaces.get(key),
+        refreshVcs: (key) => workspaces.refreshVcs(key),
+      },
+      { workspaceId: id }
+    );
+    expect(result.availability).not.toBe('no-git');
+    expect(workspaces.get(id)).toMatchObject({ vcs: 'git', defaultBranch: 'main' });
+    settings.flush();
   });
 
   it('does not run Git for plain workspaces and surfaces invalid Git roots and read failures', async () => {

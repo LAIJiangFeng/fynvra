@@ -175,16 +175,6 @@ export function compactionActive(state: CompactionState | undefined): boolean {
   return state?.phase === 'running' || state?.phase === 'backoff';
 }
 
-export function compactionNeedsRecovery(
-  state: CompactionState | undefined,
-  effectiveStrategy?: ContextRuntimeSnapshot['effectiveStrategy']
-): boolean {
-  return (
-    (state?.phase === 'failed' || state?.phase === 'cancelled') &&
-    !(effectiveStrategy === 'magic-context' && state.cancelSource === 'sdk')
-  );
-}
-
 function isClosedCompaction(runtime: SessionRuntime, state: CompactionState): boolean {
   return (
     runtime.closedCompaction?.operationId === state.operationId &&
@@ -206,9 +196,6 @@ function withCompaction(runtime: SessionRuntime, state: CompactionState): Sessio
               : ('running' as const),
           error: undefined,
         }
-      : {}),
-    ...(compactionNeedsRecovery(state, runtime.contextRuntime?.effectiveStrategy)
-      ? { recoveryRequired: true }
       : {}),
     retry: compactionActive(state) ? runtime.retry : undefined,
     ...(state.phase === 'succeeded' && runtime.contextRuntime
@@ -240,7 +227,6 @@ function endProgress(runtime: SessionRuntime, now: number, aborted = false): Ses
             operationId: compaction.operationId,
             startedAt: compaction.startedAt,
           },
-          recoveryRequired: true,
           compaction: {
             ...compaction,
             phase: aborted ? ('cancelled' as const) : ('failed' as const),
@@ -260,6 +246,16 @@ export function applyContextRuntime<S extends ChatProjection>(
   seq?: number,
   recoveryRequired?: boolean
 ): S {
+  const existing = state.runtimeBySession[sessionId];
+  // Nothing to apply and nothing to clear: list summaries without runtime data stay O(1) per session.
+  if (
+    snapshot === undefined &&
+    seq === undefined &&
+    recoveryRequired === undefined &&
+    (!existing ||
+      (!existing.contextRuntime && !existing.retry && !compactionActive(existing.compaction)))
+  )
+    return state;
   const before = sliceOf(state, sessionId);
   if (
     seq === undefined

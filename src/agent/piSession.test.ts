@@ -265,7 +265,10 @@ describe('createPiSessionFactory approval mode switch', () => {
     roles: [],
   });
 
-  async function openWith(approval: ApprovalPolicyHooks | undefined) {
+  async function openWith(
+    approval: ApprovalPolicyHooks | undefined,
+    extra: Partial<SpawnSessionSpec> = {}
+  ) {
     const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-session-approval-mode-'));
     dirs.push(dir);
     const gate = { setMode: vi.fn() };
@@ -282,13 +285,26 @@ describe('createPiSessionFactory approval mode switch', () => {
     });
     const session = await open({
       identity: { sessionId: 'session-1', generation: 1 },
-      spec: spec(dir),
+      spec: { ...spec(dir), ...extra },
       host: null,
       workerHost: null,
       ...(approval ? { approval } : {}),
     });
     return { session, gate };
   }
+
+  it('hands the gate a live confirmDangerousActions getter', async () => {
+    const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+    const { session } = await openWith({ request }, { confirmDangerousActions: true });
+    const confirm = mocks.createRoleSession.mock.calls.at(-1)?.[0]?.approval?.confirmProtected;
+    expect(confirm?.()).toBe(true);
+    session.setConfirmDangerousActions?.(false);
+    expect(confirm?.()).toBe(false);
+    await openWith({ request });
+    expect(mocks.createRoleSession.mock.calls.at(-1)?.[0]?.approval?.confirmProtected?.()).toBe(
+      false
+    );
+  });
 
   it('switches the approval gate that createRoleSession built for the session', async () => {
     const hostOnGate = vi.fn();

@@ -134,6 +134,8 @@ export interface SpawnSessionSpec {
   networkProxy?: NetworkProxy;
   /** web_fetch 允许访问本机回环地址；只有开启时才带 */
   webFetchAllowLoopback?: true;
+  /** full 档命中保护底线（rm -rf、git push 等）仍要人确认；只有开启时才带，运行中由 set-confirm-dangerous-actions 切换 */
+  confirmDangerousActions?: true;
   role: Role;
   /** 会话工作目录：工作区仓库根或 worktree（Main 由记录推导） */
   cwd: string;
@@ -250,6 +252,8 @@ export type AgentCommand =
    * 下一次工具调用起按新状态，运行中也可切换
    */
   | { type: 'set-plan-mode'; identity: SessionIdentity; enabled: boolean }
+  /** 切换「危险操作需要确认」：下一次工具调用起按新值，运行中也可切换 */
+  | { type: 'set-confirm-dangerous-actions'; identity: SessionIdentity; enabled: boolean }
   /**
    * 为刚结束的一轮生成一条输入框灰字建议：只带 Main 记下的 settled 轮次 id，不带对话正文 / 模型配置。
    * worker 只在会话当前空闲且 generation 未变时生成；结果必须回同一 requestId 与 roundId
@@ -379,6 +383,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
     case 'set-plan-mode':
       return isBoolean(record.enabled)
         ? { type: 'set-plan-mode', identity, enabled: record.enabled }
+        : null;
+    case 'set-confirm-dangerous-actions':
+      return isBoolean(record.enabled)
+        ? { type: 'set-confirm-dangerous-actions', identity, enabled: record.enabled }
         : null;
     case 'suggest-reply': {
       const { requestId, roundId, round } = record;
@@ -786,6 +794,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   if (record.webFetchAllowLoopback !== undefined && record.webFetchAllowLoopback !== true) {
     return null;
   }
+  if (record.confirmDangerousActions !== undefined && record.confirmDangerousActions !== true) {
+    return null;
+  }
   const role = parseRole(record.role);
   const model = parseModelSpec(record.model);
   const skills = parseStringList(record.skills);
@@ -822,6 +833,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   return {
     ...(networkProxy ? { networkProxy } : {}),
     ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
+    ...(record.confirmDangerousActions === true ? { confirmDangerousActions: true as const } : {}),
     role: role.role,
     cwd,
     sessionFile,

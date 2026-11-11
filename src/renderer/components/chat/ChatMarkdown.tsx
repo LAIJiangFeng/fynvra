@@ -14,7 +14,7 @@ import {
   openOutsideChatFile,
 } from '@/lib/chatFileLinks';
 import { filesStoreFor } from '@/stores/files';
-import { selectSessionOf, useSessionsStore } from '@/stores/sessions';
+import { findSession, useSessionsStore } from '@/stores/sessions';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { ensureWorkspaceTabs, selectWorkspaceTab } from '@/stores/workspaceTabs';
 import { Markdown } from './Markdown';
@@ -264,6 +264,28 @@ function ChatFileLink({
   );
 }
 
+type SessionLists = Parameters<typeof findSession>[0];
+
+/** 会话列表没变就复用上次结果：流式等高频 store 更新不再每条消息都扫一遍所有会话 */
+function selectChatSession(sessionId: string) {
+  let lists: SessionLists | undefined;
+  let found: ReturnType<typeof findSession>;
+  return (state: SessionLists) => {
+    if (
+      !lists ||
+      state.sessionsByWorkspace !== lists.sessionsByWorkspace ||
+      state.archivedByWorkspace !== lists.archivedByWorkspace
+    ) {
+      lists = {
+        sessionsByWorkspace: state.sessionsByWorkspace,
+        archivedByWorkspace: state.archivedByWorkspace,
+      };
+      found = findSession(state, sessionId);
+    }
+    return found;
+  };
+}
+
 /** 只按消息的 sessionId 取上下文，从不使用点击时的 activeSession/workspace。 */
 export function ChatMarkdown({
   sessionId,
@@ -274,7 +296,8 @@ export function ChatMarkdown({
   text: string;
   streaming?: boolean;
 }) {
-  const session = useSessionsStore(selectSessionOf(sessionId));
+  const selector = useMemo(() => selectChatSession(sessionId), [sessionId]);
+  const session = useSessionsStore(selector);
   const id = session?.id;
   const workspaceId = session?.workspaceId;
   const cwd = session?.cwd;
@@ -303,6 +326,7 @@ export function ChatMarkdown({
       streaming={streaming}
       components={components}
       urlTransform={chatUrlTransform}
+      cacheKey={context ? `${id}\u0000${workspaceId}\u0000${cwd}\u0000${worktreeId ?? ''}` : ''}
     />
   );
 }

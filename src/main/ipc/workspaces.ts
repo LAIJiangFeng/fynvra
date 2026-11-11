@@ -7,6 +7,7 @@ import {
   type WorkspaceListResult,
 } from '@shared/types/workspace';
 import {
+  app,
   BrowserWindow,
   clipboard,
   dialog,
@@ -35,7 +36,15 @@ let service: WorkspaceService | null = null;
 
 /** Main 内共享的工作区注册表（后续 worktree / 会话按 id 取 repoPath 也走这里）。 */
 export function getWorkspaceService(): WorkspaceService {
-  service ??= createWorkspaceService({ settings: getSettingsFile() });
+  if (service) return service;
+  const created = createWorkspaceService({
+    settings: getSettingsFile(),
+    onChanged: () => sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED),
+    watchGitInit: true,
+  });
+  // process 'exit' 在 Electron 退出时也会触发，且不依赖测试里 mock 的 electron app
+  process.once('exit', () => created.dispose());
+  service = created;
   return service;
 }
 
@@ -47,12 +56,20 @@ const canceled = (): WorkspaceAddResult => ({
 
 export function registerWorkspaceHandlers(): void {
   registerWorkspaceMenuHandlers();
-  ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, (): WorkspaceListResult => {
+  ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, async (): Promise<WorkspaceListResult> => {
     try {
+      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时发现
       return { ok: true, workspaces: getWorkspaceService().list() };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
     }
+  });
+
+  // 监视器可能漏掉外部的 git init：焦点时只查根目录已有 .git 的普通目录工作区
+  app.on('browser-window-focus', () => {
+    getWorkspaceService()
+      .refreshVcs(undefined, { onlyPlain: true })
+      .catch((error: unknown) => console.warn('[workspaces] vcs re-detection failed:', error));
   });
 
   // 不接收 Renderer 传来的路径：目录由 Main 弹窗选择，检查之后才写入 settings

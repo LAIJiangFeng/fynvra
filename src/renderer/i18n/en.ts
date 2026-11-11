@@ -249,7 +249,25 @@ export const en: MessagesShape<typeof zhCN> = {
     remove: 'Delete session',
     removeTitle: 'Delete session?',
     removeHint:
-      'The session will be removed from the list. Its underlying record file will be kept',
+      'The session will be removed from the list, and its worktree and branch deleted. Its underlying record file will be kept',
+    bulk: {
+      select: 'Select',
+      selectAll: 'Select all',
+      selected: '{count} selected',
+      selectSession: 'Select session: {title}',
+      archiveIdle: 'Archive idle sessions',
+      removeArchived: 'Delete all archived',
+      removeTitle: 'Delete {count} sessions?',
+      removeHint:
+        'This cannot be undone. The sessions are removed from the Fynvra session list and their worktrees and branches are deleted; their underlying pi record files are kept. Running sessions are never deleted',
+      checkingWorktrees: 'Checking worktrees…',
+      unmergedCount:
+        '{count} of these sessions have unmerged or uncommitted work in their worktrees; they are skipped unless you check the box below',
+      forceUnmerged: 'Also delete the unmerged work',
+      unmergedSkipped: 'skipped: unmerged work',
+      archivePartial: 'Archived {done}, {failed} not processed ({reasons})',
+      removePartial: 'Deleted {done}, {failed} not processed ({reasons})',
+    },
     search: 'Search sessions',
     searchHint: 'Search sessions {chord}',
     clearSearch: 'Clear',
@@ -370,7 +388,7 @@ export const en: MessagesShape<typeof zhCN> = {
     tokensHint: 'Historical input / output tokens (not current context usage)',
     usageTotal: 'Historical total',
     magicContextFallback:
-      'Magic Context paused; history and inputs are preserved, without native fallback. Select “Retry context recovery”. If it still fails, restart the app or change models and retry',
+      'Magic Context paused and the fallback compaction did not finish; history and inputs are preserved. Select “Retry context recovery”. If it still fails, restart the app or change models and retry',
     costHint: 'Historical total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
@@ -787,6 +805,11 @@ export const en: MessagesShape<typeof zhCN> = {
       appearance: 'Appearance',
       keybindings: 'Shortcuts',
       usage: 'Usage',
+    },
+    dangerousActions: {
+      title: 'Safety',
+      confirm: 'Confirm dangerous actions',
+      hint: 'When on, rm -rf, git push and similar actions still ask you even in Full access; when off, they all run automatically',
     },
     webFetch: {
       title: 'Web reader',

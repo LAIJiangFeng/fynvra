@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Workspace, WorkspaceAddResult, WorkspaceSummary } from '@shared/types/workspace';
+import { createGitInitWatcher } from './gitInitWatcher';
 import { type DirectoryInspection, inspectDirectory, samePath } from './gitRepository';
 import type { SettingsFile } from './settingsFile';
 
@@ -10,7 +13,15 @@ export interface WorkspaceServiceOptions {
   newId?: () => string;
   home?: string;
   platform?: NodeJS.Platform;
+  now?: () => number;
+  /** refreshVcs 写入了变化后调用（ipc 层接 workspaces:changed 广播） */
+  onChanged?: () => void;
+  /** 监视普通目录工作区根目录的 `.git` 出现（内置终端里 git init 后自动转为 git）；用完调 dispose() */
+  watchGitInit?: boolean;
 }
+
+/** 同一工作区两次 vcs 重新检测的最小间隔。 */
+const VCS_RECHECK_MS = 5_000;
 
 /** 仓库子目录：Main 先问用户挂仓库根目录（`repoRoot`），还是把子目录按普通目录挂入。 */
 export type AddDirectoryResult =
@@ -24,7 +35,27 @@ export function createWorkspaceService({
   newId = randomUUID,
   home = homedir(),
   platform = process.platform,
+  now = Date.now,
+  onChanged,
+  watchGitInit = false,
 }: WorkspaceServiceOptions) {
+  const lastChecked = new Map<string, number>();
+  const gitInit = watchGitInit
+    ? createGitInitWatcher((id) => {
+        service.refreshVcs(id, { force: true }).catch((error) => {
+          console.warn('[workspaces] vcs re-detection failed:', error);
+        });
+      })
+    : undefined;
+  const syncWatchers = () =>
+    gitInit?.sync(
+      new Map(
+        settings
+          .read()
+          .workspaces.filter((workspace) => workspace.vcs === 'none')
+          .map((workspace) => [workspace.id, workspace.repoPath])
+      )
+    );
   const summarize = (workspace: Workspace): WorkspaceSummary => ({
     id: workspace.id,
     name: workspace.name,
@@ -33,7 +64,7 @@ export function createWorkspaceService({
     ...(workspace.defaultBranch ? { defaultBranch: workspace.defaultBranch } : {}),
   });
 
-  return {
+  const service = {
     list(): WorkspaceSummary[] {
       return settings.read().workspaces.map(summarize);
     },
@@ -66,17 +97,74 @@ export function createWorkspaceService({
         ...current,
         workspaces: [...current.workspaces, workspace],
       }));
+      syncWatchers();
       return { ok: true, workspace: summarize(workspace), created: true };
+    },
+
+    /**
+     * 重新检测工作区的 vcs（用户可能在挂入后 git init 或删了 .git），变了才写 settings。
+     * none → git 只在目录本身是仓库根目录时；仓库子目录（not-repo-root）是用户有意按普通目录挂的，保持 none。
+     * git → none 只在目录已完全不是仓库时；出错或 not-repo-root 都不动。同一工作区 5 秒内只查一次
+     * （`force` 跳过节流，供 `.git` 监视器使用）。`onlyPlain` 只查根目录已有 `.git` 的普通目录工作区，
+     * 其余不起 git（窗口获得焦点时用）。
+     */
+    async refreshVcs(id?: string, { force = false, onlyPlain = false } = {}): Promise<void> {
+      const at = now();
+      const due = settings
+        .read()
+        .workspaces.filter(
+          (workspace) =>
+            (id === undefined || workspace.id === id) &&
+            (!onlyPlain ||
+              (workspace.vcs === 'none' && existsSync(join(workspace.repoPath, '.git')))) &&
+            (force || at - (lastChecked.get(workspace.id) ?? -Infinity) >= VCS_RECHECK_MS)
+        );
+      for (const workspace of due) lastChecked.set(workspace.id, at);
+      const changes = (
+        await Promise.all(
+          due.map(async (workspace): Promise<Workspace | undefined> => {
+            const inspection = await inspect(workspace.repoPath, { plain: false });
+            if (!inspection.ok || !samePath(inspection.root, workspace.repoPath, platform)) return;
+            if (inspection.vcs === workspace.vcs) return;
+            const { defaultBranch: _branch, ...rest } = workspace;
+            return inspection.vcs === 'git'
+              ? { ...rest, vcs: 'git', defaultBranch: inspection.defaultBranch }
+              : { ...rest, vcs: 'none' };
+          })
+        )
+      ).filter((workspace) => workspace !== undefined);
+      if (changes.length === 0) return;
+      const byId = new Map(changes.map((workspace) => [workspace.id, workspace]));
+      settings.update((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) => byId.get(workspace.id) ?? workspace),
+      }));
+      syncWatchers();
+      onChanged?.();
     },
 
     /** 只从列表移除，不触碰磁盘上的仓库；id 不存在时返回 false。 */
     remove(id: string): boolean {
-      return settings.update((current) => ({
+      const { changed } = settings.update((current) => ({
         ...current,
         workspaces: current.workspaces.filter((workspace) => workspace.id !== id),
-      })).changed;
+      }));
+      syncWatchers();
+      return changed;
+    },
+
+    /** 关闭 `.git` 监视器（应用退出时）。 */
+    dispose(): void {
+      gitInit?.close();
+    },
+
+    /** 测试用：当前被监视的工作区 id。 */
+    watchedIds(): string[] {
+      return gitInit?.watching() ?? [];
     },
   };
+  syncWatchers();
+  return service;
 }
 
 export type WorkspaceService = ReturnType<typeof createWorkspaceService>;

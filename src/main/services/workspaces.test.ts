@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,6 +99,116 @@ describe('createWorkspaceService', () => {
     expect(settings.read().workspaces).toHaveLength(1);
   });
 
+  describe('refreshVcs', () => {
+    const onChanged = vi.fn();
+    const mount = async (current: { value: DirectoryInspection }) => {
+      let clock = 0;
+      onChanged.mockClear();
+      const workspaces = createWorkspaceService({
+        onChanged,
+        settings,
+        inspect: async () => current.value,
+        newId: () => 'ws-1',
+        platform: 'linux',
+        now: () => (clock += 10_000),
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      return workspaces;
+    };
+
+    it('目录 git init 成为仓库根目录后 none → git，并记下默认分支', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      current.value = repo('/home/dev/notes', 'notes');
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]).toEqual({
+        id: 'ws-1',
+        name: 'notes',
+        repoPath: '/home/dev/notes',
+        vcs: 'git',
+        defaultBranch: 'main',
+      });
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('在外层仓库里的普通目录（not-repo-root）保持 none', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      current.value = { ok: false, code: 'not-repo-root', repoRoot: '/home/dev', error: 'x' };
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]?.vcs).toBe('none');
+    });
+
+    it('git → none 只在目录已不是仓库时；出错不动', async () => {
+      const current = { value: repo('/home/dev/notes', 'notes') };
+      const workspaces = await mount(current);
+      current.value = { ok: false, code: 'failed', error: 'gone' };
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]?.vcs).toBe('git');
+      current.value = plainDir('/home/dev/notes');
+      await workspaces.refreshVcs();
+      expect(settings.read().workspaces[0]).toEqual({
+        id: 'ws-1',
+        name: 'notes',
+        repoPath: '/home/dev/notes',
+        vcs: 'none',
+      });
+    });
+
+    it('没变化时不写 settings', async () => {
+      const current = { value: plainDir('/home/dev/notes') };
+      const workspaces = await mount(current);
+      const update = vi.spyOn(settings, 'update');
+      await workspaces.refreshVcs();
+      expect(update).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
+    });
+
+    it('onlyPlain 只检测根目录已有 .git 的普通目录，其余不起 git', async () => {
+      const notes = join(dir, 'notes');
+      mkdirSync(notes);
+      let next = 0;
+      let clock = 0;
+      const inspect = vi.fn(async (root: string) =>
+        root === notes ? plainDir(notes) : repo(root)
+      );
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect,
+        newId: () => `ws-${++next}`,
+        platform: 'linux',
+        now: () => (clock += 10_000),
+      });
+      await workspaces.addDirectory(notes);
+      await workspaces.addDirectory(join(dir, 'repo'));
+      inspect.mockClear();
+      await workspaces.refreshVcs(undefined, { onlyPlain: true });
+      expect(inspect).not.toHaveBeenCalled();
+
+      mkdirSync(join(notes, '.git'));
+      inspect.mockResolvedValueOnce(repo(notes, 'notes'));
+      await workspaces.refreshVcs(undefined, { onlyPlain: true });
+      expect(inspect).toHaveBeenCalledTimes(1);
+      expect(inspect).toHaveBeenCalledWith(notes, { plain: false });
+      expect(workspaces.get('ws-1')?.vcs).toBe('git');
+    });
+
+    it('5 秒内不重复检测', async () => {
+      const inspect = vi.fn(async () => plainDir('/home/dev/notes'));
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect,
+        newId: () => 'ws-1',
+        platform: 'linux',
+        now: () => 1_000,
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      await workspaces.refreshVcs();
+      await workspaces.refreshVcs();
+      expect(inspect).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('普通目录按 vcs: none 挂入，没有默认分支', async () => {
     const result = await service(plainDir('/home/dev/notes')).addDirectory('/home/dev/notes');
     expect(result).toEqual({
@@ -156,5 +267,66 @@ describe('toDisplayPath', () => {
 
   it('Windows 下保留原路径', () => {
     expect(toDisplayPath('C:\\Users\\dev\\a', 'C:\\Users\\dev', 'win32')).toBe('C:\\Users\\dev\\a');
+  });
+});
+
+const hasGit = (() => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const mkdirIn = (name: string): string => {
+  const path = join(realpathSync.native(dir), name);
+  mkdirSync(path);
+  return path;
+};
+
+describe.skipIf(!hasGit)('.git 监视器（真实 fs + git）', () => {
+  let previousCeiling: string | undefined;
+  beforeEach(() => {
+    previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
+    process.env.GIT_CEILING_DIRECTORIES = realpathSync.native(dir);
+  });
+  afterEach(() => {
+    if (previousCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = previousCeiling;
+  });
+
+  it('普通目录里 git init 后自动变为 git，广播一次，并关闭监视器', async () => {
+    const folder = mkdirIn('plain');
+    const onChanged = vi.fn();
+    const workspaces = createWorkspaceService({ settings, onChanged, watchGitInit: true });
+    try {
+      const added = await workspaces.addDirectory(folder);
+      expect(added).toMatchObject({ ok: true, workspace: { vcs: 'none' } });
+      // 挂入时的检测已占用 5 秒节流窗口；监视器必须绕过它
+      await workspaces.refreshVcs();
+      const id = added.ok ? added.workspace.id : '';
+      expect(workspaces.watchedIds()).toEqual([id]);
+
+      execFileSync('git', ['init', '-q'], { cwd: folder });
+      await vi.waitFor(() => expect(workspaces.get(id)?.vcs).toBe('git'), { timeout: 5_000 });
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      expect(workspaces.watchedIds()).toEqual([]);
+    } finally {
+      workspaces.dispose();
+    }
+  });
+
+  it('移除工作区或 dispose 时关闭监视器', async () => {
+    const a = mkdirIn('a');
+    const b = mkdirIn('b');
+    const workspaces = createWorkspaceService({ settings, watchGitInit: true });
+    const first = await workspaces.addDirectory(a);
+    await workspaces.addDirectory(b);
+    expect(workspaces.watchedIds()).toHaveLength(2);
+    workspaces.remove(first.ok ? first.workspace.id : '');
+    expect(workspaces.watchedIds()).toHaveLength(1);
+    workspaces.dispose();
+    expect(workspaces.watchedIds()).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import type { SessionEventEnvelope } from '@shared/types/chat';
 import type {
   DirectoryResult,
   EntryResult,
@@ -10,6 +11,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import {
   bindFileUnloadGuard,
+  connectFilesAutoRefresh,
   createFilesStore,
   filesStoreFor,
   isFileDirty,
@@ -376,5 +378,57 @@ describe('文件预览状态', () => {
     await second.getState().openFile(file('b'));
     expect(api.read).toHaveBeenLastCalledWith({ workspaceId: 'second', fileId: 'b' });
     expect(first.getState().selectedId).toBe('a');
+  });
+});
+
+describe('connectFilesAutoRefresh', () => {
+  it('debounces refresh of the loaded selected workspace on tool_end and focus', async () => {
+    vi.useFakeTimers();
+    const api = fakeApi();
+    const store = filesStoreFor('auto-refresh', api);
+    filesStoreFor('never-loaded', api);
+    let emit: (envelope: SessionEventEnvelope) => void = () => {};
+    const target = new EventTarget();
+    let selected = 'never-loaded';
+    const dispose = connectFilesAutoRefresh(
+      (cb) => {
+        emit = cb;
+        return () => {};
+      },
+      target,
+      () => selected,
+      100
+    );
+    const event = (type: string) =>
+      ({ sessionId: 's', event: { type, seq: 1 } }) as unknown as SessionEventEnvelope;
+    emit(event('tool_end'));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(api.list).not.toHaveBeenCalled();
+
+    await store.getState().loadDirectory();
+    selected = 'auto-refresh';
+    emit(event('text_delta'));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    emit(event('tool_end'));
+    target.dispatchEvent(new Event('focus'));
+    emit(event('agent_settled'));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(api.list).toHaveBeenCalledTimes(2);
+    dispose();
+    vi.useRealTimers();
+  });
+
+  it('keeps typing done while a background read is in flight', async () => {
+    const api = fakeApi();
+    let resolve: (value: FileResult) => void = () => {};
+    const store = createFilesStore(api, 'ws');
+    await store.getState().openFile(file('a'));
+    api.read.mockImplementationOnce(() => new Promise((r) => (resolve = r)));
+    const reload = store.getState().reloadFile('a');
+    store.getState().editFile('a', 'typed');
+    resolve(ready('remote'));
+    await reload;
+    expect(store.getState().previews.a?.draft).toBe('typed');
   });
 });

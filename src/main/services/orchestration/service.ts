@@ -37,7 +37,19 @@ import {
 } from './queries';
 import { createWorkerHost } from './workerHost';
 import { createWorkflowEngine } from './workflowEngine';
-import { cleanupMergedWorktree, type MergedCleanupResult } from './worktreeCleanup';
+import {
+  checkSessionWorktree,
+  cleanupMergedWorktree,
+  type MergedCleanupBlocker,
+  type MergedCleanupResult,
+  unlinkLinksIn,
+} from './worktreeCleanup';
+
+/** 删除会话时删它 worktree 的结果：被挡住（任务进行中、未合并等）或删除失败时 worktree 与记录都保留 */
+export type SessionWorktreeRemoval =
+  | { ok: true }
+  | { ok: false; reason: 'busy' | MergedCleanupBlocker }
+  | { ok: false; reason: 'failed'; error: string };
 
 export interface OrchestrationServiceOptions {
   workspace: Workspace;
@@ -105,6 +117,13 @@ export interface OrchestrationService {
    * worktree 与分支，否则保留（见 `worktreeCleanup.ts`）。
    */
   cleanupMergedWorktree(sessionId: string): Promise<MergedCleanupResult>;
+  /** 删除会话前：它的 worktree 为何不能直接删（未合并、有改动、任务进行中）；null 为没有或可以直接删。 */
+  sessionWorktreeBlocker(sessionId: string): Promise<'busy' | MergedCleanupBlocker | null>;
+  /**
+   * 删除会话时删它的 worktree 与分支：已合并且干净的同归档清理；被挡住的只在 `force` 时走
+   * cleanup_worktree 的 abandon 路径（任务记为放弃）；任务还在进行时拒绝。
+   */
+  removeSessionWorktree(sessionId: string, force: boolean): Promise<SessionWorktreeRemoval>;
   /** 等待所有落盘完成并写入当前状态。 */
   flush(): Promise<void>;
   /** 收件箱里发给该会话、未确认的消息（不消费）；状态未加载时为空。协调者唤醒器用。 */
@@ -113,6 +132,8 @@ export interface OrchestrationService {
   coordinatorWork(sessionId: string): CoordinatorWork;
   /** 确认已投递的消息（尽力而为，幂等）。 */
   ackMessages(ids: readonly string[]): void;
+  /** 状态已加载且没有排队 / 进行中 / 待审的任务、没有运行中的工作流节点：可以换掉服务（如工作区 vcs 变了）。 */
+  isIdle(): boolean;
 }
 
 function observe<T extends { id: string }>(
@@ -482,10 +503,70 @@ export function createOrchestrationService(
       return cleanupMergedWorktree(deps, dispatchOfSession(sessionId));
     },
 
+    async sessionWorktreeBlocker(sessionId) {
+      await ready;
+      const check = await checkSessionWorktree({ store, git }, dispatchOfSession(sessionId));
+      // 读不了 git 状态时按「有改动」对待，删除前一定要用户确认
+      if (typeof check === 'object') return 'dirty';
+      return check === 'none' || check === 'clean' ? null : check;
+    },
+
+    async removeSessionWorktree(sessionId, force) {
+      await ready;
+      const dispatch = dispatchOfSession(sessionId);
+      const check = await checkSessionWorktree({ store, git }, dispatch);
+      if (typeof check === 'object') return { ok: false, reason: 'failed', error: check.error };
+      if (check === 'none' || dispatch === undefined) return { ok: true };
+      if (check === 'clean') {
+        const result = await cleanupMergedWorktree(
+          { store, git, launcher, repoPath: workspace.repoPath },
+          dispatch
+        );
+        if (result.removed || result.reason === 'no-worktree') return { ok: true };
+        if (result.reason === 'failed') return { ok: false, reason: 'failed', error: result.error };
+        return { ok: false, reason: result.reason };
+      }
+      if (check === 'busy' || !force) return { ok: false, reason: check };
+      const task = store.tasks.get(dispatch.taskId);
+      const coordinator = task && store.runs.get(task.runId)?.coordinatorSessionId;
+      if (task?.status === 'completed' || coordinator === undefined) {
+        // 已验收任务合并后的新改动：abandon 路径按契约保留，不另写强删
+        return {
+          ok: false,
+          reason: 'failed',
+          error: `task ${dispatch.taskId} keeps work after it was merged (${check})`,
+        };
+      }
+      const worktree = store.worktrees.get(dispatch.worktreeId);
+      try {
+        if (worktree) await unlinkLinksIn(worktree.path);
+      } catch (error) {
+        return { ok: false, reason: 'failed', error: errorMessage(error) };
+      }
+      const resolved = await resolveHost(coordinator);
+      const result = resolved.ok
+        ? await resolved.host.cleanupWorktree({ dispatchId: dispatch.id, abandon: true })
+        : resolved;
+      return result.ok ? { ok: true } : { ok: false, reason: 'failed', error: result.error };
+    },
+
     async flush() {
       await ready;
       await persist();
     },
+
+    isIdle: () =>
+      loaded &&
+      pendingDispatches.size === 0 &&
+      store.tasks.list(
+        (task) =>
+          task.status === 'todo' ||
+          task.status === 'in-progress' ||
+          task.status === 'in-review' ||
+          (task.workflow !== undefined &&
+            (task.workflow.launches.length > 0 ||
+              task.workflow.nodes.some((node) => node.status === 'running')))
+      ).length === 0,
 
     pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
 

@@ -1,3 +1,4 @@
+import type { SessionEventEnvelope } from '@shared/types/chat';
 import type {
   EntryResult,
   FileError,
@@ -116,6 +117,8 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
           : ({ ok: false, error: 'restartRequired' } as const);
         if (fileRequests.get(fileId) !== request) return;
         const latest = get().previews[fileId] ?? base;
+        // 读取途中用户开始编辑：保留草稿，不让后台刷新吞掉输入
+        if (result.ok && isFileDirty(latest)) return update({ ...latest, loading: false });
         update(
           result.ok
             ? {
@@ -491,6 +494,36 @@ export function filesStoreFor(workspaceId: string, api: FilesApi | undefined): F
     stores.set(workspaceId, store);
   }
   return store;
+}
+
+/**
+ * Agent 改文件时自动刷新：工具调用结束、会话收尾或窗口获得焦点后，防抖刷新当前工作区的文件视图。
+ * 只刷新已加载过根目录的 store，不为没打开过的工作区创建 store 或发请求。
+ */
+export function connectFilesAutoRefresh(
+  onEvent: (cb: (envelope: SessionEventEnvelope) => void) => () => void,
+  target: EventTarget,
+  selectedWorkspace: () => string | null,
+  delay = 600
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const id = selectedWorkspace();
+      const store = id ? stores.get(id) : undefined;
+      if (store?.getState().directories[ROOT_DIRECTORY_ID]) void store.getState().refresh();
+    }, delay);
+  };
+  const unsubscribe = onEvent(({ event }) => {
+    if (event.type === 'tool_end' || event.type === 'agent_settled') schedule();
+  });
+  target.addEventListener('focus', schedule);
+  return () => {
+    clearTimeout(timer);
+    unsubscribe();
+    target.removeEventListener('focus', schedule);
+  };
 }
 
 /** 所有工作区的草稿都参与退出保护，不只检查当前可见文件。 */

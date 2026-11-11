@@ -19604,6 +19604,29 @@ function shouldSuppressHistorianAlert(sessionId) {
 function fynvraHistorianBudget(sessionId, systemPrompt, maxOutputTokens) {
   return globalThis[Symbol.for("fynvra.magic-context.historian-budget")]?.(sessionId, systemPrompt, maxOutputTokens);
 }
+// Fynvra patch 18: keep the head of one oversized block (UTF-8 bytes) plus a marker.
+function fynvraTruncateHistorianBytes(text, maxBytes) {
+  const marker = `
+[… truncated by Magic Context to fit the historian window …]`;
+  if (Buffer.byteLength(text, "utf8") <= maxBytes)
+    return text;
+  let lo = 0;
+  let hi = text.length;
+  let best = 0;
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    if (Buffer.byteLength(text.slice(0, mid) + marker, "utf8") <= maxBytes) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  // Never leave half of a surrogate pair at the cut.
+  if (best > 0 && /[\uD800-\uDBFF]/.test(text[best - 1]))
+    best -= 1;
+  return best > 0 ? text.slice(0, best) + marker : "";
+}
 async function runPiHistorian(deps) {
   // Fynvra patch 12: never start a historian after boot failure/suspension.
   if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
@@ -19763,9 +19786,15 @@ async function runPiHistorian(deps) {
       drainReservation = reserve.reservation;
       let chunk = readSessionChunk(sessionId, historianChunkTokens, offset, eligibleEndOrdinal, hosted);
       let forceKeepLastCompartmentForChunk = forceKeepLastCompartment === true && !chunk.hasMore;
+      if (hosted && (!chunk.text || chunk.messageCount === 0)) {
+        // Fynvra patch 18: the first block alone exceeds the byte budget. Read
+        // exactly that block (token mode always accepts the first block); its
+        // text is truncated below so the message range and coverage stay whole.
+        chunk = readSessionChunk(sessionId, 0, offset, eligibleEndOrdinal);
+        forceKeepLastCompartmentForChunk = forceKeepLastCompartment === true && !chunk.hasMore;
+      }
       if (!chunk.text || chunk.messageCount === 0) {
         if (hosted) {
-          // An indivisible first block cannot fit; never truncate XML/text.
           fynvraSuspendSession(sessionId, "budget");
           return;
         }
@@ -19830,6 +19859,20 @@ ${text}`,
           historianChunkTokens -= Buffer.byteLength(prompt, "utf8") - hostBudget.inputBytes + 1024;
           chunk = readSessionChunk(sessionId, Math.max(0, historianChunkTokens), offset, eligibleEndOrdinal, true);
           prompt = makePrompt(chunk.text);
+        }
+        if (!chunk.messageCount || Buffer.byteLength(prompt, "utf8") > hostBudget.inputBytes) {
+          // Fynvra patch 18: summarize the truncated head of the first block
+          // instead of suspending. Only the prompt text is shortened; the chunk
+          // (message range, coverage lines) is the complete first block.
+          chunk = readSessionChunk(sessionId, 0, offset, eligibleEndOrdinal);
+          const room = hostBudget.inputBytes - Buffer.byteLength(makePrompt(""), "utf8");
+          const truncated = fynvraTruncateHistorianBytes(chunk.text ?? "", room);
+          prompt = makePrompt(truncated);
+          if (truncated) {
+            sessionLog(sessionId, `historian pre-flight: truncated block ${chunk.startIndex}-${chunk.endIndex} to fit ${hostBudget.inputBytes} bytes`);
+          } else {
+            chunk = { ...chunk, messageCount: 0 };
+          }
         }
         if (!chunk.messageCount || Buffer.byteLength(prompt, "utf8") > hostBudget.inputBytes || validateChunkCoverage(chunk)) {
           fynvraSuspendSession(sessionId, "budget");
@@ -19979,7 +20022,11 @@ ${text}`,
           const failCount = incrementHistorianFailure(db, sessionId, errorMsg);
           await notify(buildHistorianFailureNotice(failCount, errorMsg));
         }
-        if (hosted && fynvraOperationActive()) fynvraSuspendSession(sessionId);
+        // Fynvra patch 19: a failed model request (or timeout) was already
+        // counted by the host runner, which suspends on non-transient errors and
+        // after repeated transient ones. Otherwise the next trigger retries.
+        const hostCountedFailure = validatedPass.kind === "spawn-failed" && (validatedPass.reason === "model_failed" || validatedPass.reason === "timeout");
+        if (hosted && !hostCountedFailure && fynvraOperationActive()) fynvraSuspendSession(sessionId);
         return;
       }
       retainDrainReservationForRetryThrottle = false;

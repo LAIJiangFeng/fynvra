@@ -49,6 +49,7 @@ async function setup() {
   const confirm = mocks.confirm;
   confirm.mockReset().mockResolvedValue(true);
   vi.stubGlobal('window', {
+    addEventListener: vi.fn(),
     fynvra: {
       workspaceUi,
       workspaces: api,

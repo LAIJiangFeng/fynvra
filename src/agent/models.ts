@@ -147,13 +147,15 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
           name: provider.name,
           api: provider.api as Api,
           baseUrl: provider.baseUrl,
-          models: provider.models.map(
-            (model) =>
+          models: provider.models.map((model) =>
+            forEndpoint(
               defineModel(
                 runtime,
                 { api: provider.api, modelId: model.id, reasoning: model.reasoning },
                 excluded
-              ).definition
+              ).definition,
+              provider.baseUrl
+            )
           ),
         });
         aliases.add(id);
@@ -187,7 +189,7 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
         );
       }
 
-      const { definition } = defineModel(runtime, spec, excluded);
+      const definition = forEndpoint(defineModel(runtime, spec, excluded).definition, baseUrl);
       const models = definitions.get(providerId) ?? new Map<string, ModelDefinition>();
       models.set(spec.modelId, definition);
       definitions.set(providerId, models);
@@ -356,6 +358,26 @@ function definitionFor(spec: ModelQuery, template: Model<Api>): ModelDefinition 
     ...(template.inputLimits ? { inputLimits: template.inputLimits } : {}),
     ...(template.compat ? { compat: template.compat } : {}),
   };
+}
+
+const OFFICIAL_ANTHROPIC_URL = /^https:\/\/api\.anthropic\.com(?:\/v1)?\/*$/i;
+
+/**
+ * Anthropic 中转（非官方端点）关掉原生的对话中工具增减（tool_addition / tool_removal）：
+ * 实测中转会改写请求级 tools 却不改这些引用块，移除工具时报 400 tool_reference_unresolved。
+ * 关掉后 pi 每次请求发当前工具列表，代价是工具集变化时一次 prompt cache 失效。
+ */
+export function forEndpoint(definition: ModelDefinition, baseUrl: string): ModelDefinition {
+  if (
+    definition.api !== 'anthropic-messages' ||
+    !definition.compat ||
+    !('supportsMidConvoToolChanges' in definition.compat) ||
+    !definition.compat.supportsMidConvoToolChanges ||
+    OFFICIAL_ANTHROPIC_URL.test(baseUrl.trim())
+  ) {
+    return definition;
+  }
+  return { ...definition, compat: { ...definition.compat, supportsMidConvoToolChanges: false } };
 }
 
 /** 目录外又推断不出的模型：spec 的字段加保守默认值；设置里标了推理时带上协议兜底的档位映射 */

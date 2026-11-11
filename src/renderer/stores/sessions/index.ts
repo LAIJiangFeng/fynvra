@@ -1,7 +1,7 @@
 import { useSettingsViewStore } from '../../components/settings/settingsViewStore';
 import { getSessionsApi } from '../../lib/api/sessions';
 import { diffTabsStoreFor } from '../diffTabs';
-import { filesStoreFor } from '../files';
+import { connectFilesAutoRefresh, filesStoreFor } from '../files';
 import { useTerminalsStore } from '../terminals';
 import { useWorkspacesStore } from '../workspaces';
 import {
@@ -36,6 +36,15 @@ export const useSessionsStore = createSessionsStore(api, {
 });
 
 connectSessionsStore(useSessionsStore, api);
+// 任何会话（含派发的 worker）改了文件后自动刷新当前工作区的文件树
+connectFilesAutoRefresh(api.onEvent, window, () => useWorkspacesStore.getState().selectedId);
+// agent 可能在会话里 git init：同样的触发刷新工作区列表，Main 重新检测 vcs（5 秒内不重复）
+let workspacesRefresh: ReturnType<typeof setTimeout> | undefined;
+api.onEvent(({ event }) => {
+  if (event.type !== 'tool_end' && event.type !== 'agent_settled') return;
+  clearTimeout(workspacesRefresh);
+  workspacesRefresh = setTimeout(() => void useWorkspacesStore.getState().refresh(), 600);
+});
 useSessionsStore.subscribe((state, previous) => {
   if (
     state.workspaceId &&

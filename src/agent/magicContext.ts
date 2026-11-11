@@ -49,6 +49,16 @@ const TRANSIENT_FAILURE_LIMIT = 3;
 const CONTEXT_SAFETY_TOKENS = 2_048;
 /** Do not start a historian request with less output room than this. */
 const MIN_HISTORIAN_OUTPUT_TOKENS = 1_024;
+/** Smallest historian input budget (UTF-8 bytes) worth sending. */
+const MIN_HISTORIAN_INPUT_BYTES = 1_024;
+/**
+ * Byte/token ratio for the historian budget. Real tokenizers average ~3-4
+ * bytes per token for CJK and English; 2 stays conservative for code/JSON.
+ * Provider context-overflow errors shrink the budget further (see budgetScale).
+ */
+const HISTORIAN_BYTES_PER_TOKEN = 2;
+/** Use only this share of the advertised window, like oh-my-pi compaction. */
+const HISTORIAN_WINDOW_SAFETY = 0.8;
 
 interface MagicSubagentOptions {
   agent: string;
@@ -109,6 +119,9 @@ interface SessionRunner {
   suspended: boolean;
   fallbackNotified: boolean;
   failureStreak: number;
+  /** Halved on provider context overflow; reset when the model changes. */
+  budgetScale: number;
+  budgetModelKey?: string;
   onFallback?: (reason: MagicContextFallbackReason) => void;
 }
 
@@ -127,7 +140,7 @@ export interface MagicContextCompaction {
   attach(piSessionId: string): void;
   /** Reject requests until the plugin is ready; return the current cancellation generation. */
   assertReady(): AbortSignal;
-  /** Stop unsafe requests and retain this session for explicit recovery. */
+  /** Stop Magic for this session; the host switches it to the compaction fallback chain. */
   suspend(reason: MagicContextFallbackReason): void;
   /** Stop/model changes invalidate current operations without treating cancellation as failure. */
   interrupt(): void;
@@ -136,7 +149,7 @@ export interface MagicContextCompaction {
 }
 
 export interface MagicContextCompactionOptions {
-  /** Called once when this session must stop for explicit Magic recovery (never native fallback). */
+  /** Called once when Magic stops for this session; the host then uses the fallback chain. */
   onFallback?: (reason: MagicContextFallbackReason) => void;
 }
 
@@ -162,8 +175,11 @@ export function createMagicContextCompaction(
     name: 'fynvra-magic-context',
     hidden: true,
     factory: async (pi) => {
-      // Defense for manual SDK compaction as well as startup failure before vendor hooks exist.
-      pi.on('session_before_compact', async () => ({ cancel: true }));
+      // Magic owns context while healthy. Once suspended, the session's fallback chain compacts.
+      const ownsCompaction = () => runner?.suspended !== true;
+      pi.on('session_before_compact', async () =>
+        ownsCompaction() ? { cancel: true } : undefined
+      );
       const host = prepareHost();
       if (!host.ok) {
         warnings.push(host.warning);
@@ -194,6 +210,16 @@ export function createMagicContextCompaction(
             };
           }
           if (property === BOOT_OK_SYMBOL) return bootStatus === 'ready';
+          // The vendor always cancels native compaction; let the fallback chain run after suspension.
+          if (property === 'on') {
+            return (event: string, handler: (...args: unknown[]) => unknown) =>
+              (pi.on as (event: string, handler: (...args: unknown[]) => unknown) => unknown)(
+                event,
+                event === 'session_before_compact'
+                  ? (...args: unknown[]) => (ownsCompaction() ? handler(...args) : undefined)
+                  : handler
+              );
+          }
           const value = Reflect.get(pi, property, pi);
           return typeof value === 'function' ? value.bind(pi) : value;
         },
@@ -249,6 +275,7 @@ export function createMagicContextCompaction(
           suspended: false,
           fallbackNotified: false,
           failureStreak: 0,
+          budgetScale: 1,
           ...(options.onFallback ? { onFallback: options.onFallback } : {}),
         };
         sessionRunners.set(id, runner);
@@ -452,18 +479,54 @@ function noteHistorianFailure(
   if (runner.failureStreak >= TRANSIENT_FAILURE_LIMIT) suspendSession(sessionId, 'runtime');
 }
 
-function isTransientModelError(message: string): boolean {
-  return /(?:429|rate limit|timeout|timed out|overloaded|\b50[0234]\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed)/i.test(
+export function isTransientModelError(message: string): boolean {
+  // Auth, quota and balance problems do not heal by retrying.
+  if (
+    /\b40[13]\b|unauthori[sz]ed|forbidden|invalid api key|quota|insufficient|余额|欠费/i.test(
+      message
+    )
+  )
+    return false;
+  return /(?:429|\brate\b|rate[ _-]?limit|too many requests|timeout|timed out|overloaded|busy|network|\b50[0234]\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|繁忙|限流|频率|稍后|超时)/i.test(
     message
   );
 }
 
-/** UTF-8 bytes conservatively bound text tokens for the supported byte/subword
- * tokenizers. Provider framing is separately reserved; this is not a universal
- * guarantee for arbitrary provider-side templates or inaccurate model metadata.
+export function isContextOverflowError(message: string): boolean {
+  return /context_length_exceeded|maximum context length|context window|context length|too many tokens|prompt is too long|input is too long|request entity too large|\b413\b|(?:超出|超过).{0,12}(?:上下文|长度)|上下文.{0,12}(?:超出|超过|过长|太长)/i.test(
+    message
+  );
+}
+
+/** Conservative token estimate from UTF-8 bytes (see HISTORIAN_BYTES_PER_TOKEN). */
+export function estimatePromptTokens(text: string): number {
+  return Math.ceil(Buffer.byteLength(text, 'utf8') / HISTORIAN_BYTES_PER_TOKEN);
+}
+
+function budgetScale(runner: SessionRunner, resolved: ResolvedModel): number {
+  const key = `${resolved.model.provider}/${resolved.model.id}`;
+  if (runner.budgetModelKey !== key) {
+    runner.budgetModelKey = key;
+    runner.budgetScale = 1;
+  }
+  return runner.budgetScale;
+}
+
+/**
+ * A provider rejected the historian prompt as too long: halve this session's
+ * budget so the next attempt sends a smaller chunk. Returns false once the
+ * halved budget would fall below the minimum (normal failure handling then).
  */
-function estimatePromptTokens(text: string): number {
-  return Buffer.byteLength(text, 'utf8');
+function shrinkHistorianBudget(
+  runner: SessionRunner,
+  resolved: ResolvedModel,
+  systemPrompt: string,
+  requestedMax: number
+): boolean {
+  const next = budgetScale(runner, resolved) / 2;
+  if (!modelHistorianBudget(resolved, systemPrompt, requestedMax, next)) return false;
+  runner.budgetScale = next;
+  return true;
 }
 
 function getHistorianBudget(
@@ -473,13 +536,15 @@ function getHistorianBudget(
 ): { inputBytes: number; maxTokens: number } | undefined {
   const runner = sessionRunners.get(sessionId);
   if (!runner || runner.disposed || runner.suspended || typeof systemPrompt !== 'string') return;
-  return modelHistorianBudget(runner.getModel(), systemPrompt, requestedMax);
+  const resolved = runner.getModel();
+  return modelHistorianBudget(resolved, systemPrompt, requestedMax, budgetScale(runner, resolved));
 }
 
 function modelHistorianBudget(
   resolved: ResolvedModel,
   systemPrompt: string,
-  requestedMax: number
+  requestedMax: number,
+  scale: number
 ): { inputBytes: number; maxTokens: number } | undefined {
   const { contextWindow, maxTokens: modelMax } = resolved.model;
   if (
@@ -493,10 +558,13 @@ function modelHistorianBudget(
     return;
   const maxTokens = Math.floor(Math.min(requestedMax, modelMax, 32_000, contextWindow * 0.2));
   const framing = Math.max(CONTEXT_SAFETY_TOKENS, Math.ceil(contextWindow * 0.05));
-  const inputBytes = Math.floor(
-    contextWindow - estimatePromptTokens(systemPrompt) - framing - maxTokens
-  );
-  if (maxTokens < MIN_HISTORIAN_OUTPUT_TOKENS || inputBytes < 1_024) return;
+  const inputTokens =
+    contextWindow * HISTORIAN_WINDOW_SAFETY -
+    estimatePromptTokens(systemPrompt) -
+    framing -
+    maxTokens;
+  const inputBytes = Math.floor(inputTokens * HISTORIAN_BYTES_PER_TOKEN * scale);
+  if (maxTokens < MIN_HISTORIAN_OUTPUT_TOKENS || inputBytes < MIN_HISTORIAN_INPUT_BYTES) return;
   return { inputBytes, maxTokens };
 }
 
@@ -504,10 +572,11 @@ function historianTokenBudget(
   resolved: ResolvedModel,
   systemPrompt: string,
   userMessage: string,
-  requestedMax: number
+  requestedMax: number,
+  scale: number
 ): { ok: true; maxTokens: number } | { ok: false } {
-  const budget = modelHistorianBudget(resolved, systemPrompt, requestedMax);
-  return budget && estimatePromptTokens(userMessage) <= budget.inputBytes
+  const budget = modelHistorianBudget(resolved, systemPrompt, requestedMax, scale);
+  return budget && Buffer.byteLength(userMessage, 'utf8') <= budget.inputBytes
     ? { ok: true, maxTokens: budget.maxTokens }
     : { ok: false };
 }
@@ -592,20 +661,42 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
     }
     return undefined;
   };
+  const requestedMax =
+    typeof options.maxOutputTokens === 'number' && Number.isFinite(options.maxOutputTokens)
+      ? options.maxOutputTokens
+      : 32_000;
+  let resolved: ResolvedModel | undefined;
+  const modelError = (error: string): MagicSubagentResult => ({
+    ...fail(startedAt, 'model_failed', error),
+    // A too-long prompt is retried with a halved budget instead of suspending.
+    transient:
+      (resolved !== undefined &&
+        isContextOverflowError(error) &&
+        shrinkHistorianBudget(runner, resolved, options.systemPrompt, requestedMax)) ||
+      isTransientModelError(error),
+  });
 
   try {
-    const resolved = runner.getModel();
-    const requestedMax =
-      typeof options.maxOutputTokens === 'number' && Number.isFinite(options.maxOutputTokens)
-        ? options.maxOutputTokens
-        : 32_000;
+    resolved = runner.getModel();
     const budget = historianTokenBudget(
       resolved,
       options.systemPrompt,
       options.userMessage,
-      requestedMax
+      requestedMax,
+      budgetScale(runner, resolved)
     );
     if (!budget.ok) {
+      // Chunked before a provider overflow halved the budget: re-chunk next run.
+      if (
+        runner.budgetScale < 1 &&
+        historianTokenBudget(resolved, options.systemPrompt, options.userMessage, requestedMax, 1)
+          .ok
+      ) {
+        return finish({
+          ...fail(startedAt, 'model_failed', 'historian prompt exceeds the reduced budget.'),
+          transient: true,
+        });
+      }
       return finish(
         fail(
           startedAt,
@@ -630,6 +721,10 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
           maxTokens: budget.maxTokens,
           maxRetries: 0,
           signal,
+          // Omitted reasoning means "off"; models that cannot disable it get their lowest level.
+          ...(resolved.model.reasoning && resolved.model.thinkingLevelMap?.off === null
+            ? { reasoning: 'minimal' as const }
+            : {}),
           ...(typeof options.temperature === 'number' && Number.isFinite(options.temperature)
             ? { temperature: options.temperature }
             : {}),
@@ -640,16 +735,13 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
     const cancelled = cancellation();
     if (cancelled) return finish(cancelled);
     if (answer.stopReason === 'length') {
-      return finish(
-        fail(startedAt, 'model_failed', 'historian output hit the model output limit.')
-      );
+      return finish({
+        ...fail(startedAt, 'model_failed', 'historian output hit the model output limit.'),
+        transient: true,
+      });
     }
     if (answer.stopReason === 'error') {
-      const error = answer.errorMessage ?? 'historian model request failed.';
-      return finish({
-        ...fail(startedAt, 'model_failed', error),
-        transient: isTransientModelError(error),
-      });
+      return finish(modelError(answer.errorMessage ?? 'historian model request failed.'));
     }
     if (answer.stopReason === 'aborted') {
       // An SDK abort without any caller cancellation is a failed request.
@@ -670,7 +762,10 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
       .join('')
       .trim();
     if (!assistantText) {
-      return finish(fail(startedAt, 'model_failed', 'historian returned no assistant text.'));
+      return finish({
+        ...fail(startedAt, 'model_failed', 'historian returned no assistant text.'),
+        transient: true,
+      });
     }
     options.onProgress?.({
       type: 'terminal',
@@ -688,18 +783,14 @@ async function runMagicSubagent(options: MagicSubagentOptions): Promise<MagicSub
   } catch (error) {
     const cancelled = cancellation();
     if (cancelled) return finish(cancelled);
-    const message = errorMessage(error).slice(0, 1_000);
-    return finish({
-      ...fail(startedAt, 'model_failed', message),
-      transient: isTransientModelError(message),
-    });
+    return finish(modelError(errorMessage(error).slice(0, 1_000)));
   } finally {
     runner.inFlight = false;
   }
 }
 
 /** Enforce the deadline even if a provider neglects to settle after abort. */
-function withAbort<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
+export function withAbort<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => {
       signal.removeEventListener('abort', abort);

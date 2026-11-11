@@ -12,16 +12,15 @@ function useHighlighted(code: string, lang: string, enabled: boolean): ThemedTok
 
   useEffect(() => {
     if (!enabled || tokens) return;
-    let cancelled = false;
-    highlight(code, lang).then(
+    const controller = new AbortController();
+    highlight(code, lang, controller.signal).then(
       (next) => {
-        if (!cancelled && next) setResult({ code, lang, tokens: next });
+        if (!controller.signal.aborted && next) setResult({ code, lang, tokens: next });
       },
       () => {}
     );
-    return () => {
-      cancelled = true;
-    };
+    // 快速滚过已卸载的块不再分词
+    return () => controller.abort();
   }, [code, lang, enabled, tokens]);
 
   return tokens;

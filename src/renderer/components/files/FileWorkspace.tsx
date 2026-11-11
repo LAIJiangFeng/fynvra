@@ -94,6 +94,14 @@ export function FileWorkspace({
   }
 
   const pending = confirm ? previews[confirm.file.id] : undefined;
+  /** 非当前面板：保留布局但不可见、不可聚焦、不被读屏（inert） */
+  const paneProps = (visible: boolean) => ({
+    className: cn(
+      'absolute inset-0 flex min-h-0 min-w-0 flex-col',
+      !visible && 'invisible pointer-events-none'
+    ),
+    inert: !visible,
+  });
   return (
     <section
       aria-label={t('files.workspace')}
@@ -260,55 +268,36 @@ export function FileWorkspace({
           </Button>
         </div>
       )}
-      <div
-        className={cn(
-          'min-h-0 flex-1 flex-col',
-          selectedId === null && !terminalId && !diffId ? 'flex' : 'hidden'
-        )}
-      >
-        {children}
+      {/* 面板叠放、非当前的只隐身不 display:none，切回来不用整块重新布局（聊天首滑卡顿） */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div {...paneProps(selectedId === null && !terminalId && !diffId)}>{children}</div>
+        {opened.map((file) => (
+          <div key={file.id} {...paneProps(selectedId === file.id)}>
+            {tabsReady ? (
+              <FilePane
+                file={file}
+                store={store}
+                active={selectedId === file.id}
+                onReload={() => requestReload(file)}
+              />
+            ) : (
+              <div role="status" className="m-auto p-6 text-muted-foreground text-sm">
+                {t('common.loading')}
+              </div>
+            )}
+          </div>
+        ))}
+        {diffTabs.map((tab) => (
+          <div key={tab.id} {...paneProps(diffId === tab.id)}>
+            <DiffTabPane tab={tab} />
+          </div>
+        ))}
+        {terminals.map((tab) => (
+          <div key={tab.id} {...paneProps(terminalId === tab.id)}>
+            <TerminalPane id={tab.id} active={terminalId === tab.id} />
+          </div>
+        ))}
       </div>
-      {opened.map((file) => (
-        <div
-          key={file.id}
-          className={cn(
-            'min-h-0 min-w-0 flex-1 flex-col',
-            selectedId === file.id ? 'flex' : 'hidden'
-          )}
-        >
-          {tabsReady ? (
-            <FilePane
-              file={file}
-              store={store}
-              active={selectedId === file.id}
-              onReload={() => requestReload(file)}
-            />
-          ) : (
-            <div role="status" className="m-auto p-6 text-muted-foreground text-sm">
-              {t('common.loading')}
-            </div>
-          )}
-        </div>
-      ))}
-      {diffTabs.map((tab) => (
-        <div
-          key={tab.id}
-          className={cn('min-h-0 min-w-0 flex-1 flex-col', diffId === tab.id ? 'flex' : 'hidden')}
-        >
-          <DiffTabPane tab={tab} />
-        </div>
-      ))}
-      {terminals.map((tab) => (
-        <div
-          key={tab.id}
-          className={cn(
-            'min-h-0 min-w-0 flex-1 flex-col',
-            terminalId === tab.id ? 'flex' : 'hidden'
-          )}
-        >
-          <TerminalPane id={tab.id} active={terminalId === tab.id} />
-        </div>
-      ))}
       <Dialog
         open={closingTerminal !== null}
         onOpenChange={(open) => {

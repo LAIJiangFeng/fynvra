@@ -94,6 +94,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidApprovalMode: 'Invalid approval mode',
     invalidPlanMode: 'Invalid plan mode arguments',
     archiveBusy: 'Session is running; archive it after it finishes',
+    removeBusy: 'The session or its task is still in progress; delete it after it finishes',
+    removeBlocked:
+      'The session worktree has unmerged or uncommitted work ({reason}); confirm to delete it anyway',
+    removeWorktreeFailed: 'Could not delete the session worktree; the session was kept: {error}',
   },
   agent: {
     workerUnavailable: 'Agent worker not ready (restarting or stopped); try again shortly',
@@ -130,9 +134,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     unsupported: 'Desktop notifications are not supported on this system',
     errorTitle: '{title} · Error',
     approvalTitle: '{title} · Approval needed',
-    compactionWarningTitle: '{title} · Context compaction',
-    compactionWarningBody:
-      'Magic Context paused the session; history and inputs are preserved. Fix the issue or switch models, then select “Retry context recovery” in the session. Native compaction will not take over.',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}: {detail}',
     done: 'Done',

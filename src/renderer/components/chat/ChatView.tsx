@@ -101,29 +101,26 @@ function ChatNotice() {
 }
 
 /**
- * Magic Context 暂停原因提示：可关闭，但关闭不解除恢复锁。
- * 不等待确认，也不显示 provider 原始错误或 prompt。
+ * Magic Context 锁定说明：只在恢复锁仍在时显示；普通回退到标准压缩静默进行。
+ * 可关闭，但关闭不解除恢复锁。不等待确认，也不显示 provider 原始错误或 prompt。
  */
-function ChatWarning({ sessionId }: { sessionId: string }) {
-  const visible = useSessionsStore((state) => {
+export function ChatWarning({ sessionId }: { sessionId: string }) {
+  const notice = useSessionsStore((state) => {
     const runtime = state.runtimeBySession[sessionId];
-    return (
-      runtime?.recoveryRequired &&
-      runtime.warning &&
-      runtime.warningSeq !== runtime.dismissedWarningSeq
-    );
+    if (!runtime?.warning || runtime.warningSeq === runtime.dismissedWarningSeq) return undefined;
+    return runtime.recoveryRequired ? ('chat.magicContextFallback' as const) : undefined;
   });
   const dismiss = useSessionsStore((state) => state.dismissWarning);
   const t = useT();
-  if (!visible) return null;
+  if (!notice) return null;
   return (
     <div
       role="status"
       aria-live="polite"
       className="flex shrink-0 items-center gap-2 border-amber-500/30 border-b bg-amber-500/10 py-1.5 pr-2 pl-4 text-amber-800 text-sm dark:text-amber-200"
     >
-      <span className="min-w-0 flex-1 whitespace-pre-wrap" title={t('chat.magicContextFallback')}>
-        {t('chat.magicContextFallback')}
+      <span className="min-w-0 flex-1 whitespace-pre-wrap" title={t(notice)}>
+        {t(notice)}
       </span>
       <Button
         variant="ghost"

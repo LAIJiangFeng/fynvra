@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
@@ -55,7 +56,7 @@ import { getOrchestrationRegistry } from './orchestration';
 import { getPluginRegistry } from './plugins';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
-import { getSettingsFile } from './settings';
+import { getSettingsFile, onConfirmDangerousActionsChanged } from './settings';
 import { getSkillRegistry } from './skills';
 import { getWorkflowRegistry } from './workflows';
 import { getWorkspaceService } from './workspaces';
@@ -71,7 +72,11 @@ let archiveSweeper: ArchiveSweeper | null = null;
 
 /** Main 内唯一的会话 / agent worker 管理者；userData 路径在启动早期才确定，所以延迟创建 */
 export function getAgentHost(): AgentHostService {
-  agentHost ??= createAppAgentHost();
+  if (!agentHost) {
+    const host = createAppAgentHost();
+    agentHost = host;
+    onConfirmDangerousActionsChanged((enabled) => host.setConfirmDangerousActions(enabled));
+  }
   return agentHost;
 }
 
@@ -128,7 +133,10 @@ function createAppAgentHost(): AgentHostService {
     // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
     providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
     lastModels: createLastModelStore(getSettingsFile()),
-    branches: createBranchTracker({ read: (cwd) => readGitBranch(cwd) }),
+    // 已删除的目录（如清理掉的 worktree）不起 git
+    branches: createBranchTracker({
+      read: async (cwd) => (existsSync(cwd) ? readGitBranch(cwd) : undefined),
+    }),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
       instructions: getInstructionRegistry(),
@@ -141,6 +149,8 @@ function createAppAgentHost(): AgentHostService {
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
+    resolveConfirmDangerousActions: () =>
+      getSettingsFile().read().preferences.confirmDangerousActions === true,
     resolvePluginProviders,
     // 插件运行时按名字找过的服务记进 plugins.json；内容变了才广播
     onPluginProviderLookup: (pluginId, name) => {
@@ -152,6 +162,21 @@ function createAppAgentHost(): AgentHostService {
         .catch(() => undefined);
     },
     listWorkflows: () => getWorkflowRegistry().list(),
+    removeWorktree: async (session, force) => {
+      // 工作区已移除：没有编排状态可对照，只删记录（同以前）
+      const service = getOrchestrationRegistry().serviceFor(session.workspaceId);
+      const result = await service?.removeSessionWorktree(session.id, force);
+      if (result === undefined || result.ok) return { ok: true };
+      if (result.reason === 'failed') {
+        return {
+          ok: false,
+          error: translate('sessions.removeWorktreeFailed', { error: result.error }),
+        };
+      }
+      return result.reason === 'busy'
+        ? { ok: false, error: translate('sessions.removeBusy') }
+        : { ok: false, error: translate('sessions.removeBlocked', { reason: result.reason }) };
+    },
     broadcast: sendToAllWindows,
   });
 }
@@ -241,8 +266,22 @@ export function registerSessionHandlers(
     return input ? guard(() => host().create(input)) : invalid(translate('sessions.invalidCreate'));
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSIONS_REMOVE, (_event, raw: unknown) =>
-    withSessionId(raw, (sessionId) => host().remove(sessionId))
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_REMOVE, (_event, raw: unknown) => {
+    const input = parseRemoveSessionInput(raw);
+    return input
+      ? guard(() => host().remove(input.sessionId, input.force))
+      : invalid(translate('common.invalidSessionId'));
+  });
+
+  // 删除确认前：哪些会话的 worktree 有未合并或未提交的改动（或任务还在进行）
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_WORKTREE_BLOCKED,
+    (_event, raw: unknown): Promise<IpcResult<{ sessionIds: string[] }>> => {
+      const sessionIds = parseSessionIds(raw);
+      return sessionIds
+        ? guard(async () => ({ ok: true, sessionIds: await blockedSessions(sessionIds) }))
+        : invalid(translate('common.invalidArgs'));
+    }
   );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
@@ -359,6 +398,42 @@ export function parseListSessionsInput(
   return workspaceId && typeof includeArchived === 'boolean'
     ? { workspaceId, includeArchived }
     : null;
+}
+
+/** 会话 id（兼容旧入参），或 `{ sessionId, force? }`：force 只能是布尔值 */
+export function parseRemoveSessionInput(
+  raw: unknown
+): { sessionId: string; force: boolean } | null {
+  if (typeof raw === 'string') {
+    const sessionId = parseSessionId(raw);
+    return sessionId ? { sessionId, force: false } : null;
+  }
+  const record = strictRecord(raw, ['sessionId', 'force']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const force = record?.force ?? false;
+  return sessionId && typeof force === 'boolean' ? { sessionId, force } : null;
+}
+
+const MAX_SESSION_IDS = 1000;
+
+/** 会话 id 数组：每个都要合法，数量有上限 */
+export function parseSessionIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_SESSION_IDS) return null;
+  const ids = raw.map((id) => parseSessionId(id));
+  return ids.every((id): id is string => typeof id === 'string') ? ids : null;
+}
+
+async function blockedSessions(sessionIds: string[]): Promise<string[]> {
+  const blocked: string[] = [];
+  for (const sessionId of sessionIds) {
+    const stored = getSessionStore().get(sessionId);
+    if (stored?.worktreeId === undefined) continue;
+    const service = getOrchestrationRegistry().serviceFor(stored.workspaceId);
+    const blocker = await service?.sessionWorktreeBlocker(sessionId);
+    // 任务进行中的不算：确认了也删不了，删除时由 Main 拒绝
+    if (blocker && blocker !== 'busy') blocked.push(sessionId);
+  }
+  return blocked;
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */

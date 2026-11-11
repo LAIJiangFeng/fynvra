@@ -227,3 +227,10 @@ api.onChanged(() => {
   void useWorkspacesStore.getState().refresh();
 });
 void useWorkspacesStore.getState().refresh();
+
+// 用户可能在应用外 git init：窗口重新获得焦点时刷新，Main 重新检测 vcs（5 秒内不重复）
+let focusRefresh: ReturnType<typeof setTimeout> | undefined;
+window.addEventListener('focus', () => {
+  clearTimeout(focusRefresh);
+  focusRefresh = setTimeout(() => void useWorkspacesStore.getState().refresh(), 300);
+});

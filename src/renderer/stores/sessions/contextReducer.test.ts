@@ -138,18 +138,19 @@ describe('context metadata projection', () => {
     expect(state.runtimeBySession.s.contextRuntime?.context.tokens).toBe(12_000);
   });
 
-  it('a late snapshot of a closed operation cannot clear recovery or restart progress', () => {
+  it('a late snapshot of a closed operation cannot restart progress', () => {
     let state = apply(emptyProjection(), 1, { type: 'compaction', state: operation });
     state = apply(state, 2, { type: 'agent_settled', aborted: true });
     state = apply(state, 3, {
       type: 'context_runtime',
       snapshot: { ...snapshot, compaction: operation },
     });
+    // A failed compaction no longer implies a recovery lock; only snapshots set it.
     expect(state.runtimeBySession.s).toMatchObject({
       status: 'idle',
-      recoveryRequired: true,
       compaction: { phase: 'cancelled' },
     });
+    expect(state.runtimeBySession.s.recoveryRequired).toBeFalsy();
     expect(state.runtimeBySession.s.contextRuntime).toBeUndefined();
   });
 

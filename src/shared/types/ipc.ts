@@ -93,7 +93,10 @@ export const IPC_CHANNELS = {
   SESSIONS_LIST: 'sessions:list',
   /** Renderer 只传 workspaceId / roleId（/ 模型引用）；cwd 由 Main 从工作区记录推导 */
   SESSIONS_CREATE: 'sessions:create',
+  /** 会话 id，或 `{ sessionId, force? }`：一并删会话的 worktree 与分支；有未合并的改动时只在 force 时删 */
   SESSIONS_REMOVE: 'sessions:remove',
+  /** 会话 id 数组 → 其中 worktree 有未合并或未提交改动的会话 id（删除确认框用） */
+  SESSIONS_WORKTREE_BLOCKED: 'sessions:worktree-blocked',
   SESSIONS_PROMPT: 'sessions:prompt',
   /** 运行中插话（入参同 sessions:prompt），立即注入当前回合；会话空闲时等同 prompt */
   SESSIONS_STEER: 'sessions:steer',

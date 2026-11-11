@@ -126,13 +126,17 @@ it('boots the generated host config and handles the first prompt through Magic',
       expect(session.warnings.join('\n')).toContain(
         scenario === 'fail-open' ? 'host config is invalid' : 'config schema is incompatible'
       );
+      // A Magic startup failure no longer locks the session: it continues on the
+      // compaction fallback chain without Magic's context rewriting.
       await session.prompt('hi');
-      expect(faux.state.callCount).toBe(0);
-      expect(requests).toEqual([]);
+      expect(faux.state.callCount).toBe(1);
+      expect(JSON.stringify(requests)).not.toMatch(/§\d+§/);
+      expect(events.some((e) => e.type === 'warning')).toBe(true);
       expect(snapshots().at(-1)).toMatchObject({
         configuredStrategy: 'magic-context',
-        effectiveStrategy: 'magic-context',
-        recoveryRequired: true,
+        effectiveStrategy: 'native',
+        recoveryRequired: false,
+        pendingPromptCount: 0,
       });
       // Exercise the vendor parser independently too: false must not become a
       // permissive vendor setting just because the adapter already rejects it.

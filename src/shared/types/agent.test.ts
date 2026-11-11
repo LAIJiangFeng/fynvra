@@ -152,6 +152,7 @@ describe('parseAgentCommand', () => {
     { type: 'set-approval-mode', identity, mode: 'supervised' },
     { type: 'set-approval-mode', identity, mode: 'auto-edits' },
     { type: 'set-approval-mode', identity, mode: 'full' },
+    { type: 'set-confirm-dangerous-actions', identity, enabled: true },
   ];
 
   it.each(valid)('accepts a well-formed $type command', (command) => {

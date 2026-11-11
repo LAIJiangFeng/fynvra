@@ -55,6 +55,8 @@ export interface SupervisedSession {
    * 生产会话（piSession）实现；脚本化测试会话可以不实现（supervisor 记一条日志后忽略）
    */
   setPlanMode?(enabled: boolean): void;
+  /** 可选：切换「危险操作需要确认」，下一次工具调用起生效；未实现时忽略 */
+  setConfirmDangerousActions?(enabled: boolean): void;
   retryCompaction?(): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
@@ -193,6 +195,9 @@ export class SessionSupervisor {
         return;
       case 'set-plan-mode':
         this.#setPlanMode(command.identity, command.enabled);
+        return;
+      case 'set-confirm-dangerous-actions':
+        this.#setConfirmDangerousActions(command.identity, command.enabled);
         return;
       case 'suggest-reply':
         void this.#suggest(command.identity, command.requestId, command.roundId, command.round);
@@ -485,6 +490,19 @@ export class SessionSupervisor {
         return null;
       }
       this.#log('info', `session ${identity.sessionId}: approval mode ${mode}`);
+      return session;
+    });
+  }
+
+  /** 同样接在 opening 上：只是改一个开关，不会失败 */
+  #setConfirmDangerousActions(identity: SessionIdentity, enabled: boolean): void {
+    const managed = this.#current(identity);
+    if (!managed) {
+      this.#reportMissing(identity, 'set-confirm-dangerous-actions');
+      return;
+    }
+    managed.opening = managed.opening.then((session) => {
+      if (session && !managed.closed) session.setConfirmDangerousActions?.(enabled);
       return session;
     });
   }
