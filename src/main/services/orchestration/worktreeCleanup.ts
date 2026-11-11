@@ -1,5 +1,6 @@
-import { lstat, readdir, rmdir, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { Dirent } from 'node:fs';
+import { lstat, readdir, rm, rmdir, unlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type {
   Dispatch,
   GitWorktreeManager,
@@ -40,7 +41,8 @@ export interface MergedCleanupDeps {
 
 /**
  * 删掉 dispatch 的 worktree 与分支，前提是已合并且干净（{@link mergedCleanupBlocker}）；否则原样保留。
- * 与 cleanup_worktree 对已合并任务的处理相同：不加 --force，检查之后又有了改动时 git 会拒绝。
+ * 目录用 Node 的 rm 删（只删 junction/符号链接本身，不进入指向的目录），再 `git worktree prune`：
+ * 装过依赖的 worktree 上 `git worktree remove` 要半分钟，rm 只要几秒。先停 worker 再删。
  */
 export async function cleanupMergedWorktree(
   deps: MergedCleanupDeps,
@@ -56,15 +58,18 @@ export async function cleanupMergedWorktree(
   const blocker = mergedCleanupBlocker(task?.status, status.status);
   if (blocker !== null) return { removed: false, reason: blocker };
 
-  try {
-    await unlinkLinksIn(worktree.path);
-  } catch (error) {
-    return { removed: false, reason: 'failed', error: errorMessage(error) };
+  if (resolve(worktree.path) === resolve(deps.repoPath)) {
+    return { removed: false, reason: 'failed', error: 'refusing to delete the repository itself' };
   }
   // 先停 worker：它的进程可能还占着 worktree 里的文件
   await deps.launcher.disposeSession(dispatch.workerSessionId).catch(() => undefined);
-  const removed = await deps.git.remove({ repoPath: deps.repoPath, path: worktree.path });
-  if (!removed.ok) return { removed: false, reason: 'failed', error: removed.error };
+  try {
+    await rm(worktree.path, { recursive: true, force: true, maxRetries: 3 });
+  } catch (error) {
+    return { removed: false, reason: 'failed', error: errorMessage(error) };
+  }
+  const pruned = await deps.git.prune(deps.repoPath);
+  if (!pruned.ok) return { removed: false, reason: 'failed', error: pruned.error };
   deps.store.worktrees.delete(worktree.id);
   // -d：git 再确认一次分支已合并进当前检出的分支，确认不了就留着分支
   await deps.git.deleteBranch({ repoPath: deps.repoPath, branch: worktree.branch });
@@ -92,16 +97,18 @@ export async function checkSessionWorktree(
  * 递归删除曾跟随 node_modules junction 删掉主仓库的文件。目录不存在时什么都不做。
  */
 export async function unlinkLinksIn(dir: string): Promise<void> {
-  let names: string[];
+  let entries: Dirent[];
   try {
-    names = await readdir(dir);
+    entries = await readdir(dir, { withFileTypes: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
-  for (const name of names) {
-    const path = join(dir, name);
-    const info = await lstat(path);
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    // 目录项自带类型（junction 也报为链接），省掉逐项 lstat；类型未知时才 lstat
+    const known = entry.isSymbolicLink() || entry.isDirectory() || entry.isFile();
+    const info = known ? entry : await lstat(path);
     if (info.isSymbolicLink()) {
       // Windows 的目录链接有时 unlink 不了，换 rmdir；两者都只删链接本身
       await unlink(path).catch(() => rmdir(path));

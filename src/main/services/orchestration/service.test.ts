@@ -464,10 +464,13 @@ describe('createOrchestrationService', () => {
       return dispatch;
     }
 
-    it('已合并且干净：停 worker，删 worktree（不加 --force）与分支（-d），记录随之删除', async () => {
+    it('已合并且干净：停 worker，删 worktree 目录并 prune，分支用 -d 删，记录随之删除', async () => {
       const service = make();
       const dispatch = await mergedDispatch(service);
       const [worktree] = (await service.snapshot()).worktrees;
+      const path = worktree?.path ?? '';
+      mkdirSync(join(path, 'src'), { recursive: true });
+      writeFileSync(join(path, 'src', 'a.ts'), 'merged');
       launcher.disposeSession.mockClear();
       const before = fake.calls.length;
 
@@ -475,7 +478,8 @@ describe('createOrchestrationService', () => {
         removed: true,
       });
       const commands = fake.commands().slice(before);
-      expect(commands).toContain(`git worktree remove -- ${worktree?.path}`);
+      expect(existsSync(path)).toBe(false);
+      expect(commands).toContain('git worktree prune');
       expect(commands).toContain('git branch -d fynvra/add-toggle');
       expect(launcher.disposeSession).toHaveBeenCalledWith(dispatch.workerSessionId);
       expect((await service.snapshot()).worktrees).toEqual([]);
@@ -517,18 +521,18 @@ describe('createOrchestrationService', () => {
       expect((await service.snapshot()).worktrees).toHaveLength(1);
     });
 
-    it('git 拒绝删除时保留记录并带上原因；不是 worker 的会话没有可清理的', async () => {
+    it('git prune 失败时保留记录并带上原因；不是 worker 的会话没有可清理的', async () => {
       const service = make();
       const dispatch = await mergedDispatch(service);
       fake.respond(({ args }) =>
-        args[0] === 'worktree' && args[1] === 'remove'
-          ? { code: 128, stderr: 'fatal: contains modified or untracked files' }
+        args[0] === 'worktree' && args[1] === 'prune'
+          ? { code: 128, stderr: 'fatal: unable to prune' }
           : undefined
       );
       expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
         removed: false,
         reason: 'failed',
-        error: expect.stringContaining('untracked'),
+        error: expect.stringContaining('unable to prune'),
       });
       expect((await service.snapshot()).worktrees).toHaveLength(1);
       expect(await service.cleanupMergedWorktree('session_coord')).toEqual({
@@ -567,10 +571,11 @@ describe('createOrchestrationService', () => {
         ok: true,
       });
       const commands = fake.commands().slice(before);
-      expect(commands).toContain(`git worktree remove -- ${path}`);
+      expect(commands).toContain('git worktree prune');
       expect(commands).toContain('git branch -d fynvra/add-toggle');
       expect((await service.snapshot()).worktrees).toEqual([]);
       expect(readFileSync(join(outside, 'pkg', 'index.js'), 'utf8')).toBe('keep me');
+      expect(existsSync(path)).toBe(false);
       expect(existsSync(join(path, 'node_modules'))).toBe(false);
       expect(existsSync(join(path, 'packages', 'a', 'node_modules'))).toBe(false);
     });

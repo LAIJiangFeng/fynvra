@@ -554,7 +554,18 @@ describe('createSessionsStore · 批量归档与删除', () => {
     ]);
     await store.getState().selectSession('open');
     api.list.mockClear();
+    const progress: unknown[] = [];
+    const unsubscribe = store.subscribe((state, prev) => {
+      if (state.bulkProgress !== prev.bulkProgress) progress.push(state.bulkProgress);
+    });
     expect(await store.getState().archiveIdleSessions(WS)).toEqual({ done: 2, failed: 0 });
+    unsubscribe();
+    expect(progress).toEqual([
+      { kind: 'archive', done: 0, total: 2 },
+      { kind: 'archive', done: 1, total: 2 },
+      { kind: 'archive', done: 2, total: 2 },
+      null,
+    ]);
     expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['idle1', 'idle2']);
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(store.getState().notice).toBeNull();
