@@ -212,10 +212,19 @@ describe('createBranchTracker', () => {
     expect(tracker.get('/repo')).toBe('main');
   });
 
-  it('lists the directories it has read, for a refresh of all of them', async () => {
-    const { tracker } = setup({ '/repo': 'main', '/worktrees/a': 'fynvra/a' });
-    expect(tracker.known()).toEqual([]);
-    await tracker.refresh(['/repo', '/worktrees/a']);
-    expect(tracker.known().sort()).toEqual(['/repo', '/worktrees/a']);
+  it('never reads more than the concurrency cap at once', async () => {
+    let running = 0;
+    let peak = 0;
+    const read = vi.fn(async (cwd: string) => {
+      peak = Math.max(peak, ++running);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      running--;
+      return cwd;
+    });
+    const tracker = createBranchTracker({ read, now: () => 0, concurrency: 4 });
+    const cwds = Array.from({ length: 10 }, (_, index) => `/repo${index}`);
+    expect(await tracker.refresh(cwds)).toEqual(cwds);
+    expect(read).toHaveBeenCalledTimes(10);
+    expect(peak).toBe(4);
   });
 });

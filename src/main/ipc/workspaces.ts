@@ -7,6 +7,7 @@ import {
   type WorkspaceListResult,
 } from '@shared/types/workspace';
 import {
+  app,
   BrowserWindow,
   clipboard,
   dialog,
@@ -57,12 +58,18 @@ export function registerWorkspaceHandlers(): void {
   registerWorkspaceMenuHandlers();
   ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, async (): Promise<WorkspaceListResult> => {
     try {
-      // 用户可能在挂入后 git init；重新检测很便宜（每个工作区一次 rev-parse，5 秒内不重复）
-      await getWorkspaceService().refreshVcs();
+      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时发现
       return { ok: true, workspaces: getWorkspaceService().list() };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
     }
+  });
+
+  // 监视器可能漏掉外部的 git init：焦点时只查根目录已有 .git 的普通目录工作区
+  app.on('browser-window-focus', () => {
+    getWorkspaceService()
+      .refreshVcs(undefined, { onlyPlain: true })
+      .catch((error: unknown) => console.warn('[workspaces] vcs re-detection failed:', error));
   });
 
   // 不接收 Renderer 传来的路径：目录由 Main 弹窗选择，检查之后才写入 settings

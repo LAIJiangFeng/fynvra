@@ -115,6 +115,14 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
     return repo;
   };
 
+  it('列表不重新检测 vcs（不起 git）', async () => {
+    const { getWorkspaceService } = await import('./workspaces');
+    const refreshVcs = vi.spyOn(getWorkspaceService(), 'refreshVcs');
+    expect(await list()).toMatchObject({ ok: true });
+    expect(refreshVcs).not.toHaveBeenCalled();
+    refreshVcs.mockRestore();
+  });
+
   it('取消选择目录时什么都不做', async () => {
     pick(null);
     expect(await add()).toMatchObject({ ok: false, code: 'canceled' });
