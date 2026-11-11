@@ -1440,6 +1440,40 @@ describe('createAgentHost sessions', () => {
     expect(await env.host.prompt(session.id, 'x')).toMatchObject({ ok: false });
   });
 
+  it('removing a session with a worktree removes the worktree first; refusals and failures keep the record', async () => {
+    const removeWorktree = vi.fn<NonNullable<AgentHostDeps['removeWorktree']>>(async () => ({
+      ok: false,
+      error: 'blocked: not-merged',
+    }));
+    const env = setup({ removeWorktree });
+    const plain = await createSession(env);
+    const worker = await createSession(env);
+    env.store.update(worker.id, { worktreeId: 'wt-1' });
+
+    expect(await env.host.remove(plain.id)).toEqual({ ok: true });
+    expect(removeWorktree).not.toHaveBeenCalled();
+
+    env.store.update(worker.id, { status: 'running' });
+    expect(await env.host.remove(worker.id, true)).toMatchObject({ ok: false });
+    expect(removeWorktree).not.toHaveBeenCalled();
+    env.store.update(worker.id, { status: 'idle' });
+
+    expect(await env.host.remove(worker.id)).toEqual({ ok: false, error: 'blocked: not-merged' });
+    expect(removeWorktree).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: worker.id }),
+      false
+    );
+    expect(env.host.list('ws-1').map((session) => session.id)).toEqual([worker.id]);
+
+    removeWorktree.mockResolvedValueOnce({ ok: true });
+    expect(await env.host.remove(worker.id, true)).toEqual({ ok: true });
+    expect(removeWorktree).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: worker.id }),
+      true
+    );
+    expect(env.host.list('ws-1')).toEqual([]);
+  });
+
   it('never sends the API key to the renderer', async () => {
     const env = setup();
     const session = await createSession(env);

@@ -85,6 +85,9 @@ export const mainZhCN = {
     invalidApprovalMode: '无效的审批档位',
     invalidPlanMode: '无效的计划模式参数',
     archiveBusy: '会话正在运行，结束后再归档',
+    removeBusy: '会话或它的任务还在进行，结束后再删除',
+    removeBlocked: '会话的 worktree 有未合并或未提交的改动（{reason}），需确认后才能删除',
+    removeWorktreeFailed: '删除会话的 worktree 失败，会话已保留：{error}',
   },
   agent: {
     workerUnavailable: 'agent worker 未就绪（正在重启或已停止），请稍后重试',

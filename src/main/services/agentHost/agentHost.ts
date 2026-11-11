@@ -114,6 +114,11 @@ export interface AgentHostDeps {
   onPluginProviderLookup?(pluginId: string, name: string): void;
   /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
   listWorkflows?(): Promise<readonly Workflow[]>;
+  /**
+   * 删除带 worktree 的会话前删掉它的 worktree 与分支（生产为 OrchestrationService.removeSessionWorktree）；
+   * 失败时会话保留。缺省只删注册表记录
+   */
+  removeWorktree?(session: StoredSession, force: boolean): Promise<IpcResult>;
   workerOptions?: Pick<
     WorkerClientOptions,
     'readyTimeoutMs' | 'maxRestarts' | 'restartWindowMs' | 'restartDelayMs'
@@ -170,7 +175,8 @@ export interface AgentHostService extends AgentHost {
   shutdown(timeoutMs: number): Promise<void>;
   list(workspaceId: string): SessionSummary[];
   create(input: CreateSessionInput): Promise<IpcResult<{ session: SessionSummary }>>;
-  remove(sessionId: string): Promise<IpcResult>;
+  /** 带 worktree 的会话一并删 worktree 与分支；有未合并的改动时只在 `force` 时删，运行中拒绝 */
+  remove(sessionId: string, force?: boolean): Promise<IpcResult>;
   /**
    * 发消息（首次使用时先在 worker 里 spawn）。images 是用户粘贴的图片，只来自 sessions:prompt；
    * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
@@ -1469,17 +1475,26 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setStatus(sessionId, 'idle');
   }
 
-  async function remove(sessionId: string): Promise<Result> {
+  async function remove(sessionId: string, force = false): Promise<Result> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
-    disposeLive(sessionId);
-    live.delete(sessionId);
-    // 只删注册表记录；pi jsonl 保留（会话正文的权威源，误删可从文件恢复）
-    deps.store.remove(sessionId);
-    wakeRounds();
-    announceFailure(sessionId);
-    changed(stored.workspaceId);
+    if (stored.worktreeId !== undefined && deps.removeWorktree) {
+      if (isBusy(stored)) return fail(translate('sessions.removeBusy'));
+      const removed = await deps.removeWorktree(stored, force);
+      if (!removed.ok) return removed;
+    }
+    dropRecord(stored);
     return { ok: true };
+  }
+
+  function dropRecord(stored: StoredSession): void {
+    disposeLive(stored.id);
+    live.delete(stored.id);
+    // 只删注册表记录；pi jsonl 保留（会话正文的权威源，误删可从文件恢复）
+    deps.store.remove(stored.id);
+    wakeRounds();
+    announceFailure(stored.id);
+    changed(stored.workspaceId);
   }
 
   const launcher: WorkerSessionLauncher = {
@@ -1542,7 +1557,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // 第一条 prompt 就是任务书
       const prompted = await prompt(stored.id, input.brief);
       if (!prompted.ok) {
-        await remove(stored.id);
+        // 起不来的 worker 会话：worktree 由编排侧自己回滚，这里只删记录
+        dropRecord(stored);
         return prompted;
       }
       return { ok: true, sessionId: stored.id };

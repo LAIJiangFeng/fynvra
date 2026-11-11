@@ -26,7 +26,10 @@ export interface SessionsApi {
     roleId: string;
     model?: SessionModelRef;
   }): Promise<IpcResult<{ session: SessionSummary }>>;
-  remove(sessionId: string): Promise<IpcResult>;
+  /** 一并删会话的 worktree 与分支；有未合并或未提交的改动时只在 `force` 时删，否则返回错误 */
+  remove(sessionId: string, options?: { force?: boolean }): Promise<IpcResult>;
+  /** 其中 worktree 有未合并或未提交改动的会话 id（删除前提示用） */
+  worktreeBlocked(sessionIds: string[]): Promise<IpcResult<{ sessionIds: string[] }>>;
   /**
    * 发消息；images 是粘贴的图片（最多 10 张，单张 20 MiB、合计 50 MiB 以内），带图片时 text 可以为空。
    * 有一张图片不合法就整条拒绝
@@ -111,7 +114,12 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
         options?.includeArchived ? { workspaceId, includeArchived: true } : workspaceId
       ),
     create: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_CREATE, input),
-    remove: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_REMOVE, sessionId),
+    remove: (sessionId, options) =>
+      ipc.invoke(
+        IPC_CHANNELS.SESSIONS_REMOVE,
+        options?.force ? { sessionId, force: true } : sessionId
+      ),
+    worktreeBlocked: (sessionIds) => ipc.invoke(IPC_CHANNELS.SESSIONS_WORKTREE_BLOCKED, sessionIds),
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
     steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
     retryCompaction: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, sessionId),
