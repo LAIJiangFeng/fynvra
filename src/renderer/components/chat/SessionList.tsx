@@ -135,7 +135,7 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
       {selecting && (
-        <div className="flex h-7 items-center gap-1 pr-1 pl-2 text-xs">
+        <div className="-ml-5 flex h-7 items-center gap-1 pr-1 text-xs">
           <label
             htmlFor={selectAllId}
             className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
