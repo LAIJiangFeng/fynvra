@@ -679,6 +679,7 @@ export const zhCN = {
     committedChanges: '已提交的更改',
     commitsSection: '提交',
     noUncommitted: '没有未提交的更改',
+    omittedUntracked: '另有 {count} 个未跟踪文件未预览（可加入 .gitignore 或提交）',
     noCommitList: '还没有提交',
     currentWorktreeRemoved: '此对话的 worktree 已移除，可从任务详情查看已保存的历史改动',
     worktreeRemoved: 'worktree 已移除，无法查看未提交的更改',

@@ -44,6 +44,7 @@ export interface SessionChanges {
   files: string[];
   stat: string;
   diff: string;
-  uncommitted: { available: boolean; files: string[]; diff: string };
+  /** omittedUntracked: untracked files left out of the preview (count/size limits) */
+  uncommitted: { available: boolean; files: string[]; diff: string; omittedUntracked?: number };
   commits: { sha: string; subject: string; author: string; date: string }[];
 }

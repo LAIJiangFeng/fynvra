@@ -274,9 +274,26 @@ describe('current conversation changes (real Git)', () => {
     workspace.defaultBranch = 'main..bad';
     await expect(read()).rejects.toThrow('Invalid registered default branch');
     workspace.defaultBranch = 'main';
-    for (let index = 0; index < 201; index++)
+    for (let index = 0; index < 203; index++)
       writeFileSync(join(repo, `file-${index}.txt`), 'draft');
-    await expect(read()).rejects.toThrow('200-file preview limit');
+    const data = await read();
+    expect(data.availability).toBe('available');
+    expect(data.uncommitted.files).toHaveLength(200);
+    expect(data.uncommitted.omittedUntracked).toBe(3);
+  });
+
+  it('stops previewing untracked files at the patch byte limit instead of failing', async () => {
+    commit(repo, 'base.txt');
+    const line = `${'x'.repeat(99)}\n`;
+    for (let index = 0; index < 40; index++)
+      writeFileSync(join(repo, `big-${String(index).padStart(2, '0')}.txt`), line.repeat(2500));
+    const data = await read();
+    expect(data.availability).toBe('available');
+    const listed = data.uncommitted.files.length;
+    expect(listed).toBeGreaterThan(0);
+    expect(listed).toBeLessThan(40);
+    expect(data.uncommitted.omittedUntracked).toBe(40 - listed);
+    expect(Buffer.byteLength(data.uncommitted.diff)).toBeLessThanOrEqual(8 * 1024 * 1024);
   });
 
   it('re-detects git first: a plain workspace whose folder became a repo root reads as git', async () => {
