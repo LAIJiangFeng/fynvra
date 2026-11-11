@@ -1,7 +1,7 @@
 import { useSettingsViewStore } from '../../components/settings/settingsViewStore';
 import { getSessionsApi } from '../../lib/api/sessions';
 import { diffTabsStoreFor } from '../diffTabs';
-import { filesStoreFor } from '../files';
+import { connectFilesAutoRefresh, filesStoreFor } from '../files';
 import { useTerminalsStore } from '../terminals';
 import { useWorkspacesStore } from '../workspaces';
 import {
@@ -36,6 +36,8 @@ export const useSessionsStore = createSessionsStore(api, {
 });
 
 connectSessionsStore(useSessionsStore, api);
+// 任何会话（含派发的 worker）改了文件后自动刷新当前工作区的文件树
+connectFilesAutoRefresh(api.onEvent, window, () => useWorkspacesStore.getState().selectedId);
 useSessionsStore.subscribe((state, previous) => {
   if (
     state.workspaceId &&
