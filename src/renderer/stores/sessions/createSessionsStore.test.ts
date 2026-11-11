@@ -608,6 +608,18 @@ describe('createSessionsStore · removeSession', () => {
     await sending;
   });
 
+  it('lists many idle sessions without runtime data in O(1) store notifications', async () => {
+    const { api } = fakeApi(Array.from({ length: 200 }, (_, index) => summary(`s${index}`)));
+    const store = createSessionsStore(api, { schedule: () => {} });
+    const runtimes = store.getState().runtimeBySession;
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+    await store.getState().loadSessions(WS);
+    await store.getState().loadSessions(WS);
+    expect(store.getState().runtimeBySession).toBe(runtimes);
+    expect(notifications).toBeLessThanOrEqual(4);
+  });
+
   it('checks buffered events before deciding whether the session is busy', async () => {
     const { api } = fakeApi();
     const store = createSessionsStore(api, { schedule: () => {} });
