@@ -94,6 +94,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidApprovalMode: 'Invalid approval mode',
     invalidPlanMode: 'Invalid plan mode arguments',
     archiveBusy: 'Session is running; archive it after it finishes',
+    removeBusy: 'The session or its task is still in progress; delete it after it finishes',
+    removeBlocked:
+      'The session worktree has unmerged or uncommitted work ({reason}); confirm to delete it anyway',
+    removeWorktreeFailed: 'Could not delete the session worktree; the session was kept: {error}',
   },
   agent: {
     workerUnavailable: 'Agent worker not ready (restarting or stopped); try again shortly',

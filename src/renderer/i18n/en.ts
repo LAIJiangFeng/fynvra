@@ -249,7 +249,7 @@ export const en: MessagesShape<typeof zhCN> = {
     remove: 'Delete session',
     removeTitle: 'Delete session?',
     removeHint:
-      'The session will be removed from the list. Its underlying record file will be kept',
+      'The session will be removed from the list, and its worktree and branch deleted. Its underlying record file will be kept',
     bulk: {
       select: 'Select',
       selectAll: 'Select all',
@@ -259,7 +259,12 @@ export const en: MessagesShape<typeof zhCN> = {
       removeArchived: 'Delete all archived',
       removeTitle: 'Delete {count} sessions?',
       removeHint:
-        'This cannot be undone. The sessions are removed from the Fynvra session list; their underlying pi record files are kept and worktrees are not touched. Running sessions are never deleted',
+        'This cannot be undone. The sessions are removed from the Fynvra session list and their worktrees and branches are deleted; their underlying pi record files are kept. Running sessions are never deleted',
+      checkingWorktrees: 'Checking worktrees…',
+      unmergedCount:
+        '{count} of these sessions have unmerged or uncommitted work in their worktrees; they are skipped unless you check the box below',
+      forceUnmerged: 'Also delete the unmerged work',
+      unmergedSkipped: 'skipped: unmerged work',
       archivePartial: 'Archived {done}, {failed} not processed ({reasons})',
       removePartial: 'Deleted {done}, {failed} not processed ({reasons})',
     },

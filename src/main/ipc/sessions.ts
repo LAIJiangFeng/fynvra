@@ -156,6 +156,21 @@ function createAppAgentHost(): AgentHostService {
         .catch(() => undefined);
     },
     listWorkflows: () => getWorkflowRegistry().list(),
+    removeWorktree: async (session, force) => {
+      // 工作区已移除：没有编排状态可对照，只删记录（同以前）
+      const service = getOrchestrationRegistry().serviceFor(session.workspaceId);
+      const result = await service?.removeSessionWorktree(session.id, force);
+      if (result === undefined || result.ok) return { ok: true };
+      if (result.reason === 'failed') {
+        return {
+          ok: false,
+          error: translate('sessions.removeWorktreeFailed', { error: result.error }),
+        };
+      }
+      return result.reason === 'busy'
+        ? { ok: false, error: translate('sessions.removeBusy') }
+        : { ok: false, error: translate('sessions.removeBlocked', { reason: result.reason }) };
+    },
     broadcast: sendToAllWindows,
   });
 }
@@ -245,8 +260,22 @@ export function registerSessionHandlers(
     return input ? guard(() => host().create(input)) : invalid(translate('sessions.invalidCreate'));
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSIONS_REMOVE, (_event, raw: unknown) =>
-    withSessionId(raw, (sessionId) => host().remove(sessionId))
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_REMOVE, (_event, raw: unknown) => {
+    const input = parseRemoveSessionInput(raw);
+    return input
+      ? guard(() => host().remove(input.sessionId, input.force))
+      : invalid(translate('common.invalidSessionId'));
+  });
+
+  // 删除确认前：哪些会话的 worktree 有未合并或未提交的改动（或任务还在进行）
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_WORKTREE_BLOCKED,
+    (_event, raw: unknown): Promise<IpcResult<{ sessionIds: string[] }>> => {
+      const sessionIds = parseSessionIds(raw);
+      return sessionIds
+        ? guard(async () => ({ ok: true, sessionIds: await blockedSessions(sessionIds) }))
+        : invalid(translate('common.invalidArgs'));
+    }
   );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
@@ -363,6 +392,42 @@ export function parseListSessionsInput(
   return workspaceId && typeof includeArchived === 'boolean'
     ? { workspaceId, includeArchived }
     : null;
+}
+
+/** 会话 id（兼容旧入参），或 `{ sessionId, force? }`：force 只能是布尔值 */
+export function parseRemoveSessionInput(
+  raw: unknown
+): { sessionId: string; force: boolean } | null {
+  if (typeof raw === 'string') {
+    const sessionId = parseSessionId(raw);
+    return sessionId ? { sessionId, force: false } : null;
+  }
+  const record = strictRecord(raw, ['sessionId', 'force']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const force = record?.force ?? false;
+  return sessionId && typeof force === 'boolean' ? { sessionId, force } : null;
+}
+
+const MAX_SESSION_IDS = 1000;
+
+/** 会话 id 数组：每个都要合法，数量有上限 */
+export function parseSessionIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_SESSION_IDS) return null;
+  const ids = raw.map((id) => parseSessionId(id));
+  return ids.every((id): id is string => typeof id === 'string') ? ids : null;
+}
+
+async function blockedSessions(sessionIds: string[]): Promise<string[]> {
+  const blocked: string[] = [];
+  for (const sessionId of sessionIds) {
+    const stored = getSessionStore().get(sessionId);
+    if (stored?.worktreeId === undefined) continue;
+    const service = getOrchestrationRegistry().serviceFor(stored.workspaceId);
+    const blocker = await service?.sessionWorktreeBlocker(sessionId);
+    // 任务进行中的不算：确认了也删不了，删除时由 Main 拒绝
+    if (blocker && blocker !== 'busy') blocked.push(sessionId);
+  }
+  return blocked;
 }
 
 /** `{ workspaceId, roleId, model? }`，不接受其他字段（尤其是 cwd / 路径） */

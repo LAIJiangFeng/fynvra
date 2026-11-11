@@ -95,7 +95,12 @@ export interface SessionsState extends ChatProjection {
   /** 正在批量归档 / 删除的工作区：期间不响应它的 sessions:changed，结束时只重拉一次 */
   bulkWorkspaceId: string | null;
   /** 等用户确认的批量删除；确认前不会删任何会话 */
-  pendingRemoval: { workspaceId: string; sessionIds: string[] } | null;
+  pendingRemoval: {
+    workspaceId: string;
+    sessionIds: string[];
+    /** 其中 worktree 有未合并或未提交改动的会话；null 表示还在向 Main 查 */
+    blocked: string[] | null;
+  } | null;
   /** 打开着模型选择器的会话：输入框胶囊与状态栏打开的是同一个 */
   modelPickerFor: string | null;
 
@@ -177,15 +182,18 @@ export interface SessionsState extends ChatProjection {
   /** 恢复归档的会话：同上；恢复算一次更新，会话回到列表顶部 */
   unarchiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 从列表移除会话并清空本地投影；运行中拒绝，失败时恢复。底层记录文件保留。 */
-  removeSession(sessionId: string): Promise<IpcResult>;
+  removeSession(sessionId: string, force?: boolean): Promise<IpcResult>;
   /**
    * 批量归档 / 删除工作区里的会话：逐个调用单个会话的操作，期间合并列表刷新，结束后只重拉一次；
    * 运行中、等审批的会话照单个操作的规则拒绝，失败汇总成一条提示。另一批进行中时什么都不做。
    */
   archiveSessions(workspaceId: string, sessionIds: readonly string[]): Promise<BulkResult>;
-  /** 批量删除分两步：先登记待确认（界面据此弹确认框），确认后才删；取消则丢弃 */
+  /**
+   * 删除分两步：先登记待确认并向 Main 查哪些会话的 worktree 有未合并的改动（界面据此弹确认框），确认后才删；
+   * 没勾 `force` 时跳过这些会话并计入提示。取消则丢弃
+   */
   requestRemoveSessions(workspaceId: string, sessionIds: readonly string[]): void;
-  confirmRemoveSessions(): Promise<BulkResult>;
+  confirmRemoveSessions(force?: boolean): Promise<BulkResult>;
   cancelRemoveSessions(): void;
   /** 一键归档工作区里的闲置会话：跳过运行中、等审批、消息在途、正在查看与已归档的 */
   archiveIdleSessions(workspaceId: string): Promise<BulkResult>;
@@ -1407,15 +1415,27 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       requestRemoveSessions(workspaceId, sessionIds) {
         if (sessionIds.length === 0) return;
-        set({ pendingRemoval: { workspaceId, sessionIds: [...new Set(sessionIds)] } });
+        const ids = [...new Set(sessionIds)];
+        const withWorktree = ids.filter((id) => findSession(get(), id)?.worktreeId !== undefined);
+        const pending = { workspaceId, sessionIds: ids, blocked: withWorktree.length ? null : [] };
+        set({ pendingRemoval: pending });
+        if (withWorktree.length === 0) return;
+        void safely(() => api.worktreeBlocked(withWorktree)).then((result) => {
+          // 查不到时按没有处理：Main 删除时仍会拒绝未确认的，失败计入提示
+          if (get().pendingRemoval !== pending) return;
+          set({ pendingRemoval: { ...pending, blocked: result.ok ? result.sessionIds : [] } });
+        });
       },
 
-      confirmRemoveSessions() {
+      confirmRemoveSessions(force = false) {
         const pending = get().pendingRemoval;
         if (!pending) return Promise.resolve({ done: 0, failed: 0 });
         set({ pendingRemoval: null });
+        const blocked = new Set(pending.blocked);
         return runBulk(pending.workspaceId, pending.sessionIds, 'remove', (sessionId) =>
-          get().removeSession(sessionId)
+          blocked.has(sessionId) && !force
+            ? Promise.resolve({ ok: false, error: translate('sessions.bulk.unmergedSkipped') })
+            : get().removeSession(sessionId, force)
         );
       },
 
@@ -1438,7 +1458,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         );
       },
 
-      async removeSession(sessionId) {
+      async removeSession(sessionId, force) {
         // 先归并已收到的事件，避免 16ms 攒批期间把刚开始运行的会话当成空闲。
         flushEvents();
         const before = get();
@@ -1475,7 +1495,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ...(before.modelPickerFor === sessionId ? { modelPickerFor: null } : {}),
         });
         if (wasActive && nextId) void get().selectSession(nextId);
-        const result = await safely(() => api.remove(sessionId));
+        const result = await safely(() =>
+          force ? api.remove(sessionId, { force }) : api.remove(sessionId)
+        );
         if (result.ok) {
           modelSwitches.delete(sessionId);
           approvalSwitches.delete(sessionId);

@@ -588,6 +588,11 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: true };
     },
 
+    // mock 没有 worktree
+    async worktreeBlocked() {
+      return { ok: true, sessionIds: [] };
+    },
+
     prompt,
 
     async steer(input) {
