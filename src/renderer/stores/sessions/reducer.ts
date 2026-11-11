@@ -246,6 +246,16 @@ export function applyContextRuntime<S extends ChatProjection>(
   seq?: number,
   recoveryRequired?: boolean
 ): S {
+  const existing = state.runtimeBySession[sessionId];
+  // Nothing to apply and nothing to clear: list summaries without runtime data stay O(1) per session.
+  if (
+    snapshot === undefined &&
+    seq === undefined &&
+    recoveryRequired === undefined &&
+    (!existing ||
+      (!existing.contextRuntime && !existing.retry && !compactionActive(existing.compaction)))
+  )
+    return state;
   const before = sliceOf(state, sessionId);
   if (
     seq === undefined

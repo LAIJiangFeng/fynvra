@@ -743,8 +743,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               session.contextRuntime,
               session.contextRuntimeSeq
             );
+            const hasData =
+              session.contextRuntime !== undefined || session.contextRuntimeSeq !== undefined;
             // A rejected snapshot must not reset progress through its associated status either.
-            if (hydrated === next) skip.add(session.id);
+            // Without runtime data nothing can be rejected; an unchanged state is just a no-op.
+            if (hydrated === next && hasData) skip.add(session.id);
             else synchronized.add(session.id);
             next = hydrated;
           }
@@ -756,17 +759,23 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
             ...(removed ? { activeSessionId: null } : {}),
           };
         });
-        for (const session of sessions) {
-          if (
+        const recovered = sessions.filter(
+          (session) =>
             synchronized.has(session.id) &&
             !recoveryRequests.has(session.id) &&
-            (session.status === 'idle' || session.status === 'error')
-          ) {
-            set((state) => ({
-              recoveringCompaction: omitKey(state.recoveringCompaction, session.id),
-            }));
-          }
-          if (synchronized.has(session.id)) drainQueue(session.id);
+            (session.status === 'idle' || session.status === 'error') &&
+            get().recoveringCompaction[session.id]
+        );
+        if (recovered.length > 0) {
+          set((state) => {
+            const recoveringCompaction = { ...state.recoveringCompaction };
+            for (const session of recovered) delete recoveringCompaction[session.id];
+            return { recoveringCompaction };
+          });
+        }
+        for (const session of sessions) {
+          if (synchronized.has(session.id) && (get().queuedBySession[session.id]?.length ?? 0) > 0)
+            drainQueue(session.id);
         }
       },
 

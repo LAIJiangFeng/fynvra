@@ -90,6 +90,15 @@ function liveTabs(id: string): SavedWorkspaceTab[] {
       ),
   ];
 }
+function ownTabsChanged(
+  id: string,
+  tabs: readonly { workspaceId: string }[],
+  previous: readonly { workspaceId: string }[]
+): boolean {
+  const own = tabs.filter((tab) => tab.workspaceId === id);
+  const before = previous.filter((tab) => tab.workspaceId === id);
+  return own.length !== before.length || own.some((tab, index) => tab !== before[index]);
+}
 function activeTab(id: string): string {
   const terminal = useTerminalsStore.getState().selected[id];
   const diff = diffTabsStoreFor(id).getState().selectedId;
@@ -105,7 +114,9 @@ function reconcile(id: string) {
   for (const key of keys) if (!order.includes(key)) order.push(key);
   const active = activeTab(id);
   if (active !== view?.active) runtime.interaction++;
-  updateView(id, { order, active });
+  // Unchanged order/active keeps `views` stable; still schedule, the change may be a draft or title.
+  if (!view || active !== view.active || order.join('\n') !== view.order.join('\n'))
+    updateView(id, { order, active });
   schedule(id);
 }
 function schedule(id: string) {
@@ -191,7 +202,11 @@ export function ensureWorkspaceTabs(id: string, closed?: ReadonlySet<string>): P
           if (tab.workspaceId === id && !state.tabs.some((current) => current.id === tab.id))
             runtime.closed.add(`terminal:${tab.id}`);
         }
-      if (state.tabs !== previous.tabs || state.selected[id] !== previous.selected[id])
+      // Only this workspace's own tabs or selection: other workspaces' terminals are not a change here.
+      if (
+        state.selected[id] !== previous.selected[id] ||
+        (state.tabs !== previous.tabs && ownTabsChanged(id, state.tabs, previous.tabs))
+      )
         reconcile(id);
     })
   );
