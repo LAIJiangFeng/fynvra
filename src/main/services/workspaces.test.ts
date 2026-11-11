@@ -99,9 +99,12 @@ describe('createWorkspaceService', () => {
   });
 
   describe('refreshVcs', () => {
+    const onChanged = vi.fn();
     const mount = async (current: { value: DirectoryInspection }) => {
       let clock = 0;
+      onChanged.mockClear();
       const workspaces = createWorkspaceService({
+        onChanged,
         settings,
         inspect: async () => current.value,
         newId: () => 'ws-1',
@@ -124,6 +127,7 @@ describe('createWorkspaceService', () => {
         vcs: 'git',
         defaultBranch: 'main',
       });
+      expect(onChanged).toHaveBeenCalledTimes(1);
     });
 
     it('在外层仓库里的普通目录（not-repo-root）保持 none', async () => {
@@ -156,6 +160,7 @@ describe('createWorkspaceService', () => {
       const update = vi.spyOn(settings, 'update');
       await workspaces.refreshVcs();
       expect(update).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
     });
 
     it('5 秒内不重复检测', async () => {

@@ -75,6 +75,8 @@ export function parseChangesActionInput(raw: unknown): ChangesActionInput | null
 
 interface Dependencies {
   workspace: (id: string) => Workspace | undefined;
+  /** 先重新检测工作区 vcs（用户可能刚在内置终端里 git init）；只读查询传入 */
+  refreshVcs?: (id: string) => Promise<void>;
   session: (id: string) => SessionSummary | undefined;
   snapshot: (id: string) => Promise<OrchestrationSnapshotView | undefined>;
   exec?: ExecFn;
@@ -99,6 +101,7 @@ const splitNul = (text: string) => text.split('\0').filter(Boolean);
 
 /** Resolve only registered directories, shared by the read-only query and mutations. */
 async function resolveSessionChangesRoot(deps: Dependencies, input: SessionChangesInput) {
+  await deps.refreshVcs?.(input.workspaceId);
   const workspace = deps.workspace(input.workspaceId);
   if (!workspace) throw new Error('Workspace not found');
   const session = input.sessionId ? deps.session(input.sessionId) : undefined;

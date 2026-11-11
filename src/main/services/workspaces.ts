@@ -11,6 +11,8 @@ export interface WorkspaceServiceOptions {
   home?: string;
   platform?: NodeJS.Platform;
   now?: () => number;
+  /** refreshVcs 写入了变化后调用（ipc 层接 workspaces:changed 广播） */
+  onChanged?: () => void;
 }
 
 /** 同一工作区两次 vcs 重新检测的最小间隔。 */
@@ -29,6 +31,7 @@ export function createWorkspaceService({
   home = homedir(),
   platform = process.platform,
   now = Date.now,
+  onChanged,
 }: WorkspaceServiceOptions) {
   const lastChecked = new Map<string, number>();
   const summarize = (workspace: Workspace): WorkspaceSummary => ({
@@ -109,6 +112,7 @@ export function createWorkspaceService({
         ...current,
         workspaces: current.workspaces.map((workspace) => byId.get(workspace.id) ?? workspace),
       }));
+      onChanged?.();
     },
 
     /** 只从列表移除，不触碰磁盘上的仓库；id 不存在时返回 false。 */

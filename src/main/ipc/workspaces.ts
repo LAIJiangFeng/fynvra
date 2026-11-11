@@ -35,7 +35,10 @@ let service: WorkspaceService | null = null;
 
 /** Main 内共享的工作区注册表（后续 worktree / 会话按 id 取 repoPath 也走这里）。 */
 export function getWorkspaceService(): WorkspaceService {
-  service ??= createWorkspaceService({ settings: getSettingsFile() });
+  service ??= createWorkspaceService({
+    settings: getSettingsFile(),
+    onChanged: () => sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED),
+  });
   return service;
 }
 
