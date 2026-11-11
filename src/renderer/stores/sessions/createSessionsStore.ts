@@ -92,6 +92,10 @@ export interface SessionsState extends ChatProjection {
   modelOptionsError: string | null;
   /** 各工作区上一次用过的模型（新建会话弹层的默认值之一） */
   lastModelByWorkspace: Record<string, SessionModelRef>;
+  /** 正在批量归档 / 删除的工作区：期间不响应它的 sessions:changed，结束时只重拉一次 */
+  bulkWorkspaceId: string | null;
+  /** 等用户确认的批量删除；确认前不会删任何会话 */
+  pendingRemoval: { workspaceId: string; sessionIds: string[] } | null;
   /** 打开着模型选择器的会话：输入框胶囊与状态栏打开的是同一个 */
   modelPickerFor: string | null;
 
@@ -174,6 +178,17 @@ export interface SessionsState extends ChatProjection {
   unarchiveSession(sessionId: string): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 从列表移除会话并清空本地投影；运行中拒绝，失败时恢复。底层记录文件保留。 */
   removeSession(sessionId: string): Promise<IpcResult>;
+  /**
+   * 批量归档 / 删除工作区里的会话：逐个调用单个会话的操作，期间合并列表刷新，结束后只重拉一次；
+   * 运行中、等审批的会话照单个操作的规则拒绝，失败汇总成一条提示。另一批进行中时什么都不做。
+   */
+  archiveSessions(workspaceId: string, sessionIds: readonly string[]): Promise<BulkResult>;
+  /** 批量删除分两步：先登记待确认（界面据此弹确认框），确认后才删；取消则丢弃 */
+  requestRemoveSessions(workspaceId: string, sessionIds: readonly string[]): void;
+  confirmRemoveSessions(): Promise<BulkResult>;
+  cancelRemoveSessions(): void;
+  /** 一键归档工作区里的闲置会话：跳过运行中、等审批、消息在途、正在查看与已归档的 */
+  archiveIdleSessions(workspaceId: string): Promise<BulkResult>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
   /** Main 推送的审批请求 */
@@ -189,6 +204,12 @@ export interface SessionsStoreOptions {
 }
 
 const EVENT_BATCH_MS = 16;
+
+/** 批量操作的结果：成功几个、未处理几个 */
+export interface BulkResult {
+  done: number;
+  failed: number;
+}
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -614,7 +635,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
      */
     async function setArchived(
       sessionId: string,
-      archived: boolean
+      archived: boolean,
+      bulk = false
     ): Promise<IpcResult<{ session: SessionSummary }>> {
       const session = findSession(get(), sessionId);
       if (!session) return { ok: false, error: translate('sessions.errors.notFound') };
@@ -641,6 +663,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return result;
       }
       mark(previous);
+      // 批量时由调用方汇总提示、最后统一重拉
+      if (bulk) return result;
       set({
         notice: translate(
           archived ? 'sessions.errors.archiveFailed' : 'sessions.errors.unarchiveFailed',
@@ -649,6 +673,44 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       });
       void get().loadSessions(workspaceId);
       return result;
+    }
+
+    /** 逐个执行（顺序调用，不并发），列表只在最后重拉一次；有失败时把数量与原因汇总成一条提示 */
+    async function runBulk(
+      workspaceId: string,
+      sessionIds: readonly string[],
+      kind: 'archive' | 'remove',
+      run: (sessionId: string) => Promise<IpcResult>
+    ): Promise<BulkResult> {
+      if (get().bulkWorkspaceId !== null) return { done: 0, failed: 0 };
+      const ids = [...new Set(sessionIds)];
+      if (ids.length === 0) return { done: 0, failed: 0 };
+      // 删正在查看的会话会跳到下一个：放到最后删，免得跳到一个马上要删的会话
+      const active = get().activeSessionId;
+      ids.sort((a, b) => Number(a === active) - Number(b === active));
+      set({ bulkWorkspaceId: workspaceId });
+      let done = 0;
+      const reasons = new Set<string>();
+      try {
+        for (const sessionId of ids) {
+          const result = await run(sessionId);
+          if (result.ok) done++;
+          else reasons.add(result.error);
+        }
+      } finally {
+        set({ bulkWorkspaceId: null });
+      }
+      const failed = ids.length - done;
+      if (failed > 0) {
+        set({
+          notice: translate(
+            kind === 'archive' ? 'sessions.bulk.archivePartial' : 'sessions.bulk.removePartial',
+            { done, failed, reasons: [...reasons].join('；') }
+          ),
+        });
+      }
+      await get().loadSessions(workspaceId);
+      return { done, failed };
     }
 
     return {
@@ -667,6 +729,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       listErrors: {},
       approvalSubmissions: {},
       notice: null,
+      bulkWorkspaceId: null,
+      pendingRemoval: null,
       modelProviders: null,
       modelOptionsError: null,
       lastModelByWorkspace: {},
@@ -1336,6 +1400,44 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       unarchiveSession: (sessionId) => setArchived(sessionId, false),
 
+      archiveSessions: (workspaceId, sessionIds) =>
+        runBulk(workspaceId, sessionIds, 'archive', (sessionId) =>
+          setArchived(sessionId, true, true)
+        ),
+
+      requestRemoveSessions(workspaceId, sessionIds) {
+        if (sessionIds.length === 0) return;
+        set({ pendingRemoval: { workspaceId, sessionIds: [...new Set(sessionIds)] } });
+      },
+
+      confirmRemoveSessions() {
+        const pending = get().pendingRemoval;
+        if (!pending) return Promise.resolve({ done: 0, failed: 0 });
+        set({ pendingRemoval: null });
+        return runBulk(pending.workspaceId, pending.sessionIds, 'remove', (sessionId) =>
+          get().removeSession(sessionId)
+        );
+      },
+
+      cancelRemoveSessions() {
+        set({ pendingRemoval: null });
+      },
+
+      archiveIdleSessions(workspaceId) {
+        flushEvents();
+        const state = get();
+        const idle = (state.sessionsByWorkspace[workspaceId] ?? []).filter(
+          (session) =>
+            session.id !== state.activeSessionId &&
+            !sending.has(session.id) &&
+            !isBusy(statusOf(state, session.id))
+        );
+        return get().archiveSessions(
+          workspaceId,
+          idle.map((session) => session.id)
+        );
+      },
+
       async removeSession(sessionId) {
         // 先归并已收到的事件，避免 16ms 攒批期间把刚开始运行的会话当成空闲。
         flushEvents();
@@ -1447,10 +1549,10 @@ export function connectSessionsStore(
     api.onApprovalRequest((request) => store.getState().receiveApproval(request)),
     api.onSessionsChanged((workspaceId) => {
       const state = store.getState();
-      // 只刷新看过的工作区；其余的等切过去时再拉
+      // 只刷新看过的工作区；其余的等切过去时再拉。批量操作中的工作区由它结束时重拉一次
       if (
-        workspaceId === state.workspaceId ||
-        Object.hasOwn(state.sessionsByWorkspace, workspaceId)
+        workspaceId !== state.bulkWorkspaceId &&
+        (workspaceId === state.workspaceId || Object.hasOwn(state.sessionsByWorkspace, workspaceId))
       ) {
         void state.loadSessions(workspaceId);
       }
