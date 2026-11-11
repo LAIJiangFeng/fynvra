@@ -6,6 +6,7 @@ import type {
 import type { ResolvedModel } from '@fynvra/agent-runtime';
 import { errorMessage } from '@shared/guards';
 import { isContextOverflowError } from '../magicContext';
+import { snapcompact } from '../snapcompact/snapcompact';
 import { shake } from './shake';
 import { soft } from './soft';
 import type { CompactionContext, CompactionMethodFn } from './types';
@@ -26,6 +27,7 @@ export type CompactionMethod = (typeof DEFAULT_COMPACTION_METHOD_ORDER)[number];
 
 // To add a method: write compaction/<name>.ts exporting a CompactionMethodFn and register it here.
 export const COMPACTION_METHODS: Partial<Record<CompactionMethod, CompactionMethodFn>> = {
+  snapcompact,
   shake,
   soft,
 };
