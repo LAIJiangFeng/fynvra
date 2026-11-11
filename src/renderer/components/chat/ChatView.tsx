@@ -101,16 +101,14 @@ function ChatNotice() {
 }
 
 /**
- * Magic Context 出错提示：会话已改用标准压缩继续时是普通通知；只有恢复锁仍在时才是锁定说明。
+ * Magic Context 锁定说明：只在恢复锁仍在时显示；普通回退到标准压缩静默进行。
  * 可关闭，但关闭不解除恢复锁。不等待确认，也不显示 provider 原始错误或 prompt。
  */
-function ChatWarning({ sessionId }: { sessionId: string }) {
+export function ChatWarning({ sessionId }: { sessionId: string }) {
   const notice = useSessionsStore((state) => {
     const runtime = state.runtimeBySession[sessionId];
     if (!runtime?.warning || runtime.warningSeq === runtime.dismissedWarningSeq) return undefined;
-    return runtime.recoveryRequired
-      ? ('chat.magicContextFallback' as const)
-      : ('chat.magicContextFellBack' as const);
+    return runtime.recoveryRequired ? ('chat.magicContextFallback' as const) : undefined;
   });
   const dismiss = useSessionsStore((state) => state.dismissWarning);
   const t = useT();

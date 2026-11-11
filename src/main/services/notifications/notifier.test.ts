@@ -105,6 +105,14 @@ function setup(prefs: Partial<NotificationPreferences> = {}) {
 }
 
 describe('createNotifier', () => {
+  it('Magic Context 回退告警静默：不弹通知', () => {
+    const env = setup();
+    env.pastStartup();
+    env.event(MAIN, { type: 'warning', source: 'magic-context', reason: 'runtime' });
+    env.flush();
+    expect(env.shown).toEqual([]);
+  });
+
   it('主 agent 一轮结束：合并窗口结束时弹出，带声音设置与点击目标', () => {
     const env = setup();
     env.pastStartup();
