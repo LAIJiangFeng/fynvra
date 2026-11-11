@@ -326,6 +326,13 @@ function DiffContent({
           files={data.uncommitted.files}
           diff={data.uncommitted.diff}
           empty={t('orchestration.noUncommitted')}
+          notice={
+            'omittedUntracked' in data.uncommitted && data.uncommitted.omittedUntracked
+              ? t('orchestration.omittedUntracked', {
+                  count: data.uncommitted.omittedUntracked,
+                })
+              : undefined
+          }
         />
       ) : (
         <SectionBox title={t('orchestration.uncommittedChanges')}>
@@ -442,6 +449,7 @@ function ChangeSet({
   files: names,
   diff,
   empty,
+  notice,
   controls,
 }: {
   source: DiffSource;
@@ -450,6 +458,7 @@ function ChangeSet({
   files: string[];
   diff: string;
   empty: string;
+  notice?: string;
   controls?: ChangeControls;
 }) {
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
@@ -499,6 +508,7 @@ function ChangeSet({
         ) : undefined
       }
     >
+      {notice && <p className="px-2 py-1 text-muted-foreground text-xs">{notice}</p>}
       {files.length === 0 && extra.length === 0 ? (
         <SectionNote>{empty}</SectionNote>
       ) : (

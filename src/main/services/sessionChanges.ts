@@ -338,15 +338,17 @@ export async function readSessionChanges(
     required([...DIFF, head ?? emptyTree, '--']),
     required(['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
-  const untracked = splitNul(others);
-  if (untracked.length > MAX_FILES)
-    throw new Error('Untracked files exceed the 200-file preview limit');
+  const allUntracked = splitNul(others);
+  // Degrade instead of failing: preview what fits, report the rest as a count.
+  const untracked: string[] = [];
   let workingPatch = tracked;
-  for (const path of untracked) {
-    workingPatch += await untrackedPatch(root, path, true);
-    if (Buffer.byteLength(workingPatch) > MAX_PATCH_BYTES)
-      throw new Error('Changes exceed the 8 MiB preview limit');
+  for (const path of allUntracked.slice(0, MAX_FILES)) {
+    const patch = await untrackedPatch(root, path, true);
+    if (Buffer.byteLength(workingPatch) + Buffer.byteLength(patch) > MAX_PATCH_BYTES) break;
+    workingPatch += patch;
+    untracked.push(path);
   }
+  const omittedUntracked = allUntracked.length - untracked.length;
 
   let files: string[] = [];
   let diff = '';
@@ -406,6 +408,7 @@ export async function readSessionChanges(
         ]),
       ],
       diff: workingPatch,
+      ...(omittedUntracked > 0 && { omittedUntracked }),
     },
   };
 }

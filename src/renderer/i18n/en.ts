@@ -710,6 +710,8 @@ export const en: MessagesShape<typeof zhCN> = {
     committedChanges: 'Committed changes',
     commitsSection: 'Commits',
     noUncommitted: 'No uncommitted changes',
+    omittedUntracked:
+      '{count} more untracked files not previewed (add them to .gitignore or commit them)',
     noCommitList: 'No commits yet',
     currentWorktreeRemoved:
       'This conversation’s worktree has been removed. Saved task history can be reviewed from the task drawer',
