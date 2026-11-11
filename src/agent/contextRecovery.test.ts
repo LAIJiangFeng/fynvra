@@ -33,7 +33,8 @@ async function setup(
   const dir = await mkdtemp(join(tmpdir(), 'fynvra-context-'));
   const faux = fauxProvider({
     provider: 'context-test',
-    models: [{ id: 'context-test', contextWindow: 10_000, maxTokens: 1000 }],
+    // Text-only, so the chain reaches shake/soft (snapcompact needs image input).
+    models: [{ id: 'context-test', contextWindow: 10_000, maxTokens: 1000, input: ['text'] }],
   });
   const runtime = await ModelRuntime.create({
     authPath: join(dir, 'auth.json'),
