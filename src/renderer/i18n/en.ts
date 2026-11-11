@@ -265,6 +265,8 @@ export const en: MessagesShape<typeof zhCN> = {
         '{count} of these sessions have unmerged or uncommitted work in their worktrees; they are skipped unless you check the box below',
       forceUnmerged: 'Also delete the unmerged work',
       unmergedSkipped: 'skipped: unmerged work',
+      archiving: 'Archiving {done}/{total}…',
+      removing: 'Deleting {done}/{total}…',
       archivePartial: 'Archived {done}, {failed} not processed ({reasons})',
       removePartial: 'Deleted {done}, {failed} not processed ({reasons})',
     },
