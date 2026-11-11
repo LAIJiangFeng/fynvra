@@ -11,8 +11,11 @@ import ReactMarkdown, { type Components, type ExtraProps, type Options } from 'r
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
+import { CharLru } from './highlighter';
 
 const REMARK_PLUGINS = [remarkGfm];
+/** 已完成消息的渲染结果：虚拟列表把行卸载后再滚回来不用重新解析 Markdown */
+const rendered = new CharLru<ReactElement>(1_000_000);
 
 function textOf(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -117,6 +120,7 @@ export const Markdown = memo(function Markdown({
   rehypePlugins,
   components,
   urlTransform,
+  cacheKey,
 }: {
   text: string;
   streaming?: boolean;
@@ -126,21 +130,28 @@ export const Markdown = memo(function Markdown({
   components?: Components;
   /** 聊天链接可保留原值给受控组件，DOM URL 仍须过滤。 */
   urlTransform?: Options['urlTransform'];
+  /**
+   * 给了就缓存非流式的渲染结果（另加 text）。调用方要保证：同一个 key
+   * 下 components / rehypePlugins / urlTransform 的行为不变。
+   */
+  cacheKey?: string;
 }) {
   const renderers = useMemo(
     () => ({ ...(streaming ? STREAMING_COMPONENTS : STATIC_COMPONENTS), ...components }),
     [streaming, components]
   );
-  return (
-    <div className={cn('min-w-0 break-words text-sm', className)}>
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={rehypePlugins}
-        components={renderers}
-        urlTransform={urlTransform}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
+  const key = !streaming && cacheKey !== undefined ? `${cacheKey}\u0000${text}` : null;
+  let content = key ? rendered.get(key) : undefined;
+  if (!content) {
+    // react-markdown 是同步、无 hook 的函数，直接调用拿到元素树才能缓存
+    content = ReactMarkdown({
+      remarkPlugins: REMARK_PLUGINS,
+      rehypePlugins,
+      components: renderers,
+      urlTransform,
+      children: text,
+    });
+    if (key) rendered.set(key, content);
+  }
+  return <div className={cn('min-w-0 break-words text-sm', className)}>{content}</div>;
 });

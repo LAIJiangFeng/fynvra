@@ -70,11 +70,38 @@ const ALIASES: Record<string, string> = {
 
 export const CODE_THEMES = { light: 'github-light', dark: 'github-dark' } as const;
 
-/** 已高亮结果的缓存：虚拟列表滚回来重新挂载时直接复用，不闪一下纯文本 */
-const CACHE_LIMIT = 200;
+/** 按 key 总字符数限量的 LRU：命中时挪到最新，超额时从最久没用的开始淘汰 */
+export class CharLru<V> {
+  private readonly entries = new Map<string, V>();
+  private total = 0;
+
+  constructor(private readonly limit: number) {}
+
+  get(key: string): V | undefined {
+    const value = this.entries.get(key);
+    if (value === undefined) return undefined;
+    this.entries.delete(key);
+    this.entries.set(key, value);
+    return value;
+  }
+
+  set(key: string, value: V): void {
+    if (key.length > this.limit) return;
+    if (this.entries.delete(key)) this.total -= key.length;
+    this.entries.set(key, value);
+    this.total += key.length;
+    for (const oldest of this.entries.keys()) {
+      if (this.total <= this.limit) break;
+      this.entries.delete(oldest);
+      this.total -= oldest.length;
+    }
+  }
+}
+
+/** 已高亮结果的缓存：虚拟列表滚回来重新挂载时直接复用，不闪一下纯文本。聊天、工具输出、文件预览共用，按字符总量限量 */
+const cache = new CharLru<ThemedToken[][]>(2_000_000);
 /** 超过这个长度不高亮：JS 正则引擎逐行匹配，太长的块会卡住界面 */
 const MAX_HIGHLIGHT_CHARS = 20_000;
-const cache = new Map<string, ThemedToken[][]>();
 let highlighter: Promise<HighlighterCore> | null = null;
 
 export function resolveLanguage(lang: string): string | null {
@@ -108,11 +135,28 @@ function loadHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
+/** 等到浏览器空闲：同步分词放这里跑，滚动时不抢帧 */
+function idle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
+// 启动后空闲时预热（首次初始化约 300ms），第一次滚到代码块时不再现场初始化
+if (typeof requestIdleCallback === 'function') {
+  requestIdleCallback(() => void loadHighlighter().catch(() => {}));
+}
+
 /**
  * 把代码切成带双主题颜色的 token 行（`htmlStyle` 里是 `--shiki-light` / `--shiki-dark`）。
- * 不支持的语言返回 null，调用方按纯文本显示。
+ * 不支持的语言返回 null，调用方按纯文本显示。`signal` 中止（块已卸载）时跳过分词。
  */
-export async function highlight(code: string, lang: string): Promise<ThemedToken[][] | null> {
+export async function highlight(
+  code: string,
+  lang: string,
+  signal?: AbortSignal
+): Promise<ThemedToken[][] | null> {
   const language = resolveLanguage(lang);
   if (!language || code.length > MAX_HIGHLIGHT_CHARS) return null;
   const key = cacheKey(code, language);
@@ -121,17 +165,20 @@ export async function highlight(code: string, lang: string): Promise<ThemedToken
 
   const core = await loadHighlighter();
   if (!core.getLoadedLanguages().includes(language)) {
+    await idle();
+    if (signal?.aborted) return null;
     await core.loadLanguage(LANGUAGES[language]());
   }
+  await idle();
+  if (signal?.aborted) return null;
+  // 等待期间别的挂载可能已经算好了
+  const ready = cache.get(key);
+  if (ready) return ready;
   const { tokens } = core.codeToTokens(code, {
     lang: language,
     themes: CODE_THEMES,
     defaultColor: false,
   });
-  if (cache.size >= CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
   cache.set(key, tokens);
   return tokens;
 }

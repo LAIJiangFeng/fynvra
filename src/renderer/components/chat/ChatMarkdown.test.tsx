@@ -6,11 +6,11 @@ const mocks = vi.hoisted(() => ({
   resolve: vi.fn(),
   openHtml: vi.fn(),
   filesStoreFor: vi.fn(),
-  selectSessionOf: vi.fn((id: string) => () => ({ id, workspaceId: 'ws', cwd: 'C:/repo' })),
+  findSession: vi.fn((_state: unknown, id: string) => ({ id, workspaceId: 'ws', cwd: 'C:/repo' })),
 }));
 vi.mock('@/stores/sessions', () => ({
-  selectSessionOf: mocks.selectSessionOf,
-  useSessionsStore: (select: () => unknown) => select(),
+  findSession: mocks.findSession,
+  useSessionsStore: (select: (state: object) => unknown) => select({}),
 }));
 vi.mock('@/stores/files', () => ({ filesStoreFor: mocks.filesStoreFor }));
 vi.mock('@/stores/workspaceTabs', () => ({
@@ -49,7 +49,7 @@ describe('聊天 Markdown URL 边界', () => {
       expect(html.match(/href=/g)).toHaveLength(1);
       expect(html).toContain('href="https://example.test/guide?q=1#intro" target="_blank"');
       expect(html).not.toContain('chatHref=');
-      expect(mocks.selectSessionOf).toHaveBeenCalledWith('message-session');
+      expect(mocks.findSession).toHaveBeenCalledWith({}, 'message-session');
       expect(mocks.list).not.toHaveBeenCalled();
       expect(mocks.resolve).not.toHaveBeenCalled();
       expect(mocks.openHtml).not.toHaveBeenCalled();
