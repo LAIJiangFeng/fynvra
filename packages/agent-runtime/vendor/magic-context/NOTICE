@@ -88,6 +88,14 @@ use fynvra-prefixed helpers and MAGIC_CONTEXT_FYNVRA_HOST checks):
       and runs Magic hooks before resuming; no native compact() unlock is used.
       Fail-closed storage boot also rejects late adoption in the Fynvra host;
       only explicit recovery creates a fresh binding.
+  18. Hosted historian: when the first formatted block alone exceeds the byte
+      budget, read exactly that block and send its head plus a truncation
+      marker (UTF-8 byte check against the host inputBytes) instead of pausing.
+      The chunk's message range and coverage lines stay the complete block.
+  19. Hosted historian: a failed model request or timeout (spawn-failed with
+      model_failed/timeout) does not suspend in the vendor; the host runner has
+      already counted it and suspends on non-transient errors or after three
+      consecutive transient failures. Other failures still suspend.
 
 When upgrading, re-copy the pinned upstream files and re-apply these hosted
 changes, including fynvra-host.js. The compaction, validation, tag/drop, SQLite
