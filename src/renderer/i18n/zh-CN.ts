@@ -236,7 +236,7 @@ export const zhCN = {
     unarchive: '恢复',
     remove: '删除会话',
     removeTitle: '删除会话？',
-    removeHint: '会话从列表中移除，底层记录文件保留',
+    removeHint: '会话从列表中移除，它的 worktree 与分支一并删除；底层记录文件保留',
     bulk: {
       select: '选择',
       selectAll: '全选',
@@ -246,7 +246,11 @@ export const zhCN = {
       removeArchived: '删除全部已归档',
       removeTitle: '删除 {count} 个会话？',
       removeHint:
-        '此操作无法撤销。会话从 Fynvra 的会话列表中移除；底层 pi 记录文件保留，worktree 不受影响。运行中的会话不会被删除',
+        '此操作无法撤销。会话从 Fynvra 的会话列表中移除，它们的 worktree 与分支一并删除；底层 pi 记录文件保留。运行中的会话不会被删除',
+      checkingWorktrees: '正在检查 worktree…',
+      unmergedCount: '{count} 个会话的 worktree 有未合并或未提交的改动，不勾选下项时会跳过它们',
+      forceUnmerged: '也删除未合并的改动',
+      unmergedSkipped: '有未合并的改动，已跳过',
       archivePartial: '已归档 {done} 个，{failed} 个未处理（{reasons}）',
       removePartial: '已删除 {done} 个，{failed} 个未处理（{reasons}）',
     },

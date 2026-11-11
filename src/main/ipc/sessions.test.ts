@@ -185,6 +185,7 @@ describe('sessions IPC', () => {
         'sessions:suggest-reply',
         'sessions:sweep',
         'sessions:unarchive',
+        'sessions:worktree-blocked',
       ].sort()
     );
   });
@@ -299,7 +300,16 @@ describe('sessions IPC', () => {
     expect(await invoke(IPC_CHANNELS.SESSIONS_HISTORY, 's-1')).toEqual(coldHistory);
     expect(host.history).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_REMOVE, 's-1');
-    expect(host.remove).toHaveBeenCalledWith('s-1');
+    expect(host.remove).toHaveBeenLastCalledWith('s-1', false);
+    await invoke(IPC_CHANNELS.SESSIONS_REMOVE, { sessionId: 's-1', force: true });
+    expect(host.remove).toHaveBeenLastCalledWith('s-1', true);
+    for (const bad of [{ sessionId: 's-1', force: 'yes' }, { sessionId: 's-1', path: '/' }, 42]) {
+      expect(await invoke(IPC_CHANNELS.SESSIONS_REMOVE, bad)).toMatchObject({ ok: false });
+    }
+    expect(host.remove).toHaveBeenCalledTimes(2);
+    expect(await invoke(IPC_CHANNELS.SESSIONS_WORKTREE_BLOCKED, 's-1')).toMatchObject({
+      ok: false,
+    });
     await invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, {
       sessionId: 's-1',
       requestId: 'req-1',

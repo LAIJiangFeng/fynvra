@@ -96,6 +96,12 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       sessions = sessions.filter((session) => session.id !== sessionId);
       return { ok: true };
     }),
+    worktreeBlocked: vi.fn(
+      async (_ids: string[]): Promise<IpcResult<{ sessionIds: string[] }>> => ({
+        ok: true,
+        sessionIds: [],
+      })
+    ),
     prompt: vi.fn(
       async (_input: {
         sessionId: string;
@@ -579,7 +585,12 @@ describe('createSessionsStore · 批量归档与删除', () => {
       summary('run', { status: 'running' }),
     ]);
     store.getState().requestRemoveSessions(WS, ['a', 'b']);
-    expect(store.getState().pendingRemoval).toEqual({ workspaceId: WS, sessionIds: ['a', 'b'] });
+    expect(store.getState().pendingRemoval).toEqual({
+      workspaceId: WS,
+      sessionIds: ['a', 'b'],
+      blocked: [],
+    });
+    expect(api.worktreeBlocked).not.toHaveBeenCalled();
     store.getState().cancelRemoveSessions();
     expect(await store.getState().confirmRemoveSessions()).toEqual({ done: 0, failed: 0 });
     expect(api.remove).not.toHaveBeenCalled();
@@ -593,6 +604,27 @@ describe('createSessionsStore · 批量归档与删除', () => {
     expect(store.getState().notice).toBe('已删除 2 个，1 个未处理（会话正在运行，结束后再删除）');
     expect(selectSessionsOf(WS)(store.getState()).map((session) => session.id)).toEqual(['run']);
     expect(selectArchivedSessionsOf(WS)(store.getState())).toEqual([]);
+  });
+
+  it('worktree 有未合并改动的会话：未确认 force 时跳过并计入提示，确认后带 force 删除', async () => {
+    const { store, api } = await bulkSetup([
+      summary('a', { worktreeId: 'wt_a' }),
+      summary('b', { worktreeId: 'wt_b' }),
+      summary('c'),
+    ]);
+    api.worktreeBlocked.mockResolvedValue({ ok: true, sessionIds: ['b'] });
+    store.getState().requestRemoveSessions(WS, ['a', 'b', 'c']);
+    expect(store.getState().pendingRemoval?.blocked).toBeNull();
+    await vi.waitFor(() => expect(store.getState().pendingRemoval?.blocked).toEqual(['b']));
+    expect(api.worktreeBlocked).toHaveBeenCalledWith(['a', 'b']);
+    expect(await store.getState().confirmRemoveSessions()).toEqual({ done: 2, failed: 1 });
+    expect(api.remove.mock.calls).toEqual([['a'], ['c']]);
+    expect(store.getState().notice).toBe('已删除 2 个，1 个未处理（有未合并的改动，已跳过）');
+
+    store.getState().requestRemoveSessions(WS, ['b']);
+    await vi.waitFor(() => expect(store.getState().pendingRemoval?.blocked).toEqual(['b']));
+    expect(await store.getState().confirmRemoveSessions(true)).toEqual({ done: 1, failed: 0 });
+    expect(api.remove).toHaveBeenLastCalledWith('b', { force: true });
   });
 });
 

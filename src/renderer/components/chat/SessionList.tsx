@@ -12,7 +12,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { useNow } from '@/hooks/useNow';
 import { useT } from '@/i18n/I18nProvider';
@@ -231,33 +230,61 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-/** 批量删除的确认框：只在 store 登记了本工作区的待确认删除时打开 */
+/** 删除的确认框（单个与批量共用）：只在 store 登记了本工作区的待确认删除时打开 */
 function BulkRemoveDialog({ workspaceId, onDone }: { workspaceId: string; onDone: () => void }) {
   const pending = useSessionsStore((state) =>
     state.pendingRemoval?.workspaceId === workspaceId ? state.pendingRemoval : null
   );
   const confirm = useSessionsStore((state) => state.confirmRemoveSessions);
   const cancelRemove = useSessionsStore((state) => state.cancelRemoveSessions);
+  const [force, setForce] = useState(false);
+  const forceId = useId();
   const cancel = useRef<HTMLButtonElement>(null);
   const t = useT();
+  const count = pending?.sessionIds.length ?? 0;
+  const blocked = pending?.blocked?.length ?? 0;
   return (
-    <Dialog open={pending !== null} onOpenChange={(open) => !open && cancelRemove()}>
+    <Dialog
+      open={pending !== null}
+      onOpenChange={(open) => {
+        setForce(false);
+        if (!open) cancelRemove();
+      }}
+    >
       <DialogContent initialFocus={cancel} className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>
-            {t('sessions.bulk.removeTitle', { count: pending?.sessionIds.length ?? 0 })}
+            {count === 1 ? t('sessions.removeTitle') : t('sessions.bulk.removeTitle', { count })}
           </DialogTitle>
-          <DialogDescription>{t('sessions.bulk.removeHint')}</DialogDescription>
+          <DialogDescription>
+            {t(count === 1 ? 'sessions.removeHint' : 'sessions.bulk.removeHint')}
+          </DialogDescription>
         </DialogHeader>
+        {pending?.blocked === null && (
+          <p className="text-muted-foreground text-sm">{t('sessions.bulk.checkingWorktrees')}</p>
+        )}
+        {blocked > 0 && (
+          <div className="space-y-2 text-sm">
+            <p className="text-destructive">
+              {t('sessions.bulk.unmergedCount', { count: blocked })}
+            </p>
+            <label htmlFor={forceId} className="flex cursor-pointer items-center gap-2">
+              <Checkbox id={forceId} checked={force} onCheckedChange={(on) => setForce(on)} />
+              {t('sessions.bulk.forceUnmerged')}
+            </label>
+          </div>
+        )}
         <DialogFooter>
           <DialogClose render={<Button ref={cancel} variant="outline" />}>
             {t('common.cancel')}
           </DialogClose>
           <Button
             variant="destructive"
+            disabled={pending?.blocked === null}
             onClick={() => {
               onDone();
-              void confirm();
+              setForce(false);
+              void confirm(force);
             }}
           >
             {t('common.delete')}
@@ -326,9 +353,7 @@ const SessionRow = memo(function SessionRow({
   const select = useSessionsStore((state) => state.selectSession);
   const archive = useSessionsStore((state) => state.archiveSession);
   const unarchive = useSessionsStore((state) => state.unarchiveSession);
-  const remove = useSessionsStore((state) => state.removeSession);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const cancel = useRef<HTMLButtonElement>(null);
+  const requestRemove = useSessionsStore((state) => state.requestRemoveSessions);
   const now = useNow();
   const t = useT();
   const archived = session.archivedAt !== undefined;
@@ -367,82 +392,55 @@ const SessionRow = memo(function SessionRow({
   }
 
   return (
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-      <div className="group/session relative pb-0.5">
-        <button
-          type="button"
-          aria-current={active ? 'true' : undefined}
-          onClick={() => void select(session.id, session.workspaceId)}
-          className={rowClass}
-        >
-          <StatusDot status={status} />
-          <span className="min-w-0 flex-1">
-            {/* Only the title reserves space for the hover actions; metadata gets the full width. */}
-            <span className="block h-7 truncate pr-14 leading-7" title={session.title}>
-              {session.title}
-            </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-              <RoleBadge roleId={session.roleId} className="min-w-0 max-w-[60%] shrink truncate" />
-              <span className="min-w-0 flex-1 truncate text-right">
-                {formatRelativeTime(session.updatedAt, now, t)}
-              </span>
-            </span>
-            <SessionModelBadge model={session.model} />
+    <div className="group/session relative pb-0.5">
+      <button
+        type="button"
+        aria-current={active ? 'true' : undefined}
+        onClick={() => void select(session.id, session.workspaceId)}
+        className={rowClass}
+      >
+        <StatusDot status={status} />
+        <span className="min-w-0 flex-1">
+          {/* Only the title reserves space for the hover actions; metadata gets the full width. */}
+          <span className="block h-7 truncate pr-14 leading-7" title={session.title}>
+            {session.title}
           </span>
-        </button>
-        {/* 运行中、等审批的会话不能归档或删除；已归档的仍可恢复。 */}
-        {(archived || !busy) && (
-          <div className="pointer-events-none absolute top-1.5 right-1 flex gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
+          <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+            <RoleBadge roleId={session.roleId} className="min-w-0 max-w-[60%] shrink truncate" />
+            <span className="min-w-0 flex-1 truncate text-right">
+              {formatRelativeTime(session.updatedAt, now, t)}
+            </span>
+          </span>
+          <SessionModelBadge model={session.model} />
+        </span>
+      </button>
+      {/* 运行中、等审批的会话不能归档或删除；已归档的仍可恢复。 */}
+      {(archived || !busy) && (
+        <div className="pointer-events-none absolute top-1.5 right-1 flex gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={action}
+            title={action}
+            onClick={() => void (archived ? unarchive(session.id) : archive(session.id))}
+            className="hover:bg-background"
+          >
+            {archived ? <ArchiveRestore /> : <Archive />}
+          </Button>
+          {!busy && (
             <Button
               variant="ghost"
               size="icon-xs"
-              aria-label={action}
-              title={action}
-              onClick={() => void (archived ? unarchive(session.id) : archive(session.id))}
-              className="hover:bg-background"
+              aria-label={t('sessions.remove')}
+              title={t('sessions.remove')}
+              onClick={() => requestRemove(session.workspaceId, [session.id])}
+              className="hover:bg-background hover:text-destructive"
             >
-              {archived ? <ArchiveRestore /> : <Archive />}
+              <Trash2 />
             </Button>
-            {!busy && (
-              <DialogTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={t('sessions.remove')}
-                    title={t('sessions.remove')}
-                    className="hover:bg-background hover:text-destructive"
-                  />
-                }
-              >
-                <Trash2 />
-              </DialogTrigger>
-            )}
-          </div>
-        )}
-      </div>
-      <DialogContent initialFocus={cancel} className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{t('sessions.removeTitle')}</DialogTitle>
-          <DialogDescription>{t('sessions.removeHint')}</DialogDescription>
-        </DialogHeader>
-        <p className="break-all text-sm">{session.title}</p>
-        <DialogFooter>
-          <DialogClose render={<Button ref={cancel} variant="outline" />}>
-            {t('common.cancel')}
-          </DialogClose>
-          <Button
-            variant="destructive"
-            disabled={busy}
-            onClick={() => {
-              setConfirmOpen(false);
-              void remove(session.id);
-            }}
-          >
-            {t('common.delete')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          )}
+        </div>
+      )}
+    </div>
   );
 });

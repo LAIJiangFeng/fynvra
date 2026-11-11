@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -534,6 +535,96 @@ describe('createOrchestrationService', () => {
         removed: false,
         reason: 'no-worktree',
       });
+    });
+  });
+
+  describe('removeSessionWorktree（删除会话时删它的 worktree）', () => {
+    async function reported(service: ReturnType<typeof make>) {
+      const dispatch = await dispatchOn(service);
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+      return dispatch;
+    }
+
+    it('已合并且干净：删 worktree 与分支；junction 只删链接本身，指向的外部目录原样保留', async () => {
+      const service = make();
+      const dispatch = await reported(service);
+      expect(
+        await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id })
+      ).toMatchObject({ merged: true });
+      fake.respond(({ args }) => (args[0] === 'rev-list' ? { stdout: '2\t0\n' } : undefined));
+      const [worktree] = (await service.snapshot()).worktrees;
+      const path = worktree?.path ?? '';
+      const outside = join(dir, 'main-repo-node_modules');
+      mkdirSync(join(outside, 'pkg'), { recursive: true });
+      writeFileSync(join(outside, 'pkg', 'index.js'), 'keep me');
+      mkdirSync(join(path, 'packages', 'a'), { recursive: true });
+      symlinkSync(outside, join(path, 'node_modules'), 'junction');
+      symlinkSync(outside, join(path, 'packages', 'a', 'node_modules'), 'junction');
+      expect(await service.sessionWorktreeBlocker(dispatch.workerSessionId)).toBeNull();
+      const before = fake.calls.length;
+
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, false)).toEqual({
+        ok: true,
+      });
+      const commands = fake.commands().slice(before);
+      expect(commands).toContain(`git worktree remove -- ${path}`);
+      expect(commands).toContain('git branch -d fynvra/add-toggle');
+      expect((await service.snapshot()).worktrees).toEqual([]);
+      expect(readFileSync(join(outside, 'pkg', 'index.js'), 'utf8')).toBe('keep me');
+      expect(existsSync(join(path, 'node_modules'))).toBe(false);
+      expect(existsSync(join(path, 'packages', 'a', 'node_modules'))).toBe(false);
+    });
+
+    it('未合并：不带 force 拒绝且什么都不动；带 force 走 abandon，任务记为放弃', async () => {
+      const service = make();
+      const dispatch = await reported(service);
+      expect(await service.sessionWorktreeBlocker(dispatch.workerSessionId)).toBe('not-merged');
+      const before = fake.calls.length;
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, false)).toEqual({
+        ok: false,
+        reason: 'not-merged',
+      });
+      expect(
+        fake
+          .commands()
+          .slice(before)
+          .filter((line) => line.includes('remove'))
+      ).toEqual([]);
+      expect((await service.snapshot()).worktrees).toHaveLength(1);
+      expect((await service.snapshot()).tasks[0]?.status).toBe('in-review');
+
+      const [worktree] = (await service.snapshot()).worktrees;
+      const outside = join(dir, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'file.txt'), 'keep me');
+      mkdirSync(worktree?.path ?? '', { recursive: true });
+      symlinkSync(outside, join(worktree?.path ?? '', 'node_modules'), 'junction');
+
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, true)).toEqual({
+        ok: true,
+      });
+      const snapshot = await service.snapshot();
+      expect(snapshot.tasks[0]?.status).toBe('abandoned');
+      expect(snapshot.worktrees).toEqual([]);
+      expect(fake.commands()).toContain(`git worktree remove --force -- ${worktree?.path}`);
+      expect(readFileSync(join(outside, 'file.txt'), 'utf8')).toBe('keep me');
+    });
+
+    it('任务还在进行：即使 force 也拒绝', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, true)).toEqual({
+        ok: false,
+        reason: 'busy',
+      });
+      expect((await service.snapshot()).worktrees).toHaveLength(1);
+      expect((await service.snapshot()).tasks[0]?.status).toBe('in-progress');
+    });
+
+    it('不是 worker 的会话：没有 worktree，直接通过', async () => {
+      const service = make();
+      expect(await service.removeSessionWorktree('session_coord', false)).toEqual({ ok: true });
+      expect(await service.sessionWorktreeBlocker('session_coord')).toBeNull();
     });
   });
 
