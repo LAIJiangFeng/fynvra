@@ -54,6 +54,9 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const bulkBusy = useSessionsStore((state) => state.bulkWorkspaceId !== null);
+  const bulkProgress = useSessionsStore((state) =>
+    state.bulkWorkspaceId === workspaceId ? state.bulkProgress : null
+  );
   const archiveIdle = useSessionsStore((state) => state.archiveIdleSessions);
   const archiveMany = useSessionsStore((state) => state.archiveSessions);
   const requestRemove = useSessionsStore((state) => state.requestRemoveSessions);
@@ -106,7 +109,16 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
       {/* 选择模式下工具条原地换掉标题行（同为 h-7），列表不下移 */}
       {!selecting && (
         <div className="flex h-7 items-center justify-between pr-1 pl-2">
-          <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
+          <span className="truncate text-muted-foreground text-xs" aria-live="polite">
+            {bulkProgress
+              ? t(
+                  bulkProgress.kind === 'archive'
+                    ? 'sessions.bulk.archiving'
+                    : 'sessions.bulk.removing',
+                  { done: bulkProgress.done, total: bulkProgress.total }
+                )
+              : t('sessions.title')}
+          </span>
           <span className="flex items-center">
             <SessionSearchButton workspaceId={workspaceId} />
             <Button

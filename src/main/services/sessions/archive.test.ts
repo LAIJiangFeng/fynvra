@@ -104,6 +104,7 @@ describe('archive', () => {
     store.update('worker', { archivedAt: undefined });
     await archive.archive('worker');
     await archive.archive('coordinator');
+    await vi.waitFor(() => expect(deps.cleanupWorktree).toHaveBeenCalled());
     expect(deps.cleanupWorktree.mock.calls).toEqual([
       [expect.objectContaining({ id: 'worker', worktreeId: 'wt_1', archivedAt: NOW })],
     ]);
@@ -121,10 +122,32 @@ describe('archive', () => {
     expect(await archive.archive('b')).toMatchObject({ ok: true });
     expect(store.get('a')?.archivedAt).toBe(NOW);
     expect(store.get('b')?.archivedAt).toBe(NOW);
+    await vi.waitFor(() => expect(deps.log).toHaveBeenCalledTimes(2));
     expect(deps.log.mock.calls.map(([message]) => message)).toEqual([
       expect.stringContaining('EBUSY'),
       expect.stringContaining('git crashed'),
     ]);
+  });
+
+  it('归档不等清理：清理在后台逐个进行，每个结束时广播', async () => {
+    cleanupOnArchive = true;
+    store.put(session({ id: 'a', worktreeId: 'wt_1' }));
+    store.put(session({ id: 'b', worktreeId: 'wt_2' }));
+    const { deps, archive } = make();
+    let finish = () => {};
+    deps.cleanupWorktree.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve({ removed: true })))
+    );
+    expect(await archive.archive('a')).toMatchObject({ ok: true });
+    expect(await archive.archive('b')).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(deps.cleanupWorktree).toHaveBeenCalledTimes(1));
+    // 第一个还没删完：第二个排队等着
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deps.cleanupWorktree).toHaveBeenCalledTimes(1);
+    expect(deps.changed).toHaveBeenCalledTimes(2);
+    finish();
+    await vi.waitFor(() => expect(deps.changed).toHaveBeenCalledTimes(4));
+    expect(deps.cleanupWorktree).toHaveBeenCalledTimes(2);
   });
 
   it('没合并、不干净：保留 worktree，不记日志', async () => {
@@ -133,6 +156,7 @@ describe('archive', () => {
     const { deps, archive } = make();
     deps.cleanupWorktree.mockResolvedValueOnce({ removed: false, reason: 'not-merged' });
     expect(await archive.archive('session-1')).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(deps.changed).toHaveBeenCalledTimes(2));
     expect(deps.log).not.toHaveBeenCalled();
   });
 

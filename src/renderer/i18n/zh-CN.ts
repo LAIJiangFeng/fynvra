@@ -251,6 +251,8 @@ export const zhCN = {
       unmergedCount: '{count} 个会话的 worktree 有未合并或未提交的改动，不勾选下项时会跳过它们',
       forceUnmerged: '也删除未合并的改动',
       unmergedSkipped: '有未合并的改动，已跳过',
+      archiving: '正在归档 {done}/{total}…',
+      removing: '正在删除 {done}/{total}…',
       archivePartial: '已归档 {done} 个，{failed} 个未处理（{reasons}）',
       removePartial: '已删除 {done} 个，{failed} 个未处理（{reasons}）',
     },

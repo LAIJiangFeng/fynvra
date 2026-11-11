@@ -20,7 +20,7 @@ export interface SessionArchiveDeps {
   cleanupWorktreeOnArchive(): boolean;
   /** 清理会话绑定的 worktree：只删已合并且干净的（生产为 OrchestrationService.cleanupMergedWorktree） */
   cleanupWorktree(session: StoredSession): Promise<WorktreeCleanupOutcome>;
-  /** 会话列表变了：广播 sessions:changed */
+  /** 会话列表变了：广播 sessions:changed（归档后与每次后台清理 worktree 结束时） */
   changed(workspaceId: string): void;
   now?(): number;
   log?(message: string): void;
@@ -48,6 +48,13 @@ export function createSessionArchive(deps: SessionArchiveDeps): SessionArchive {
     } catch (error) {
       log(`清理会话 ${session.id} 的 worktree 失败：${errorMessage(error)}`);
     }
+    deps.changed(session.workspaceId);
+  }
+
+  // 删 worktree 可能要好几秒：归档立即返回，清理在后台逐个排队进行，失败只记日志
+  let cleanups = Promise.resolve();
+  function queueCleanup(session: StoredSession): void {
+    cleanups = cleanups.then(() => cleanup(session)).catch(() => undefined);
   }
 
   return {
@@ -65,7 +72,7 @@ export function createSessionArchive(deps: SessionArchiveDeps): SessionArchive {
         log(`会话 ${sessionId} 退出 agent worker 失败：${errorMessage(error)}`);
       }
       if (archived.worktreeId !== undefined && deps.cleanupWorktreeOnArchive()) {
-        await cleanup(archived);
+        queueCleanup(archived);
       }
       return { ok: true, session: toSummary(archived) };
     },

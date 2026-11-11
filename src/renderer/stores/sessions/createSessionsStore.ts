@@ -94,6 +94,8 @@ export interface SessionsState extends ChatProjection {
   lastModelByWorkspace: Record<string, SessionModelRef>;
   /** 正在批量归档 / 删除的工作区：期间不响应它的 sessions:changed，结束时只重拉一次 */
   bulkWorkspaceId: string | null;
+  /** 批量操作的进度（已处理 / 总数），只在 bulkWorkspaceId 有值时不为 null */
+  bulkProgress: { kind: 'archive' | 'remove'; done: number; total: number } | null;
   /** 等用户确认的批量删除；确认前不会删任何会话 */
   pendingRemoval: {
     workspaceId: string;
@@ -696,17 +698,19 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       // 删正在查看的会话会跳到下一个：放到最后删，免得跳到一个马上要删的会话
       const active = get().activeSessionId;
       ids.sort((a, b) => Number(a === active) - Number(b === active));
-      set({ bulkWorkspaceId: workspaceId });
+      const total = ids.length;
+      set({ bulkWorkspaceId: workspaceId, bulkProgress: { kind, done: 0, total } });
       let done = 0;
       const reasons = new Set<string>();
       try {
-        for (const sessionId of ids) {
+        for (const [index, sessionId] of ids.entries()) {
           const result = await run(sessionId);
           if (result.ok) done++;
           else reasons.add(result.error);
+          set({ bulkProgress: { kind, done: index + 1, total } });
         }
       } finally {
-        set({ bulkWorkspaceId: null });
+        set({ bulkWorkspaceId: null, bulkProgress: null });
       }
       const failed = ids.length - done;
       if (failed > 0) {
@@ -738,6 +742,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       approvalSubmissions: {},
       notice: null,
       bulkWorkspaceId: null,
+      bulkProgress: null,
       pendingRemoval: null,
       modelProviders: null,
       modelOptionsError: null,
