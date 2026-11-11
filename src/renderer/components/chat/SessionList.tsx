@@ -21,6 +21,7 @@ import {
   isBusy,
   selectArchivedSessionsOf,
   selectListErrorOf,
+  selectSessionOf,
   selectSessionsOf,
   selectStatusOf,
   statusOf,
@@ -246,6 +247,12 @@ function BulkRemoveDialog({ workspaceId, onDone }: { workspaceId: string; onDone
   const t = useT();
   const count = pending?.sessionIds.length ?? 0;
   const blocked = pending?.blocked?.length ?? 0;
+  // 单个删除时显示标题，让用户看清删的是哪个
+  const singleTitle = useSessionsStore((state) =>
+    pending?.sessionIds.length === 1
+      ? selectSessionOf(pending.sessionIds[0] ?? '')(state)?.title
+      : undefined
+  );
   return (
     <Dialog
       open={pending !== null}
@@ -263,6 +270,7 @@ function BulkRemoveDialog({ workspaceId, onDone }: { workspaceId: string; onDone
             {t(count === 1 ? 'sessions.removeHint' : 'sessions.bulk.removeHint')}
           </DialogDescription>
         </DialogHeader>
+        {singleTitle !== undefined && <p className="break-all text-sm">{singleTitle}</p>}
         {pending?.blocked === null && (
           <p className="text-muted-foreground text-sm">{t('sessions.bulk.checkingWorktrees')}</p>
         )}
@@ -381,6 +389,12 @@ const SessionRow = memo(function SessionRow({
           checked={checked && !pickDisabled}
           disabled={pickDisabled}
           onCheckedChange={(on) => onCheck(session.id, on)}
+          // Space 由复选框自己处理；Enter 也切换
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || pickDisabled) return;
+            event.preventDefault();
+            onCheck(session.id, !checked);
+          }}
           className="absolute top-3 -left-5"
         />
       )}
