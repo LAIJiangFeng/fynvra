@@ -347,7 +347,8 @@ export const zhCN = {
     tokensHint: '历史累计输入 / 输出 tokens（不是当前上下文占用）',
     usageTotal: '历史累计',
     magicContextFallback:
-      'Magic Context 已暂停，历史与输入已保留，不会转用原生压缩。点击“重试上下文恢复”；若仍失败，可重启应用或更换模型后重试',
+      'Magic Context 已暂停，备用压缩也未完成，历史与输入已保留。点击“重试上下文恢复”；若仍失败，可重启应用或更换模型后重试',
+    magicContextFellBack: 'Magic Context 出错，已自动改用标准压缩继续',
     costHint: '历史累计费用',
     branchHint: '当前分支（{cwd}）',
     image: '图片 {index}',

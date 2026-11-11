@@ -19,6 +19,7 @@ import type {
 } from '@shared/types/agent';
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/settings';
+import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
@@ -95,6 +96,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     let activeModel = model;
     const strategy = compactionStrategyOf(spec);
     let magicFailed = false;
+    let recoveryGate: ReturnType<typeof createContextRecovery> | undefined;
     let pendingFallback: MagicContextFallbackReason | undefined;
     let emitFallback: ((reason: MagicContextFallbackReason) => void) | undefined;
     const magic =
@@ -102,11 +104,28 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         ? createMagicContextCompaction(() => activeModel, {
             onFallback: (reason) => {
               magicFailed = true;
+              recoveryGate?.fallBack();
               if (emitFallback) emitFallback(reason);
               else pendingFallback ??= reason;
             },
           })
         : undefined;
+    const timeoutMs = compactionTimeoutMsOf(spec);
+    const logContext = (message: string) =>
+      options.onContextLog?.(
+        `session=${identity.sessionId} generation=${identity.generation} ${message}`
+      );
+    // Native always compacts through the method chain; Magic only after it stopped.
+    const compactionChain =
+      strategy === 'off'
+        ? undefined
+        : createCompactionChainExtension({
+            getModel: () => activeModel,
+            getSessionManager: () => sessionManager,
+            active: () => strategy === 'native' || magicFailed,
+            log: logContext,
+          });
+    const extensions = [magic?.extension, compactionChain].filter((ext) => ext !== undefined);
     magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
     // 计划模式的实时开关：spawn 时按 spec 初始化，运行中由 set-plan-mode 改写；createRoleSession 每次 run / dispatch_task 读取
@@ -143,7 +162,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         ...(spec.workflows && spec.workflows.length > 0 ? { workflows: spec.workflows } : {}),
         ...(spec.inPlace ? { inPlace: true } : {}),
         planMode: () => planMode,
-        ...(magic ? { extensions: [magic.extension] } : {}),
+        ...(extensions.length ? { extensions } : {}),
         settingsManager: createSessionSettings(spec.shellPath, strategy),
         ...(spec.networkProxy
           ? {
@@ -158,20 +177,18 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       throw error;
     }
     const { session } = created;
-    const timeoutMs = compactionTimeoutMsOf(spec);
     const recovery = createContextRecovery({
       session,
       strategy,
       ...(magic ? { magicReady: () => magic.assertReady() } : {}),
       timeoutMs,
       contextWindow: () => activeModel.model?.contextWindow ?? 0,
-      log: (message) =>
-        options.onContextLog?.(
-          `session=${identity.sessionId} generation=${identity.generation} ${message}`
-        ),
+      log: logContext,
     });
-    // SDK automatic overflow compaction is disabled for Magic. Preserve its failed turn
-    // and require explicit recovery; never ask pi for a replacement native summary.
+    recoveryGate = recovery;
+    // Magic stopped during startup, before the gate existed.
+    if (magicFailed) recovery.fallBack();
+    // An overflow under Magic stops Magic; pi then compacts with the fallback chain and retries.
     const unsubscribeMagicOverflow = magic
       ? session.subscribe((event) => {
           if (
@@ -191,12 +208,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     const retrySettings = session.settingsManager.getRetrySettings();
     const subscription = subscribeNormalized(
       session,
-      (incoming) => {
-        // Magic failures cross the UI boundary only as controlled reasons/fixed recovery text.
-        const event =
-          magicFailed && incoming.type === 'error'
-            ? { ...incoming, message: 'Magic Context paused this session. Retry context recovery.' }
-            : incoming;
+      (event) => {
         try {
           listener?.(event);
         } finally {
@@ -215,10 +227,9 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       subscribe: (nextListener) => {
         listener = nextListener;
         recovery.publish();
-        const emitWarning = (reason: MagicContextFallbackReason) => {
-          recovery.failMagic();
+        // Non-blocking notice: the session already continues on the fallback chain.
+        const emitWarning = (reason: MagicContextFallbackReason) =>
           subscription.emit({ type: 'warning', source: 'magic-context', reason });
-        };
         emitFallback = emitWarning;
         if (pendingFallback) {
           const reason = pendingFallback;
