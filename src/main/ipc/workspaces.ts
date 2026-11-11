@@ -35,10 +35,15 @@ let service: WorkspaceService | null = null;
 
 /** Main 内共享的工作区注册表（后续 worktree / 会话按 id 取 repoPath 也走这里）。 */
 export function getWorkspaceService(): WorkspaceService {
-  service ??= createWorkspaceService({
+  if (service) return service;
+  const created = createWorkspaceService({
     settings: getSettingsFile(),
     onChanged: () => sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED),
+    watchGitInit: true,
   });
+  // process 'exit' 在 Electron 退出时也会触发，且不依赖测试里 mock 的 electron app
+  process.once('exit', () => created.dispose());
+  service = created;
   return service;
 }
 
