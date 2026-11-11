@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Workspace, WorkspaceAddResult, WorkspaceSummary } from '@shared/types/workspace';
 import { createGitInitWatcher } from './gitInitWatcher';
 import { type DirectoryInspection, inspectDirectory, samePath } from './gitRepository';
@@ -103,15 +105,18 @@ export function createWorkspaceService({
      * 重新检测工作区的 vcs（用户可能在挂入后 git init 或删了 .git），变了才写 settings。
      * none → git 只在目录本身是仓库根目录时；仓库子目录（not-repo-root）是用户有意按普通目录挂的，保持 none。
      * git → none 只在目录已完全不是仓库时；出错或 not-repo-root 都不动。同一工作区 5 秒内只查一次
-     * （`force` 跳过节流，供 `.git` 监视器使用）。
+     * （`force` 跳过节流，供 `.git` 监视器使用）。`onlyPlain` 只查根目录已有 `.git` 的普通目录工作区，
+     * 其余不起 git（窗口获得焦点时用）。
      */
-    async refreshVcs(id?: string, { force = false } = {}): Promise<void> {
+    async refreshVcs(id?: string, { force = false, onlyPlain = false } = {}): Promise<void> {
       const at = now();
       const due = settings
         .read()
         .workspaces.filter(
           (workspace) =>
             (id === undefined || workspace.id === id) &&
+            (!onlyPlain ||
+              (workspace.vcs === 'none' && existsSync(join(workspace.repoPath, '.git')))) &&
             (force || at - (lastChecked.get(workspace.id) ?? -Infinity) >= VCS_RECHECK_MS)
         );
       for (const workspace of due) lastChecked.set(workspace.id, at);

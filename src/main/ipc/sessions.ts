@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { isApprovalMode, isThinkingLevel, isValidRoleId } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
@@ -128,7 +129,10 @@ function createAppAgentHost(): AgentHostService {
     // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
     providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
     lastModels: createLastModelStore(getSettingsFile()),
-    branches: createBranchTracker({ read: (cwd) => readGitBranch(cwd) }),
+    // 已删除的目录（如清理掉的 worktree）不起 git
+    branches: createBranchTracker({
+      read: async (cwd) => (existsSync(cwd) ? readGitBranch(cwd) : undefined),
+    }),
     resolveResources: createRoleResourceResolver({
       skills: getSkillRegistry(),
       instructions: getInstructionRegistry(),

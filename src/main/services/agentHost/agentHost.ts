@@ -218,7 +218,7 @@ export interface AgentHostService extends AgentHost {
    * 运行中也可以切；派发出的 worker 会话拒绝。会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setPlanMode(input: SetPlanModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
-  /** 窗口重新获得焦点：重读读过的会话目录的分支（节流），有变化的工作区广播 sessions:changed */
+  /** 窗口重新获得焦点：重读未归档会话目录的分支（节流），有变化的工作区广播 sessions:changed */
   refreshBranches(): void;
   /** 会话的 IPC 视图；不存在时 undefined */
   get(sessionId: string): SessionSummary | undefined;
@@ -1627,7 +1627,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     list(workspaceId) {
       const sessions = deps.store.list(workspaceId);
       // 列表马上返回缓存里的分支；分支在后台重读，变了再广播 sessions:changed
-      rereadBranches(sessions.map((session) => session.cwd));
+      rereadBranches(
+        sessions.filter((session) => session.archivedAt === undefined).map((session) => session.cwd)
+      );
       return sessions.map(withBranch);
     },
     async create(input) {
@@ -1785,7 +1787,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setApprovalMode,
     setPlanMode,
     refreshBranches() {
-      if (deps.branches) rereadBranches(deps.branches.known());
+      // 只重读未归档会话的目录：归档会话与已清理的 worktree 不起 git
+      rereadBranches(
+        deps.store
+          .all()
+          .filter((session) => session.archivedAt === undefined)
+          .map((session) => session.cwd)
+      );
     },
     get(sessionId) {
       const stored = deps.store.get(sessionId);

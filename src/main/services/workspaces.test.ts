@@ -164,6 +164,35 @@ describe('createWorkspaceService', () => {
       expect(onChanged).not.toHaveBeenCalled();
     });
 
+    it('onlyPlain 只检测根目录已有 .git 的普通目录，其余不起 git', async () => {
+      const notes = join(dir, 'notes');
+      mkdirSync(notes);
+      let next = 0;
+      let clock = 0;
+      const inspect = vi.fn(async (root: string) =>
+        root === notes ? plainDir(notes) : repo(root)
+      );
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect,
+        newId: () => `ws-${++next}`,
+        platform: 'linux',
+        now: () => (clock += 10_000),
+      });
+      await workspaces.addDirectory(notes);
+      await workspaces.addDirectory(join(dir, 'repo'));
+      inspect.mockClear();
+      await workspaces.refreshVcs(undefined, { onlyPlain: true });
+      expect(inspect).not.toHaveBeenCalled();
+
+      mkdirSync(join(notes, '.git'));
+      inspect.mockResolvedValueOnce(repo(notes, 'notes'));
+      await workspaces.refreshVcs(undefined, { onlyPlain: true });
+      expect(inspect).toHaveBeenCalledTimes(1);
+      expect(inspect).toHaveBeenCalledWith(notes, { plain: false });
+      expect(workspaces.get('ws-1')?.vcs).toBe('git');
+    });
+
     it('5 秒内不重复检测', async () => {
       const inspect = vi.fn(async () => plainDir('/home/dev/notes'));
       const workspaces = createWorkspaceService({

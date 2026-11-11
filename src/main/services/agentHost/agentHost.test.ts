@@ -2722,6 +2722,18 @@ describe('createAgentHost branches', () => {
     expect(env.host.list('ws-1')[0]?.branch).toBe('a1b2c3d');
   });
 
+  it('does not re-read the cwd of an archived session on list or focus', async () => {
+    const env = branchEnv();
+    const session = await createSession(env);
+    env.store.update(session.id, { archivedAt: 1 });
+    env.read.mockClear();
+    env.advance(BRANCH_REFRESH_THROTTLE_MS);
+    env.host.list('ws-1');
+    env.host.refreshBranches();
+    await flush();
+    expect(env.read).not.toHaveBeenCalled();
+  });
+
   it('re-reads once the turn settles, even inside the throttle window (the agent may have checked out)', async () => {
     const env = branchEnv();
     const session = await createSession(env);

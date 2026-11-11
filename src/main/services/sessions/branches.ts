@@ -3,7 +3,9 @@ import { type GitRunner, runGit } from '../gitRepository';
 /** 读一次分支的上限：git 卡住（如仓库锁）时不拖住会话列表，到点按读不到处理 */
 export const BRANCH_READ_TIMEOUT_MS = 2_000;
 /** 同一目录两次重读的最小间隔：会话列表每次状态变化都会重拉，不能每次都起 git */
-export const BRANCH_REFRESH_THROTTLE_MS = 3_000;
+export const BRANCH_REFRESH_THROTTLE_MS = 10_000;
+/** 一次 refresh 同时在读的目录上限：Windows 上起进程会同步卡住 Main 的事件循环 */
+export const BRANCH_REFRESH_CONCURRENCY = 4;
 
 /**
  * cwd 当前检出的分支：`git symbolic-ref --quiet --short HEAD`，detached 时给 `git rev-parse --short HEAD` 的短 sha；
@@ -43,14 +45,13 @@ export interface BranchTracker {
    * 同时只起一次 git：正在读的目录等那次的结果；force 时等它读完再读一次，免得用上 checkout 之前的结果。
    */
   refresh(cwds: Iterable<string>, options?: { force?: boolean }): Promise<string[]>;
-  /** 读过的目录：窗口重新获得焦点时全部重读 */
-  known(): string[];
 }
 
 export interface BranchTrackerOptions {
   read: (cwd: string) => Promise<string | undefined>;
   now?: () => number;
   throttleMs?: number;
+  concurrency?: number;
 }
 
 interface BranchEntry {
@@ -65,6 +66,7 @@ export function createBranchTracker({
   read,
   now = Date.now,
   throttleMs = BRANCH_REFRESH_THROTTLE_MS,
+  concurrency = BRANCH_REFRESH_CONCURRENCY,
 }: BranchTrackerOptions): BranchTracker {
   const entries = new Map<string, BranchEntry>();
 
@@ -95,11 +97,15 @@ export function createBranchTracker({
     get: (cwd) => entries.get(cwd)?.branch,
     async refresh(cwds, options = {}) {
       const unique = [...new Set(cwds)];
-      const changed = await Promise.all(
-        unique.map((cwd) => refreshOne(cwd, options.force === true))
-      );
+      const changed: boolean[] = [];
+      const queue = unique.entries();
+      const lane = async () => {
+        for (const [index, cwd] of queue) {
+          changed[index] = await refreshOne(cwd, options.force === true);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(concurrency, unique.length) }, lane));
       return unique.filter((_cwd, index) => changed[index]);
     },
-    known: () => [...entries.keys()],
   };
 }
