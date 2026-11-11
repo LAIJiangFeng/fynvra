@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -237,5 +238,66 @@ describe('toDisplayPath', () => {
 
   it('Windows 下保留原路径', () => {
     expect(toDisplayPath('C:\\Users\\dev\\a', 'C:\\Users\\dev', 'win32')).toBe('C:\\Users\\dev\\a');
+  });
+});
+
+const hasGit = (() => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const mkdirIn = (name: string): string => {
+  const path = join(realpathSync.native(dir), name);
+  mkdirSync(path);
+  return path;
+};
+
+describe.skipIf(!hasGit)('.git 监视器（真实 fs + git）', () => {
+  let previousCeiling: string | undefined;
+  beforeEach(() => {
+    previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
+    process.env.GIT_CEILING_DIRECTORIES = realpathSync.native(dir);
+  });
+  afterEach(() => {
+    if (previousCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = previousCeiling;
+  });
+
+  it('普通目录里 git init 后自动变为 git，广播一次，并关闭监视器', async () => {
+    const folder = mkdirIn('plain');
+    const onChanged = vi.fn();
+    const workspaces = createWorkspaceService({ settings, onChanged, watchGitInit: true });
+    try {
+      const added = await workspaces.addDirectory(folder);
+      expect(added).toMatchObject({ ok: true, workspace: { vcs: 'none' } });
+      // 挂入时的检测已占用 5 秒节流窗口；监视器必须绕过它
+      await workspaces.refreshVcs();
+      const id = added.ok ? added.workspace.id : '';
+      expect(workspaces.watchedIds()).toEqual([id]);
+
+      execFileSync('git', ['init', '-q'], { cwd: folder });
+      await vi.waitFor(() => expect(workspaces.get(id)?.vcs).toBe('git'), { timeout: 5_000 });
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      expect(workspaces.watchedIds()).toEqual([]);
+    } finally {
+      workspaces.dispose();
+    }
+  });
+
+  it('移除工作区或 dispose 时关闭监视器', async () => {
+    const a = mkdirIn('a');
+    const b = mkdirIn('b');
+    const workspaces = createWorkspaceService({ settings, watchGitInit: true });
+    const first = await workspaces.addDirectory(a);
+    await workspaces.addDirectory(b);
+    expect(workspaces.watchedIds()).toHaveLength(2);
+    workspaces.remove(first.ok ? first.workspace.id : '');
+    expect(workspaces.watchedIds()).toHaveLength(1);
+    workspaces.dispose();
+    expect(workspaces.watchedIds()).toEqual([]);
   });
 });

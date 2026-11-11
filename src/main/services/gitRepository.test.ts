@@ -60,6 +60,13 @@ describe.skipIf(!hasGit)('inspectGitRepository（真实 git）', () => {
     });
   });
 
+  it('刚 git init、还没有提交的空仓库也是 git 工作区', async () => {
+    const repo = join(base, 'empty-repo');
+    mkdirSync(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    expect(await inspectDirectory(repo)).toMatchObject({ ok: true, vcs: 'git', root: repo });
+  });
+
   it('仓库子目录不提升为外层仓库：返回 not-repo-root 与仓库根目录', async () => {
     const repo = makeRepo('nested-repo', 'main');
     const sub = join(repo, 'src');
