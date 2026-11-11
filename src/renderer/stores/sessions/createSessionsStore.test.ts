@@ -515,6 +515,87 @@ describe('createSessionsStore · 归档', () => {
   });
 });
 
+describe('createSessionsStore · 批量归档与删除', () => {
+  /** 像 Main 一样：每次归档 / 删除成功都广播一次 sessions:changed */
+  async function bulkSetup(initial: SessionSummary[]) {
+    const harness = await setup(initial);
+    const { archive, remove } = harness.api;
+    const archiveImpl = archive.getMockImplementation();
+    const removeImpl = remove.getMockImplementation();
+    if (!archiveImpl || !removeImpl) throw new Error('fakeApi 缺少实现');
+    archive.mockImplementation(async (sessionId) => {
+      const result = await archiveImpl(sessionId);
+      harness.emitChanged();
+      return result;
+    });
+    remove.mockImplementation(async (sessionId) => {
+      const result = await removeImpl(sessionId);
+      harness.emitChanged();
+      return result;
+    });
+    harness.api.list.mockClear();
+    return harness;
+  }
+
+  it('一键归档闲置：跳过运行中、等审批、正在查看与已归档的，列表只重拉一次', async () => {
+    const { store, api } = await bulkSetup([
+      summary('idle1'),
+      summary('idle2'),
+      summary('run', { status: 'running' }),
+      summary('wait', { status: 'waiting-approval' }),
+      summary('open'),
+      summary('old', { archivedAt: 30 }),
+    ]);
+    await store.getState().selectSession('open');
+    api.list.mockClear();
+    expect(await store.getState().archiveIdleSessions(WS)).toEqual({ done: 2, failed: 0 });
+    expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['idle1', 'idle2']);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(store.getState().notice).toBeNull();
+    expect(store.getState().bulkWorkspaceId).toBeNull();
+  });
+
+  it('批量归档的失败汇总成一条提示，不逐个重拉', async () => {
+    const { store, api } = await bulkSetup([
+      summary('a'),
+      summary('b'),
+      summary('run', { status: 'running' }),
+    ]);
+    api.archive.mockResolvedValueOnce({ ok: false, error: 'worktree 有未合并的改动' });
+    expect(await store.getState().archiveSessions(WS, ['a', 'b', 'run'])).toEqual({
+      done: 1,
+      failed: 2,
+    });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(store.getState().notice).toBe(
+      '已归档 1 个，2 个未处理（worktree 有未合并的改动；会话正在运行，结束后再归档）'
+    );
+  });
+
+  it('批量删除要先确认：登记、取消都不删，确认后才删且只重拉一次', async () => {
+    const { store, api } = await bulkSetup([
+      summary('a', { archivedAt: 30 }),
+      summary('b', { archivedAt: 30 }),
+      summary('run', { status: 'running' }),
+    ]);
+    store.getState().requestRemoveSessions(WS, ['a', 'b']);
+    expect(store.getState().pendingRemoval).toEqual({ workspaceId: WS, sessionIds: ['a', 'b'] });
+    store.getState().cancelRemoveSessions();
+    expect(await store.getState().confirmRemoveSessions()).toEqual({ done: 0, failed: 0 });
+    expect(api.remove).not.toHaveBeenCalled();
+
+    store.getState().requestRemoveSessions(WS, ['a', 'b', 'run']);
+    expect(api.remove).not.toHaveBeenCalled();
+    expect(await store.getState().confirmRemoveSessions()).toEqual({ done: 2, failed: 1 });
+    expect(api.remove.mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingRemoval).toBeNull();
+    expect(store.getState().notice).toBe('已删除 2 个，1 个未处理（会话正在运行，结束后再删除）');
+    expect(selectSessionsOf(WS)(store.getState()).map((session) => session.id)).toEqual(['run']);
+    expect(selectArchivedSessionsOf(WS)(store.getState())).toEqual([]);
+  });
+});
+
 describe('createSessionsStore · removeSession', () => {
   const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
   const messages: ChatMessage[] = [

@@ -1,8 +1,9 @@
 import type { SessionSummary } from '@shared/types/chat';
-import { Archive, ArchiveRestore, ChevronRight, Trash2 } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Archive, ArchiveRestore, ChevronRight, ListChecks, Trash2 } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -23,6 +24,7 @@ import {
   selectListErrorOf,
   selectSessionsOf,
   selectStatusOf,
+  statusOf,
   useSessionsStore,
 } from '@/stores/sessions';
 import { formatRelativeTime } from './format';
@@ -49,7 +51,37 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   const archived = useSessionsStore(selectArchivedSessionsOf(workspaceId));
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const bulkBusy = useSessionsStore((state) => state.bulkWorkspaceId !== null);
+  const archiveIdle = useSessionsStore((state) => state.archiveIdleSessions);
+  const archiveMany = useSessionsStore((state) => state.archiveSessions);
+  const requestRemove = useSessionsStore((state) => state.requestRemoveSessions);
   const t = useT();
+  const selectAllId = useId();
+  const exitSelect = useCallback(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, []);
+  const toggle = useCallback((sessionId: string, on: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (on) next.add(sessionId);
+      else next.delete(sessionId);
+      return next;
+    });
+  }, []);
+  // 已不在列表里的（别处删掉的）不算
+  const picked = [...all, ...archived].filter((session) => selected.has(session.id));
+  const pickedActive = picked.filter((session) => session.archivedAt === undefined);
+  // 全选：当前显示的、能操作的会话（运行中、等审批的未归档会话不勾）
+  const selectable = () => {
+    const state = useSessionsStore.getState();
+    return [...sessions, ...(archivedOpen ? archived : [])]
+      .filter((session) => session.archivedAt !== undefined || !isBusy(statusOf(state, session.id)))
+      .map((session) => session.id);
+  };
+  const allPicked = picked.length > 0 && selectable().every((id) => selected.has(id));
   const anchor = useCallback((node: HTMLElement | null) => {
     setScrollParent(node?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null);
   }, []);
@@ -64,14 +96,96 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   );
 
   return (
-    <li ref={anchor} className="pb-1 pl-6">
+    <li
+      ref={anchor}
+      className="pb-1 pl-6"
+      onKeyDown={(event) => {
+        if (selecting && event.key === 'Escape' && !event.defaultPrevented) exitSelect();
+      }}
+    >
       <div className="flex h-7 items-center justify-between pr-1 pl-2">
         <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
         <span className="flex items-center">
           <SessionSearchButton workspaceId={workspaceId} />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('sessions.bulk.archiveIdle')}
+            title={t('sessions.bulk.archiveIdle')}
+            disabled={bulkBusy || sessions.length === 0}
+            onClick={() => void archiveIdle(workspaceId)}
+          >
+            <Archive />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('sessions.bulk.select')}
+            aria-pressed={selecting}
+            title={t('sessions.bulk.select')}
+            disabled={all.length + archived.length === 0}
+            onClick={() => (selecting ? exitSelect() : setSelecting(true))}
+          >
+            <ListChecks />
+          </Button>
           <NewSessionButton workspaceId={workspaceId} compact />
         </span>
       </div>
+      {selecting && (
+        <div className="flex h-7 items-center gap-1 pr-1 pl-2 text-xs">
+          <label
+            htmlFor={selectAllId}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"
+          >
+            <Checkbox
+              id={selectAllId}
+              checked={allPicked}
+              indeterminate={picked.length > 0 && !allPicked}
+              onCheckedChange={(on) => setSelected(new Set(on ? selectable() : []))}
+            />
+            <span className="truncate text-muted-foreground">
+              {picked.length > 0
+                ? t('sessions.bulk.selected', { count: picked.length })
+                : t('sessions.bulk.selectAll')}
+            </span>
+          </label>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('sessions.archive')}
+            title={t('sessions.archive')}
+            disabled={bulkBusy || pickedActive.length === 0}
+            onClick={() => {
+              exitSelect();
+              void archiveMany(
+                workspaceId,
+                pickedActive.map((session) => session.id)
+              );
+            }}
+          >
+            <Archive />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('common.delete')}
+            title={t('common.delete')}
+            disabled={bulkBusy || picked.length === 0}
+            onClick={() =>
+              requestRemove(
+                workspaceId,
+                picked.map((session) => session.id)
+              )
+            }
+            className="hover:text-destructive"
+          >
+            <Trash2 />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={exitSelect}>
+            {t('common.cancel')}
+          </Button>
+        </div>
+      )}
       <SessionSearchInput workspaceId={workspaceId} />
       {error && (
         <p className="px-2 py-1 text-destructive text-xs">{t('sessions.loadFailed', { error })}</p>
@@ -88,18 +202,69 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
           computeItemKey={(_, row) => (row.kind === 'session' ? row.session.id : 'archived')}
           itemContent={(_, row) =>
             row.kind === 'session' ? (
-              <SessionRow session={row.session} />
+              <SessionRow
+                session={row.session}
+                checked={selecting ? selected.has(row.session.id) : undefined}
+                onCheck={toggle}
+              />
             ) : (
               <ArchivedToggle
                 count={row.count}
                 open={archivedOpen}
                 onToggle={() => setArchivedOpen((open) => !open)}
+                onRemoveAll={
+                  bulkBusy
+                    ? undefined
+                    : () =>
+                        requestRemove(
+                          workspaceId,
+                          archived.map((session) => session.id)
+                        )
+                }
               />
             )
           }
         />
       )}
+      <BulkRemoveDialog workspaceId={workspaceId} onDone={exitSelect} />
     </li>
+  );
+}
+
+/** 批量删除的确认框：只在 store 登记了本工作区的待确认删除时打开 */
+function BulkRemoveDialog({ workspaceId, onDone }: { workspaceId: string; onDone: () => void }) {
+  const pending = useSessionsStore((state) =>
+    state.pendingRemoval?.workspaceId === workspaceId ? state.pendingRemoval : null
+  );
+  const confirm = useSessionsStore((state) => state.confirmRemoveSessions);
+  const cancelRemove = useSessionsStore((state) => state.cancelRemoveSessions);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const t = useT();
+  return (
+    <Dialog open={pending !== null} onOpenChange={(open) => !open && cancelRemove()}>
+      <DialogContent initialFocus={cancel} className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>
+            {t('sessions.bulk.removeTitle', { count: pending?.sessionIds.length ?? 0 })}
+          </DialogTitle>
+          <DialogDescription>{t('sessions.bulk.removeHint')}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose render={<Button ref={cancel} variant="outline" />}>
+            {t('common.cancel')}
+          </DialogClose>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              onDone();
+              void confirm();
+            }}
+          >
+            {t('common.delete')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -107,14 +272,29 @@ function ArchivedToggle({
   count,
   open,
   onToggle,
+  onRemoveAll,
 }: {
   count: number;
   open: boolean;
   onToggle: () => void;
+  /** 删除全部已归档（先弹确认）；批量操作进行中时不给 */
+  onRemoveAll?: () => void;
 }) {
   const t = useT();
   return (
-    <div className="pt-1 pb-0.5">
+    <div className="group/archived relative pt-1 pb-0.5">
+      {onRemoveAll && (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={t('sessions.bulk.removeArchived')}
+          title={t('sessions.bulk.removeArchived')}
+          onClick={onRemoveAll}
+          className="absolute top-1.5 right-1 opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover/archived:opacity-100"
+        >
+          <Trash2 />
+        </Button>
+      )}
       <button
         type="button"
         aria-expanded={open}
@@ -129,7 +309,16 @@ function ArchivedToggle({
   );
 }
 
-const SessionRow = memo(function SessionRow({ session }: { session: SessionSummary }) {
+const SessionRow = memo(function SessionRow({
+  session,
+  checked,
+  onCheck,
+}: {
+  session: SessionSummary;
+  /** 选择模式下是否勾选；undefined 表示不在选择模式 */
+  checked?: boolean;
+  onCheck: (sessionId: string, on: boolean) => void;
+}) {
   const active = useSessionsStore(
     (state) => state.workspaceId === session.workspaceId && state.activeSessionId === session.id
   );
@@ -146,6 +335,37 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
   const action = t(archived ? 'sessions.unarchive' : 'sessions.archive');
   const busy = isBusy(status);
 
+  const rowClass = cn(
+    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
+    active && 'bg-sidebar-accent text-sidebar-accent-foreground'
+  );
+
+  if (checked !== undefined) {
+    // 选择模式：整行是标签，点哪里都能勾；运行中、等审批的未归档会话不能选
+    const disabled = busy && !archived;
+    const id = `session-pick-${session.id}`;
+    return (
+      <div className="pb-0.5">
+        <label
+          htmlFor={id}
+          className={cn(rowClass, disabled ? 'cursor-default opacity-60' : 'cursor-pointer')}
+        >
+          <Checkbox
+            id={id}
+            aria-label={t('sessions.bulk.selectSession', { title: session.title })}
+            checked={checked && !disabled}
+            disabled={disabled}
+            onCheckedChange={(on) => onCheck(session.id, on)}
+          />
+          <StatusDot status={status} />
+          <span className="block h-7 min-w-0 flex-1 truncate leading-7" title={session.title}>
+            {session.title}
+          </span>
+        </label>
+      </div>
+    );
+  }
+
   return (
     <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
       <div className="group/session relative pb-0.5">
@@ -153,10 +373,7 @@ const SessionRow = memo(function SessionRow({ session }: { session: SessionSumma
           type="button"
           aria-current={active ? 'true' : undefined}
           onClick={() => void select(session.id, session.workspaceId)}
-          className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
-            active && 'bg-sidebar-accent text-sidebar-accent-foreground'
-          )}
+          className={rowClass}
         >
           <StatusDot status={status} />
           <span className="min-w-0 flex-1">

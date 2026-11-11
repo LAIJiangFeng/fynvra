@@ -250,6 +250,19 @@ export const en: MessagesShape<typeof zhCN> = {
     removeTitle: 'Delete session?',
     removeHint:
       'The session will be removed from the list. Its underlying record file will be kept',
+    bulk: {
+      select: 'Select',
+      selectAll: 'Select all',
+      selected: '{count} selected',
+      selectSession: 'Select session: {title}',
+      archiveIdle: 'Archive idle sessions',
+      removeArchived: 'Delete all archived',
+      removeTitle: 'Delete {count} sessions?',
+      removeHint:
+        'This cannot be undone. The sessions are removed from the Fynvra session list; their underlying pi record files are kept and worktrees are not touched. Running sessions are never deleted',
+      archivePartial: 'Archived {done}, {failed} not processed ({reasons})',
+      removePartial: 'Deleted {done}, {failed} not processed ({reasons})',
+    },
     search: 'Search sessions',
     searchHint: 'Search sessions {chord}',
     clearSearch: 'Clear',
