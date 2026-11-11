@@ -1,7 +1,14 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
+import {
+  type Api,
+  getSupportedThinkingLevels,
+  type Message,
+  type Model,
+  normalizeContext,
+} from '@earendil-works/pi-ai';
+import { stream } from '@earendil-works/pi-ai/api/anthropic-messages';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ThinkingLevel } from '@fynvra/core';
 import type { ModelQuery } from '@shared/types/agent';
@@ -129,6 +136,70 @@ describe('createModelRegistry', () => {
       modelId: 'claude-haiku-5-5',
     });
     expect(model.baseUrl).toBe('https://api.anthropic.com');
+  });
+
+  describe('Anthropic relays: no native mid-conversation tool changes', () => {
+    const tool = (name: string) => ({
+      name,
+      description: name,
+      parameters: { type: 'object', properties: {} },
+    });
+    // The shape pi persisted in the user's session: a tool declared up front, removed later on reload.
+    const transcript: Message[] = [
+      { role: 'system', content: '', toolsAdded: [tool('read'), tool('ctx_search')], timestamp: 0 },
+      { role: 'user', content: 'hi', timestamp: 1 },
+      { role: 'system', content: '', toolsRemoved: [{ name: 'ctx_search' }], timestamp: 2 },
+      { role: 'user', content: 'hello', timestamp: 3 },
+    ];
+    /** The Anthropic request pi would send, captured before any network I/O. */
+    async function payloadFor(model: Model<Api>) {
+      let payload: { tools?: { name: string }[]; messages: { content: unknown }[] } | undefined;
+      const result = await stream(
+        model as Model<'anthropic-messages'>,
+        normalizeContext({ messages: transcript }),
+        {
+          apiKey: 'k',
+          onPayload: (params) => {
+            payload = params as typeof payload;
+            throw new Error('captured');
+          },
+        }
+      ).result();
+      expect(result.stopReason).toBe('error');
+      if (!payload) throw new Error('no payload');
+      return payload;
+    }
+    const resolveAt = (baseUrl: string, providerId = KEY_A) =>
+      createModelRegistry(runtime).resolve({
+        providerId,
+        api: 'anthropic-messages',
+        baseUrl,
+        apiKey: 'k',
+        modelId: 'claude-opus-5-5',
+      });
+
+    it('turns supportsMidConvoToolChanges off for a relay and keeps it on the official endpoint', async () => {
+      const relay = await resolveAt('https://relay.example.com');
+      expect(relay.model.compat).toMatchObject({
+        supportsMidConvoSystemMessages: true,
+        supportsMidConvoToolChanges: false,
+      });
+      for (const official of ['https://api.anthropic.com', 'https://api.anthropic.com/v1/']) {
+        const { model } = await resolveAt(official, KEY_B);
+        expect(model.compat).toMatchObject({ supportsMidConvoToolChanges: true });
+      }
+    });
+
+    it('sends the current tools and no tool_removal block through a relay', async () => {
+      const relay = await payloadFor((await resolveAt('http://localhost:8080')).model);
+      expect(relay.tools?.map((t) => t.name)).toEqual(['read']);
+      expect(JSON.stringify(relay.messages)).not.toContain('tool_removal');
+
+      const official = await payloadFor(
+        (await resolveAt('https://api.anthropic.com', KEY_B)).model
+      );
+      expect(JSON.stringify(official.messages)).toContain('tool_removal');
+    });
   });
 
   it('fails when an unknown api has no base URL', async () => {
