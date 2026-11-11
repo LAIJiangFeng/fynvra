@@ -102,34 +102,37 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
         if (selecting && event.key === 'Escape' && !event.defaultPrevented) exitSelect();
       }}
     >
-      <div className="flex h-7 items-center justify-between pr-1 pl-2">
-        <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
-        <span className="flex items-center">
-          <SessionSearchButton workspaceId={workspaceId} />
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t('sessions.bulk.archiveIdle')}
-            title={t('sessions.bulk.archiveIdle')}
-            disabled={bulkBusy || sessions.length === 0}
-            onClick={() => void archiveIdle(workspaceId)}
-          >
-            <Archive />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t('sessions.bulk.select')}
-            aria-pressed={selecting}
-            title={t('sessions.bulk.select')}
-            disabled={all.length + archived.length === 0}
-            onClick={() => (selecting ? exitSelect() : setSelecting(true))}
-          >
-            <ListChecks />
-          </Button>
-          <NewSessionButton workspaceId={workspaceId} compact />
-        </span>
-      </div>
+      {/* 选择模式下工具条原地换掉标题行（同为 h-7），列表不下移 */}
+      {!selecting && (
+        <div className="flex h-7 items-center justify-between pr-1 pl-2">
+          <span className="text-muted-foreground text-xs">{t('sessions.title')}</span>
+          <span className="flex items-center">
+            <SessionSearchButton workspaceId={workspaceId} />
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t('sessions.bulk.archiveIdle')}
+              title={t('sessions.bulk.archiveIdle')}
+              disabled={bulkBusy || sessions.length === 0}
+              onClick={() => void archiveIdle(workspaceId)}
+            >
+              <Archive />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t('sessions.bulk.select')}
+              aria-pressed={selecting}
+              title={t('sessions.bulk.select')}
+              disabled={all.length + archived.length === 0}
+              onClick={() => (selecting ? exitSelect() : setSelecting(true))}
+            >
+              <ListChecks />
+            </Button>
+            <NewSessionButton workspaceId={workspaceId} compact />
+          </span>
+        </div>
+      )}
       {selecting && (
         <div className="flex h-7 items-center gap-1 pr-1 pl-2 text-xs">
           <label
@@ -365,39 +368,32 @@ const SessionRow = memo(function SessionRow({
     active && 'bg-sidebar-accent text-sidebar-accent-foreground'
   );
 
-  if (checked !== undefined) {
-    // 选择模式：整行是标签，点哪里都能勾；运行中、等审批的未归档会话不能选
-    const disabled = busy && !archived;
-    const id = `session-pick-${session.id}`;
-    return (
-      <div className="pb-0.5">
-        <label
-          htmlFor={id}
-          className={cn(rowClass, disabled ? 'cursor-default opacity-60' : 'cursor-pointer')}
-        >
-          <Checkbox
-            id={id}
-            aria-label={t('sessions.bulk.selectSession', { title: session.title })}
-            checked={checked && !disabled}
-            disabled={disabled}
-            onCheckedChange={(on) => onCheck(session.id, on)}
-          />
-          <StatusDot status={status} />
-          <span className="block h-7 min-w-0 flex-1 truncate leading-7" title={session.title}>
-            {session.title}
-          </span>
-        </label>
-      </div>
-    );
-  }
+  // 选择模式：行本身不变，只在左侧留白里叠一个复选框；点行切换勾选、不打开会话。
+  // 运行中、等审批的未归档会话不能选
+  const selecting = checked !== undefined;
+  const pickDisabled = busy && !archived;
 
   return (
     <div className="group/session relative pb-0.5">
+      {selecting && (
+        <Checkbox
+          aria-label={t('sessions.bulk.selectSession', { title: session.title })}
+          checked={checked && !pickDisabled}
+          disabled={pickDisabled}
+          onCheckedChange={(on) => onCheck(session.id, on)}
+          className="absolute top-3 -left-5"
+        />
+      )}
       <button
         type="button"
         aria-current={active ? 'true' : undefined}
-        onClick={() => void select(session.id, session.workspaceId)}
-        className={rowClass}
+        // 选择模式下键盘只停在复选框上
+        tabIndex={selecting ? -1 : undefined}
+        onClick={() => {
+          if (!selecting) void select(session.id, session.workspaceId);
+          else if (!pickDisabled) onCheck(session.id, !checked);
+        }}
+        className={cn(rowClass, selecting && pickDisabled && 'cursor-default')}
       >
         <StatusDot status={status} />
         <span className="min-w-0 flex-1">
@@ -415,7 +411,7 @@ const SessionRow = memo(function SessionRow({
         </span>
       </button>
       {/* 运行中、等审批的会话不能归档或删除；已归档的仍可恢复。 */}
-      {(archived || !busy) && (
+      {!selecting && (archived || !busy) && (
         <div className="pointer-events-none absolute top-1.5 right-1 flex gap-0.5 rounded-md bg-sidebar-accent opacity-0 group-focus-within/session:pointer-events-auto group-focus-within/session:opacity-100 group-hover/session:pointer-events-auto group-hover/session:opacity-100">
           <Button
             variant="ghost"
