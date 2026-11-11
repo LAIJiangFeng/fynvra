@@ -23,6 +23,7 @@ import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
+import { createSnapcompactExtension } from './snapcompact/snapcompact';
 import type { OpenSession } from './supervisor';
 
 /** dispose 前先中止进行中的回合（pi 的 bash 是独立进程组，只在中止时整树结束），最多等这么久 */
@@ -125,7 +126,10 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
             active: () => strategy === 'native' || magicFailed,
             log: logContext,
           });
-    const extensions = [magic?.extension, compactionChain].filter((ext) => ext !== undefined);
+    // Snapcompact re-attaches archived frames whatever the strategy: older entries may carry them.
+    const extensions = [magic?.extension, compactionChain, createSnapcompactExtension()].filter(
+      (ext) => ext !== undefined
+    );
     magic?.attach(sessionManager.getSessionId());
     let gate: ApprovalGate | undefined;
     // 计划模式的实时开关：spawn 时按 spec 初始化，运行中由 set-plan-mode 改写；createRoleSession 每次 run / dispatch_task 读取
