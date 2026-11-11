@@ -23,7 +23,8 @@ async function setup(options: { seed?: boolean; beforeOpen?: () => Promise<void>
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const faux = fauxProvider({
     provider: 'recovery-test',
-    models: [{ id: 'model', contextWindow: 100_000, maxTokens: 1000 }],
+    // Text-only, so snapcompact skips and recovery depends on the model summary the tests script.
+    models: [{ id: 'model', contextWindow: 100_000, maxTokens: 1000, input: ['text'] }],
   });
   const runtime = await ModelRuntime.create({
     authPath: join(dir, 'auth.json'),
