@@ -100,6 +100,7 @@ export function GeneralSettings() {
       <LanguageSection />
       <ShellsSection />
       <NetworkProxySettings />
+      <DangerousActionsSection />
       <WebFetchSection />
 
       <section>
@@ -524,6 +525,37 @@ function DaysSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// --- dangerous actions ---
+/** 完全放行档下保护底线是否仍要确认（preferences.confirmDangerousActions）：已打开的会话立即生效 */
+function DangerousActionsSection() {
+  const confirm = useGeneralPreferencesStore((state) => state.confirmDangerousActions);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const t = useT();
+  const id = useId();
+  return (
+    <section>
+      <SectionHeader title={t('settings.dangerousActions.title')} />
+      <ul className="divide-y rounded-lg border">
+        <li className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <label htmlFor={id} className="font-medium text-sm">
+              {t('settings.dangerousActions.confirm')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">
+              {t('settings.dangerousActions.hint')}
+            </p>
+          </div>
+          <Switch
+            id={id}
+            checked={confirm}
+            onCheckedChange={(checked) => void update({ confirmDangerousActions: checked })}
+          />
+        </li>
+      </ul>
+    </section>
   );
 }
 

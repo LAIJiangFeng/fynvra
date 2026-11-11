@@ -2607,6 +2607,25 @@ describe('createAgentHost approval mode', () => {
     });
   });
 
+  it('carries confirmDangerousActions in the spawn spec and pushes changes to live sessions', async () => {
+    let confirm = true;
+    const env = setup({ resolveConfirmDangerousActions: () => confirm });
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    const spawned = env.sent('spawn-session')[0];
+    expect(spawned?.type === 'spawn-session' && spawned.spec.confirmDangerousActions).toBe(true);
+
+    confirm = false;
+    env.host.setConfirmDangerousActions(false);
+    expect(env.sent('set-confirm-dangerous-actions')).toEqual([
+      {
+        type: 'set-confirm-dangerous-actions',
+        identity: { sessionId: session.id, generation: 1 },
+        enabled: false,
+      },
+    ]);
+  });
+
   it('switches a running session at once and keeps the mode for a crash respawn', async () => {
     const env = setup();
     const session = await createSession(env, 'orchestrator');

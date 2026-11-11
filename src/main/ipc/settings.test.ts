@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   testNetwork: vi.fn(),
   showOpenDialog: vi.fn(),
   nativeTheme: { themeSource: 'light', shouldUseDarkColors: false },
+  setConfirmDangerousActions: vi.fn(),
   describeShells: vi.fn(async () => ({
     shells: [],
     defaultTerminalPath: '/bin/sh',
@@ -108,8 +109,9 @@ beforeAll(async () => {
       messages: [],
     })
   );
-  const { registerSettingsHandlers } = await import('./settings');
+  const { registerSettingsHandlers, onConfirmDangerousActionsChanged } = await import('./settings');
   registerSettingsHandlers();
+  onConfirmDangerousActionsChanged(mocks.setConfirmDangerousActions);
 });
 
 afterAll(() => {
@@ -266,6 +268,17 @@ describe('network settings IPC', () => {
       ok: true,
     });
     expect(preferences()).not.toHaveProperty('networkProxy');
+  });
+
+  it('pushes confirmDangerousActions changes to live sessions', () => {
+    mocks.setConfirmDangerousActions.mockClear();
+    invoke(IPC_CHANNELS.SETTINGS_UPDATE, { confirmDangerousActions: true });
+    invoke(IPC_CHANNELS.SETTINGS_UPDATE, { confirmDangerousActions: true });
+    invoke(IPC_CHANNELS.SETTINGS_UPDATE, { confirmDangerousActions: false });
+    expect(mocks.setConfirmDangerousActions.mock.calls).toEqual([[true], [false]]);
+    expect(invoke(IPC_CHANNELS.SETTINGS_UPDATE, { confirmDangerousActions: 1 })).toMatchObject({
+      ok: false,
+    });
   });
 
   it('rejects arbitrary targets, paths and invalid drafts before networking', async () => {

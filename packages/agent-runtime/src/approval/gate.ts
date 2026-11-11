@@ -59,6 +59,11 @@ export interface ApprovalPolicyHooks {
    * createRoleSession 在内部建审批门，宿主只能经这里拿到它。
    */
   onGate?: (gate: ApprovalGate) => void;
+  /**
+   * 保护底线是否在 `full` 档也要人确认（宿主持有，随时可变），每次 check 都重新读取；缺省或读取失败视为 true（fail-closed）。
+   * 为 false 时 `full` 档命中保护底线也直接放行；其他档位与计划模式不受影响。
+   */
+  confirmProtected?: () => boolean;
 }
 
 export interface ApprovalGateOptions extends ApprovalPolicyHooks {
@@ -124,6 +129,7 @@ const DECISIONS: ReadonlySet<unknown> = new Set<ApprovalDecision>([
  * 在 pi 的 tool_call 上按角色审批档位拦截工具调用：
  * - `supervised` 审批命令、文件写 / 改、MCP、访问网络与插件工具；`auto-edits` 不审批文件写 / 改；`full` 全部放行；
  * - 保护底线（rm -rf、git push 等）在任何档位都要人确认，allowSession 也不豁免；
+ *   `confirmProtected` 返回 false 时 `full` 档不再为它确认；
  * - `allowSession` 记住 kind + 工具名，本会话（本审批门）后续同类自动放行；
  * - 档位可以随时用 setMode 切换（会话级设置，初始值是角色的档位）；
  * - 计划模式（`planMode` 为 true 时）：改文件的工具只能写 Markdown 文档（照原档位审批），其他目标直接拒绝；
@@ -154,7 +160,10 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
       }
     }
     const command = kind === 'command' ? commandOf(call.input) : undefined;
-    const floor = command === undefined ? undefined : protectedAction(command);
+    const floor =
+      command === undefined || (mode === 'full' && !confirmProtectedOn())
+        ? undefined
+        : protectedAction(command);
     // 计划模式：MCP、插件工具与判定不了只读的命令，不论档位都要人确认
     const planConfirm =
       planning &&
@@ -197,6 +206,15 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
   function planModeOn(): boolean {
     try {
       return options.planMode?.() === true;
+    } catch {
+      return true;
+    }
+  }
+
+  /** 开关缺省或读取失败按开着处理（fail-closed） */
+  function confirmProtectedOn(): boolean {
+    try {
+      return options.confirmProtected?.() !== false;
     } catch {
       return true;
     }

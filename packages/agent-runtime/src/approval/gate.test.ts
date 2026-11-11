@@ -148,6 +148,48 @@ describe('createApprovalGate protected floor', () => {
     expect(verdict?.reason).toContain('rm -rf build');
     expect(verdict?.reason).toContain('protected action (rm -rf)');
   });
+
+  describe('confirmProtected', () => {
+    const push = { toolCallId: 'p1', toolName: 'bash', input: { command: 'git push' } };
+    const wipe = { toolCallId: 'p2', toolName: 'bash', input: { command: 'rm -rf build' } };
+    function gateWith(mode: ApprovalMode, confirmProtected: () => boolean) {
+      const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+      return { gate: createApprovalGate({ mode, request, confirmProtected }), request };
+    }
+
+    it('false lets full mode run protected commands without asking, read live', async () => {
+      let confirm = false;
+      const env = gateWith('full', () => confirm);
+      await expect(env.gate.check(push)).resolves.toBeUndefined();
+      await expect(env.gate.check(wipe)).resolves.toBeUndefined();
+      expect(env.request).not.toHaveBeenCalled();
+      confirm = true;
+      await env.gate.check(push);
+      expect(env.request).toHaveBeenCalledTimes(1);
+    });
+
+    it('true (or a throwing getter) keeps asking in full mode', async () => {
+      for (const getter of [
+        () => true,
+        () => {
+          throw new Error('boom');
+        },
+      ]) {
+        const env = gateWith('full', getter);
+        await env.gate.check(push);
+        await env.gate.check(wipe);
+        expect(env.request).toHaveBeenCalledTimes(2);
+      }
+    });
+
+    it('does not change supervised mode either way', async () => {
+      for (const value of [true, false]) {
+        const env = gateWith('supervised', () => value);
+        await env.gate.check(push);
+        expect(env.request.mock.calls[0]?.[0]).toMatchObject({ protectedAction: 'git push' });
+      }
+    });
+  });
 });
 
 describe('createApprovalGate decisions', () => {

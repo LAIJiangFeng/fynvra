@@ -105,6 +105,8 @@ export interface AgentHostDeps {
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   /** 是否允许 web_fetch 访问本机回环地址（生产为 preferences.webFetchAllowLoopback）；缺省关闭 */
   resolveWebFetchAllowLoopback?(): boolean;
+  /** 保护底线在 full 档是否仍要人确认（生产为 preferences.confirmDangerousActions）；缺省关闭 */
+  resolveConfirmDangerousActions?(): boolean;
   /**
    * 插件可见的模型服务（生产为 providers.json 里已启用、有 key、有模型的服务，带 key 明文）；
    * 只在角色挂了插件时读取并下发。缺省不下发
@@ -224,6 +226,8 @@ export interface AgentHostService extends AgentHost {
    * 运行中也可以切；派发出的 worker 会话拒绝。会话还没在 worker 里时只改记录，下次 spawn 用新值。
    */
   setPlanMode(input: SetPlanModeInput): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 「危险操作需要确认」改了：发给 worker 里所有会话立即生效，缓存的 spawn spec 一并改掉 */
+  setConfirmDangerousActions(enabled: boolean): void;
   /** 窗口重新获得焦点：重读未归档会话目录的分支（节流），有变化的工作区广播 sessions:changed */
   refreshBranches(): void;
   /** 会话的 IPC 视图；不存在时 undefined */
@@ -584,6 +588,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const shellPath = await resolveShellPath();
       const networkProxy = deps.resolveNetworkProxy?.();
       const webFetchAllowLoopback = deps.resolveWebFetchAllowLoopback?.() === true;
+      const confirmDangerousActions = deps.resolveConfirmDangerousActions?.() === true;
       const pluginProviders = resources.plugins?.length
         ? await pluginProvidersFor(stored.id)
         : undefined;
@@ -611,6 +616,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(workflows.length > 0 ? { workflows } : {}),
           ...(networkProxy ? { networkProxy } : {}),
           ...(webFetchAllowLoopback ? { webFetchAllowLoopback: true as const } : {}),
+          ...(confirmDangerousActions ? { confirmDangerousActions: true as const } : {}),
           ...(shellPath ? { shellPath } : {}),
           compactionStrategy,
           compactionTimeoutMs: compactionTimeoutMsOf({
@@ -1113,12 +1119,19 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!state.respawn) continue;
       state.respawn = false;
       if (state.spec && deps.store.get(sessionId)) {
-        const { webFetchAllowLoopback: _previous, ...spec } = state.spec;
+        const {
+          webFetchAllowLoopback: _previous,
+          confirmDangerousActions: _confirm,
+          ...spec
+        } = state.spec;
         spawnWith(sessionId, state, {
           ...spec,
           networkProxy: deps.resolveNetworkProxy?.(),
           ...(deps.resolveWebFetchAllowLoopback?.() === true
             ? { webFetchAllowLoopback: true as const }
+            : {}),
+          ...(deps.resolveConfirmDangerousActions?.() === true
+            ? { confirmDangerousActions: true as const }
             : {}),
         });
       }
@@ -1425,6 +1438,20 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
     changed(stored.workspaceId);
     return { ok: true, session: summaryOf(updated) };
+  }
+
+  function setConfirmDangerousActions(enabled: boolean): void {
+    for (const [sessionId, state] of live) {
+      if (state.spec) {
+        const { confirmDangerousActions: _previous, ...spec } = state.spec;
+        state.spec = enabled ? { ...spec, confirmDangerousActions: true } : spec;
+      }
+      if (!state.spawned) continue;
+      const identity = identityOf(sessionId, state);
+      // 发不出去（worker 正在退出）：下次使用前重新 spawn，从设置读到新值
+      if (!send({ type: 'set-confirm-dangerous-actions', identity, enabled }))
+        detach(sessionId, state);
+    }
   }
 
   async function modelOptions({
@@ -1802,6 +1829,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     modelOptions,
     setApprovalMode,
     setPlanMode,
+    setConfirmDangerousActions,
     refreshBranches() {
       // 只重读未归档会话的目录：归档会话与已清理的 worktree 不起 git
       rereadBranches(

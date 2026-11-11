@@ -807,6 +807,11 @@ export const en: MessagesShape<typeof zhCN> = {
       keybindings: 'Shortcuts',
       usage: 'Usage',
     },
+    dangerousActions: {
+      title: 'Safety',
+      confirm: 'Confirm dangerous actions',
+      hint: 'When on, rm -rf, git push and similar actions still ask you even in Full access; when off, they all run automatically',
+    },
     webFetch: {
       title: 'Web reader',
       allowLoopback: 'Allow web_fetch to access local addresses',

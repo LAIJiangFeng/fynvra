@@ -134,6 +134,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     let gate: ApprovalGate | undefined;
     // 计划模式的实时开关：spawn 时按 spec 初始化，运行中由 set-plan-mode 改写；createRoleSession 每次 run / dispatch_task 读取
     let planMode = spec.planMode === true;
+    // 「危险操作需要确认」：spawn 时按 spec，运行中由 set-confirm-dangerous-actions 改写；审批门每次工具调用读取
+    let confirmDangerousActions = spec.confirmDangerousActions === true;
     let created: Awaited<ReturnType<typeof createRoleSession>>;
     try {
       created = await createRoleSession({
@@ -148,6 +150,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
           ? {
               approval: {
                 ...approval,
+                confirmProtected: () => confirmDangerousActions,
                 onGate: (built: ApprovalGate) => {
                   gate = built;
                   approval.onGate?.(built);
@@ -269,6 +272,9 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       },
       setPlanMode: (enabled) => {
         planMode = enabled;
+      },
+      setConfirmDangerousActions: (enabled) => {
+        confirmDangerousActions = enabled;
       },
       abort: () => {
         magic?.interrupt();

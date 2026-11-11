@@ -39,6 +39,13 @@ export function getSettingsFile(): SettingsFile {
   return settingsFile;
 }
 
+let confirmDangerousActionsListener: ((enabled: boolean) => void) | undefined;
+
+/** agent host 建好时登记：「危险操作需要确认」改了就推给已打开的会话（不在这里 import sessions，避免依赖环） */
+export function onConfirmDangerousActionsChanged(listener: (enabled: boolean) => void): void {
+  confirmDangerousActionsListener = listener;
+}
+
 /** 原生主题跟随设置：窗口首帧背景、系统对话框与 prefers-color-scheme 一并切换。 */
 function applyNativeTheme(theme: ThemeMode): void {
   nativeTheme.themeSource = theme;
@@ -174,6 +181,9 @@ export function registerSettingsHandlers(): void {
           for (const test of networkTests.values()) test.abort();
         }
         applyNativeTheme(settings.preferences.theme);
+        if (Object.hasOwn(patch, 'confirmDangerousActions')) {
+          confirmDangerousActionsListener?.(settings.preferences.confirmDangerousActions === true);
+        }
         sendToAllWindows(IPC_CHANNELS.SETTINGS_CHANGED);
       }
       return { ok: true, preferences: settings.preferences };

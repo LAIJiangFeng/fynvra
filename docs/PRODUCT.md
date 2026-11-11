@@ -23,7 +23,7 @@ Fynvra 是一个基于 Electron 和 [pi](https://github.com/earendil-works/pi) S
 
 ### 3. Worker 在独立 worktree 里干活
 每个 worker 会话绑定一个 worktree（分支 `fynvra/<task-slug>`）。worker 的工具：pi 默认编程工具 + `ask_coordinator`（阻塞提问）+ `report_done`（一次性汇报，带 succeeded/failed）。
-worker 的审批档位随主 agent 派发时的当前档位；模型按角色配置，角色没配则用主 agent 当前的。主 agent 与 Worker 都执行真实工具审批：`supervised` 审批命令、文件写入/编辑、MCP、访问网络与插件工具；`auto-edits` 自动接受编辑，命令、MCP、访问网络与插件工具仍需审批；`full` 放行普通操作，但 `rm -rf`、`git push` 等保护底线在任何档位都必须人工确认，会话内允许也不豁免。用户可允许一次、会话内允许或拒绝；超时、Stop、断连按拒绝处理。参数校验、角色白名单、路径边界、编排权限和真正的信息提问仍有效。
+worker 的审批档位随主 agent 派发时的当前档位；模型按角色配置，角色没配则用主 agent 当前的。主 agent 与 Worker 都执行真实工具审批：`supervised` 审批命令、文件写入/编辑、MCP、访问网络与插件工具；`auto-edits` 自动接受编辑，命令、MCP、访问网络与插件工具仍需审批；`full` 放行普通操作。`rm -rf`、`git push` 等保护底线在 `supervised` / `auto-edits` 下必须人工确认，会话内允许也不豁免；在 `full` 下由「设置 → 通用 → 危险操作需要确认」决定（默认关闭：全部自动执行，便于无人值守；开启后同样必须确认），已打开的会话立即生效。用户可允许一次、会话内允许或拒绝；超时、Stop、断连按拒绝处理。参数校验、角色白名单、路径边界、编排权限和真正的信息提问仍有效。
 
 只移除 App 顶部跨会话的全局审批横幅及其详情弹窗（ApprovalAttention）；会话内审批卡、确认操作和三档权限选择保留。OS 桌面审批通知继续遵循通知偏好并按请求去重，实时审批不受普通通知的启动静默或合并节流影响，点击只定位会话，不授权执行。重启不会重放未执行的旧工具；源码修改不会热更新已安装应用或原进程里的待答复调用。
 
