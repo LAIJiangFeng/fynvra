@@ -120,7 +120,7 @@ export const mainZhCN = {
     approvalTitle: '{title} · 待审批',
     compactionWarningTitle: '{title} · 上下文压缩',
     compactionWarningBody:
-      'Magic Context 已暂停会话，历史与输入已保留。修复问题或更换模型后，在会话中点击“重试上下文恢复”；不会转用原生压缩。',
+      'Magic Context 出错，会话已自动改用标准压缩继续，历史已保留。',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}：{detail}',
     done: '完成',

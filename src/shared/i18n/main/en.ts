@@ -132,7 +132,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     approvalTitle: '{title} · Approval needed',
     compactionWarningTitle: '{title} · Context compaction',
     compactionWarningBody:
-      'Magic Context paused the session; history and inputs are preserved. Fix the issue or switch models, then select “Retry context recovery” in the session. Native compaction will not take over.',
+      'Magic Context failed; the session switched to standard compaction automatically and continues. History is preserved.',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}: {detail}',
     done: 'Done',
