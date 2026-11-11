@@ -35,7 +35,10 @@ let service: WorkspaceService | null = null;
 
 /** Main 内共享的工作区注册表（后续 worktree / 会话按 id 取 repoPath 也走这里）。 */
 export function getWorkspaceService(): WorkspaceService {
-  service ??= createWorkspaceService({ settings: getSettingsFile() });
+  service ??= createWorkspaceService({
+    settings: getSettingsFile(),
+    onChanged: () => sendToAllWindows(IPC_CHANNELS.WORKSPACES_CHANGED),
+  });
   return service;
 }
 
@@ -47,8 +50,10 @@ const canceled = (): WorkspaceAddResult => ({
 
 export function registerWorkspaceHandlers(): void {
   registerWorkspaceMenuHandlers();
-  ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, (): WorkspaceListResult => {
+  ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, async (): Promise<WorkspaceListResult> => {
     try {
+      // 用户可能在挂入后 git init；重新检测很便宜（每个工作区一次 rev-parse，5 秒内不重复）
+      await getWorkspaceService().refreshVcs();
       return { ok: true, workspaces: getWorkspaceService().list() };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };

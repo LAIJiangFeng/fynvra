@@ -152,6 +152,35 @@ describe('createOrchestrationRegistry', () => {
     expect(registry.workerHostFor('session_w1')).not.toBeNull();
   });
 
+  it('工作区 vcs 变了：服务空闲后才落盘重开，已完成的任务仍在', async () => {
+    WS2 = { id: 'ws_2', name: 'notes', repoPath: join(dir, 'notes'), vcs: 'none' };
+    const launcher = createFakeLauncher();
+    const registry = make({ launcher });
+    const host = registry.hostFor('session_coord', 'ws_2');
+    const dispatched = await host?.dispatchTask(TASK);
+    if (!dispatched?.ok || !dispatched.dispatch) throw new Error('dispatch failed');
+    await registry
+      .workerHostFor(dispatched.dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Done.');
+    const old = registry.serviceFor('ws_2');
+
+    WS2 = { ...WS2, vcs: 'git' };
+    // in-review 不空闲：继续用旧服务
+    expect(registry.serviceFor('ws_2')).toBe(old);
+    await old?.flush();
+    expect(registry.serviceFor('ws_2')).toBe(old);
+
+    expect(await host?.mergeWorktree({ dispatchId: dispatched.dispatch.id })).toMatchObject({
+      ok: true,
+    });
+    registry.serviceFor('ws_2');
+    await vi.waitFor(() => expect(registry.serviceFor('ws_2')).not.toBe(old));
+    const reopened = registry.serviceFor('ws_2');
+    expect(reopened?.workspace.vcs).toBe('git');
+    await reopened?.ready;
+    expect((await reopened?.snapshot())?.tasks.map((task) => task.status)).toEqual(['completed']);
+  });
+
   it('workerHostFor / serviceForDispatch 跨工作区查找', async () => {
     const launcher = createFakeLauncher();
     const registry = make({ launcher });

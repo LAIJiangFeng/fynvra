@@ -84,6 +84,7 @@ export function registerOrchestrationHandlers(): void {
         const data = await readSessionChanges(
           {
             workspace: (id) => getWorkspaceService().get(id),
+            refreshVcs: (id) => getWorkspaceService().refreshVcs(id),
             session: (id) => sessions?.get(id),
             snapshot: (id) => getOrchestrationRegistry().readSnapshot(id),
           },
