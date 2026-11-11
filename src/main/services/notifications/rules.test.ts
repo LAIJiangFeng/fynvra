@@ -32,7 +32,6 @@ const KINDS: NotificationKind[] = [
   'worker-failed',
   'question',
   'escalation',
-  'compaction-warning',
   'approval',
 ];
 
@@ -50,7 +49,6 @@ describe('allowedBy（设置允许弹哪些）', () => {
       'turn-error',
       'question',
       'escalation',
-      'compaction-warning',
       'approval',
     ]);
   });
@@ -59,18 +57,13 @@ describe('allowedBy（设置允许弹哪些）', () => {
     expect(allowed(prefs({ mainAgentOnly: false }))).toEqual(KINDS);
   });
 
-  it('关掉「提问与审批」仍保留完成、出错和独立压缩告警', () => {
-    expect(allowed(prefs({ askAndApproval: false }))).toEqual([
-      'turn-done',
-      'turn-error',
-      'compaction-warning',
-    ]);
+  it('关掉「提问与审批」仍保留完成与出错', () => {
+    expect(allowed(prefs({ askAndApproval: false }))).toEqual(['turn-done', 'turn-error']);
     expect(allowed(prefs({ askAndApproval: false, mainAgentOnly: false }))).toEqual([
       'turn-done',
       'turn-error',
       'worker-done',
       'worker-failed',
-      'compaction-warning',
     ]);
   });
 
@@ -88,12 +81,6 @@ describe('hiddenByView（聚焦抑制）', () => {
     expect(
       hiddenByView({ ...candidate, kind: 'approval' }, { focused: true, viewingSessionId: MAIN.id })
     ).toBe(false);
-    expect(
-      hiddenByView(
-        { ...candidate, kind: 'compaction-warning' },
-        { focused: true, viewingSessionId: MAIN.id }
-      )
-    ).toBe(true);
   });
 
   it('看着别的会话、没选会话、或窗口没聚焦（最小化、切到别的应用）时照弹', () => {

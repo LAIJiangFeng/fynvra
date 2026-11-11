@@ -130,9 +130,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     unsupported: 'Desktop notifications are not supported on this system',
     errorTitle: '{title} · Error',
     approvalTitle: '{title} · Approval needed',
-    compactionWarningTitle: '{title} · Context compaction',
-    compactionWarningBody:
-      'Magic Context failed; the session switched to standard compaction automatically and continues. History is preserved.',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}: {detail}',
     done: 'Done',

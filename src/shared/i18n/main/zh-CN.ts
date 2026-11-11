@@ -118,9 +118,6 @@ export const mainZhCN = {
     unsupported: '系统不支持桌面通知',
     errorTitle: '{title} · 出错',
     approvalTitle: '{title} · 待审批',
-    compactionWarningTitle: '{title} · 上下文压缩',
-    compactionWarningBody:
-      'Magic Context 出错，会话已自动改用标准压缩继续，历史已保留。',
     labeledTitle: '{title} · {label}',
     approvalBody: '{title}：{detail}',
     done: '完成',

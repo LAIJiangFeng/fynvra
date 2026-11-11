@@ -24,8 +24,6 @@ export type NotificationKind =
   | 'question'
   /** 上报给主 agent（worker 或 Fynvra 自己） */
   | 'escalation'
-  /** Magic Context 交回原生压缩；独立于工具审批 */
-  | 'compaction-warning'
   /** 任何会话的审批请求 */
   | 'approval';
 
@@ -62,9 +60,6 @@ export function allowedBy(preferences: NotificationPreferences, kind: Notificati
     case 'escalation':
     case 'approval':
       return preferences.askAndApproval;
-    case 'compaction-warning':
-      // 服务回退是功能告警，不绑定“提问与审批”开关；总开关仍然生效。
-      return true;
   }
 }
 
@@ -153,16 +148,6 @@ export function createTurnTracker(): TurnTracker {
       }
     },
   };
-}
-
-/** Magic Context 回退提示只用固定安全文案，不带原因详情、prompt 或 provider 错误。 */
-export function compactionWarningCandidate(session: NotifiedSession): NotificationCandidate {
-  return candidate(
-    'compaction-warning',
-    session,
-    translate('notifications.compactionWarningTitle', { title: excerpt(session.title) }),
-    translate('notifications.compactionWarningBody')
-  );
 }
 
 /** 审批请求：任何会话都弹（受「提问与审批」开关管）。 */

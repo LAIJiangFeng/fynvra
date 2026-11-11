@@ -6,7 +6,6 @@ import { createCoalescer } from './coalesce';
 import {
   allowedBy,
   approvalCandidate,
-  compactionWarningCandidate,
   createTurnTracker,
   hiddenByView,
   messageCandidate,
@@ -15,7 +14,7 @@ import {
   type ViewState,
 } from './rules';
 
-/** 普通通知启动静默；实时审批与 Magic Context 回退告警不受限。 */
+/** 普通通知启动静默；实时审批不受限。 */
 export const STARTUP_QUIET_MS = 5_000;
 /** 普通通知同一会话的合并窗口；实时审批不进入合并窗口。 */
 export const COALESCE_MS = 2_000;
@@ -59,7 +58,7 @@ const TRACKED_EVENTS = new Set(['message_end', 'error', 'agent_settled']);
 /**
  * 普通事件 → 桌面通知：启动静默期内丢掉，按开关筛一遍进合并窗口
  * （同一会话 {@link COALESCE_MS} 内只留最后一条）；窗口结束时按当时的设置与窗口状态决定弹不弹。
- * 实时审批不等启动静默或合并窗口，按 request id 去重；Magic Context 回退告警独立按 seq 去重与合并。
+ * 实时审批不等启动静默或合并窗口，按 request id 去重。Magic Context 回退静默进行，不弹通知。
  */
 export function createNotifier(deps: NotifierDeps): Notifier {
   const now = deps.now ?? Date.now;
@@ -68,20 +67,7 @@ export function createNotifier(deps: NotifierDeps): Notifier {
   const turns = createTurnTracker();
   // 只存 id 与到期时间；每次审批到达清掉过期记录。
   const notifiedApprovals = new Map<string, number>();
-  // Main 提供跨 generation 单调递增的会话 seq，只保留有界的最近记录。
-  const noticedSeq = new Map<string, number>();
   const coalescer = createCoalescer<NotificationCandidate>({ windowMs: COALESCE_MS, emit: show });
-
-  function claimSeq(sessionId: string, seq: number): boolean {
-    if (seq <= (noticedSeq.get(sessionId) ?? 0)) return false;
-    noticedSeq.delete(sessionId);
-    noticedSeq.set(sessionId, seq);
-    if (noticedSeq.size > 1_000) {
-      const oldest = noticedSeq.keys().next().value;
-      if (oldest !== undefined) noticedSeq.delete(oldest);
-    }
-    return true;
-  }
 
   function offer(candidate: NotificationCandidate | null): void {
     if (!candidate || now() < quietUntil) return;
@@ -104,14 +90,6 @@ export function createNotifier(deps: NotifierDeps): Notifier {
 
   return {
     sessionEvent({ sessionId, event }) {
-      if (event.type === 'warning' && event.source === 'magic-context') {
-        // 独立于工具执行通知；按会话 seq 去重并与自身窗口合并。
-        if (!claimSeq(sessionId, event.seq)) return;
-        const session = deps.session(sessionId);
-        if (!session || !allowedBy(deps.preferences(), 'compaction-warning')) return;
-        coalescer.push(`compaction:${sessionId}`, compactionWarningCandidate(session));
-        return;
-      }
       if (!TRACKED_EVENTS.has(event.type)) return;
       const session = deps.session(sessionId);
       if (session) offer(turns.push(session, event));
@@ -139,7 +117,6 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     clear() {
       coalescer.clear();
       notifiedApprovals.clear();
-      noticedSeq.clear();
     },
   };
 }

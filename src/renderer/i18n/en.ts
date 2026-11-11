@@ -384,7 +384,6 @@ export const en: MessagesShape<typeof zhCN> = {
     usageTotal: 'Historical total',
     magicContextFallback:
       'Magic Context paused and the fallback compaction did not finish; history and inputs are preserved. Select “Retry context recovery”. If it still fails, restart the app or change models and retry',
-    magicContextFellBack: 'Magic Context failed; switched to standard compaction automatically',
     costHint: 'Historical total cost',
     branchHint: 'Current branch ({cwd})',
     image: 'Image {index}',
