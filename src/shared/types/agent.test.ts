@@ -407,6 +407,7 @@ describe('parseAgentWorkerEvent', () => {
     { type: 'error', source: 'host', message: 'worker crashed', seq: 11 },
     { type: 'command', text: '/mcp login x', seq: 12 },
     { type: 'notice', level: 'warning', text: 'Run /mcp', seq: 13 },
+    { type: 'command_end', aborted: true, seq: 14 },
   ];
 
   it('rejects a notice with an unknown level', () => {

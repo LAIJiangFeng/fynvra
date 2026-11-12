@@ -254,6 +254,39 @@ describe('slash command 与 notice', () => {
   });
 });
 
+describe('command_end', () => {
+  const withRetry = (state: ChatProjection): ChatProjection => {
+    const runtime = runtimeOf(state);
+    if (!runtime) throw new Error('no runtime');
+    const retry = { kind: 'model', phase: 'backoff', attempt: 1, maxAttempts: 3, delayMs: 10 };
+    return {
+      ...state,
+      runtimeBySession: { ...state.runtimeBySession, [S]: { ...runtime, retry } as typeof runtime },
+    };
+  };
+
+  it('command → command_end 回到 idle，结束进度，不设 settledSeq', () => {
+    let state = run([{ type: 'command', text: '/mcp login x' }]);
+    expect(runtimeOf(state)?.status).toBe('running');
+    const settledSeq = runtimeOf(state)?.settledSeq;
+    state = run([{ type: 'command_end', aborted: false }], withRetry(state), 2);
+    expect(runtimeOf(state)).toMatchObject({ status: 'idle', retry: undefined });
+    expect(runtimeOf(state)?.settledSeq).toBe(settledSeq);
+  });
+
+  it('已有 error 时 command_end 落到 error', () => {
+    let state = run([{ type: 'command', text: '/mcp' }]);
+    const runtime = runtimeOf(state);
+    if (!runtime) throw new Error('no runtime');
+    state = {
+      ...state,
+      runtimeBySession: { [S]: { ...runtime, error: 'boom' } },
+    };
+    state = run([{ type: 'command_end', aborted: true }], state, 2);
+    expect(runtimeOf(state)?.status).toBe('error');
+  });
+});
+
 describe('带图片的消息', () => {
   it('回显带着图片；user 的 message_end 确认时保留图片，正文去掉 pi 接上的提示行', () => {
     let state = addOptimisticMessage(emptyProjection(), S, {

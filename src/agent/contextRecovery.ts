@@ -336,11 +336,15 @@ export function createContextRecovery({
       publish();
       events?.emit({ type: 'command', text: input.text });
       commands.add(command);
+      let aborted = true;
       try {
         await command.done;
       } finally {
-        commands.delete(command);
+        // stopCommands() already removed a stopped command.
+        aborted = !commands.delete(command);
       }
+      // A command typed during a turn must not settle it; that turn's agent_settled will.
+      if (!session.isStreaming) events?.emit({ type: 'command_end', aborted });
       return;
     }
     const images: ImageContent[] | undefined = input.images?.map((image) => ({
