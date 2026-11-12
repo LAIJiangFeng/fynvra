@@ -160,7 +160,7 @@ describe('应用更新服务', () => {
     expect(service.finishInstall()).toBe(false);
     service.requestInstall();
     expect(service.finishInstall()).toBe(true);
-    expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true);
     service.finishInstall();
     expect(updater.quitAndInstall).toHaveBeenCalledOnce();
     service.stop();
