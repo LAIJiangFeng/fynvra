@@ -29,6 +29,8 @@ export interface TextFilePreview {
   text: string;
   size: number;
   version: string;
+  /** 超过可编辑上限的大文本只读打开，保存会被 Main 拒绝。 */
+  readOnly?: true;
 }
 
 export type FilePreview = { size: number } & (

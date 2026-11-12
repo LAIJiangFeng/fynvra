@@ -76,6 +76,19 @@ function deferred<T>() {
 }
 
 describe('文件预览状态', () => {
+  it('只读大文件不会被编辑成脏状态', async () => {
+    const api = fakeApi();
+    api.read.mockResolvedValue({
+      ok: true,
+      preview: { ...ready('大').preview, readOnly: true },
+    });
+    const store = createFilesStore(api, 'ws');
+    await store.getState().openFile(file('a'));
+    store.getState().editFile('a', '改动');
+    expect(isFileDirty(store.getState().previews.a)).toBe(false);
+    expect(await store.getState().saveFile('a')).toBe(true);
+    expect(api.write).not.toHaveBeenCalled();
+  });
   it('超限草稿保留并提示大小限制，不发送无效 IPC', async () => {
     const api = fakeApi();
     const store = createFilesStore(api, 'ws');

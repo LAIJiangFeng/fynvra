@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WorkspaceFileEntry } from '@shared/types/files';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFilesService, MAX_TEXT_BYTES } from './files';
+import {
+  createFilesService,
+  MAX_IMAGE_BYTES,
+  MAX_READONLY_TEXT_BYTES,
+  MAX_TEXT_BYTES,
+} from './files';
 
 describe('工作区文件只读服务', () => {
   let base: string;
@@ -156,8 +161,37 @@ describe('工作区文件只读服务', () => {
     }
   });
 
-  it('大文本有明确的大小限制，不把正文送入 Renderer', async () => {
-    await writeFile(join(root, 'huge.txt'), 'a'.repeat(MAX_TEXT_BYTES + 1));
+  it('超过可编辑上限的文本只读打开，拒绝保存；小文件仍可编辑', async () => {
+    await writeFile(join(root, 'small.txt'), 'a');
+    const small = await service.read({ workspaceId: 'ws', fileId: (await entry('small.txt')).id });
+    expect(small.ok && small.preview).not.toHaveProperty('readOnly');
+    const text = 'a'.repeat(MAX_TEXT_BYTES + 1);
+    await writeFile(join(root, 'large.json'), text);
+    const file = await entry('large.json');
+    const result = await service.read({ workspaceId: 'ws', fileId: file.id });
+    expect(result).toMatchObject({
+      ok: true,
+      preview: { kind: 'text', text, size: MAX_TEXT_BYTES + 1, readOnly: true },
+    });
+    if (!result.ok || result.preview.kind !== 'text') throw new Error('应为文本');
+    expect(
+      await service.write({
+        workspaceId: 'ws',
+        fileId: file.id,
+        version: result.preview.version,
+        text: 'b',
+      })
+    ).toEqual({ ok: false, error: 'tooLarge' });
+    expect(await readFile(join(root, 'large.json'), 'utf8')).toBe(text);
+  });
+
+  it('超过 10 MiB 的文本和 2 MiB 的图片仍不预览，不把正文送入 Renderer', async () => {
+    await writeFile(join(root, 'huge.txt'), 'a'.repeat(MAX_READONLY_TEXT_BYTES + 1));
+    const png = Buffer.alloc(MAX_IMAGE_BYTES + 1);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
+    await writeFile(join(root, 'huge.png'), png);
+    const image = await service.read({ workspaceId: 'ws', fileId: (await entry('huge.png')).id });
+    expect(image).toMatchObject({ ok: true, preview: { kind: 'unsupported', reason: 'tooLarge' } });
     const file = await entry('huge.txt');
     const result = await service.read({ workspaceId: 'ws', fileId: file.id });
     expect(result).toMatchObject({

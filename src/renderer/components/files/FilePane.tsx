@@ -38,7 +38,9 @@ export function FilePane({
   const t = useT();
   const draft = useDeferredValue(current?.draft ?? '');
   const preview = current?.preview;
-  const markdown = isMarkdown(file.name);
+  const readOnly = preview?.kind === 'text' && preview.readOnly === true;
+  // 只读大文件只看源码：渲染数 MB 的 Markdown 会卡住界面。
+  const markdown = isMarkdown(file.name) && !readOnly;
   const dirty = isFileDirty(current);
   const mode = current?.mode;
   const findable =
@@ -70,7 +72,7 @@ export function FilePane({
         // 弹窗内的保存由确认按钮处理，不抢占其他编辑界面的快捷键。
         if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         event.preventDefault();
-        save();
+        if (!readOnly) save();
       } else if (matchAction(event, 'find-in-file')) {
         if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         openFind(event);
@@ -78,7 +80,7 @@ export function FilePane({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [active]);
+  }, [active, readOnly]);
 
   return (
     <section
@@ -111,7 +113,7 @@ export function FilePane({
             ))}
           </fieldset>
         )}
-        {preview?.kind === 'text' ? (
+        {preview?.kind === 'text' && !readOnly ? (
           <>
             <span role="status" className="text-muted-foreground">
               {t(current?.saving ? 'files.saving' : dirty ? 'files.unsaved' : 'files.saved')}
@@ -219,57 +221,78 @@ export function FilePane({
           </div>
         </div>
       ) : (
-        <div
-          className={cn(
-            'grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden',
-            markdown &&
-              current.mode === 'split' &&
-              'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] @min-[42rem]:grid-cols-2 @min-[42rem]:grid-rows-[minmax(0,1fr)]'
+        <div className="flex min-h-0 flex-1 flex-col">
+          {readOnly && (
+            <p className="shrink-0 truncate border-b bg-muted/40 px-4 py-1.5 text-muted-foreground text-xs">
+              {t('files.largeReadonly', { size: formatSize(preview.size) })}
+            </p>
           )}
-        >
           <div
             className={cn(
-              'min-h-0 min-w-0 overflow-hidden',
-              markdown && current.mode === 'preview' && 'hidden'
+              'grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden',
+              markdown &&
+                current.mode === 'split' &&
+                'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] @min-[42rem]:grid-cols-2 @min-[42rem]:grid-rows-[minmax(0,1fr)]'
             )}
           >
-            <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
-              <FileEditor
-                name={file.name}
-                value={current.draft}
-                source={preview.text}
-                onChange={(text) => store.getState().editFile(file.id, text)}
-              />
-            </Suspense>
-          </div>
-          {markdown && (
             <div
               className={cn(
-                'relative min-h-0 min-w-0',
-                current.mode === 'edit' && 'hidden',
-                current.mode === 'split' && 'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
+                'min-h-0 min-w-0 overflow-hidden',
+                markdown && current.mode === 'preview' && 'hidden'
               )}
             >
-              <article
-                ref={previewRef}
-                tabIndex={-1}
-                aria-label={t('files.markdownPreview')}
-                className="h-full overflow-auto bg-background px-6 py-4 outline-none"
-              >
-                <FileMarkdownPreview key={preview.version} file={file} store={store} text={draft} />
-              </article>
-              <PreviewFindBar
-                containerRef={previewRef}
-                open={findOpen}
-                focusSignal={findSignal}
-                onClose={() => setFindOpen(false)}
-              />
+              <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
+                <FileEditor
+                  name={file.name}
+                  value={current.draft}
+                  source={preview.text}
+                  readOnly={readOnly}
+                  onChange={(text) => store.getState().editFile(file.id, text)}
+                />
+              </Suspense>
             </div>
-          )}
+            {markdown && (
+              <div
+                className={cn(
+                  'relative min-h-0 min-w-0',
+                  current.mode === 'edit' && 'hidden',
+                  current.mode === 'split' &&
+                    'border-t @min-[42rem]:border-t-0 @min-[42rem]:border-l'
+                )}
+              >
+                <article
+                  ref={previewRef}
+                  tabIndex={-1}
+                  aria-label={t('files.markdownPreview')}
+                  className="h-full overflow-auto bg-background px-6 py-4 outline-none"
+                >
+                  <FileMarkdownPreview
+                    key={preview.version}
+                    file={file}
+                    store={store}
+                    text={draft}
+                  />
+                </article>
+                <PreviewFindBar
+                  containerRef={previewRef}
+                  open={findOpen}
+                  focusSignal={findSignal}
+                  onClose={() => setFindOpen(false)}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>
   );
+}
+
+/** 只读文件必大于 256 KiB，只需 KiB / MiB。 */
+function formatSize(bytes: number): string {
+  return bytes < 1024 * 1024
+    ? `${Math.round(bytes / 1024)} KiB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
 function FileMessage({
