@@ -168,6 +168,11 @@ describe('Mac 自更新下载与安装', () => {
     expect(INSTALL_SCRIPT).toContain('if mv "$target" "$backup"; then');
     expect(INSTALL_SCRIPT).toContain('mv "$backup" "$target"');
     expect(INSTALL_SCRIPT).toContain('/usr/bin/open -n "$target"');
+    // 同卷改名而非复制；先打开新版再删除备份
+    expect(INSTALL_SCRIPT).not.toContain('ditto');
+    expect(INSTALL_SCRIPT).toMatch(
+      /if mv "\$source" "\$target"; then\n\s*\/usr\/bin\/open -n "\$target"\n\s*rm -rf "\$backup" "\$work"/
+    );
     expect(INSTALL_SCRIPT).not.toMatch(/\$[a-z]+[^"a-z]/);
   });
   it('SHA512 不匹配时删除下载并报错', async () => {
