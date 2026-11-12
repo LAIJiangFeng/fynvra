@@ -440,6 +440,18 @@ function applyEvent(
     case 'command':
       // The worker accepted the input as a command: its echo is delivered, no message_end follows.
       return startTurn(confirmUser(slice, fresh, event.text, true));
+    case 'command_end':
+      // A command has no agent_settled; settle without a reply suggestion (no settledSeq).
+      if (slice.runtime.status !== 'running' && slice.runtime.status !== 'waiting-approval') {
+        return slice;
+      }
+      return {
+        ...slice,
+        runtime: {
+          ...endProgress(slice.runtime, now, event.aborted),
+          status: slice.runtime.error === undefined ? 'idle' : 'error',
+        },
+      };
     case 'notice':
       return {
         ...slice,

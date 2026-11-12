@@ -20,6 +20,7 @@ describe('session events', () => {
       | 'warning'
       | 'error'
       | 'command'
+      | 'command_end'
       | 'notice'
     >();
   });

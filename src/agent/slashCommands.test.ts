@@ -262,6 +262,22 @@ describe('extension command dispatch', () => {
     );
     expect(prompt).not.toHaveBeenCalled();
     expect(env.recovery.isIdle()).toBe(true);
+    // The command settles the chat once its notices are out.
+    const ends = env.events.filter((event) => event.type === 'command_end');
+    expect(ends).toMatchObject([{ aborted: false }]);
+    expect(env.events.indexOf(ends[0] as FynvraSessionEvent)).toBeGreaterThan(
+      env.events.findLastIndex((event) => event.type === 'notice')
+    );
+  });
+
+  it('does not settle a running agent turn with command_end', async () => {
+    const env = await open([], (pi) =>
+      pi.registerCommand('hello', { description: 'test', handler: async () => {} })
+    );
+    vi.spyOn(env.session, 'isStreaming', 'get').mockReturnValue(true);
+    await env.recovery.prompt('/hello');
+    expect(env.events.some((event) => event.type === 'command')).toBe(true);
+    expect(env.events.some((event) => event.type === 'command_end')).toBe(false);
   });
 
   it('sends unknown slash text to pi as a prompt', async () => {
@@ -308,6 +324,9 @@ describe('extension command dispatch', () => {
     await until(() => answer !== 'unset');
     expect(answer).toBeUndefined();
     expect(env.notices()).toEqual(['info: Paste the code']);
+    expect(env.events.filter((event) => event.type === 'command_end')).toMatchObject([
+      { aborted: true },
+    ]);
     expect(env.events.findLast((event) => event.type === 'context_runtime')).toMatchObject({
       snapshot: { pendingPromptCount: 0 },
     });
@@ -429,6 +448,11 @@ describe('/mcp login through Fynvra command dispatch', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
     expect(env.recovery.isIdle()).toBe(true);
+    const notice = env.events.findIndex((event) => event.type === 'notice');
+    expect(env.events.findIndex((event) => event.type === 'command_end')).toBeGreaterThan(notice);
+    expect(env.events.find((event) => event.type === 'command_end')).toMatchObject({
+      aborted: false,
+    });
     expect(env.events.findLast((event) => event.type === 'context_runtime')).toMatchObject({
       snapshot: { pendingPromptCount: 0 },
     });

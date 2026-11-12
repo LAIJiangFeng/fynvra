@@ -1030,6 +1030,8 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
       : null;
   },
   command: ({ text }) => (isString(text) ? { type: 'command', text } : null),
+  command_end: ({ aborted }) =>
+    typeof aborted === 'boolean' ? { type: 'command_end', aborted } : null,
   notice: ({ level, text }) => {
     if (level !== 'info' && level !== 'warning' && level !== 'error') return null;
     return isString(text) ? { type: 'notice', level, text } : null;
