@@ -78,7 +78,8 @@ export function installTarget(execPath: string): string | undefined {
   }
 }
 
-// 等旧进程退出后替换；新包写入失败则还原备份，最后重新打开应用。
+// 等旧进程退出后替换；临时目录与 /Applications 同在 Data 卷，mv 只是改名，先重新打开再清理。
+// 新包移入失败则还原备份并打开旧版。
 export const INSTALL_SCRIPT = `#!/bin/sh
 pid="$1"; target="$2"; source="$3"; backup="$4"; work="$5"
 i=0
@@ -89,12 +90,13 @@ while kill -0 "$pid" 2>/dev/null; do
 done
 rm -rf "$backup"
 if mv "$target" "$backup"; then
-  if /usr/bin/ditto "$source" "$target"; then
+  if mv "$source" "$target"; then
+    /usr/bin/open -n "$target"
     rm -rf "$backup" "$work"
-  else
-    rm -rf "$target"
-    mv "$backup" "$target"
+    exit 0
   fi
+  rm -rf "$target"
+  mv "$backup" "$target"
 fi
 /usr/bin/open -n "$target"
 `;
