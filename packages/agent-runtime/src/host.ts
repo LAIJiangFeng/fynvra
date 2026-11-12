@@ -217,3 +217,14 @@ export interface WorkerHost {
     filesModified?: string[]
   ): Promise<HostResult>;
 }
+
+/**
+ * fynvra_config 背后的宿主（Main 的配置宿主）：入参是归一化后的工具参数（含 action），
+ * 成功时 `result` 是给模型看的 JSON 结果（不含 env / headers 的值）
+ */
+export interface ConfigHost {
+  configure(
+    input: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<HostResult<{ result?: unknown }>>;
+}

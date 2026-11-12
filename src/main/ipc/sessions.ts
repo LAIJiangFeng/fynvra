@@ -34,6 +34,7 @@ import {
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
+import { createConfigHost } from '../services/configHost/configHost';
 import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
 import { createSessionArchive, type SessionArchive } from '../services/sessions/archive';
@@ -53,7 +54,7 @@ import { sendToAllWindows } from '../windows/createAppWindow';
 import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
 import { getOrchestrationRegistry } from './orchestration';
-import { getPluginRegistry } from './plugins';
+import { getPluginRegistry, installPlugin, setPluginEnabled } from './plugins';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile, onConfirmDangerousActionsChanged } from './settings';
@@ -162,6 +163,19 @@ function createAppAgentHost(): AgentHostService {
         .catch(() => undefined);
     },
     listWorkflows: () => getWorkflowRegistry().list(),
+    config: createConfigHost({
+      skills: getSkillRegistry(),
+      roles: getRoleStore(),
+      mcp: getMcpRegistry(),
+      workflows: getWorkflowRegistry(),
+      plugins: {
+        list: () => getPluginRegistry().list(),
+        install: installPlugin,
+        setEnabled: setPluginEnabled,
+      },
+      broadcast: (channel) => sendToAllWindows(channel),
+      skillsDir: join(userData, 'skills'),
+    }),
     removeWorktree: async (session, force) => {
       // 工作区已移除：没有编排状态可对照，只删记录（同以前）
       const service = getOrchestrationRegistry().serviceFor(session.workspaceId);

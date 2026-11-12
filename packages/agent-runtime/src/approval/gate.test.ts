@@ -493,3 +493,44 @@ describe('createApprovalGate pi extension', () => {
     expect(env.request).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('fynvra_config', () => {
+  const install: GatedToolCall = {
+    toolCallId: 'c-config',
+    toolName: 'fynvra_config',
+    input: { action: 'skill_install', source: 'D:/skills/foo', roles: ['worker'] },
+  };
+
+  it('asks before a mutating action in supervised mode, with a readable description', async () => {
+    const env = setup('supervised');
+    await expect(env.gate.check(install)).resolves.toBeUndefined();
+    expect(env.requests[0]).toMatchObject({
+      kind: 'command',
+      title: 'Change Fynvra settings',
+      detail: 'Install skill from D:/skills/foo and add it to role(s) worker',
+    });
+  });
+
+  it('does not ask in full mode, nor for list', async () => {
+    const full = setup('full');
+    await expect(full.gate.check(install)).resolves.toBeUndefined();
+    expect(full.request).not.toHaveBeenCalled();
+    const supervised = setup('supervised');
+    await supervised.gate.check({ ...install, input: { action: 'list' } });
+    expect(supervised.request).not.toHaveBeenCalled();
+  });
+
+  it('never puts MCP env values into the approval detail', async () => {
+    const env = setup('supervised', 'deny');
+    const block = await env.gate.check({
+      toolCallId: 'c-mcp-config',
+      toolName: 'fynvra_config',
+      input: {
+        action: 'mcp_upsert',
+        server: { name: 'gh', transport: 'stdio', command: 'npx', env: { TOKEN: 'sekret' } },
+      },
+    });
+    expect(env.requests[0]?.detail).toBe('Add MCP server "gh" (stdio: npx); env keys: TOKEN');
+    expect(block?.reason).not.toContain('sekret');
+  });
+});

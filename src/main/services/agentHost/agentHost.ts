@@ -116,6 +116,10 @@ export interface AgentHostDeps {
   onPluginProviderLookup?(pluginId: string, name: string): void;
   /** 用户定义的工作流（生产为 workflows.json 注册表），orchestrator 会话 spawn 时读取清单；缺省为空 */
   listWorkflows?(): Promise<readonly Workflow[]>;
+  /** fynvra_config 背后的配置宿主（生产为 createConfigHost）；缺省时该工具的调用一律失败 */
+  config?: {
+    invoke(method: string, input: unknown, signal: AbortSignal): Promise<HostCallResult>;
+  };
   /**
    * 删除带 worktree 的会话前删掉它的 worktree 与分支（生产为 OrchestrationService.removeSessionWorktree）；
    * 失败时会话保留。缺省只删注册表记录
@@ -1042,7 +1046,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     state.calls.set(key, controller);
     let result: HostCallResult;
     try {
-      if (kind === 'orchestration') {
+      if (kind === 'config') {
+        result = deps.config
+          ? await deps.config.invoke(method, input, controller.signal)
+          : fail('Fynvra configuration is not available in this session');
+      } else if (kind === 'orchestration') {
         const host = orchestrationHostFor(stored.id, stored.workspaceId);
         result = host
           ? await invokeOrchestrationHost(host, method, input, controller.signal)

@@ -40,6 +40,7 @@ export { type ExecFn, type ExecOptions, type ExecResult, nodeExec } from './exec
 export {
   type CleanupWorktreeInput,
   type CleanupWorktreeOutput,
+  type ConfigHost,
   type DispatchOutcome,
   type DispatchRef,
   type DispatchTaskInput,
@@ -81,6 +82,13 @@ export {
   type RoleResourcePaths,
   type RoleSession,
 } from './session/createRoleSession';
+export {
+  CONFIG_ACTIONS,
+  CONFIG_TOOL_NAME,
+  type ConfigAction,
+  createConfigTool,
+  describeConfigAction,
+} from './tools/configTool';
 export { DOCUMENT_EXTENSIONS, isDocumentPath } from './tools/documentPath';
 export {
   CHECK_OUTPUT_MAX_CHARS,

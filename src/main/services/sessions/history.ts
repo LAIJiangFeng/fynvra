@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { asRecord } from '@shared/guards';
+import { redactToolArgs } from '@shared/types/agent';
 import {
   type ChatImage,
   type ChatMessage,
@@ -222,7 +223,14 @@ function thinkingOf(content: unknown): string {
 function toolCallsOf(content: unknown): ChatToolCall[] {
   return blocksOf(content).flatMap((block): ChatToolCall[] =>
     block.type === 'toolCall' && typeof block.id === 'string' && typeof block.name === 'string'
-      ? [{ id: block.id, name: block.name, args: block.arguments ?? {}, status: 'running' }]
+      ? [
+          {
+            id: block.id,
+            name: block.name,
+            args: redactToolArgs(block.name, block.arguments ?? {}),
+            status: 'running',
+          },
+        ]
       : []
   );
 }

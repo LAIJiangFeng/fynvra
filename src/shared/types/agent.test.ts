@@ -6,6 +6,7 @@ import {
   type AgentWorkerEvent,
   parseAgentCommand,
   parseAgentWorkerEvent,
+  redactToolArgs,
   type SpawnSessionSpec,
 } from './agent';
 
@@ -426,6 +427,14 @@ describe('parseAgentWorkerEvent', () => {
     {
       type: 'host-invoke',
       identity,
+      callId: '5',
+      kind: 'config',
+      method: 'configure',
+      input: { action: 'list' },
+    },
+    {
+      type: 'host-invoke',
+      identity,
       callId: '4',
       kind: 'worker',
       method: 'reportDone',
@@ -695,5 +704,33 @@ describe('parseAgentWorkerEvent', () => {
     ]),
   ])('rejects %s', (_label, raw) => {
     expect(parseAgentWorkerEvent(raw)).toBeNull();
+  });
+});
+
+describe('redactToolArgs', () => {
+  it('masks MCP env / header values of fynvra_config and keeps the keys', () => {
+    const args = {
+      action: 'mcp_upsert',
+      server: {
+        name: 'gh',
+        env: { GITHUB_TOKEN: 'ghp_secret' },
+        headers: [{ key: 'Authorization', value: 'Bearer x' }, { key: 'Keep' }],
+      },
+    };
+    const shown = redactToolArgs('fynvra_config', args);
+    expect(JSON.stringify(shown)).not.toMatch(/ghp_secret|Bearer/);
+    expect(shown).toEqual({
+      action: 'mcp_upsert',
+      server: {
+        name: 'gh',
+        env: { GITHUB_TOKEN: '***' },
+        headers: [{ key: 'Authorization', value: '***' }, { key: 'Keep' }],
+      },
+    });
+  });
+
+  it('leaves other tools alone', () => {
+    const args = { server: { env: { A: 'b' } } };
+    expect(redactToolArgs('bash', args)).toBe(args);
   });
 });

@@ -185,8 +185,44 @@ export interface SpawnSessionSpec {
   planMode?: boolean;
 }
 
-/** host-invoke 的目标：编排工具背后的 OrchestrationHost，或 worker 工具背后的 WorkerHost。 */
-export type HostKind = 'orchestration' | 'worker';
+/**
+ * host-invoke 的目标：编排工具背后的 OrchestrationHost、worker 工具背后的 WorkerHost，
+ * 或 fynvra_config 背后的 Main 配置宿主（所有会话都有）。
+ */
+export type HostKind = 'orchestration' | 'worker' | 'config';
+
+/** 配置 Fynvra 的 agent 工具名（与 agent-runtime 的 CONFIG_TOOL_NAME 相同） */
+export const CONFIG_TOOL_NAME = 'fynvra_config';
+const SECRET_MASK = '***';
+
+/**
+ * fynvra_config 的参数可能带 MCP env / headers 明文：展示（会话事件、历史投影）前把值换成掩码，只留键名。
+ * 其他工具原样返回。
+ */
+export function redactToolArgs(toolName: string, args: unknown): unknown {
+  if (toolName !== CONFIG_TOOL_NAME) return args;
+  const record = asRecord(args);
+  const server = asRecord(record?.server);
+  if (!record || !server) return args;
+  const masked: Record<string, unknown> = { ...server };
+  for (const key of ['env', 'headers'] as const) {
+    if (server[key] !== undefined) masked[key] = maskSecretFields(server[key]);
+  }
+  return { ...record, server: masked };
+}
+
+function maskSecretFields(raw: unknown): unknown {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => {
+      const field = asRecord(item);
+      return field
+        ? { key: field.key, ...(field.value !== undefined ? { value: SECRET_MASK } : {}) }
+        : SECRET_MASK;
+    });
+  }
+  const map = asRecord(raw);
+  return map ? Object.fromEntries(Object.keys(map).map((key) => [key, SECRET_MASK])) : SECRET_MASK;
+}
 
 /** Host 调用结果的线上形态（agent-runtime 的 HostResult）：失败带 error，成功时其余字段原样透传。 */
 export type HostCallResult =
@@ -339,7 +375,7 @@ const APPROVAL_KIND_SET: Record<ApprovalKind, true> = {
   network: true,
   plugin: true,
 };
-const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true };
+const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true, config: true };
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };
 
 function memberOf<T extends string>(set: Record<T, true>, value: unknown): value is T {
