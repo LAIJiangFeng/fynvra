@@ -88,6 +88,7 @@ Markdown 文件默认以只读预览打开，可切换到源码编辑或双栏�
 - 分层构建：electron-vite 三段构建，结合 Zustand、Tailwind 4、Biome 与 Vitest；应用元数据通过 settings.json 持久化。
 - 进程隔离：明确 IPC 与 Agent Worker 的安全边界，会话 jsonl 为正文权威源（见 `AGENTS.md`）。
 - 资源配置：统一管理 Providers、Skills 与 MCP，支持扫描导入本机工具配置（模型服务可从 Claude Code、Codex、CC Switch、pi 导入；pi 中命令形式的 key 不会执行，需手动填写）。
+- 对话里配置：用户在对话里要求时，主 agent 与 worker 可用 `fynvra_config` 安装技能并挂到角色、增改 MCP 服务器与工作流、安装 / 启停插件、调整角色的技能，效果与在「设置」里操作相同；改动按会话审批档位确认，密钥值不回显。
 - 任务验收：内置差异查看、三档审批与 worktree 验收合并流程。
 
 ## 明确不做（v1）

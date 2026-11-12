@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, rename, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
@@ -234,17 +234,7 @@ export function registerPluginHandlers(): void {
     async (_event, raw: unknown): Promise<PluginToggleResult> => {
       const input = parseToggle(raw);
       if (!input) return { ok: false, error: translate('common.invalidArgs') };
-      try {
-        const plugin = await getPluginRegistry().setEnabled(input.id, input.enabled);
-        if (!plugin) return { ok: false, error: translate('plugins.notFound') };
-        sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
-        return { ok: true, plugin };
-      } catch (error) {
-        return {
-          ok: false,
-          error: translate('plugins.updateFailed', { error: errorMessage(error) }),
-        };
-      }
+      return setPluginEnabled(input.id, input.enabled);
     }
   );
 
@@ -392,6 +382,46 @@ export function registerPluginHandlers(): void {
 }
 
 /** 日志只带错误码，不带 fs 错误里的路径 */
+/** 启用 / 停用插件并广播（plugins:toggle 与 fynvra_config 共用） */
+export async function setPluginEnabled(id: string, enabled: boolean): Promise<PluginToggleResult> {
+  try {
+    const plugin = await getPluginRegistry().setEnabled(id, enabled);
+    if (!plugin) return { ok: false, error: translate('plugins.notFound') };
+    sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+    return { ok: true, plugin };
+  } catch (error) {
+    return {
+      ok: false,
+      error: translate('plugins.updateFailed', { error: errorMessage(error) }),
+    };
+  }
+}
+
+/**
+ * fynvra_config 的 plugin_install：远程来源（npm: / git: / https）走 plugins:install 的安装，
+ * 绝对本地路径走「添加本地插件」的校验 + 复制登记（不弹对话框）；与界面共用同一把锁并广播
+ */
+export function installPlugin(source: string): Promise<PluginAddResult> {
+  const remote = parseRemotePluginSource(source);
+  if (!remote && !isAbsolute(source)) {
+    return Promise.resolve({
+      ok: false,
+      code: 'invalid',
+      error: translate('plugins.invalidSource'),
+    });
+  }
+  return exclusive(busyResult, async () => {
+    try {
+      if (remote) return await installRemote(remote.source, remote.kind);
+      const result = await registerLocal(source);
+      if (result.ok) sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED);
+      return result;
+    } catch (error) {
+      return { ok: false, code: 'failed', error: errorMessage(error) };
+    }
+  });
+}
+
 function scanWarning(error: unknown): string {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   return typeof code === 'string' ? code : 'unknown';

@@ -19,7 +19,7 @@ import {
 import type { Role, ThinkingLevel } from '@fynvra/core';
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
 import { type ExecFn, nodeExec } from '../exec';
-import type { OrchestrationHost, WorkerHost } from '../host';
+import type { ConfigHost, OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
 import { bindSessionExtensions, emitSessionShutdown } from '../pi/lifecycle';
 import { createRoleMcpExtensions, type McpServerConfig } from '../pi/mcp';
@@ -28,6 +28,7 @@ import {
   DIRECT_PLAN_MODE_PROMPT,
   PLAN_MODE_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { createConfigTool } from '../tools/configTool';
 import {
   createOrchestrationTools,
   type RoleOption,
@@ -82,6 +83,8 @@ export interface CreateRoleSessionOptions {
   /** 提供时本会话是 worker：加 ask_coordinator / report_done 与 worker 契约 */
   workerHost?: WorkerHost | null;
   workerTools?: WorkerToolsOptions;
+  /** 提供时加 fynvra_config（任何工具策略都加）：经宿主改 Fynvra 的技能 / MCP / 工作流 / 插件 / 角色技能 */
+  configHost?: ConfigHost | null;
   /** dispatch_task 可选的角色（orchestrator 用） */
   roles?: readonly RoleOption[];
   /** dispatch_task 可选的工作流（orchestrator 用）；非空时工具参数与提示词说明它们 */
@@ -273,7 +276,10 @@ function selectTools(
             env: commandEnv(process.env),
           })) satisfies ExecFn)
       : undefined);
-  const workerTools = workerToolset?.tools ?? [];
+  const workerTools = [
+    ...(workerToolset?.tools ?? []),
+    ...(options.configHost ? [createConfigTool(options.configHost)] : []),
+  ];
   // 描述不说「唯一能写的文件」：all 策略还有 pi 的 write / edit（名字不冲突）
   const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
   // 所有工具策略都有 web_fetch；代理与命令一致，取会话加载时的 commandEnv 快照
