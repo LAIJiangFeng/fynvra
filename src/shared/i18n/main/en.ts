@@ -46,6 +46,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     exitHint:
       'Keep drafts to restore them next time, or discard them explicitly. Cancel returns to the editor without stopping running tasks.',
   },
+  terminals: {
+    cwdMissing: 'Terminal failed to start: workspace folder does not exist ({cwd})',
+    spawnFailed: 'Terminal failed to start: {error} (shell: {shell}, folder: {cwd})',
+  },
   files: {
     unsavedTitle: 'Unsaved file changes',
     unsavedMessage: 'Some files have unsaved changes or are still being saved.',

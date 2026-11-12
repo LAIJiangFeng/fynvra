@@ -39,6 +39,10 @@ export const mainZhCN = {
     keep: '保留草稿并离开',
     exitHint: '保留草稿可在下次打开时恢复，也可明确放弃。取消会返回编辑器，不会停止运行中的任务。',
   },
+  terminals: {
+    cwdMissing: '终端启动失败：工作区目录不存在（{cwd}）',
+    spawnFailed: '终端启动失败：{error}（shell: {shell}，目录: {cwd}）',
+  },
   files: {
     unsavedTitle: '文件修改尚未保存',
     unsavedMessage: '仍有未保存或正在保存的文件。',
