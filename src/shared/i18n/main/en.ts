@@ -32,6 +32,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     notReady: 'The update is not ready, or an installation confirmation is already open',
     installTitle: 'Install Fynvra update',
     installFailed: 'Update installation failed; reopen the app to retry',
+    macNotWritable:
+      'Fynvra is not running from a writable Applications folder, so it cannot replace itself. Move Fynvra to Applications and install the new version manually from GitHub Releases once',
     installMessage: 'Restart and install version {version}?',
     installDetail:
       'Running tasks will stop. Unsaved files require a separate confirmation. Canceling exit cancels installation.',
@@ -45,6 +47,10 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     keep: 'Keep drafts and leave',
     exitHint:
       'Keep drafts to restore them next time, or discard them explicitly. Cancel returns to the editor without stopping running tasks.',
+  },
+  terminals: {
+    cwdMissing: 'Terminal failed to start: workspace folder does not exist ({cwd})',
+    spawnFailed: 'Terminal failed to start: {error} (shell: {shell}, folder: {cwd})',
   },
   files: {
     unsavedTitle: 'Unsaved file changes',

@@ -15,6 +15,8 @@ extraResources:
     to: magic-context
 asarUnpack:
   - node_modules/node-pty/**
+# 签名前给 node-pty 的 spawn-helper 补执行位；electron-builder.mac-manual.yml 经 extends 继承
+afterPack: scripts/afterPack.cjs
 win:
   target: nsis
   # 显式提供多尺寸 ico，避免依赖构建时由 png 转换；exe 资源图标需要 signAndEditExecutable（默认开启）。

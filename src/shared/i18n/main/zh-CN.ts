@@ -29,6 +29,8 @@ export const mainZhCN = {
     notReady: '更新尚未下载完成，或已有安装确认正在进行',
     installTitle: '安装 Fynvra 更新',
     installFailed: '更新安装失败，请重新打开应用重试',
+    macNotWritable:
+      'Fynvra 不在可写的应用程序目录中运行，无法自动替换。请将 Fynvra 拖入“应用程序”文件夹，并从 GitHub Releases 下载新版手动安装一次',
     installMessage: '重启并安装版本 {version}？',
     installDetail: '正在运行的任务将停止。未保存的文件仍会单独确认，取消退出不会安装更新。',
     install: '重启并安装',
@@ -38,6 +40,10 @@ export const mainZhCN = {
     limits: '标签存储已达上限，请关闭标签或缩小草稿（每份最多 256 KiB），文本未被截断',
     keep: '保留草稿并离开',
     exitHint: '保留草稿可在下次打开时恢复，也可明确放弃。取消会返回编辑器，不会停止运行中的任务。',
+  },
+  terminals: {
+    cwdMissing: '终端启动失败：工作区目录不存在（{cwd}）',
+    spawnFailed: '终端启动失败：{error}（shell: {shell}，目录: {cwd}）',
   },
   files: {
     unsavedTitle: '文件修改尚未保存',

@@ -11,9 +11,10 @@ describe('自动更新支持的平台', () => {
       expect(updateUnavailableReason(true, platform, arch, 'signed')).toBeUndefined();
     }
   });
-  it('无证书 Mac 包或未知打包标记只允许手动更新，不能假报支持自动安装', () => {
+  it('无证书 Mac 包启用自替换更新，未知打包标记只允许手动更新', () => {
     for (const arch of ['x64', 'arm64']) {
-      for (const mode of [undefined, 'manual', 'unknown', true, {}]) {
+      expect(updateUnavailableReason(true, 'darwin', arch, 'manual')).toBeUndefined();
+      for (const mode of [undefined, 'Manual', 'unknown', true, {}]) {
         expect(updateUnavailableReason(true, 'darwin', arch, mode)).toBe('manual-install');
       }
     }

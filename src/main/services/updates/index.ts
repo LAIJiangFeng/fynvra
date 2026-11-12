@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asRecord } from '@shared/guards';
 import { IPC_CHANNELS } from '@shared/types/ipc';
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, net } from 'electron';
 import electronUpdater from 'electron-updater';
 import { translate } from '../../i18n';
 import { showAppMessageBox } from '../../ipc/appDialog';
 import { sendToAllWindows } from '../../windows/createAppWindow';
 import { showDesktopNotification } from '../notifications/desktop';
+import { createMacSelfUpdater } from './macSelfUpdater';
 import { updateUnavailableReason } from './platform';
 import { createUpdateService, type UpdateService } from './service';
 
@@ -25,14 +26,28 @@ function macUpdateMode(): unknown {
 }
 
 export function getUpdateService(): UpdateService {
-  service ??= createUpdateService({
-    updater: electronUpdater.autoUpdater,
+  if (service) return service;
+  const mode = macUpdateMode();
+  service = createUpdateService({
+    // 无证书 Mac 包不能交给 Squirrel，改用自替换更新；签名包与 Windows 不变。
+    updater:
+      mode === 'manual'
+        ? createMacSelfUpdater({
+            currentVersion: app.getVersion(),
+            arch: process.arch,
+            execPath: process.execPath,
+            tempDir: app.getPath('temp'),
+            fetch: (url) => net.fetch(url),
+            quit: () => setImmediate(() => app.quit()),
+            notWritableMessage: () => translate('updates.macNotWritable'),
+          })
+        : electronUpdater.autoUpdater,
     currentVersion: app.getVersion(),
     unavailableReason: updateUnavailableReason(
       app.isPackaged,
       process.platform,
       process.arch,
-      macUpdateMode()
+      mode
     ),
     broadcast: (state) => sendToAllWindows(IPC_CHANNELS.UPDATES_CHANGED, state),
     notify: (version) =>

@@ -136,7 +136,7 @@ jobs:
       - name: Package Mac without Apple credentials
         if: steps.signing.outputs.signing_mode == 'manual'
         run: |
-          echo "Mac packages use ad-hoc signatures and require manual installation; Apple notarization and automatic updates are disabled." >> "$GITHUB_STEP_SUMMARY"
+          echo "Mac packages use ad-hoc signatures: first install is manual, Apple notarization is disabled, and updates use the in-app self-updater (latest-mac-manual.yml)." >> "$GITHUB_STEP_SUMMARY"
           pnpm exec electron-builder --config electron-builder.mac-manual.yml --mac --x64 --arm64 --publish never "--config.extraMetadata.version=$RELEASE_VERSION"
       - name: Verify signatures and architectures
         shell: bash
@@ -150,6 +150,11 @@ jobs:
             fi
             bundle="dist/$directory/Fynvra.app"
             test "$(lipo -archs "$bundle/Contents/MacOS/Fynvra")" = "$expected"
+            helpers=$(find "$bundle/Contents/Resources/app.asar.unpacked/node_modules/node-pty" -name spawn-helper -type f)
+            if [ -z "$helpers" ]; then echo "::error::node-pty spawn-helper missing in $bundle"; exit 1; fi
+            for helper in $helpers; do
+              if [ ! -x "$helper" ]; then echo "::error::$helper is not executable"; exit 1; fi
+            done
             codesign --verify --deep --strict --verbose=2 "$bundle"
           done
       - name: Verify Developer ID and notarization
@@ -226,7 +231,7 @@ jobs:
           notes="Windows and Mac installers. See docs/RELEASE.md for installation and update details."
           if [ "$MAC_SIGNING_MODE" = manual ]; then
             title="$title (Mac manual install)"
-            notes="Mac 包未使用 Apple Developer ID 证书签名或公证，仅使用 ad-hoc 签名。请从 DMG 拖入应用程序后手动安装；macOS 可能拦截启动，需要在系统设置的隐私与安全性中针对应用选择仍要打开。Mac 自动更新不可用，新版需重新下载覆盖安装。Windows 自动更新正常提供。"
+            notes="Mac 包未使用 Apple Developer ID 证书签名或公证，仅使用 ad-hoc 签名。请从 DMG 拖入应用程序后手动安装；macOS 可能拦截启动，需要在系统设置的隐私与安全性中针对应用选择仍要打开。已安装的支持自更新的 Mac 版本会通过应用内更新自动下载并替换（更新后 macOS 可能再次询问文件夹权限）；更早的手动版需手动安装一次本版本。Windows 自动更新正常提供。"
           elif [ "$MAC_SIGNING_MODE" != signed ]; then
             echo "::error::Unknown Mac signing mode"
             exit 1
@@ -242,7 +247,7 @@ jobs:
           assets=(
             "artifacts/Fynvra-$RELEASE_VERSION-x64-setup.exe"
             "artifacts/Fynvra-$RELEASE_VERSION-x64-setup.exe.blockmap"
-            artifacts/latest.yml artifacts/SHA256SUMS artifacts/SHA256SUMS-mac
+            artifacts/latest.yml artifacts/SHA256SUMS artifacts/SHA256SUMS-mac artifacts/latest-mac-manual.yml
           )
           for arch in x64 arm64; do
             assets+=("artifacts/Fynvra-$RELEASE_VERSION-mac-$arch.dmg" "artifacts/Fynvra-$RELEASE_VERSION-mac-$arch.zip")

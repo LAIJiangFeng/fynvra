@@ -20,7 +20,7 @@ vi.mock('./workspaces', () => ({
   getWorkspaceService: () => ({ get: () => ({ repoPath: '/registered-repo' }) }),
 }));
 vi.mock('../services/shells', () => ({
-  shellDetectionDeps: () => ({ platform: 'linux' }),
+  shellDetectionDeps: () => ({ platform: 'linux', existsSync: () => true }),
   availableShells: async () => [],
   resolveTerminalShell: () => ({ path: '/bin/bash', args: ['-l'] }),
 }));
