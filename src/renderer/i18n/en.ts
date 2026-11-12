@@ -147,6 +147,7 @@ export const en: MessagesShape<typeof zhCN> = {
     pickFile: 'Select a file to preview',
     pickFileHint: 'Select a file in the right explorer to preview or edit it in a central tab',
     readonly: 'Read only',
+    largeReadonly: 'Large file ({size}), opened read-only',
     closeFile: 'Close {name}',
     editor: 'Edit {name}',
     markdownPreview: 'Markdown preview',
@@ -194,7 +195,7 @@ export const en: MessagesShape<typeof zhCN> = {
     tooLarge: 'File is too large to preview',
     unreadable: 'Could not parse this document',
     limits:
-      'Supports UTF-8 text up to 256 KiB, PNG / JPEG / GIF / WebP images up to 2 MiB, and PDF / Word documents up to 32 MiB',
+      'Supports UTF-8 text (editable up to 256 KiB, read-only up to 10 MiB), PNG / JPEG / GIF / WebP images up to 2 MiB, and PDF / Word documents up to 32 MiB',
     document: {
       pdfPreview: 'PDF preview',
       wordPreview: 'Word preview',

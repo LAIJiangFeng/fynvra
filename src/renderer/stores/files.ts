@@ -308,7 +308,8 @@ export function createFilesStore(api: FilesApi | undefined, workspaceId: string)
 
       editFile(fileId, text) {
         const current = get().previews[fileId];
-        if (current?.preview?.kind !== 'text') return;
+        // 只读大文件不能变脏：草稿持久化有 256 KiB 上限。
+        if (current?.preview?.kind !== 'text' || current.preview.readOnly) return;
         fileRequests.delete(fileId);
         set((state) => ({
           previews: { ...state.previews, [fileId]: { ...current, draft: text, loading: false } },
