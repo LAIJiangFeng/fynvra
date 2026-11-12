@@ -20,7 +20,7 @@ import { useKeybindingsStore } from '@/stores/settings';
 import { InlineMessage, SectionHeader } from './common';
 
 /** 分组标题在字典 settings.keybindings.<作用域> */
-const SCOPES: readonly KeyScope[] = ['global', 'composer'];
+const SCOPES: readonly KeyScope[] = ['global', 'composer', 'files'];
 
 /** 冲突对象的名字：另一个动作，或保留的编辑键（全选、复制……） */
 function conflictName(conflict: KeyConflict, t: T): string {

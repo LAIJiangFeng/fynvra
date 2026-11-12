@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { BrowserWindow, type BrowserWindowConstructorOptions, nativeTheme, shell } from 'electron';
 import winIcon from '../../../resources/icon.ico?asset';
 import pngIcon from '../../../resources/icon.png?asset';
+import { getSettingsFile } from '../ipc/settings';
 import { registerFileUnloadGuard } from './fileUnloadGuard';
 import { registerZoomShortcuts } from './zoomShortcuts';
 
@@ -39,7 +40,7 @@ export function createAppWindow(options: AppWindowOptions): BrowserWindow {
 
   win.once('ready-to-show', () => win.show());
   registerFileUnloadGuard(win);
-  registerZoomShortcuts(win.webContents);
+  registerZoomShortcuts(win.webContents, () => getSettingsFile().read().preferences.keybindings);
   win.on('maximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, true));
   win.on('unmaximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, false));
 
