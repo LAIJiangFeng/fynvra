@@ -131,7 +131,8 @@ async function hangingServer() {
 
 async function open(
   servers: { name: string; url: string; timeout?: number }[],
-  extension?: (pi: ExtensionAPI) => void
+  extension?: (pi: ExtensionAPI) => void,
+  commandHintMs?: number
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'fynvra-slash-'));
   // pi keeps MCP OAuth tokens in <PI_CODING_AGENT_DIR>/mcp-auth.json.
@@ -194,6 +195,8 @@ async function open(
     timeoutMs: 30_000,
     contextWindow: () => session.model?.contextWindow ?? 0,
     log: () => {},
+    mcpServers: servers.map((server) => server.name),
+    ...(commandHintMs ? { commandHintMs } : {}),
   });
   const subscription = subscribeNormalized(
     session,
@@ -212,6 +215,20 @@ async function open(
   const notices = () =>
     events.flatMap((event) => (event.type === 'notice' ? [`${event.level}: ${event.text}`] : []));
   return { dir, recovery, session, events, notices, openUrl };
+}
+
+function spyOnMcp(session: Awaited<ReturnType<typeof open>>['session']) {
+  // getCommand returns a fresh object per call; spy on the one the dispatch receives.
+  const runner = session.extensionRunner;
+  const handler = vi.fn();
+  const getCommand = runner.getCommand.bind(runner);
+  vi.spyOn(runner, 'getCommand').mockImplementation((name) => {
+    const command = getCommand(name);
+    if (name !== 'mcp' || !command) return command;
+    handler.mockImplementation(command.handler);
+    return { ...command, handler };
+  });
+  return handler;
 }
 
 async function until(check: () => boolean, ms = 10_000) {
@@ -315,6 +332,38 @@ describe('extension command dispatch', () => {
     expect(env.notices()).toHaveLength(1);
     expect(env.notices()[0]).toMatch(/^warning: \/pick asked for an interactive choice/);
   });
+
+  const waitFor = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const slow = (notifyFirst: boolean) => (pi: ExtensionAPI) =>
+    pi.registerCommand('slow', {
+      description: 'test',
+      handler: async (_args, ctx) => {
+        if (notifyFirst) ctx.ui.notify('working');
+        await waitFor(300);
+      },
+    });
+
+  it('hints once when a command stays silent', async () => {
+    const env = await open([], slow(false), 50);
+    await env.recovery.prompt('/slow');
+    expect(env.notices()).toEqual(['info: /slow is still running. Press Stop to cancel.']);
+  });
+
+  it('does not hint after the command notified', async () => {
+    const env = await open([], slow(true), 50);
+    await env.recovery.prompt('/slow');
+    expect(env.notices()).toEqual(['info: working']);
+  });
+
+  it('does not hint after Stop', async () => {
+    const env = await open([], slow(false), 100);
+    const run = env.recovery.prompt('/slow');
+    await waitFor(20);
+    await env.recovery.abort();
+    await run;
+    await waitFor(200);
+    expect(env.notices()).toEqual([]);
+  });
 });
 
 describe('/mcp login through Fynvra command dispatch', () => {
@@ -364,6 +413,62 @@ describe('/mcp login through Fynvra command dispatch', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     // The cancelled sign-in's own "Sign-in cancelled." is dropped after Stop.
     expect(env.notices()).toHaveLength(shown);
+  }, 30_000);
+
+  it('fails at once on a server this session does not have', async () => {
+    const env = await open([
+      { name: 'fake', url: await hangingServer(), timeout: 600 },
+      { name: 'other', url: await hangingServer(), timeout: 600 },
+    ]);
+    const prompt = vi.spyOn(env.session, 'prompt');
+    const handler = spyOnMcp(env.session);
+    await env.recovery.prompt('/mcp login mobbin');
+    expect(env.notices()).toEqual([
+      'error: No MCP server named "mobbin" in this session. This session\'s servers: fake, other. Sign in from a session whose role has "mobbin", or add it to this role in Settings.',
+    ]);
+    expect(handler).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(env.recovery.isIdle()).toBe(true);
+    expect(env.events.findLast((event) => event.type === 'context_runtime')).toMatchObject({
+      snapshot: { pendingPromptCount: 0 },
+    });
+  });
+
+  it('lists none when the session has no MCP servers', async () => {
+    const env = await open([]);
+    await env.recovery.prompt('/mcp logout mobbin');
+    expect(env.notices()[0]).toContain("This session's servers: none.");
+  });
+
+  it('treats - and _ in server names as equal', async () => {
+    const origin = await fakeOAuthMcp();
+    const env = await open([{ name: 'fake-server', url: `${origin}/mcp` }]);
+    const handler = spyOnMcp(env.session);
+    const run = env.recovery.prompt('/mcp login fake_server');
+    await until(() => env.openUrl.mock.calls.length > 0);
+    expect(handler).toHaveBeenCalledWith('login fake-server', expect.anything());
+    expect(env.notices().some((text) => text.startsWith('error:'))).toBe(false);
+    await env.recovery.abort();
+    await run;
+  }, 30_000);
+
+  it('hints while /mcp waits for servers still connecting', async () => {
+    const origin = await fakeOAuthMcp();
+    const env = await open(
+      [
+        { name: 'fake', url: `${origin}/mcp` },
+        { name: 'slow', url: await hangingServer(), timeout: 600 },
+      ],
+      undefined,
+      50
+    );
+    const run = env.recovery.prompt('/mcp login fake');
+    await until(() => env.notices().length > 0);
+    expect(env.notices()).toEqual([
+      "info: Waiting for this session's MCP servers to finish connecting; a freshly started session can take a minute or two. Press Stop to cancel.",
+    ]);
+    await env.recovery.abort();
+    await run;
   }, 30_000);
 
   it('a server still connecting holds /mcp at `await pending`; Stop releases it', async () => {
