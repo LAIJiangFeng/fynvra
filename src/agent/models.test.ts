@@ -8,7 +8,8 @@ import {
   type Model,
   normalizeContext,
 } from '@earendil-works/pi-ai';
-import { stream } from '@earendil-works/pi-ai/api/anthropic-messages';
+import { stream, streamSimple } from '@earendil-works/pi-ai/api/anthropic-messages';
+import { streamSimple as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ThinkingLevel } from '@fynvra/core';
 import type { ModelQuery } from '@shared/types/agent';
@@ -199,6 +200,89 @@ describe('createModelRegistry', () => {
         (await resolveAt('https://api.anthropic.com', KEY_B)).model
       );
       expect(JSON.stringify(official.messages)).toContain('tool_removal');
+    });
+  });
+
+  describe('relays: the selected thinking effort goes at request level', () => {
+    const context = normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 0 }] });
+    /** Run pi's real stream and capture the request payload before any network I/O. */
+    async function capture<T>(
+      run: typeof streamSimple,
+      model: Model<Api>,
+      reasoning: 'max' | 'high'
+    ): Promise<T> {
+      let payload: T | undefined;
+      const result = await run(model as Model<'anthropic-messages'>, context, {
+        apiKey: 'k',
+        reasoning,
+        onPayload: (params) => {
+          payload = params as T;
+          throw new Error('captured');
+        },
+      }).result();
+      expect(result.stopReason).toBe('error');
+      if (!payload) throw new Error('no payload');
+      return payload;
+    }
+    type AnthropicPayload = {
+      thinking?: { type: string };
+      output_config?: { effort?: string };
+      messages: { role: string; output_config?: unknown }[];
+    };
+    const resolve = (api: string, baseUrl: string, modelId: string, providerId = KEY_A) =>
+      createModelRegistry(runtime).resolve({ providerId, api, baseUrl, apiKey: 'k', modelId });
+
+    it('sends output_config.effort = the selected level for claude-opus-5-5 through an Anthropic relay', async () => {
+      const { model } = await resolve(
+        'anthropic-messages',
+        'https://relay.example.com',
+        'claude-opus-5-5'
+      );
+      expect(model.compat).toMatchObject({ supportsMidConvoEffort: false });
+      for (const level of ['max', 'high'] as const) {
+        const payload = await capture<AnthropicPayload>(streamSimple, model, level);
+        expect(payload.output_config?.effort).toBe(level);
+        expect(payload.thinking?.type).toBe('adaptive');
+        expect(payload.messages.some((m) => m.role === 'system' && m.output_config)).toBe(false);
+      }
+    });
+
+    it('keeps mid-conversation effort on the official Anthropic endpoint', async () => {
+      const { model } = await resolve(
+        'anthropic-messages',
+        'https://api.anthropic.com/v1',
+        'claude-opus-5-5',
+        KEY_B
+      );
+      expect(model.compat).toMatchObject({ supportsMidConvoEffort: true });
+      const payload = await capture<AnthropicPayload>(streamSimple, model, 'max');
+      expect(payload.messages).toContainEqual(
+        expect.objectContaining({ role: 'system', output_config: { effort: 'max' } })
+      );
+    });
+
+    it('sends reasoning.effort = the selected level through an OpenAI Responses relay, unchanged on the official one', async () => {
+      type ResponsesPayload = { reasoning?: { effort?: string }; input: { type?: string }[] };
+      const run = streamResponses as unknown as typeof streamSimple;
+      const relay = await resolve(
+        'openai-responses',
+        'https://relay.example.com/v1',
+        'gpt-6-astra'
+      );
+      expect(relay.model.compat).toMatchObject({ supportsMidConvoEffort: false });
+      const viaRelay = await capture<ResponsesPayload>(run, relay.model, 'max');
+      expect(viaRelay.reasoning?.effort).toBe('max');
+      expect(viaRelay.input.some((i) => i.type === 'configuration_update')).toBe(false);
+
+      const official = await resolve(
+        'openai-responses',
+        'https://api.openai.com/v1/',
+        'gpt-6-astra',
+        KEY_B
+      );
+      expect(official.model.compat).toMatchObject({ supportsMidConvoEffort: true });
+      const direct = await capture<ResponsesPayload>(run, official.model, 'max');
+      expect(direct.input.some((i) => i.type === 'configuration_update')).toBe(true);
     });
   });
 
