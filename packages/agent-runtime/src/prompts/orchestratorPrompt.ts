@@ -75,7 +75,7 @@ The workspace directory is not a git repository (or the user mounted it as a pla
 - merge_worktree has nothing to merge, because the changes are already in place: after the same review and checks it accepts the work and completes the task.
 - cleanup_worktree only stops the worker, with the same acceptance requirement: unfinished tasks require explicit abandon: true, and completed tasks stay completed. Nothing can be discarded: an abandoned task keeps the edits its worker already made, so tell the user which files they are.
 - reject_work works as usual: the worker fixes its work in the same files and reports again.
-- Workers do not commit here; never ask them to.`;
+- Workers do not commit here unless you ask. When the user asks to put this folder under git (init, commit, add a remote, push, create the remote repository), that request is the authorization: dispatch one worker for it while no other worker is running, and list in the brief the exact git/gh steps and the remote to use. Once the folder is a git repository, Fynvra detects it and later dispatches get their own worktrees.`;
 
 /**
  * 计划模式开启时（按会话的开关，只对 `tools: 'orchestrator'` 的会话生效），每次 run 追加在角色追加段之后：
@@ -131,7 +131,7 @@ export const WORKER_CONTRACT_PROMPT = [
 ].join('\n');
 
 /**
- * 工作区没有 git 时 worker 的契约：直接在工作区目录里改、可能与别的 worker 共用目录、不提交，
+ * 工作区没有 git 时 worker 的契约：直接在工作区目录里改、可能与别的 worker 共用目录、任务书不要求就不提交，
  * 汇报的改动文件就是主 agent 能看到的全部改动。其余各条同 {@link WORKER_CONTRACT_PROMPT}。
  */
 export const IN_PLACE_WORKER_CONTRACT_PROMPT = [
@@ -139,7 +139,10 @@ export const IN_PLACE_WORKER_CONTRACT_PROMPT = [
   'You are a worker agent. The Fynvra orchestrator (your coordinator) assigned you one task. This workspace has no git, so you work directly in the workspace directory: there is no worktree or branch of your own, and other workers may be changing files in the same directory at the same time.',
   '',
   "- Do the task in your brief completely and within its Ownership. Don't gold-plate and don't refactor unrelated code. Leave files outside your Ownership alone, even when they change while you work: another worker may be editing them.",
-  "- Verify your work with the brief's acceptance commands before reporting. Your changes stay where you make them: do not run git commands that write (no init, add, commit, stash or checkout), and never push.",
+  "- Verify your work with the brief's acceptance commands before reporting. Your changes stay where you make them and nobody merges them, so do not commit unless your brief asks you to.",
+  '- When your brief asks for git work (for example turning this folder into a repository, committing, adding a remote, pushing, or creating the remote repository), do it: run `git init`, `git add`, `git commit`, `git remote`, `git push` and the like as the brief says. Never force-push.',
+  '- Never run commands that discard work in this shared directory (`git stash`, `git checkout` or `git restore` of files, `git reset --hard`, `git clean`) unless your brief asks for that exact operation.',
+  '- If a tool the brief names is missing (for example `gh`), use an equivalent you have: a GitHub MCP tool if available, or `git push` to a URL from the brief. If nothing works, report exactly what the user must provide, such as "create an empty repository and send me its URL" or "run `gh auth login`".',
   reportDoneRule(
     'every file you created, changed or deleted: without git, that list is how your coordinator finds your changes'
   ),

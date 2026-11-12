@@ -268,7 +268,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   `run_checks` 在工作区目录里跑；`merge_worktree` 无需合并，把 in-review 的任务记为 completed；
   `cleanup_worktree` 只停 worker，状态规则与 Git 模式相同：未完成任务需显式 `abandon: true`，已完成任务保持 completed，改动留在目录里。
 - 提示词：Main 在 spawn 时按工作区给 spawn spec 带 `inPlace: true`，orchestrator 在工具说明后追加非 git 模式一段，
-  worker 换用不提交的契约（agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
+  worker 换用任务书不要求就不提交的契约（用户要求 init / commit / push 时照任务书做，不 force-push、不跑丢弃改动的命令；agent-runtime 的 `IN_PLACE_ORCHESTRATOR_PROMPT` / `IN_PLACE_WORKER_CONTRACT_PROMPT`）。
 
 **工作流任务**（`dispatch_task` 带 `workflow`，定义与推进见 §7.13）：
 - 节点之间由 Main 在 `report_done` 结算后自动调度（并行、隔离与汇合合并见 §7.13），任务保持 `in-progress`。只有整张图全部通过（→ `in-review`）或失败（无可退回目标、超过回退上限、节点启动失败 → `failed`）时才向主 agent 发 `worker_done`；主 agent 照常对集成 worktree review_diff / run_checks / merge_worktree。
