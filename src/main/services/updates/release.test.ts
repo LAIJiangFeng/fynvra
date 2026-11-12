@@ -145,10 +145,20 @@ describe('发布产物校验', () => {
     expect(files).toContain('Fynvra-0.1.1-mac-arm64.dmg');
     expect(files).toContain('latest-mac.yml');
     expect(files).toContain('SHA256SUMS-mac');
+    expect(files).toContain('latest-mac-manual.yml');
     expect(readFileSync(join(dir, 'SHA256SUMS'), 'utf8')).toBe('Windows 校验和');
-    expect(readFileSync(join(dir, 'SHA256SUMS-mac'), 'utf8').trim().split('\n')).toHaveLength(7);
+    expect(readFileSync(join(dir, 'SHA256SUMS-mac'), 'utf8').trim().split('\n')).toHaveLength(8);
   });
-  it('Mac 手动包只公布双架构安装文件与校验和，不发布自动更新元数据', async () => {
+  it('Mac 两种模式都生成自更新清单，按架构记录 ZIP 名、SHA512 和大小', async () => {
+    const { dir, metadata } = macFixture();
+    await verifyRelease(dir, '0.1.1', 'mac-manual');
+    const zip = (arch: string) => metadata.files.find((file) => file.url.endsWith(`${arch}.zip`));
+    expect(parse(readFileSync(join(dir, 'latest-mac-manual.yml'), 'utf8'))).toEqual({
+      version: '0.1.1',
+      files: ['x64', 'arm64'].map((arch) => ({ arch, ...zip(arch) })),
+    });
+  });
+  it('Mac 手动包只公布双架构安装文件、自更新清单与校验和，不发布原生更新元数据', async () => {
     const { dir } = macFixture();
     for (const arch of ['x64', 'arm64']) rmSync(join(dir, `Fynvra-0.1.1-mac-${arch}.zip.blockmap`));
     const files = await verifyRelease(dir, '0.1.1', 'mac-manual');
@@ -157,10 +167,11 @@ describe('发布产物校验', () => {
       'Fynvra-0.1.1-mac-x64.dmg',
       'Fynvra-0.1.1-mac-arm64.zip',
       'Fynvra-0.1.1-mac-arm64.dmg',
+      'latest-mac-manual.yml',
       'SHA256SUMS-mac',
     ]);
     const sums = readFileSync(join(dir, 'SHA256SUMS-mac'), 'utf8');
-    expect(sums.trim().split('\n')).toHaveLength(4);
+    expect(sums.trim().split('\n')).toHaveLength(5);
     expect(sums).not.toContain('latest-mac.yml');
     expect(sums).not.toContain('.blockmap');
   });

@@ -272,16 +272,14 @@ if (!process.versions.electron) {
         await clickText('通用', '[role="tab"]');
         await waitFor(`document.body.innerText.includes('当前版本 0.1.0')`, '当前版本');
         if (manualMac) {
-          await waitFor(stateIs('disabled'), '手动 Mac 安装包不启用自动更新');
-          const result = await evaluate('window.fynvra.updates.check()');
-          assert.equal(result.state.reason, 'manual-install');
-          await waitFor(`document.body.innerText.includes('手动安装')`, '手动安装说明可见');
-          await new Promise((resolve) => setTimeout(resolve, 11_000));
-          assert.equal(requests.length, 0, '手动包不能后台请求原生更新');
+          // 自替换更新器只连 GitHub；不调 check()，并在 10 秒首次检查前退出，CI 不访问公网。
+          await waitFor(stateIs('idle'), '手动 Mac 安装包启用自替换更新');
+          const result = await evaluate('window.fynvra.updates.state()');
+          assert.equal(result.state.reason, undefined);
+          assert(!(await evaluate(`document.body.innerText.includes('手动安装')`)));
+          assert.equal(requests.length, 0, '手动包不请求原生更新源');
           assert.equal(installCalls, 0);
-          checks.push(
-            '打包后的 Mac 手动版可启动，设置明确提示手动安装，自动与手动检查均不请求更新源'
-          );
+          checks.push('打包后的 Mac 手动版可启动，自替换更新待命且不显示手动安装提示');
           app.once('will-quit', () => {
             try {
               assert.equal(BrowserWindow.getAllWindows().length, 0);
