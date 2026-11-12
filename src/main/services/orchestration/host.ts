@@ -152,7 +152,7 @@ function feedbackPrompt(feedback: string, dispatchId: string, inPlace: boolean):
     feedback,
     '',
     inPlace
-      ? 'Address the feedback in the workspace directory (no git: do not commit), then call `report_done` again.'
+      ? 'Address the feedback in the workspace directory (no git: do not commit unless your brief asks you to), then call `report_done` again.'
       : 'Address the feedback in this worktree, commit your changes, then call `report_done` again.',
   ].join('\n');
 }
