@@ -155,8 +155,8 @@ export function createUpdateService(options: UpdateServiceOptions) {
       if (installationStarted) return true;
       installationStarted = true;
       try {
-        // 静默安装：Windows NSIS 以 /S 复用上次安装目录，不弹向导；macOS 忽略该参数。
-        updater.quitAndInstall(true, true);
+        // Windows 只显示 NSIS 安装进度页，完成页由 installer.nsh 跳过并重新打开应用；macOS 忽略该参数。
+        updater.quitAndInstall(false, true);
       } catch (error) {
         fail(error);
       }
