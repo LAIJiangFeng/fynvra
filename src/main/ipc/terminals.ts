@@ -122,6 +122,15 @@ function repairSpawnHelper(error: unknown, platform: NodeJS.Platform): boolean {
   }
 }
 
+// shellDetectionDeps().existsSync 只认可执行文件，目录必须单独判断
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function send(owner: WebContents, event: TerminalEvent): void {
   if (!owner.isDestroyed()) owner.send(IPC_CHANNELS.TERMINALS_EVENT, event);
 }
@@ -172,7 +181,7 @@ export function registerTerminalHandlers(): void {
           deps.platform
         );
       const cwd = workspace.repoPath;
-      if (!deps.existsSync(cwd))
+      if (!isDirectory(cwd))
         return { ok: false, error: translate('terminals.cwdMissing', { cwd }) };
       if (
         owner.isDestroyed() ||
