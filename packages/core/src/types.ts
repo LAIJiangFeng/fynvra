@@ -379,6 +379,11 @@ export type FynvraSessionEventBody =
       text: string;
     }
   | {
+      /** The command finished (or Stop released it) with no agent run active; ephemeral. */
+      type: 'command_end';
+      aborted: boolean;
+    }
+  | {
       /** Command output (`ctx.ui.notify` and prompts); ephemeral, not in pi jsonl. */
       type: 'notice';
       level: 'info' | 'warning' | 'error';

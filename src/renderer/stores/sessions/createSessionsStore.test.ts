@@ -1723,3 +1723,57 @@ describe('createSessionsStore · queue while running', () => {
     expect(texts(store)).toEqual([]);
   });
 });
+
+describe('createSessionsStore · slash command settlement', () => {
+  it('settles after command_end even when sessions:changed reloads the list meanwhile', async () => {
+    const fake = fakeApi();
+    // Events stay buffered until the test flushes them, like the renderer's frame batching.
+    const flushes: (() => void)[] = [];
+    const store = createSessionsStore(fake.api, {
+      schedule: (flush) => flushes.push(flush),
+      now: () => 100,
+    });
+    connectSessionsStore(store, fake.api);
+    store.getState().setWorkspace(WS);
+    await settle();
+    await store.getState().selectSession('s1');
+    await store.getState().send('/mcp login mobbin');
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+
+    fake.emitEvent(1, { type: 'command', text: '/mcp login mobbin' });
+    fake.emitEvent(2, { type: 'notice', level: 'error', text: 'No MCP server named "mobbin"' });
+    fake.emitEvent(3, { type: 'command_end', aborted: false });
+    // Main broadcasts right after the command's events; the list says idle.
+    fake.emitChanged();
+    await settle();
+    for (const flush of flushes.splice(0)) flush();
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
+    expect(fake.api.suggestReply).not.toHaveBeenCalled();
+  });
+
+  it('sends a queued message after command_end, without a reply suggestion', async () => {
+    const { store, api, emitEvent } = await setup();
+    await store.getState().selectSession('s1');
+    await store.getState().send('/slow');
+    await store.getState().send('next');
+    expect(selectQueueOf('s1')(store.getState())).toHaveLength(1);
+    emitEvent(1, { type: 'command', text: '/slow' });
+    emitEvent(2, { type: 'command_end', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'next' });
+    expect(selectQueueOf('s1')(store.getState())).toEqual([]);
+    expect(api.suggestReply).not.toHaveBeenCalled();
+  });
+
+  it('Stop resyncs a stuck status from the session list', async () => {
+    const { store, api } = await setup();
+    await store.getState().selectSession('s1');
+    await store.getState().send('/mcp login x');
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    api.list.mockClear();
+    await store.getState().abort();
+    await settle();
+    expect(api.list).toHaveBeenCalledTimes(1);
+    expect(selectStatusOf('s1')(store.getState())).toBe('idle');
+  });
+});

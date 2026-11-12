@@ -525,6 +525,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           const roundId = get().runtimeBySession[sessionId]?.settledSeq;
           if (roundId !== undefined) normal.set(sessionId, roundId);
         }
+        // A finished slash command sends the queue on, but never asks for a reply suggestion.
+        if (event.type === 'command_end') settled.add(sessionId);
         if (event.type !== 'agent_settled') continue;
         if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
@@ -1160,6 +1162,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set((state) => ({ stopping: omitKey(state.stopping, sessionId) }));
         if (!result.ok)
           set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
+        // Safety net: resync the status from Main in case this chat missed its settlement.
+        const session = result.ok ? findSession(get(), sessionId) : undefined;
+        if (session) void get().loadSessions(session.workspaceId);
         // The settled event may have arrived while stopping held the drain back
         drainQueue(sessionId);
       },
