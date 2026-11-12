@@ -1029,6 +1029,11 @@ const EVENT_BODY_PARSERS: EventBodyParsers = {
       ? { type: 'warning', source, reason }
       : null;
   },
+  command: ({ text }) => (isString(text) ? { type: 'command', text } : null),
+  notice: ({ level, text }) => {
+    if (level !== 'info' && level !== 'warning' && level !== 'error') return null;
+    return isString(text) ? { type: 'notice', level, text } : null;
+  },
 };
 
 function parseSessionEvent(raw: unknown): FynvraSessionEvent | null {

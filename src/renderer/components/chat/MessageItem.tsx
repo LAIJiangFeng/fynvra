@@ -30,6 +30,7 @@ export const MessageItem = memo(function MessageItem({
   tools?: ToolItem[];
   live?: boolean;
 }) {
+  if (message.notice) return <NoticeLine message={message} />;
   return message.role === 'user' ? (
     <UserMessage message={message} />
   ) : (
@@ -89,6 +90,20 @@ function UserMessage({ message }: { message: TimelineMessage }) {
         </div>
       )}
       {message.optimistic && <PendingDelivery message={message} />}
+    </div>
+  );
+}
+
+/** Output of a slash command: a muted line, URLs clickable through the chat Markdown. */
+function NoticeLine({ message }: { message: TimelineMessage }) {
+  return (
+    <div
+      className={cn(
+        'min-w-0 whitespace-pre-wrap break-words text-xs',
+        message.notice === 'error' ? 'text-destructive' : 'text-muted-foreground'
+      )}
+    >
+      <ChatMarkdown sessionId={message.sessionId} text={message.text} />
     </div>
   );
 }

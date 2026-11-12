@@ -372,7 +372,18 @@ export type FynvraSessionEventBody =
       source: 'magic-context';
       reason: MagicContextFallbackReason;
     }
-  | { type: 'error'; source: 'model' | 'compaction' | 'host'; message: string };
+  | { type: 'error'; source: 'model' | 'compaction' | 'host'; message: string }
+  | {
+      /** Fynvra ran this slash text as a pi extension command instead of a prompt; not in pi jsonl. */
+      type: 'command';
+      text: string;
+    }
+  | {
+      /** Command output (`ctx.ui.notify` and prompts); ephemeral, not in pi jsonl. */
+      type: 'notice';
+      level: 'info' | 'warning' | 'error';
+      text: string;
+    };
 
 /** 每条事件带递增 `seq`（从 1 开始）；消费方丢弃过期 seq。 */
 export type FynvraSessionEvent = FynvraSessionEventBody & { seq: number };

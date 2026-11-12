@@ -52,7 +52,8 @@ function assistantRows(messages: readonly TimelineMessage[], compact: boolean): 
   const blocks: { message: TimelineMessage; calls: ChatToolCall[] }[] = [];
   for (const message of messages) {
     const last = blocks.at(-1);
-    if (last && !message.text.trim() && !message.thinking) last.calls.push(...message.toolCalls);
+    if (last && !last.message.notice && !message.text.trim() && !message.thinking)
+      last.calls.push(...message.toolCalls);
     else blocks.push({ message, calls: [...message.toolCalls] });
   }
   return blocks.map(({ message, calls }) => ({

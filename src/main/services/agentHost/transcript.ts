@@ -77,6 +77,12 @@ export class Transcript {
       case 'warning':
         this.#line('[warning] magic-context failed; switched to standard compaction');
         return;
+      case 'command':
+        this.#line(`[command] ${oneLine(event.text, PROMPT_PREVIEW_CHARS)}`);
+        return;
+      case 'notice':
+        this.#line(`[${event.level}] ${event.text}`);
+        return;
       case 'agent_settled':
         this.#line(event.aborted ? '[aborted]' : '[settled]');
         return;

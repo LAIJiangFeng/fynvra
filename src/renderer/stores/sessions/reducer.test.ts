@@ -213,6 +213,47 @@ describe('乐观回显', () => {
   });
 });
 
+describe('slash command 与 notice', () => {
+  it('command 确认回显（不再「发送中」），notice 作为弱化行排在后续回显之前', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: '/mcp login x',
+      createdAt: T0,
+    });
+    state = addOptimisticMessage(state, S, { id: 'local-2', text: 'next', createdAt: T0 });
+    state = run(
+      [
+        { type: 'command', text: '/mcp login x' },
+        { type: 'notice', level: 'info', text: 'Sign in:\nhttp://127.0.0.1/a' },
+      ],
+      state
+    );
+    const messages = messagesOf(state);
+    expect(messages.map((message) => [message.id, message.optimistic, message.notice])).toEqual([
+      ['local-1', undefined, undefined],
+      ['live-2', undefined, 'info'],
+      ['local-2', true, undefined],
+    ]);
+    expect(messages[0]?.command).toBe(true);
+    expect(messages[1]).toMatchObject({ role: 'assistant', text: 'Sign in:\nhttp://127.0.0.1/a' });
+  });
+
+  it('usage 与工具调用不挂到 notice 上；history 重载时 command 气泡不占 user 计数', () => {
+    let state = run([
+      { type: 'command', text: '/mcp' },
+      { type: 'notice', level: 'error', text: 'oops' },
+      { type: 'tool_start', toolCallId: 'call-1', toolName: 'read', args: {} },
+    ]);
+    expect(messagesOf(state)[1]?.toolCalls).toEqual([]);
+    expect(messagesOf(state)[2]?.toolCalls.map((call) => call.id)).toEqual(['call-1']);
+
+    state = addOptimisticMessage(state, S, { id: 'local-9', text: 'hi', createdAt: T0 });
+    state = applyHistory(state, S, [chat({ id: 'h1', role: 'user', text: 'hi' })]);
+    // The echo is recognised as delivered; ephemeral command/notice rows are replaced by history.
+    expect(messagesOf(state).map((message) => message.id)).toEqual(['h1']);
+  });
+});
+
 describe('带图片的消息', () => {
   it('回显带着图片；user 的 message_end 确认时保留图片，正文去掉 pi 接上的提示行', () => {
     let state = addOptimisticMessage(emptyProjection(), S, {
