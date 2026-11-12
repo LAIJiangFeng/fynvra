@@ -360,24 +360,32 @@ function definitionFor(spec: ModelQuery, template: Model<Api>): ModelDefinition 
   };
 }
 
-const OFFICIAL_ANTHROPIC_URL = /^https:\/\/api\.anthropic\.com(?:\/v1)?\/*$/i;
+const OFFICIAL_URL: Partial<Record<Api, RegExp>> = {
+  'anthropic-messages': /^https:\/\/api\.anthropic\.com(?:\/v1)?\/*$/i,
+  'openai-responses': /^https:\/\/api\.openai\.com\/v1\/*$/i,
+};
 
 /**
- * Anthropic 中转（非官方端点）关掉原生的对话中工具增减（tool_addition / tool_removal）：
- * 实测中转会改写请求级 tools 却不改这些引用块，移除工具时报 400 tool_reference_unresolved。
- * 关掉后 pi 每次请求发当前工具列表，代价是工具集变化时一次 prompt cache 失效。
+ * 中转（非官方端点）关掉对话中途的原生改动，官方端点保持原样以保住 prompt cache：
+ * - Anthropic 工具增减（tool_addition / tool_removal）：推断中转会改写请求级 tools 却不改这些引用块，
+ *   移除工具时报 400 tool_reference_unresolved；关掉后 pi 每次请求发当前工具列表。
+ * - 思考档位（Anthropic 内联 output_config 消息 / OpenAI configuration_update）：中转读取并转发的是请求级字段，
+ *   所选档位必须放在请求级，否则请求级被固定成 high / medium。
  */
 export function forEndpoint(definition: ModelDefinition, baseUrl: string): ModelDefinition {
-  if (
-    definition.api !== 'anthropic-messages' ||
-    !definition.compat ||
-    !('supportsMidConvoToolChanges' in definition.compat) ||
-    !definition.compat.supportsMidConvoToolChanges ||
-    OFFICIAL_ANTHROPIC_URL.test(baseUrl.trim())
-  ) {
-    return definition;
-  }
-  return { ...definition, compat: { ...definition.compat, supportsMidConvoToolChanges: false } };
+  const official = definition.api && OFFICIAL_URL[definition.api];
+  const compat = definition.compat as
+    | { supportsMidConvoToolChanges?: boolean; supportsMidConvoEffort?: boolean }
+    | undefined;
+  if (!official || !compat || official.test(baseUrl.trim())) return definition;
+  const off = {
+    ...(compat.supportsMidConvoEffort ? { supportsMidConvoEffort: false } : {}),
+    ...(definition.api === 'anthropic-messages' && compat.supportsMidConvoToolChanges
+      ? { supportsMidConvoToolChanges: false }
+      : {}),
+  };
+  if (Object.keys(off).length === 0) return definition;
+  return { ...definition, compat: { ...definition.compat, ...off } } as ModelDefinition;
 }
 
 /** 目录外又推断不出的模型：spec 的字段加保守默认值；设置里标了推理时带上协议兜底的档位映射 */

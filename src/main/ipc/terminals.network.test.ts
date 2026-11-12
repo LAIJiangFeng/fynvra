@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { tmpdir } from 'node:os';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureCommandNetwork } from '../services/commandNetwork';
@@ -16,9 +17,10 @@ vi.mock('electron', () => ({
 }));
 vi.mock('node-pty', () => ({ spawn: mocks.spawn }));
 vi.mock('./settings', () => ({ getSettingsFile: () => ({ read: () => ({ preferences: {} }) }) }));
-vi.mock('./workspaces', () => ({
-  getWorkspaceService: () => ({ get: () => ({ repoPath: '/registered-repo' }) }),
-}));
+vi.mock('./workspaces', async () => {
+  const { tmpdir } = await import('node:os');
+  return { getWorkspaceService: () => ({ get: () => ({ repoPath: tmpdir() }) }) };
+});
 vi.mock('../services/shells', () => ({
   shellDetectionDeps: () => ({ platform: 'linux', existsSync: () => true }),
   availableShells: async () => [],
@@ -54,7 +56,7 @@ describe('new PTY proxy snapshot', () => {
       '/bin/bash',
       ['-l'],
       expect.objectContaining({
-        cwd: '/registered-repo',
+        cwd: tmpdir(),
         env: expect.objectContaining({
           HTTP_PROXY: 'http://127.0.0.1:7890',
           HTTPS_PROXY: 'http://127.0.0.1:7890',

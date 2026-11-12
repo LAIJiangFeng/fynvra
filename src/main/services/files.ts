@@ -31,6 +31,8 @@ import WordExtractor from 'word-extractor';
 
 export const MAX_TEXT_BYTES = 256 * 1024;
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** 超过 MAX_TEXT_BYTES 的文本以只读方式预览，上限如下。 */
+export const MAX_READONLY_TEXT_BYTES = 10 * 1024 * 1024;
 /** PDF / Word 只读预览的上限；仅在扩展名匹配时放宽有界读取。 */
 export const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 export const MAX_DIRECTORY_ENTRIES = 2000;
@@ -153,14 +155,20 @@ async function previewOf(
   if (format && size > MAX_DOCUMENT_BYTES) return { kind: 'unsupported', reason: 'tooLarge', size };
   if (isDocument(format, bytes)) return documentPreview(format, bytes, size, convertDoc);
   const mime = imageMime(bytes);
-  if (size > MAX_IMAGE_BYTES || (!mime && size > MAX_TEXT_BYTES))
+  if ((mime && size > MAX_IMAGE_BYTES) || size > MAX_READONLY_TEXT_BYTES)
     return { kind: 'unsupported', reason: 'tooLarge', size };
   if (mime)
     return { kind: 'image', dataUrl: `data:${mime};base64,${bytes.toString('base64')}`, size };
   try {
     if (bytes.includes(0)) throw new Error('二进制文件');
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return { kind: 'text', text, size, version: versionOf(bytes) };
+    return {
+      kind: 'text',
+      text,
+      size,
+      version: versionOf(bytes),
+      ...(size > MAX_TEXT_BYTES ? { readOnly: true as const } : {}),
+    };
   } catch {
     return { kind: 'unsupported', reason: 'binary', size };
   }
@@ -188,13 +196,11 @@ async function snapshot(files: WorkspaceFiles, entry: WorkspaceFileEntry, conver
     if (checked !== path || !sameFile(await lstat(checked, { bigint: true }), info))
       throw new FileAccessError('conflict');
     const format = documentFormatOf(path);
-    const limit = format ? MAX_DOCUMENT_BYTES : MAX_IMAGE_BYTES;
+    const limit = format ? MAX_DOCUMENT_BYTES : Math.max(MAX_IMAGE_BYTES, MAX_READONLY_TEXT_BYTES);
     let bytes = Buffer.alloc(0);
     if (info.size <= BigInt(limit)) {
       // 有界读取，即便文件同时增长也不把无限内容带进 IPC。
-      const buffer = Buffer.alloc(
-        format ? Math.min(Number(info.size), limit) + 1 : MAX_IMAGE_BYTES + 1
-      );
+      const buffer = Buffer.alloc(Math.min(Number(info.size), limit) + 1);
       let offset = 0;
       while (offset < buffer.length) {
         const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
@@ -290,6 +296,7 @@ export function createFilesService({
           ? 'tooLarge'
           : 'notText'
       );
+    if (current.preview.readOnly) throw new FileAccessError('tooLarge');
     if (current.preview.version !== input.version) throw new FileAccessError('conflict');
     if (input.text.includes('\0')) throw new FileAccessError('notText');
     const bom = current.bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]));

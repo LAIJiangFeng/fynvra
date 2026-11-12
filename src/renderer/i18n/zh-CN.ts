@@ -143,6 +143,7 @@ export const zhCN = {
     pickFile: '选择文件查看内容',
     pickFileHint: '点击右侧目录中的文件，在中央标签中预览或编辑',
     readonly: '只读',
+    largeReadonly: '文件较大（{size}），以只读方式打开',
     closeFile: '关闭 {name}',
     editor: '编辑 {name}',
     markdownPreview: 'Markdown 预览',
@@ -190,7 +191,7 @@ export const zhCN = {
     tooLarge: '文件过大，无法预览',
     unreadable: '文档解析失败，无法预览',
     limits:
-      '支持 UTF-8 文本（256 KiB 内）、PNG / JPEG / GIF / WebP 图片（2 MiB 内）和 PDF / Word 文档（32 MiB 内）',
+      '支持 UTF-8 文本（256 KiB 内可编辑，10 MiB 内只读）、PNG / JPEG / GIF / WebP 图片（2 MiB 内）和 PDF / Word 文档（32 MiB 内）',
     document: {
       pdfPreview: 'PDF 预览',
       wordPreview: 'Word 预览',

@@ -54,11 +54,13 @@ export default function FileEditor({
   name,
   value,
   source,
+  readOnly = false,
   onChange,
 }: {
   name: string;
   value: string;
   source: string;
+  readOnly?: boolean;
   onChange(text: string): void;
 }) {
   const [language, setLanguage] = useState<Extension[]>([]);
@@ -97,6 +99,8 @@ export default function FileEditor({
       height="100%"
       className="h-full"
       theme={dark ? 'dark' : 'light'}
+      // 只用 EditorState.readOnly：编辑器仍可聚焦，Mod+F 搜索和选中复制照常可用。
+      readOnly={readOnly}
       extensions={[
         Prec.highest(EDITOR_THEME),
         EditorView.contentAttributes.of({ 'aria-label': t('files.editor', { name }) }),
