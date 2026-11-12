@@ -150,6 +150,11 @@ jobs:
             fi
             bundle="dist/$directory/Fynvra.app"
             test "$(lipo -archs "$bundle/Contents/MacOS/Fynvra")" = "$expected"
+            helpers=$(find "$bundle/Contents/Resources/app.asar.unpacked/node_modules/node-pty" -name spawn-helper -type f)
+            if [ -z "$helpers" ]; then echo "::error::node-pty spawn-helper missing in $bundle"; exit 1; fi
+            for helper in $helpers; do
+              if [ ! -x "$helper" ]; then echo "::error::$helper is not executable"; exit 1; fi
+            done
             codesign --verify --deep --strict --verbose=2 "$bundle"
           done
       - name: Verify Developer ID and notarization

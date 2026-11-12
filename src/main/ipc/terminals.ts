@@ -1,3 +1,6 @@
+import { chmodSync, existsSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, posix, win32 } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { AvailableShell } from '@shared/types/settings';
@@ -98,6 +101,27 @@ function track(owner: WebContents): { generation: number } {
   return state;
 }
 
+/** macOS 上 spawn-helper 丢了执行位时 node-pty 只报 posix_spawnp failed：就地补一次执行位，返回是否值得重试。 */
+function repairSpawnHelper(error: unknown, platform: NodeJS.Platform): boolean {
+  if (platform === 'win32' || !errorMessage(error).includes('posix_spawnp failed')) return false;
+  try {
+    // node-pty 自己也把 app.asar 换成 app.asar.unpacked 来找 helper
+    const root = dirname(dirname(createRequire(import.meta.url).resolve('node-pty'))).replace(
+      /app\.asar(?=[\\/])/,
+      'app.asar.unpacked'
+    );
+    const helper = [
+      join(root, 'prebuilds', `${platform}-${process.arch}`, 'spawn-helper'),
+      join(root, 'build', 'Release', 'spawn-helper'),
+    ].find((path) => existsSync(path) && (statSync(path).mode & 0o111) === 0);
+    if (!helper) return false;
+    chmodSync(helper, 0o755);
+    return true;
+  } catch {
+    return false; // 只读位置（如已签名的 .app）改不了，保留原错误
+  }
+}
+
 function send(owner: WebContents, event: TerminalEvent): void {
   if (!owner.isDestroyed()) owner.send(IPC_CHANNELS.TERMINALS_EVENT, event);
 }
@@ -137,10 +161,19 @@ export function registerTerminalHandlers(): void {
       const preference = getSettingsFile().read().preferences.terminalShell;
       const deps = shellDetectionDeps();
       const shells = preference ? await cachedShells(deps) : [];
-      const shell = terminalShellIntegration(
+      const paths = deps.platform === 'win32' ? win32 : posix;
+      let shell = terminalShellIntegration(
         resolveTerminalShell(preference, shells, deps),
         deps.platform
       );
+      if (paths.isAbsolute(shell.path) && !deps.existsSync(shell.path))
+        shell = terminalShellIntegration(
+          resolveTerminalShell(undefined, shells, deps),
+          deps.platform
+        );
+      const cwd = workspace.repoPath;
+      if (!deps.existsSync(cwd))
+        return { ok: false, error: translate('terminals.cwdMissing', { cwd }) };
       if (
         owner.isDestroyed() ||
         state.generation !== generation ||
@@ -148,13 +181,29 @@ export function registerTerminalHandlers(): void {
         !getWorkspaceService().get(workspaceId)
       )
         return { ok: false, error: translate('common.windowClosed') };
-      const pty = spawn(shell.path, shell.args, {
-        name: 'xterm-256color',
-        cwd: workspace.repoPath,
-        cols: input.cols as number,
-        rows: input.rows as number,
-        env: { ...savedCommandEnvironment(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
-      });
+      const start = () =>
+        spawn(shell.path, shell.args, {
+          name: 'xterm-256color',
+          cwd,
+          cols: input.cols as number,
+          rows: input.rows as number,
+          env: { ...savedCommandEnvironment(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+        });
+      let pty: IPty;
+      try {
+        try {
+          pty = start();
+        } catch (error) {
+          if (!repairSpawnHelper(error, deps.platform)) throw error;
+          pty = start();
+        }
+      } catch (error) {
+        const message = errorMessage(error);
+        return {
+          ok: false,
+          error: translate('terminals.spawnFailed', { error: message, shell: shell.path, cwd }),
+        };
+      }
       terminals.set(id, { owner, workspaceId, pty });
       // ponytail: output is pushed directly; add acknowledged backpressure for sustained bulk output.
       pty.onData((data) => {
