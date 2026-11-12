@@ -149,13 +149,17 @@ describe('IN_PLACE_WORKER_CONTRACT_PROMPT', () => {
   });
 
   it('works in the shared directory, runs git only when the brief asks, and lists every changed file', () => {
-    expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('do not commit unless your brief asks you to');
+    expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain(
+      'do not commit unless your brief asks you to'
+    );
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('When your brief asks for git work');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('`git init`, `git add`, `git commit`');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('`git push`');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('Never force-push');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('Never run commands that discard work');
-    expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('unless your brief asks for that exact operation');
+    expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain(
+      'unless your brief asks for that exact operation'
+    );
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).not.toContain('Push authorization');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('no worktree or branch of your own');
     expect(IN_PLACE_WORKER_CONTRACT_PROMPT).toContain('other workers may be changing files');
