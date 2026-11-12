@@ -28,6 +28,10 @@ type SessionWarning = 'magic-context';
 export interface TimelineMessage extends ChatMessage {
   optimistic?: true;
   failed?: true;
+  /** A slash command Fynvra ran instead of a prompt (`command` event); not in pi jsonl. */
+  command?: true;
+  /** A command notice line (`notice` event, role assistant); not in pi jsonl, gone after a history reload. */
+  notice?: 'info' | 'warning' | 'error';
 }
 
 /** 待审批请求；`toolCallId` 来自 approval_request 事件，工具开始或结束时据此出队。 */
@@ -433,6 +437,17 @@ function applyEvent(
     case 'tool_notice':
       // 只用于旁路通知；不能据此把工具标为开始或成功。
       return slice;
+    case 'command':
+      // The worker accepted the input as a command: its echo is delivered, no message_end follows.
+      return startTurn(confirmUser(slice, fresh, event.text, true));
+    case 'notice':
+      return {
+        ...slice,
+        messages: insertAt(slice.messages, authoritativeLength(slice.messages), {
+          ...newMessage(fresh, 'assistant', event.text, false),
+          notice: event.level,
+        }),
+      };
     case 'agent_settled': {
       const error =
         slice.runtime.error ??
@@ -493,7 +508,8 @@ function authoritativeLength(messages: readonly TimelineMessage[]): number {
   return index < 0 ? messages.length : index;
 }
 
-const isAssistant = (message: TimelineMessage) => message.role === 'assistant';
+// Notices are not replies: usage and tool calls never attach to them.
+const isAssistant = (message: TimelineMessage) => message.role === 'assistant' && !message.notice;
 
 function lastIndexOf(
   messages: readonly TimelineMessage[],
@@ -566,25 +582,25 @@ function finishAssistant(slice: Slice, fresh: Fresh, text: string): Slice {
  * user 的 message_end：只确认正文匹配的乐观回显，避免旧 pending 输入确认新投递。
  * 带图片的回显，正文取去掉 pi 提示行后的文本（事件里不带图片）。
  */
-function confirmUser(slice: Slice, fresh: Fresh, text: string): Slice {
+function confirmUser(slice: Slice, fresh: Fresh, text: string, command = false): Slice {
+  const mark = command ? { command: true as const } : {};
   const index = slice.messages.findIndex(
     (message) => message.optimistic && deliveredAs(message, { text })
   );
   if (index < 0) {
     return {
       ...slice,
-      messages: insertAt(
-        slice.messages,
-        authoritativeLength(slice.messages),
-        newMessage(fresh, 'user', text, false)
-      ),
+      messages: insertAt(slice.messages, authoritativeLength(slice.messages), {
+        ...newMessage(fresh, 'user', text, false),
+        ...mark,
+      }),
     };
   }
   const { optimistic: _optimistic, failed: _failed, ...confirmed } = slice.messages[index];
-  const delivered = confirmed.images ? stripImageHints(text) : text;
+  const delivered = confirmed.images && !command ? stripImageHints(text) : text;
   return {
     ...slice,
-    messages: replaceAt(slice.messages, index, { ...confirmed, text: delivered }),
+    messages: replaceAt(slice.messages, index, { ...confirmed, text: delivered, ...mark }),
   };
 }
 
@@ -763,7 +779,10 @@ export function applyHistory<S extends ChatProjection>(
   const last = before.messages[end - 1];
   const streaming = last?.role === 'assistant' && last.streaming ? [last] : [];
 
-  const seenUsers = before.messages.slice(0, end).filter((message) => message.role === 'user');
+  // Command bubbles are not in pi jsonl, so they do not count against history's user messages.
+  const seenUsers = before.messages
+    .slice(0, end)
+    .filter((message) => message.role === 'user' && !message.command);
   const unseen = history.filter((message) => message.role === 'user').slice(seenUsers.length);
   const echoes = before.messages.slice(end).filter((echo) => {
     const delivered = unseen.findIndex((message) => deliveredAs(echo, message));

@@ -228,6 +228,7 @@ export interface Message {
   不代表已确认实际服务档位；模型元数据没有更细的 Fast capability，沿用上述协议守卫，不硬编码型号名单。
   不增加自动降级重发逻辑，不吞掉服务商拒绝、凭据、网络或模型不存在等错误。
 - 事件归一化：pi session 事件 → `FynvraSessionEvent`（`text_delta`、`thinking_delta`、`tool_start` / `tool_end`、`message_end`、`agent_settled`、`approval_request`、`usage`、`error`；宿主还可经同一 `emit()` 注入非阻塞 `warning`，`tool_notice` 仅保留历史解析兼容），每条带 `seq`。SDK `agent_end` / `compaction_end` 中可恢复的错误先暂存，直到真正 `agent_settled` 才发布尚未恢复的最终错误；中间恢复成功不把 Main / Renderer 锁在错误态，显式 aborted 不误判为同轮模型失败。
+- 斜杠命令：`/name args` 若是已注册的 pi 扩展命令（如 MCP 的 `/mcp`），由 `src/agent/slashCommands.ts` 在 contextRecovery `submit()` 里直接运行 handler，不走 `session.prompt`。上下文只对这条命令覆盖 `hasUI: true` 与 `ui`（不绑全局 uiContext，Magic 等插件仍见 `hasUI: false`）：`notify` → `notice` 事件；`input` 发一条标题 notice 后挂起，直到自己的 signal 或 Stop 再返回 undefined（MCP 登录因此等 localhost 回调）；`select` / `confirm` / `editor` / `custom` 保持空结果并提示显式传参。命令一开始就消费输入（移出 pending 并 checkpoint，重载不重跑），并发 `command` 事件确认 Renderer 的乐观回显；handler 报错变 error notice。Stop 立即放弃等待 handler（其后台继续、后续输出丢弃）并让会话回到 idle。未注册的 `/foo`、`/skill:`、提示词模板照旧交给 `session.prompt`。`command` / `notice` 不在 pi jsonl 里，是临时投影：只进 transcript 与 Renderer 时间线（notice 为弱化行，URL 可点），history 重载后消失。MCP OAuth 令牌由 pi 存在 `<agentDir>/mcp-auth.json`，其他会话在下一轮 `turn_start` 自行重连。
 
 ## 6. 主 agent 工作循环（产品核心）
 
