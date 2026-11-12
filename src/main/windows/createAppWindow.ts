@@ -5,6 +5,7 @@ import { BrowserWindow, type BrowserWindowConstructorOptions, nativeTheme, shell
 import winIcon from '../../../resources/icon.ico?asset';
 import pngIcon from '../../../resources/icon.png?asset';
 import { registerFileUnloadGuard } from './fileUnloadGuard';
+import { registerZoomShortcuts } from './zoomShortcuts';
 
 /** 与 styles/globals.css 的 --background 一致，避免首帧闪白 / 闪黑。 */
 const BACKGROUND = { light: '#ffffff', dark: '#09090b' } as const;
@@ -38,6 +39,7 @@ export function createAppWindow(options: AppWindowOptions): BrowserWindow {
 
   win.once('ready-to-show', () => win.show());
   registerFileUnloadGuard(win);
+  registerZoomShortcuts(win.webContents);
   win.on('maximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, true));
   win.on('unmaximize', () => sendToWindow(win, IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, false));
 
