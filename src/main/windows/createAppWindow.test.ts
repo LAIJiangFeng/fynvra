@@ -23,6 +23,7 @@ vi.mock('electron', () => ({
   shell: {},
 }));
 vi.mock('./fileUnloadGuard', () => ({ registerFileUnloadGuard: vi.fn() }));
+vi.mock('../ipc/settings', () => ({ getSettingsFile: vi.fn() }));
 
 import { createAppWindow } from './createAppWindow';
 import { registerFileUnloadGuard } from './fileUnloadGuard';

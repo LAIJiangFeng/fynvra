@@ -9,8 +9,8 @@ import { asRecord } from './guards';
  * 动作与保留键的显示名在 Renderer 的字典里（keys.actions.<动作 id>、keys.reserved.<保留键 id>）。
  */
 
-/** 全局：窗口上监听；输入框：由 Composer 自己派发 */
-export type KeyScope = 'global' | 'composer';
+/** 全局：窗口上监听；输入框：由 Composer 自己派发；文件：由打开着的文件预览自己派发 */
+export type KeyScope = 'global' | 'composer' | 'files';
 /** 决定 `mod` 是哪个键、按键怎么显示 */
 export type KeyPlatform = 'mac' | 'windows' | 'linux';
 
@@ -32,6 +32,12 @@ const ACTIONS = {
   'prev-session': { scope: 'global', chord: 'mod+shift+[', allowInInput: true },
   'next-session': { scope: 'global', chord: 'mod+shift+]', allowInInput: true },
   'search-sessions': { scope: 'global', chord: 'mod+k', allowInInput: true },
+  /** 缩放由 Main 的 before-input-event 处理：焦点在终端、编辑器里也响应 */
+  'zoom-in': { scope: 'global', chord: 'mod+=', allowInInput: true },
+  'zoom-out': { scope: 'global', chord: 'mod+-', allowInInput: true },
+  'zoom-reset': { scope: 'global', chord: 'mod+0', allowInInput: true },
+  'save-file': { scope: 'files', chord: 'mod+s' },
+  'find-in-file': { scope: 'files', chord: 'mod+f' },
   send: { scope: 'composer', chord: 'enter' },
   newline: { scope: 'composer', chord: 'shift+enter' },
   'cycle-approval': { scope: 'composer', chord: 'shift+tab' },

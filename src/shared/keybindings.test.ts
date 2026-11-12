@@ -243,6 +243,30 @@ describe('默认键', () => {
     expect(defaultChord('steer-now', 'mac')).toBe('meta+s');
   });
 
+  it('缩放与文件预览动作的默认键', () => {
+    const windows = resolveKeybindings(undefined, 'windows');
+    expect(windows['zoom-in']).toBe('ctrl+=');
+    expect(windows['zoom-out']).toBe('ctrl+-');
+    expect(windows['zoom-reset']).toBe('ctrl+0');
+    expect(windows['save-file']).toBe('ctrl+s');
+    expect(windows['find-in-file']).toBe('ctrl+f');
+    const mac = resolveKeybindings(undefined, 'mac');
+    expect(mac['zoom-in']).toBe('meta+=');
+    expect(mac['zoom-out']).toBe('meta+-');
+    expect(mac['zoom-reset']).toBe('meta+0');
+    expect(mac['save-file']).toBe('meta+s');
+    expect(mac['find-in-file']).toBe('meta+f');
+    // FilePane 用 matchAction（chordFromEvent === 生效的键）派发：默认键照旧响应，改键后旧键不响应
+    const ctrlS = chordFromEvent(key({ key: 's', code: 'KeyS', ctrlKey: true }));
+    expect(ctrlS).toBe(windows['save-file']);
+    expect(chordFromEvent(key({ key: 'f', code: 'KeyF', metaKey: true }))).toBe(
+      mac['find-in-file']
+    );
+    expect(resolveKeybindings({ 'save-file': 'ctrl+alt+s' }, 'windows')['save-file']).not.toBe(
+      ctrlS
+    );
+  });
+
   it('输入框动作不带修饰键', () => {
     for (const platform of PLATFORMS) {
       expect(defaultChord('send', platform)).toBe('enter');
@@ -275,6 +299,9 @@ describe('默认键', () => {
       'prev-session',
       'next-session',
       'search-sessions',
+      'zoom-in',
+      'zoom-out',
+      'zoom-reset',
     ]);
     for (const action of globals) expect(KEY_ACTIONS[action].allowInInput).toBe(true);
   });
