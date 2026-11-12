@@ -3,7 +3,7 @@
 ## 客户端
 
 - 发布目标是 Windows x64 的 NSIS 安装包，以及 macOS Intel（x64）/ Apple Silicon（arm64）的 DMG 和 ZIP。更新源固定为公开仓库 `LAIJiangFeng/fynvra` 的 GitHub Releases，不需要给客户端配置 token。
-- Windows 和 Developer ID 签名的 Mac 版启动 10 秒后检查，此后每 4 小时检查一次；发现稳定新版本后自动下载。设置 → 通用 → 应用更新可以手动检查、查看版本和进度。Mac 无证书手动安装版不请求原生更新，设置页明确说明须下载新版后手动安装。
+- Windows 和 Developer ID 签名的 Mac 版启动 10 秒后检查，此后每 4 小时检查一次；发现稳定新版本后自动下载。设置 → 通用 → 应用更新可以手动检查、查看版本和进度。Mac 无证书（ad-hoc）版同样定时检查，但不走原生 Squirrel，而是只读 `latest-mac-manual.yml`，自行下载对应架构 ZIP、校验 SHA512 和大小、用 `ditto` 解压并核对 `Info.plist` 版本，确认安装后由独立脚本等应用退出再替换 `.app`（失败还原备份）并重新打开。应用位于 App Translocation、`/Volumes/` 或不可写目录时拒绝替换，提示移到「应用程序」后手动安装。代价：每次下载完整 ZIP；更新后 macOS 可能再次询问文件夹权限。**旧的手动版不含自更新代码，须手动安装一次包含此功能的版本。**
 - 下载完显示应用内提醒和静默系统通知。点击「重启并安装」后先确认，再确认未保存文件，关闭 agent 和落盘编排状态，最后安装并重新打开。取消任一退出确认都不会安装，不会因后台下载主动中断任务。
 - 开发模式不联网更新；未发布的平台明确显示不可用。默认不在普通退出时安装，不接受降级、预发行版本或 Renderer 指定的 URL。
 - **首次需要手动安装一个包含本功能的安装包**。没有更新代码的旧安装包不会自行获得更新功能。仅重新运行 `pnpm dev` 也不会启用生产更新。
@@ -18,7 +18,7 @@
 2. 根据 `package.json` 和已有稳定 `vX.Y.Z` 标签决定版本。没有标签时从当前版本加一个 patch；通常下一版递增 patch，主动提高 package 版本时可发布新的 minor / major。版本只写入构建产物，不产生版本提交。
 3. Windows runner 构建安装包、blockmap、`latest.yml`；校验版本、文件名、大小、SHA512，再生成 `SHA256SUMS`。
 4. Mac runner 在同一次构建中生成 x64 / arm64 两套 DMG、ZIP。Apple 凭证全未配置时使用 ad-hoc 签名；配置齐全时执行 Developer ID 签名、公证。两种模式都检查架构、签名完整性、元数据与文件哈希，签名模式还检查团队和公证票据。
-5. Mac 手动模式的 `SHA256SUMS-mac` 只包含四个安装包，不公开 `latest-mac.yml` 或 ZIP blockmap；签名模式则完整公开它们。手动包的 `package.json` 标记 `fynvraMacUpdateMode: manual`，Main 据此禁用原生自动更新。
+5. Mac 两种模式都生成并公开 `latest-mac-manual.yml`（版本及每个架构 ZIP 的文件名、base64 SHA512、大小），签名客户端从不读取它，旧手动版因此也能升级到之后的签名版。手动模式的 `SHA256SUMS-mac` 只包含四个安装包和该清单，不公开 `latest-mac.yml` 或 ZIP blockmap；签名模式则完整公开它们。手动包的 `package.json` 标记 `fynvraMacUpdateMode: manual`，Main 据此改用自替换更新器而非原生更新。
 6. Windows 和 Mac 都成功后，发布 job 校验两份 SHA256 与版本顺序，创建草稿 Release，完整上传后才公开并标记为 latest。没有 Apple 凭证不再阻止公开下载；部分凭证缺失、构建或校验失败仍会阻止发布。
 
 工作流串行发布，连续合并时 GitHub 可能把尚未开始的排队任务合并为最新一次。重新运行相同提交复用标签，已公开的 Release 不覆盖；旧提交落后于已发布代码时拒绝发布，避免版本号升高但代码回退。失败的草稿不会被客户端发现，可重跑失败任务继续发布。
@@ -29,13 +29,13 @@
 - 可在 Actions → Release → Run workflow 选择 main 手动发布首版；其他分支禁止发布。
 - 在 Releases → 对应版本 → Assets 下载 `.exe`、对应架构的 `.dmg` 或 `.zip`。只有源码的 Source code 下载项不代表已经生成安装包；工作流在产物上传完整后才公开版本。Windows 发布 `latest.yml`；只有正式签名 Mac 发布 `latest-mac.yml`。
 - 没有 Windows 签名证书也可生成安装包，但系统可能显示 SmartScreen 提示。可选的 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD` Secrets 分别提供签名证书及密码；不能把证书或密码提交到仓库。
-- 目前不自动发布 Linux。Mac 打包、公开下载、手动安装不强制要求 Apple 证书；当前使用的原生自动更新方案需要正式签名身份，不能把 ad-hoc 手动包当作支持自动安装的更新。
+- 目前不自动发布 Linux。Mac 打包、公开下载、手动安装不强制要求 Apple 证书；原生自动更新（Squirrel）需要正式签名身份，ad-hoc 包改用应用内自替换更新。
 
 ## 不使用 Apple 凭证
 
 不配置下面的五项 Apple Secrets，工作流会生成 ad-hoc 签名的双架构 Mac 包并发布到同一个 Release，标题和说明标注 Mac 需手动安装。ad-hoc 签名满足应用代码签名的基本要求，但不提供 Apple 验证的开发者身份，也没有公证。
 
-首次运行可能被 Gatekeeper 拦截。确认从本仓库下载后，先将应用复制到「应用程序」，再按 macOS 提示到「系统设置 → 隐私与安全性」针对 Fynvra 选择「仍要打开」。不同系统版本或组织管理策略可能有不同限制；不建议全局关闭安全检查。后续版本需重新下载并覆盖应用，用户数据保留在独立应用数据目录。
+首次运行可能被 Gatekeeper 拦截。确认从本仓库下载后，先将应用复制到「应用程序」，再按 macOS 提示到「系统设置 → 隐私与安全性」针对 Fynvra 选择「仍要打开」。不同系统版本或组织管理策略可能有不同限制；不建议全局关闭安全检查。后续版本由应用内自替换更新安装（需在可写的「应用程序」目录中运行），也可重新下载覆盖；用户数据保留在独立应用数据目录。
 
 ## Mac 签名与公证
 
@@ -83,6 +83,6 @@ pnpm release:verify dist 0.1.1 mac
 
 `pnpm package:mac:signed` 使用 `package.json` 的版本生成签名、公证包。两个本地打包命令都不会上传 Release。
 
-`test:updates` 使用隐藏的隔离 Electron 实例、临时数据与缓存目录、本机 HTTP 更新源。Windows 和签名 Mac 模式验证真实下载和哈希校验，但拦截最终安装器，永不执行测试安装文件；Mac 还拦截原生 Squirrel 入口。手动 Mac 模式验证应用加载、明确的手动安装提示、零更新网络请求和正常退出。工作流加载打包后的 `app.asar`，Mac 联调运行 arm64 版本，Intel 包另做架构和签名完整性校验；签名模式还做公证检查。这不是原生安装升级的替代测试。
+`test:updates` 使用隐藏的隔离 Electron 实例、临时数据与缓存目录、本机 HTTP 更新源。Windows 和签名 Mac 模式验证真实下载和哈希校验，但拦截最终安装器，永不执行测试安装文件；Mac 还拦截原生 Squirrel 入口。手动 Mac 模式只验证应用加载、自替换更新器待命（不显示手动安装提示）、零本机更新源请求和正常退出，并在首次检查前退出以免 CI 访问 GitHub；自替换下载与安装由单元测试覆盖。工作流加载打包后的 `app.asar`，Mac 联调运行 arm64 版本，Intel 包另做架构和签名完整性校验；签名模式还做公证检查。这不是原生安装升级的替代测试。
 
 上面的命令只生成和校验本地产物，不发布。Windows 机器不能验证 Mac 签名、公证或原生更新。真正的线上闭环仍需首次 GitHub 工作流成功，在 Windows、Intel Mac、Apple Silicon Mac 分别安装首版后再发布一个更高版本，验证客户端能够检查、下载、安装并保留用户数据。

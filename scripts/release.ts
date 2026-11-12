@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 type Version = [number, number, number];
+const MAC_MANUAL_MANIFEST = 'latest-mac-manual.yml';
 
 export function selectMacSigningMode(
   credentials: Record<string, string | undefined>
@@ -110,6 +111,7 @@ export async function verifyRelease(
     throw new Error('更新版本或安装包名称不匹配');
   }
   const remaining = new Set(installers);
+  const zips = new Map<string, { sha512: string; size: number }>();
   for (const raw of metadata.files) {
     const file = record(raw);
     if (typeof file.url !== 'string' || !remaining.delete(file.url)) {
@@ -122,10 +124,23 @@ export async function verifyRelease(
     const sha512 = await hashFile(path, 'sha512', 'base64');
     if (file.sha512 !== sha512 || (metadata.path === file.url && metadata.sha512 !== sha512))
       throw new Error('安装包 SHA512 不匹配');
+    zips.set(file.url, { sha512, size: info.size });
+  }
+  if (platform !== 'win') {
+    // 无证书 Mac 包自更新只读这份清单；签名客户端仍走 latest-mac.yml。JSON 也是合法 YAML。
+    const manifest = {
+      version,
+      files: ['x64', 'arm64'].map((arch) => {
+        const url = `Fynvra-${version}-mac-${arch}.zip`;
+        return { arch, url, ...zips.get(url) };
+      }),
+    };
+    writeFileSync(join(directory, MAC_MANUAL_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
   }
   // 手动安装包可公开下载，但不能被原生更新器当作正式签名更新。
   const files = [
     ...installers,
+    ...(platform !== 'win' ? [MAC_MANUAL_MANIFEST] : []),
     ...(platform === 'mac-manual'
       ? []
       : [...updatePackages.map((name) => `${name}.blockmap`), metadataName]),
