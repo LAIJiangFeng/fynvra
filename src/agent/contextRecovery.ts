@@ -6,6 +6,7 @@ import { asRecord } from '@shared/guards';
 import type { ChatImage } from '@shared/types/chat';
 import { parseChatImages, stripImageHints } from '@shared/types/chat';
 import type { CompactionStrategy } from '@shared/types/settings';
+import { type SlashCommandRun, startExtensionCommand } from './slashCommands';
 
 const CHECKPOINT = 'fynvra-context-recovery';
 const BLOCKED = 'Context recovery required. Retry context recovery before continuing.';
@@ -61,6 +62,9 @@ export function createContextRecovery({
   let lastCompactionId: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const pending: PendingInput[] = [];
+  /** Extension commands Fynvra is running instead of a prompt; Stop releases them at once. */
+  const commands = new Set<SlashCommandRun>();
+  let drained: Promise<void> = Promise.resolve();
 
   // Recovery survives unloading/restarting without putting message bodies in settings.json.
   for (const entry of session.sessionManager.getBranch()) {
@@ -312,6 +316,24 @@ export function createContextRecovery({
       turnStopped = false;
       session.setAutoCompactionEnabled(effective === 'native');
     }
+    const command = startExtensionCommand(session, input.text, (level, text) =>
+      events?.emit({ type: 'notice', level, text })
+    );
+    if (command) {
+      // The command consumes its input at once: a reload must not run it (e.g. a sign-in) again.
+      const index = pending.indexOf(input);
+      if (index >= 0) pending.splice(index, 1);
+      checkpoint();
+      publish();
+      events?.emit({ type: 'command', text: input.text });
+      commands.add(command);
+      try {
+        await command.done;
+      } finally {
+        commands.delete(command);
+      }
+      return;
+    }
     const images: ImageContent[] | undefined = input.images?.map((image) => ({
       type: 'image',
       ...image,
@@ -336,6 +358,8 @@ export function createContextRecovery({
     const allowed = () => !blocked || (duringRecovery && magicActive() && !recoveryFailed);
     if (running || (recovering && !duringRecovery) || !allowed() || stopped || disposed) return;
     running = true;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    drained = promise;
     try {
       while (pending.length && allowed() && !stopped && !disposed) {
         const input = pending[0];
@@ -349,11 +373,19 @@ export function createContextRecovery({
       if (compaction?.phase === 'running' || compaction?.phase === 'backoff') cancel('exception');
       throw error;
     } finally {
+      resolve();
       running = false;
       for (const input of pending) input.submitted = false;
       checkpoint();
       publish();
     }
+  }
+  /** Stop running commands; their handlers finish in the background with output dropped. */
+  function stopCommands() {
+    const any = commands.size > 0;
+    for (const command of commands) command.stop();
+    commands.clear();
+    return any;
   }
   return {
     bind(subscription: Pick<NormalizedSubscription, 'emit' | 'cancelCompaction'>) {
@@ -464,18 +496,22 @@ export function createContextRecovery({
         publish();
       }
     },
-    abort() {
+    async abort() {
+      const stoppedCommand = stopCommands();
       cancel('user');
-      return session.abort();
+      await session.abort();
+      // The drain loop leaves on the next ticks; wait so the caller sees the session idle.
+      if (stoppedCommand) await drained;
     },
     dispose() {
       if (disposed) return;
+      stopCommands();
       cancel('shutdown');
       checkpoint();
       disposed = true;
     },
     isIdle() {
-      return !running && !recovering && session.isIdle;
+      return !running && !recovering && commands.size === 0 && session.isIdle;
     },
   };
 }

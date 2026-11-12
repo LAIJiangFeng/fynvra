@@ -19,6 +19,8 @@ describe('session events', () => {
       | 'usage'
       | 'warning'
       | 'error'
+      | 'command'
+      | 'notice'
     >();
   });
 

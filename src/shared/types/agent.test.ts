@@ -405,7 +405,14 @@ describe('parseAgentWorkerEvent', () => {
       seq: 10,
     },
     { type: 'error', source: 'host', message: 'worker crashed', seq: 11 },
+    { type: 'command', text: '/mcp login x', seq: 12 },
+    { type: 'notice', level: 'warning', text: 'Run /mcp', seq: 13 },
   ];
+
+  it('rejects a notice with an unknown level', () => {
+    const event = { type: 'notice', level: 'debug', text: 'x', seq: 1 };
+    expect(parseAgentWorkerEvent({ type: 'session-event', identity, seq: 1, event })).toBeNull();
+  });
 
   it.each(events)('accepts a session-event carrying $type', (event) => {
     const message = { type: 'session-event', identity, seq: event.seq, event };
