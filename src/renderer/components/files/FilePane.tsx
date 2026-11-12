@@ -14,6 +14,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type FileMode, type FilesStore, isFileDirty, isMarkdown } from '@/stores/files';
 import { FileMarkdownPreview } from './FileMarkdownPreview';
+import ImagePreview from './ImagePreview';
 import { PreviewFindBar } from './PreviewFindBar';
 
 const FileEditor = lazy(() => import('./FileEditor'));
@@ -176,13 +177,7 @@ export function FilePane({
       ) : preview.kind === 'unsupported' ? (
         <FileMessage title={t(`files.${preview.reason}`)} description={t('files.limits')} />
       ) : preview.kind === 'image' ? (
-        <div className="min-h-0 flex-1 overflow-auto p-6">
-          <img
-            src={preview.dataUrl}
-            alt={file.name}
-            className="mx-auto max-w-full rounded border bg-muted/30"
-          />
-        </div>
+        <ImagePreview dataUrl={preview.dataUrl} name={file.name} />
       ) : preview.kind === 'pdf' ? (
         <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
           <PdfPreview data={preview.data} />

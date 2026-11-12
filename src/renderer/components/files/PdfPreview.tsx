@@ -3,6 +3,7 @@ import { type RefObject, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
 import { openPdf, type PDFDocumentProxy, type PDFPageProxy } from './pdfjs';
+import { clampZoom, useCtrlWheelZoom } from './useCtrlWheelZoom';
 
 const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 const PAGE_GAP_PX = 32;
@@ -63,11 +64,19 @@ export default function PdfPreview({ data }: { data: Uint8Array }) {
   const fitScale =
     baseSize && width > 0 ? Math.max(0.1, (width - PAGE_GAP_PX) / baseSize.width) : 1;
   const scale = fitScale * zoom;
+  // 滚轮缩放后 zoom 可能落在档位之间，按钮跳到相邻档位
   const step = (delta: number) => {
-    const index = ZOOM_STEPS.findIndex((value) => value >= zoom - 0.001);
-    const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, index + delta))];
+    const next =
+      delta > 0
+        ? ZOOM_STEPS.find((value) => value > zoom + 0.001)
+        : [...ZOOM_STEPS].reverse().find((value) => value < zoom - 0.001);
     if (next !== undefined) setZoom(next);
   };
+  useCtrlWheelZoom(scrollRef, (factor) =>
+    setZoom((current) =>
+      clampZoom(current * factor, ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.length - 1])
+    )
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
