@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   ApprovalGateRequest,
   ApprovalPolicyHooks,
+  ConfigHost,
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
@@ -16,6 +17,7 @@ import {
   type ModelQuery,
   type ModelsDescribedResult,
   type ResolvedModelSpec,
+  redactToolArgs,
   type SessionIdentity,
   type SpawnSessionSpec,
 } from '@shared/types/agent';
@@ -28,6 +30,7 @@ import {
 } from '@shared/types/chat';
 import { ApprovalBroker } from './approvals';
 import {
+  configHostProxy,
   createHostInvoker,
   type HostCall,
   type HostInvoker,
@@ -81,6 +84,8 @@ export interface OpenSessionInput {
   host: OrchestrationHost | null;
   /** 仅 `spec.worker` 的会话有：ask_coordinator / report_done 经 host-invoke 转给 Main */
   workerHost: WorkerHost | null;
+  /** 所有会话都有：fynvra_config 经 host-invoke（kind: 'config'）转给 Main 的配置宿主 */
+  configHost?: ConfigHost | null;
   /** 审批门的人工审批通道；supervisor 提供，缺失时需审批的工具调用一律拒绝。 */
   approval?: ApprovalPolicyHooks;
 }
@@ -342,6 +347,7 @@ export class SessionSupervisor {
         host:
           spec.role.tools === 'orchestrator' ? orchestrationHostProxy(call('orchestration')) : null,
         workerHost: spec.worker ? workerHostProxy(call('worker')) : null,
+        configHost: configHostProxy(call('config')),
         approval: {
           request: (request, signal) => this.requestApproval(identity, request, signal),
           timeoutMs: this.#approvalTimeoutMs,
@@ -389,7 +395,12 @@ export class SessionSupervisor {
       managed.approvalEpoch += 1;
       this.#approvals.cancelSession(managed.identity.sessionId);
     }
-    this.#post({ type: 'session-event', identity: managed.identity, seq: event.seq, event });
+    // fynvra_config 的 MCP env / headers 值不出 worker：展示用的参数只留键名
+    const shown =
+      event.type === 'tool_start' || event.type === 'approval_request'
+        ? { ...event, args: redactToolArgs(event.toolName, event.args) }
+        : event;
+    this.#post({ type: 'session-event', identity: managed.identity, seq: event.seq, event: shown });
     // Startup/background Magic failure can happen without an active SDK run to settle.
     if (event.type === 'warning' && event.source === 'magic-context' && managed.status === 'idle') {
       managed.failed = true;

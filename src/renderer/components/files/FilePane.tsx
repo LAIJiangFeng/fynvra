@@ -11,9 +11,11 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/i18n/I18nProvider';
+import { matchAction } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { type FileMode, type FilesStore, isFileDirty, isMarkdown } from '@/stores/files';
 import { FileMarkdownPreview } from './FileMarkdownPreview';
+import ImagePreview from './ImagePreview';
 import { PreviewFindBar } from './PreviewFindBar';
 
 const FileEditor = lazy(() => import('./FileEditor'));
@@ -49,7 +51,7 @@ export function FilePane({
   const save = useEffectEvent(() => {
     void store.getState().saveFile(file.id);
   });
-  /** Ctrl/Cmd+F：预览模式总是打开查找条；双栏仅在焦点不在编辑器时；源码模式交给 CodeMirror */
+  /** 查找（默认 Ctrl/Cmd+F）：预览模式总是打开查找条；双栏仅在焦点不在编辑器时；源码模式交给 CodeMirror */
   const openFind = useEffectEvent((event: KeyboardEvent) => {
     if (!findable) return;
     if (mode === 'split' && document.activeElement?.closest('.cm-editor')) return;
@@ -64,17 +66,12 @@ export function FilePane({
   useEffect(() => {
     if (!active) return;
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 's') {
+      if (matchAction(event, 'save-file')) {
         // 弹窗内的保存由确认按钮处理，不抢占其他编辑界面的快捷键。
         if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         event.preventDefault();
         save();
-      } else if (
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === 'f'
-      ) {
+      } else if (matchAction(event, 'find-in-file')) {
         if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         openFind(event);
       }
@@ -176,13 +173,7 @@ export function FilePane({
       ) : preview.kind === 'unsupported' ? (
         <FileMessage title={t(`files.${preview.reason}`)} description={t('files.limits')} />
       ) : preview.kind === 'image' ? (
-        <div className="min-h-0 flex-1 overflow-auto p-6">
-          <img
-            src={preview.dataUrl}
-            alt={file.name}
-            className="mx-auto max-w-full rounded border bg-muted/30"
-          />
-        </div>
+        <ImagePreview dataUrl={preview.dataUrl} name={file.name} />
       ) : preview.kind === 'pdf' ? (
         <Suspense fallback={<FileMessage loading title={t('common.loading')} />}>
           <PdfPreview data={preview.data} />

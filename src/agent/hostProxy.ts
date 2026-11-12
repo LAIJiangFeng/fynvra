@@ -1,4 +1,4 @@
-import type { HostResult, OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
+import type { ConfigHost, HostResult, OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import { errorMessage } from '@shared/guards';
 import type {
   AgentWorkerEvent,
@@ -153,6 +153,11 @@ export function orchestrationHostProxy(call: HostCall): OrchestrationHost {
     rejectWork: (input, signal) => forward(call('rejectWork', input, signal)),
     cleanupWorktree: (input, signal) => forward(call('cleanupWorktree', input, signal)),
   };
+}
+
+/** fynvra_config 背后的配置宿主（kind: 'config'，method: 'configure'） */
+export function configHostProxy(call: HostCall): ConfigHost {
+  return { configure: (input, signal) => forward(call('configure', input, signal)) };
 }
 
 /** worker 工具背后的 WorkerHost：位置参数打包成对象转发（kind: 'worker'） */

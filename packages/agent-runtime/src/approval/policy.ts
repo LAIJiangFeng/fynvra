@@ -1,5 +1,6 @@
 import type { ApprovalMode } from '@fynvra/core';
 import { asRecord } from '../tools/args';
+import { CONFIG_TOOL_NAME, describeConfigAction, isConfigMutation } from '../tools/configTool';
 import { truncateHeadChars } from '../tools/result';
 
 // 与 src/shared/types/chat.ts 的 ApprovalKind / ApprovalDecision 同形（packages 不能 import src）。
@@ -41,8 +42,12 @@ const MODE_KINDS: Record<ApprovalMode, readonly ApprovalKind[]> = {
   full: [],
 };
 
-/** 工具的审批类别；只读与协调类工具（read / grep / report_done / dispatch_task …）返回 null，任何档位都不审批 */
-export function approvalKindOf(toolName: string): ApprovalKind | null {
+/**
+ * 工具的审批类别；只读与协调类工具（read / grep / report_done / dispatch_task …）返回 null，任何档位都不审批。
+ * fynvra_config 按 action：list 只读，其余改配置的动作按 command 审批（supervised / auto-edits 要问）
+ */
+export function approvalKindOf(toolName: string, input?: unknown): ApprovalKind | null {
+  if (toolName === CONFIG_TOOL_NAME) return isConfigMutation(input) ? 'command' : null;
   return TOOL_KINDS.get(toolName) ?? (toolName.startsWith('mcp__') ? 'mcp' : null);
 }
 
@@ -68,6 +73,9 @@ export function describeToolCall(
       title: `${toolName} (network access)`,
       detail: urlOf(input) ?? argsPreview(input),
     };
+  }
+  if (toolName === CONFIG_TOOL_NAME) {
+    return { title: 'Change Fynvra settings', detail: describeConfigAction(input) };
   }
   const detail =
     kind === 'command'

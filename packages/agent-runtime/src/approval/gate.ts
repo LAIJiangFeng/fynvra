@@ -4,6 +4,7 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 import type { ApprovalMode } from '@fynvra/core';
+import { CONFIG_TOOL_NAME } from '../tools/configTool';
 import { isDocumentPath } from '../tools/documentPath';
 import { errorMessage } from '../tools/result';
 import {
@@ -149,7 +150,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     if (signal?.aborted) {
       return { block: true, reason: 'The run was stopped; the tool was not run.' };
     }
-    const kind = approvalKindOf(call.toolName) ?? (isPluginTool(call.toolName) ? 'plugin' : null);
+    const kind =
+      approvalKindOf(call.toolName, call.input) ?? (isPluginTool(call.toolName) ? 'plugin' : null);
     if (!kind) return undefined;
     const planning = planModeOn();
     if (planning && (kind === 'file-write' || kind === 'file-edit')) {
@@ -350,6 +352,8 @@ function refusal(request: ApprovalGateRequest, outcome: Outcome, timeoutMs: numb
 
 function describeAction(request: ApprovalGateRequest): string {
   const target = request.detail.split('\n')[0]?.trim() ?? '';
+  if (request.toolName === CONFIG_TOOL_NAME)
+    return `the Fynvra settings change "${oneLine(target)}"`;
   switch (request.kind) {
     case 'command':
       return target ? `the command \`${oneLine(target)}\`` : `the ${request.toolName} call`;
