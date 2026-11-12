@@ -23,19 +23,53 @@ export interface SlashCommandRun {
 export function startExtensionCommand(
   session: Pick<AgentSession, 'extensionRunner'>,
   text: string,
-  notify: (level: NoticeLevel, text: string) => void
+  notify: (level: NoticeLevel, text: string) => void,
+  options: { mcpServers?: readonly string[]; hintMs?: number } = {}
 ): SlashCommandRun | undefined {
   if (!text.startsWith('/')) return undefined;
   // Same parsing as pi `_tryExecuteExtensionCommand`.
   const space = text.indexOf(' ');
   const name = space === -1 ? text.slice(1) : text.slice(1, space);
-  const args = space === -1 ? '' : text.slice(space + 1);
+  let args = space === -1 ? '' : text.slice(space + 1);
   const runner = session.extensionRunner;
   const command = runner.getCommand(name);
   if (!command) return undefined;
 
+  // Same parsing as pi's /mcp handler. An unknown server fails here instead of after pi's
+  // `await pending`, which waits for every startup connection of this session.
+  const [action, server, ...extra] = args.trim().split(/\s+/).filter(Boolean);
+  if (
+    name === 'mcp' &&
+    options.mcpServers &&
+    server &&
+    (action === 'login' || action === 'logout' || action === 'reconnect')
+  ) {
+    const key = (value: string) => value.replaceAll('_', '-');
+    const match = options.mcpServers.find((known) => key(known) === key(server));
+    if (match === undefined) {
+      const list = options.mcpServers.length ? options.mcpServers.join(', ') : 'none';
+      const message = `No MCP server named "${server}" in this session. This session's servers: ${list}. Sign in from a session whose role has "${server}", or add it to this role in Settings.`;
+      // Next microtask, like a real command, so the caller announces it first.
+      return { done: Promise.resolve().then(() => notify('error', message)), stop: () => {} };
+    }
+    // pi looks the name up exactly; pass the configured spelling.
+    args = [action, match, ...extra].join(' ');
+  }
+
   const stopper = new AbortController();
+  const hint = setTimeout(
+    () =>
+      emit(
+        'info',
+        name === 'mcp'
+          ? "Waiting for this session's MCP servers to finish connecting; a freshly started session can take a minute or two. Press Stop to cancel."
+          : `/${name} is still running. Press Stop to cancel.`
+      ),
+    options.hintMs ?? 3000
+  );
+  stopper.signal.addEventListener('abort', () => clearTimeout(hint), { once: true });
   const emit = (level: NoticeLevel, message: string) => {
+    clearTimeout(hint);
     if (!stopper.signal.aborted) notify(level, message);
   };
   let warned = false;
@@ -92,7 +126,8 @@ export function startExtensionCommand(
     .then(() => command.handler(args, ctx))
     .catch((error: unknown) => {
       emit('error', `/${name} failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    })
+    .finally(() => clearTimeout(hint));
   const stopped = new Promise<void>((resolve) =>
     stopper.signal.addEventListener('abort', () => resolve(), { once: true })
   );

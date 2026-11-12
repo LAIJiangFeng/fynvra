@@ -192,6 +192,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       timeoutMs,
       contextWindow: () => activeModel.model?.contextWindow ?? 0,
       log: logContext,
+      mcpServers: spec.mcpServers.map((server) => server.name),
     });
     recoveryGate = recovery;
     // Magic stopped during startup, before the gate existed.

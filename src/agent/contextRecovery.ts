@@ -25,6 +25,10 @@ interface Options {
   log(message: string): void;
   /** Readiness plus the Magic cancellation generation; never authorizes native compaction. */
   magicReady?(): AbortSignal;
+  /** This session's MCP server names, so `/mcp login <unknown>` fails at once. */
+  mcpServers?: readonly string[];
+  /** Delay before a silent slash command gets a "still running" hint (tests). */
+  commandHintMs?: number;
 }
 
 /** Host-owned gate around public SDK APIs. No listener throws and no private SDK state is mutated. */
@@ -35,6 +39,8 @@ export function createContextRecovery({
   contextWindow,
   log,
   magicReady,
+  mcpServers,
+  commandHintMs,
 }: Options) {
   let events: Pick<NormalizedSubscription, 'emit' | 'cancelCompaction'> | undefined;
   let effective = strategy;
@@ -316,8 +322,11 @@ export function createContextRecovery({
       turnStopped = false;
       session.setAutoCompactionEnabled(effective === 'native');
     }
-    const command = startExtensionCommand(session, input.text, (level, text) =>
-      events?.emit({ type: 'notice', level, text })
+    const command = startExtensionCommand(
+      session,
+      input.text,
+      (level, text) => events?.emit({ type: 'notice', level, text }),
+      { ...(mcpServers ? { mcpServers } : {}), ...(commandHintMs ? { hintMs: commandHintMs } : {}) }
     );
     if (command) {
       // The command consumes its input at once: a reload must not run it (e.g. a sign-in) again.
