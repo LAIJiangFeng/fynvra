@@ -18,6 +18,12 @@ import {
 } from './testing';
 import { createWorkerHost } from './workerHost';
 
+// 假 worktree 路径在磁盘上不存在；.git 已不在的清理路径由真实 git 的集成测试覆盖
+vi.mock('./worktreeCleanup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./worktreeCleanup')>()),
+  worktreeGone: async () => false,
+}));
+
 const COORDINATOR = 'session_coord';
 const WORKSPACE = {
   id: 'ws_1',

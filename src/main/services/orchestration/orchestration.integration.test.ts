@@ -45,6 +45,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   let repo: string;
   let statePath: string;
   let launcher: FakeLauncher;
+  let exec: ReturnType<typeof vi.fn<ExecFn>>;
   let service: OrchestrationService;
   let host: OrchestrationHost;
 
@@ -55,7 +56,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
       resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
       launcher,
       roles: createFakeRoles(),
-      exec: nodeExec,
+      exec,
       runChecks: createShellRunner(),
       fs,
       notifyChanged: () => {},
@@ -76,6 +77,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     commitFile(repo, 'a.txt', 'base\n', 'init');
 
     launcher = createFakeLauncher();
+    exec = vi.fn<ExecFn>(nodeExec);
     service = openService();
     host = service.hostFor('session_coord');
   });
@@ -290,6 +292,36 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     expect((await service.snapshot()).worktrees).toEqual([]);
     expect(existsSync(join(repo, 'a.txt'))).toBe(true);
   });
+
+  it.each(['missing', 'leftover'] as const)(
+    '已验收任务的 worktree 已注销且没有 .git（%s）：cleanup_worktree 跳过 status，删目录、用 -d 删分支',
+    async (shape) => {
+      const { dispatch: attempt, worktree } = await dispatch(`Gone ${shape}`);
+      commitFile(worktree.path, 'worker.txt', 'worker change\n', 'worker change');
+      await report(attempt.workerSessionId);
+      expect(await host.mergeWorktree({ dispatchId: attempt.id })).toMatchObject({ ok: true });
+      // 模拟 EBUSY 之后：git 已删文件并注销 worktree，只剩空目录或残留文件（或什么都不剩）
+      git(repo, 'worktree', 'remove', '--force', worktree.path);
+      if (shape === 'leftover') {
+        mkdirSync(worktree.path);
+        writeFileSync(join(worktree.path, 'left.txt'), 'left behind\n');
+      }
+      exec.mockClear();
+
+      expect(await host.cleanupWorktree({ dispatchId: attempt.id })).toEqual({
+        ok: true,
+        removedWorktree: true,
+        deletedBranch: true,
+      });
+      const calls = exec.mock.calls.map(([, args]) => args);
+      expect(calls.some((args) => args.includes('status'))).toBe(false);
+      expect(calls).toContainEqual(expect.arrayContaining(['branch', '-d', worktree.branch]));
+      expect(existsSync(worktree.path)).toBe(false);
+      expect(git(repo, 'branch', '--list', worktree.branch)).toBe('');
+      expect((await service.snapshot()).worktrees).toEqual([]);
+      expect(existsSync(join(repo, 'a.txt'))).toBe(true);
+    }
+  );
 
   it.each(['coordinator', 'archive'] as const)(
     '%s 清理 worktree 与分支后，重启仍读取固定提交，不混入主分支或同名新分支的改动',
