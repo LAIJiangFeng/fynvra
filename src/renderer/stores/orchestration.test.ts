@@ -1,4 +1,4 @@
-import type { Dispatch, Message, Task } from '@fynvra/core';
+import type { Dispatch, Message, Run, Task } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestrationApi, OrchestrationSnapshotView } from '../lib/api/orchestration';
 import {
@@ -11,6 +11,7 @@ import {
   messagesOf,
   OUTPUT_POLL_MS,
   reviewCandidatesOf,
+  selectRun,
   tasksByStatus,
 } from './orchestration';
 
@@ -521,5 +522,53 @@ describe('createOrchestrationStore · diffs', () => {
     });
     await store.getState().loadDiff('dispatch_a1');
     expect(store.getState().diffs.dispatch_a1?.status).toBe('ready');
+  });
+});
+
+describe('selectRun', () => {
+  const runOf = (id: string, coordinatorSessionId: string, createdAt: number): Run => ({
+    id,
+    workspaceId: 'ws',
+    coordinatorSessionId,
+    objective: id,
+    createdAt,
+  });
+  // newest first, as runsOf returns them
+  const runs = [runOf('r3', 'c3', 3), runOf('r2', 'c2', 2), runOf('r1', 'c1', 1)];
+  const all = new Set(['c1', 'c2', 'c3']);
+
+  it("shows the current coordinator's own run", () => {
+    expect(selectRun(runs, all, 'c2', null).run?.id).toBe('r2');
+  });
+
+  it("shows a worker's parent run even when the parent was deleted", () => {
+    // the panel passes the worker's parentSessionId as the coordinator id
+    const result = selectRun(runs, new Set(['c3']), 'c1', null);
+    expect(result.run?.id).toBe('r1');
+    expect(result.listed.map((run) => run.id)).toEqual(['r3', 'r1']);
+  });
+
+  it('prefers a hand-picked run', () => {
+    expect(selectRun(runs, all, 'c2', 'r3').run?.id).toBe('r3');
+  });
+
+  it('does not fall back when the current session has no run', () => {
+    const result = selectRun(runs, all, 'plain', null);
+    expect(result.run).toBeUndefined();
+    expect(result.listed.map((run) => run.id)).toEqual(['r3', 'r2', 'r1']);
+  });
+
+  it('shows the newest visible run without a current session', () => {
+    expect(selectRun(runs, new Set(['c1', 'c2']), null, null).run?.id).toBe('r2');
+  });
+
+  it('hides runs whose coordinator is gone', () => {
+    expect(selectRun(runs, new Set(['c2']), 'c2', null).listed.map((run) => run.id)).toEqual([
+      'r2',
+    ]);
+  });
+
+  it('does not filter when the live set is null', () => {
+    expect(selectRun(runs, null, null, null).listed).toBe(runs);
   });
 });

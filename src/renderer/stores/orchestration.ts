@@ -564,6 +564,32 @@ export function runsOf(view: OrchestrationSnapshotView | null): Run[] {
   return [...view.runs].sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/**
+ * 任务面板显示哪个 Run，以及切换下拉列出哪些 Run。
+ * `live`：仍存在（含已归档）的会话 id，null 表示不过滤；当前主 agent 自己的 Run 总在列表里。
+ * `coordinatorId`：当前会话的主 agent id，null 表示没有当前会话（显示最新的 Run）；
+ * 有当前会话但它没有 Run 时不回退到别人的 Run。`pickedId`：手动选中的 Run，优先。
+ */
+export function selectRun(
+  runs: Run[],
+  live: ReadonlySet<string> | null,
+  coordinatorId: string | null,
+  pickedId: string | null
+): { listed: Run[]; run: Run | undefined } {
+  const listed = live
+    ? runs.filter(
+        (run) => live.has(run.coordinatorSessionId) || run.coordinatorSessionId === coordinatorId
+      )
+    : runs;
+  const picked = pickedId === null ? undefined : runs.find((run) => run.id === pickedId);
+  const run =
+    picked ??
+    (coordinatorId === null
+      ? listed[0]
+      : listed.find((candidate) => candidate.coordinatorSessionId === coordinatorId));
+  return { listed, run };
+}
+
 function groupBy<T extends { id: string }>(
   records: readonly T[],
   key: (record: T) => string,
