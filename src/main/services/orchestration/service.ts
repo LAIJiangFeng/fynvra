@@ -1,4 +1,4 @@
-import { lstat, rm } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import type {
   HostResult,
   OrchestrationHost,
@@ -42,6 +42,7 @@ import {
   cleanupMergedWorktree,
   type MergedCleanupBlocker,
   type MergedCleanupResult,
+  removeTree,
   unlinkLinksIn,
 } from './worktreeCleanup';
 
@@ -249,7 +250,7 @@ export function createOrchestrationService(
   // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
   const git = new GitWorktreeManager({
     exec: options.exec,
-    removeDir: (path) => rm(path, { recursive: true, force: true, maxRetries: 3 }),
+    removeDir: removeTree,
     pathKind: async (path) => {
       try {
         const stat = await lstat(path);

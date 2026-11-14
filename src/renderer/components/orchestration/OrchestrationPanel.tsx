@@ -23,14 +23,14 @@ import {
 import { cn } from '@/lib/utils';
 import { type DiffSource, diffSourceKey } from '@/stores/diffTabs';
 import { filesStoreFor, ROOT_DIRECTORY_ID } from '@/stores/files';
-import { runsOf, useOrchestrationStore } from '@/stores/orchestration';
+import { runsOf, selectRun, useOrchestrationStore } from '@/stores/orchestration';
 import { loadSourceDiff, useSourceDiff } from '@/stores/sessionChanges';
 import { useSessionsStore } from '@/stores/sessions';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { ChangesView } from './ChangesView';
 import { PanelMessage } from './common';
 import { TaskDrawer } from './TaskDrawer';
-import { TasksView } from './TasksView';
+import { RunSelect, TasksView } from './TasksView';
 
 /** 与 store 创建时取的是同一个数据源：同一次页面加载内不会变。 */
 const USING_MOCK = usingOrchestrationMock();
@@ -87,7 +87,8 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   useEffect(() => watchWorkspace(workspaceId), [watchWorkspace, workspaceId]);
 
   const [tab, setTab] = useState<PanelTab>('files');
-  const [runId, setRunId] = useState<string | null>(null);
+  // 手动选中的 Run 只在同一个会话内有效；切换会话后回到跟随当前会话
+  const [picked, setPicked] = useState<{ runId: string; sessionKey: string } | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [review, setReview] = useState<{ dispatchId: string; sessionKey: string } | null>(null);
   // 对话卡片请求定位的节点；只交给同一个任务的抽屉
@@ -112,7 +113,27 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const currentKey = diffSourceKey(currentSource);
   useEffect(() => {
     setReview((current) => (current?.sessionKey === currentKey ? current : null));
+    setPicked((current) => (current?.sessionKey === currentKey ? current : null));
   }, [currentKey]);
+  const setRunId = (runId: string) => setPicked({ runId, sessionKey: currentKey });
+  const liveSessions = useSessionsStore((state) => state.sessionsByWorkspace[workspaceId]);
+  const archivedSessions = useSessionsStore((state) => state.archivedByWorkspace[workspaceId]);
+  // 已归档主 agent 的 Run 也隐藏；当前主 agent 的 Run 由 selectRun 保留
+  const liveIds = useMemo(
+    () =>
+      USING_MOCK || liveSessions === undefined
+        ? null
+        : new Set(liveSessions.map((session) => session.id)),
+    [liveSessions]
+  );
+  // worker 会话跟随派发它的主 agent
+  const coordinatorId = useMemo(() => {
+    if (USING_MOCK || activeSessionId === null) return null;
+    const session = [...(liveSessions ?? []), ...(archivedSessions ?? [])].find(
+      (candidate) => candidate.id === activeSessionId
+    );
+    return session?.parentSessionId ?? activeSessionId;
+  }, [activeSessionId, liveSessions, archivedSessions]);
   const source = useMemo<DiffSource>(
     () =>
       review?.sessionKey === currentKey
@@ -127,7 +148,11 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const t = useT();
 
   const runs = useMemo(() => runsOf(view), [view]);
-  const run = runs.find((candidate) => candidate.id === runId) ?? runs[0];
+  const pickedRunId = picked?.sessionKey === currentKey ? picked.runId : null;
+  const { listed, run } = useMemo(
+    () => selectRun(runs, liveIds, coordinatorId, pickedRunId),
+    [runs, liveIds, coordinatorId, pickedRunId]
+  );
   const openTask = openTaskId ? view?.tasks.find((task) => task.id === openTaskId) : undefined;
   const taskCount = run && view ? view.tasks.filter((task) => task.runId === run.id).length : 0;
 
@@ -138,7 +163,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
     const task = view.tasks.find((candidate) => candidate.id === focusRequest.taskId);
     if (!task) return;
     setTab('tasks');
-    setRunId(task.runId);
+    setPicked({ runId: task.runId, sessionKey: currentKey });
     returnFocus.current = null;
     setOpenTaskId(task.id);
     setDrawerFocus(
@@ -146,7 +171,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
         ? { taskId: task.id, nodeId: focusRequest.nodeId, seq: focusRequest.seq }
         : null
     );
-  }, [focusRequest, view, workspaceId, clearFocusRequest]);
+  }, [focusRequest, view, workspaceId, clearFocusRequest, currentKey]);
 
   const closeDrawer = () => {
     setOpenTaskId(null);
@@ -168,7 +193,11 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
       <PanelMessage icon={Loader2} spin title={t('orchestration.loading')} />
     );
   } else if (!run) {
-    notice = <PanelMessage icon={Workflow} title={t('orchestration.noTasks')} />;
+    notice = (
+      <PanelMessage icon={Workflow} title={t('orchestration.noTasks')}>
+        {listed.length > 0 && <RunSelect runs={listed} value={null} onSelectRun={setRunId} />}
+      </PanelMessage>
+    );
   }
 
   return (
@@ -255,7 +284,7 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
               <TasksView
                 view={view}
                 run={run}
-                runs={runs}
+                runs={listed}
                 onSelectRun={setRunId}
                 onOpenTask={(taskId, trigger) => {
                   returnFocus.current = trigger;

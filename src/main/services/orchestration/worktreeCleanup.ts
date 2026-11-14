@@ -1,11 +1,14 @@
 import type { Dirent } from 'node:fs';
-import { lstat, readdir, rm, rmdir, unlink } from 'node:fs/promises';
+import * as nodeFs from 'node:fs';
+import { lstat, readdir, rmdir, unlink } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import type {
   Dispatch,
   GitWorktreeManager,
   OrchestrationStore,
   TaskStatus,
+  Worktree,
   WorktreeStatus,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
@@ -13,6 +16,51 @@ import type { WorkerSessionLauncher } from './launcher';
 
 /** 不能删的原因：没经 merge_worktree 合并、有未提交改动或未跟踪文件、合并之后又有新提交 */
 export type MergedCleanupBlocker = 'not-merged' | 'dirty' | 'unmerged-commits';
+
+let treeFs: typeof nodeFs | undefined;
+
+/** 递归删除目录（只删链接本身，不跟随）；路径不存在算成功。 */
+export async function removeTree(path: string): Promise<void> {
+  // Electron 打过补丁的 fs 把 .asar 文件当目录，rimraf 删不掉；original-fs 是未打补丁的 fs
+  treeFs ??= process.versions.electron
+    ? (createRequire(import.meta.url)('original-fs') as typeof nodeFs)
+    : nodeFs;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // 不用 maxRetries：rimraf 在每一层目录都重试，层层嵌套，深目录要几小时才失败
+      await treeFs.promises.rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      await new Promise((done) => setTimeout(done, 200 * attempt));
+    }
+  }
+}
+
+/** worktree 的 `.git` 已不在（目录已删或删到一半）。 */
+export async function worktreeGone(worktree: Worktree): Promise<boolean> {
+  try {
+    await lstat(join(worktree.path, '.git'));
+    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
+/**
+ * worktree 的 git 状态；没有 `.git`（目录已不在或删到一半）时直接当作干净：检出已不存在，
+ * 没有未提交改动可保护，分支上的提交仍由分支删除规则（-d / 用户确认后 -D）保护。
+ */
+async function worktreeStatus(
+  git: GitWorktreeManager,
+  worktree: Worktree
+): ReturnType<GitWorktreeManager['status']> {
+  if (await worktreeGone(worktree)) {
+    return { ok: true, status: { dirty: false, ahead: 0, behind: 0 } };
+  }
+  return git.status(worktree);
+}
 
 export type MergedCleanupResult =
   | { removed: true }
@@ -52,7 +100,7 @@ export async function cleanupMergedWorktree(
   if (dispatch === undefined || worktree === undefined) {
     return { removed: false, reason: 'no-worktree' };
   }
-  const status = await deps.git.status(worktree);
+  const status = await worktreeStatus(deps.git, worktree);
   if (!status.ok) return { removed: false, reason: 'failed', error: status.error };
   const task = deps.store.tasks.get(dispatch.taskId);
   const blocker = mergedCleanupBlocker(task?.status, status.status);
@@ -64,7 +112,7 @@ export async function cleanupMergedWorktree(
   // 先停 worker：它的进程可能还占着 worktree 里的文件
   await deps.launcher.disposeSession(dispatch.workerSessionId).catch(() => undefined);
   try {
-    await rm(worktree.path, { recursive: true, force: true, maxRetries: 3 });
+    await removeTree(worktree.path);
   } catch (error) {
     return { removed: false, reason: 'failed', error: errorMessage(error) };
   }
@@ -87,7 +135,7 @@ export async function checkSessionWorktree(
   if (dispatch === undefined || worktree === undefined) return 'none';
   const task = deps.store.tasks.get(dispatch.taskId);
   if (task?.status === 'todo' || task?.status === 'in-progress') return 'busy';
-  const status = await deps.git.status(worktree);
+  const status = await worktreeStatus(deps.git, worktree);
   if (!status.ok) return { error: status.error };
   return mergedCleanupBlocker(task?.status, status.status) ?? 'clean';
 }

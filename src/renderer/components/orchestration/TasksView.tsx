@@ -120,10 +120,6 @@ function RunHeader({
   now: number;
 }) {
   const t = useT();
-  const items = runs.map((candidate) => ({
-    value: candidate.id,
-    label: oneLine(candidate.objective, 40) || candidate.id,
-  }));
   return (
     <div className="rounded-md border bg-card px-2.5 py-2">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -159,30 +155,52 @@ function RunHeader({
         indicatorClassName="bg-emerald-500"
       />
       {runs.length > 1 && (
-        <Select
-          items={items}
-          value={run.id}
-          onValueChange={(value) => {
-            if (typeof value === 'string') onSelectRun(value);
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            className="mt-2 h-7 text-xs"
-            aria-label={t('orchestration.switchRun')}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value} className="text-xs">
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <RunSelect runs={runs} value={run.id} onSelectRun={onSelectRun} className="mt-2" />
       )}
     </div>
+  );
+}
+
+/** 切换 Run 的下拉；value 为 null 时（当前会话没有 Run）显示占位。 */
+export function RunSelect({
+  runs,
+  value,
+  onSelectRun,
+  className,
+}: {
+  runs: Run[];
+  value: string | null;
+  onSelectRun: (runId: string) => void;
+  className?: string;
+}) {
+  const t = useT();
+  const items = runs.map((candidate) => ({
+    value: candidate.id,
+    label: oneLine(candidate.objective, 40) || candidate.id,
+  }));
+  return (
+    <Select
+      items={items}
+      value={value}
+      onValueChange={(next) => {
+        if (typeof next === 'string') onSelectRun(next);
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        className={cn('h-7 text-xs', className)}
+        aria-label={t('orchestration.switchRun')}
+      >
+        <SelectValue placeholder={t('orchestration.switchRun')} />
+      </SelectTrigger>
+      <SelectContent>
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value} className="text-xs">
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
