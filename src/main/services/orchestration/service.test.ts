@@ -508,6 +508,10 @@ describe('createOrchestrationService', () => {
     it('合并之后又有改动或新提交：保留', async () => {
       const service = make();
       const dispatch = await mergedDispatch(service);
+      // 有 .git 才是活的 worktree，会跑 git status
+      const [worktree] = (await service.snapshot()).worktrees;
+      mkdirSync(worktree?.path ?? '', { recursive: true });
+      writeFileSync(join(worktree?.path ?? '', '.git'), 'gitdir: x');
       fake.respond(({ args }) => (args[0] === 'rev-list' ? { stdout: '2\t1\n' } : undefined));
       expect(await service.cleanupMergedWorktree(dispatch.workerSessionId)).toEqual({
         removed: false,
@@ -613,6 +617,65 @@ describe('createOrchestrationService', () => {
       expect(snapshot.worktrees).toEqual([]);
       expect(fake.commands()).toContain(`git worktree remove --force -- ${worktree?.path}`);
       expect(readFileSync(join(outside, 'file.txt'), 'utf8')).toBe('keep me');
+    });
+
+    it.each([
+      ['目录不存在', false],
+      ['只剩残留文件、没有 .git', true],
+    ])('已合并、worktree 已半删（%s）：不跑 git status，照常删除', async (_, leftover) => {
+      const service = make();
+      const dispatch = await reported(service);
+      expect(
+        await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id })
+      ).toMatchObject({ merged: true });
+      const [worktree] = (await service.snapshot()).worktrees;
+      const path = worktree?.path ?? '';
+      if (leftover) {
+        const asarDir = join(path, 'node_modules', 'electron', 'dist', 'resources');
+        mkdirSync(asarDir, { recursive: true });
+        writeFileSync(join(asarDir, 'default_app.asar'), 'asar');
+      }
+      const before = fake.calls.length;
+
+      expect(await service.sessionWorktreeBlocker(dispatch.workerSessionId)).toBeNull();
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, false)).toEqual({
+        ok: true,
+      });
+      const commands = fake.commands().slice(before);
+      expect(existsSync(path)).toBe(false);
+      expect((await service.snapshot()).worktrees).toEqual([]);
+      expect(commands).toContain('git worktree prune');
+      expect(commands).toContain('git branch -d fynvra/add-toggle');
+      expect(commands.filter((line) => line.startsWith('git status'))).toEqual([]);
+    });
+
+    it.each([
+      ['只剩没有 .git 的残留目录', true],
+      ['目录不存在', false],
+    ])('未合并、%s：确认 force 后放弃任务并删掉残留', async (_, leftover) => {
+      const service = make();
+      const dispatch = await reported(service);
+      const [worktree] = (await service.snapshot()).worktrees;
+      const path = worktree?.path ?? '';
+      if (leftover) {
+        mkdirSync(join(path, 'node_modules', 'pkg'), { recursive: true });
+        writeFileSync(join(path, 'node_modules', 'pkg', 'default_app.asar'), 'asar');
+      }
+      // 真实 git 对已注销的目录拒绝 worktree remove，走残留目录兜底
+      fake.respond(({ args }) =>
+        args[0] === 'worktree' && args[1] === 'remove'
+          ? { code: 128, stderr: `fatal: '${path}' is not a working tree` }
+          : undefined
+      );
+
+      expect(await service.sessionWorktreeBlocker(dispatch.workerSessionId)).toBe('not-merged');
+      expect(await service.removeSessionWorktree(dispatch.workerSessionId, true)).toEqual({
+        ok: true,
+      });
+      const snapshot = await service.snapshot();
+      expect(snapshot.tasks[0]?.status).toBe('abandoned');
+      expect(snapshot.worktrees).toEqual([]);
+      expect(existsSync(path)).toBe(false);
     });
 
     it('任务还在进行：即使 force 也拒绝', async () => {
