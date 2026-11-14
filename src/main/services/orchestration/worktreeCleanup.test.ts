@@ -1,5 +1,8 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { mergedCleanupBlocker } from './worktreeCleanup';
+import { mergedCleanupBlocker, removeTree } from './worktreeCleanup';
 
 const clean = { dirty: false, ahead: 0, behind: 3 };
 
@@ -27,5 +30,21 @@ describe('mergedCleanupBlocker（归档时能不能删 worker 的 worktree）', 
   it('合并之后 worker 又提交了：不删', () => {
     expect(mergedCleanupBlocker('completed', { ...clean, ahead: 1 })).toBe('unmerged-commits');
     expect(mergedCleanupBlocker('completed', { dirty: true, ahead: 2, behind: 0 })).toBe('dirty');
+  });
+});
+
+describe('removeTree', () => {
+  it('删掉嵌套目录；路径不存在时也成功', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-remove-tree-'));
+    try {
+      const deep = join(dir, 'wt', 'a', 'b', 'c');
+      mkdirSync(deep, { recursive: true });
+      writeFileSync(join(deep, 'default_app.asar'), 'asar');
+      await removeTree(join(dir, 'wt'));
+      expect(existsSync(join(dir, 'wt'))).toBe(false);
+      await expect(removeTree(join(dir, 'missing'))).resolves.toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
