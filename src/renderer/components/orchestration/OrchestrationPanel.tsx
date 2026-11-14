@@ -118,12 +118,13 @@ function WorkspaceOrchestration({ workspaceId }: { workspaceId: string }) {
   const setRunId = (runId: string) => setPicked({ runId, sessionKey: currentKey });
   const liveSessions = useSessionsStore((state) => state.sessionsByWorkspace[workspaceId]);
   const archivedSessions = useSessionsStore((state) => state.archivedByWorkspace[workspaceId]);
+  // 已归档主 agent 的 Run 也隐藏；当前主 agent 的 Run 由 selectRun 保留
   const liveIds = useMemo(
     () =>
       USING_MOCK || liveSessions === undefined
         ? null
-        : new Set([...liveSessions, ...(archivedSessions ?? [])].map((session) => session.id)),
-    [liveSessions, archivedSessions]
+        : new Set(liveSessions.map((session) => session.id)),
+    [liveSessions]
   );
   // worker 会话跟随派发它的主 agent
   const coordinatorId = useMemo(() => {

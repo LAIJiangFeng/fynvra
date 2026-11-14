@@ -566,7 +566,7 @@ export function runsOf(view: OrchestrationSnapshotView | null): Run[] {
 
 /**
  * 任务面板显示哪个 Run，以及切换下拉列出哪些 Run。
- * `live`：仍存在（含已归档）的会话 id，null 表示不过滤；当前主 agent 自己的 Run 总在列表里。
+ * `live`：未归档会话的 id（已删除、已归档的都不在内），null 表示不过滤；当前主 agent 自己的 Run 总在列表里。
  * `coordinatorId`：当前会话的主 agent id，null 表示没有当前会话（显示最新的 Run）；
  * 有当前会话但它没有 Run 时不回退到别人的 Run。`pickedId`：手动选中的 Run，优先。
  */

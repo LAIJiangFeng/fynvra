@@ -548,6 +548,13 @@ describe('selectRun', () => {
     expect(result.listed.map((run) => run.id)).toEqual(['r3', 'r1']);
   });
 
+  it('keeps the current coordinator run when that coordinator is archived', () => {
+    // archived sessions are not in the live set
+    const result = selectRun(runs, new Set(['c3']), 'c2', null);
+    expect(result.run?.id).toBe('r2');
+    expect(result.listed.map((run) => run.id)).toEqual(['r3', 'r2']);
+  });
+
   it('prefers a hand-picked run', () => {
     expect(selectRun(runs, all, 'c2', 'r3').run?.id).toBe('r3');
   });
