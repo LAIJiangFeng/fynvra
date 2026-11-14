@@ -58,7 +58,7 @@ import type { WorkerSessionLauncher } from './launcher';
 import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
 import type { WorkflowEngine } from './workflowEngine';
-import { mergedCleanupBlocker } from './worktreeCleanup';
+import { mergedCleanupBlocker, worktreeGone } from './worktreeCleanup';
 import { isInsideDirectory } from './worktreesRoot';
 
 /** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
@@ -1056,7 +1056,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       if (!completed) await disposeWorker(dispatch.workerSessionId, disposeOptions);
       return { ok: true, removedWorktree: false, deletedBranch: false };
     }
-    if (completed) {
+    // .git 已不在（上次删到一半）：没有检出可保护，跳过状态检查，用强删清掉残留目录；分支仍只用 -d。
+    const gone = completed && (await worktreeGone(worktree));
+    if (completed && !gone) {
       const status = await git.status(worktree);
       if (!status.ok) return fail(`could not read the worktree status: ${status.error}`);
       const blocker = mergedCleanupBlocker(task.status, status.status);
@@ -1068,9 +1070,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     }
     // 先停 worker：它的进程可能还占着 worktree 里的文件。
     await disposeWorker(dispatch.workerSessionId, disposeOptions);
-    const removed = completed
-      ? await git.remove({ repoPath, path: worktree.path })
-      : await removeWorktree(worktree);
+    const removed =
+      completed && !gone
+        ? await git.remove({ repoPath, path: worktree.path })
+        : await removeWorktree(worktree);
     if (!removed.ok) {
       return fail(`could not remove the worktree ${worktree.path}: ${removed.error}`);
     }

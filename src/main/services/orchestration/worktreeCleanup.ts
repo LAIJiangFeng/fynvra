@@ -37,6 +37,17 @@ export async function removeTree(path: string): Promise<void> {
   }
 }
 
+/** worktree 的 `.git` 已不在（目录已删或删到一半）。 */
+export async function worktreeGone(worktree: Worktree): Promise<boolean> {
+  try {
+    await lstat(join(worktree.path, '.git'));
+    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
 /**
  * worktree 的 git 状态；没有 `.git`（目录已不在或删到一半）时直接当作干净：检出已不存在，
  * 没有未提交改动可保护，分支上的提交仍由分支删除规则（-d / 用户确认后 -D）保护。
@@ -45,13 +56,8 @@ async function worktreeStatus(
   git: GitWorktreeManager,
   worktree: Worktree
 ): ReturnType<GitWorktreeManager['status']> {
-  try {
-    await lstat(join(worktree.path, '.git'));
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return { ok: true, status: { dirty: false, ahead: 0, behind: 0 } };
-    }
+  if (await worktreeGone(worktree)) {
+    return { ok: true, status: { dirty: false, ahead: 0, behind: 0 } };
   }
   return git.status(worktree);
 }
