@@ -386,6 +386,7 @@ export const en: MessagesShape<typeof zhCN> = {
       revealed: 'Shown in folder',
     },
     copyCode: 'Copy code',
+    mermaidFailed: 'Failed to render diagram: {error}',
     thinking: 'Thinking…',
     thoughts: 'Thoughts',
     tokensHint: 'Historical input / output tokens (not current context usage)',

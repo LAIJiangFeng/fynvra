@@ -296,11 +296,17 @@ describe('context runtime snapshots and recovery', () => {
 
 class FakeProcess implements WorkerProcess {
   sent: AgentCommand[] = [];
+  /** 像真实 worker 一样异步回执 dispose-session；关掉后由用例自己 emit */
+  ackDispose = true;
   #onMessage: ((message: unknown) => void) | undefined;
   #onExit: ((code: number) => void) | undefined;
   postMessage(message: unknown): void {
     // 与真实通道一样走结构化克隆
-    this.sent.push(structuredClone(message) as AgentCommand);
+    const command = structuredClone(message) as AgentCommand;
+    this.sent.push(command);
+    if (command.type === 'dispose-session' && this.ackDispose) {
+      queueMicrotask(() => this.emit({ type: 'session-disposed', identity: command.identity }));
+    }
   }
   onMessage(listener: (message: unknown) => void): void {
     this.#onMessage = listener;
@@ -493,6 +499,56 @@ describe('explicit abandoned-worker error cleanup', () => {
     expect(env.processes).toHaveLength(2);
     expect(env.sent('spawn-session')).toHaveLength(0);
     expect(env.host.get(session.id)?.status).toBe('idle');
+  });
+});
+
+describe('acknowledged dispose', () => {
+  async function spawned() {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'task');
+    env.worker().ackDispose = false;
+    let done = false;
+    const disposing = env.host
+      .implementsLauncher()
+      .disposeSession(session.id)
+      .then(() => {
+        done = true;
+      });
+    return { env, sessionId: session.id, disposing, done: () => done };
+  }
+
+  it('waits for session-disposed of the same generation', async () => {
+    const { env, sessionId, disposing, done } = await spawned();
+    await flush();
+    expect(done()).toBe(false);
+    env.worker().emit({ type: 'session-disposed', identity: { sessionId, generation: 2 } });
+    await flush();
+    expect(done()).toBe(false);
+    env.worker().emit({ type: 'session-disposed', identity: { sessionId, generation: 1 } });
+    await disposing;
+  });
+
+  it('stops waiting after 5 s without an ack', async () => {
+    vi.useFakeTimers();
+    const { done } = await spawned();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(done()).toBe(true);
+  });
+
+  it('stops waiting when the worker crashes', async () => {
+    const { env, disposing } = await spawned();
+    env.worker().exit(1);
+    await disposing;
+  });
+
+  it('resolves at once for a session that was never spawned', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.implementsLauncher().disposeSession(session.id);
+    expect(env.sent('dispose-session')).toHaveLength(0);
   });
 });
 

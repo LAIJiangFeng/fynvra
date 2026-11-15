@@ -451,6 +451,35 @@ describe('SessionSupervisor generations and lifecycle', () => {
     expect(of('session-error').at(-1)).toMatchObject({ fatal: true });
   });
 
+  it.each([true, false])(
+    'acks dispose-session only after dispose() settles (throws: %s)',
+    async (throws) => {
+      const { supervisor, sessions, of } = setup();
+      supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+      await settle();
+      const gate = Promise.withResolvers<void>();
+      (sessions[0] as FakeSession).dispose = () => gate.promise;
+      supervisor.handle({ type: 'dispose-session', identity: id1 });
+      await settle();
+      expect(of('session-disposed')).toEqual([]);
+      if (throws) gate.reject(new Error('locked'));
+      else gate.resolve();
+      await settle();
+      expect(of('session-disposed')).toEqual([{ type: 'session-disposed', identity: id1 }]);
+    }
+  );
+
+  it('acks dispose-session at once for an unknown or stale identity', async () => {
+    const { supervisor, sessions, of } = setup();
+    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    await settle();
+    const stale = { ...id1, generation: id1.generation + 1 };
+    supervisor.handle({ type: 'dispose-session', identity: stale });
+    await settle();
+    expect(of('session-disposed')).toEqual([{ type: 'session-disposed', identity: stale }]);
+    expect((sessions[0] as FakeSession).disposals).toBe(0);
+  });
+
   it('disposes a session that finishes opening after it was closed', async () => {
     let finishOpen: (session: FakeSession) => void = () => {};
     const session = new FakeSession();
