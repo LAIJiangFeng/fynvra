@@ -315,6 +315,8 @@ const TITLE_MAX_CHARS = 60;
 const DESCRIBE_TIMEOUT_MS = 15_000;
 /** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
 const SUGGESTION_TIMEOUT_MS = 10_000;
+/** 等 worker 关完会话的上限：到时不再等，清理照常继续 */
+const DISPOSE_ACK_TIMEOUT_MS = 5_000;
 /** 同时最多几条建议请求：辅助功能不能与主对话争资源 */
 const MAX_CONCURRENT_SUGGESTIONS = 2;
 /** dispatch_task 认不出模型时错误里最多列出的可选模型数 */
@@ -344,6 +346,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   const approvals = new Map<string, PendingApproval>();
   /** 在途的建议请求：requestId → 结算；同时用它限制并发并丢弃旧回包 */
   const suggestions = new Map<string, PendingSuggestion>();
+  /** 等 worker 回执 session-disposed 的结算：`${sessionId}:${generation}` → resolve */
+  const disposals = new Map<string, () => void>();
   let suggestionSeq = 0;
   let recoverySeq = 0;
   /** 模型的思考档位：pi 目录随 worker 版本固定，同一（协议, 模型, reasoning 标记）的回答不会变 */
@@ -910,6 +914,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   function handleEvent(event: Exclude<AgentWorkerEvent, { type: 'ready' }>): void {
     switch (event.type) {
+      case 'session-disposed':
+        // 会话此时已 detach，不走 currentOf；键含 generation，过期回执碰不到新的等待
+        disposals.get(`${event.identity.sessionId}:${event.identity.generation}`)?.();
+        return;
       case 'compaction-recovery-result': {
         const state = currentOf(event.identity);
         const operation = state?.recovery;
@@ -1098,6 +1106,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   function handleCrash(code: number, willRestart: boolean): void {
     failDescribes(translate('agent.describeCrashed', { code }));
+    // 持有句柄的进程已经没了，不会再有回执
+    for (const settle of [...disposals.values()]) settle();
     for (const [sessionId, state] of live) {
       if (!state.spawned) continue;
       const wasRunning = state.running;
@@ -1492,7 +1502,23 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return { ok: true, providers, ...(lastUsed ? { lastUsed } : {}) };
   }
 
-  function disposeLive(sessionId: string): void {
+  /** 等 worker 关完该 generation 的会话；超时或崩溃也结算，卡住的 agent 不阻塞清理 */
+  function awaitDisposed(identity: SessionIdentity): Promise<void> {
+    const key = `${identity.sessionId}:${identity.generation}`;
+    return new Promise((resolve) => {
+      const previous = disposals.get(key);
+      const timer = setTimeout(settle, DISPOSE_ACK_TIMEOUT_MS);
+      function settle(): void {
+        clearTimeout(timer);
+        if (disposals.get(key) === settle) disposals.delete(key);
+        previous?.();
+        resolve();
+      }
+      disposals.set(key, settle);
+    });
+  }
+
+  function disposeLive(sessionId: string): SessionIdentity | undefined {
     const state = live.get(sessionId);
     if (state) {
       state.activity += 1;
@@ -1500,14 +1526,17 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       wakeRounds();
     }
     tellObservers((observer) => observer.activity?.(sessionId, 'abort'));
-    if (!state?.spawned) return;
-    send({ type: 'dispose-session', identity: identityOf(sessionId, state) });
+    if (!state?.spawned) return undefined;
+    const identity = identityOf(sessionId, state);
+    // 没发出去（worker 不在）就没有回执可等
+    const sent = send({ type: 'dispose-session', identity }) ? identity : undefined;
     const wasRunning = state.running;
     detach(sessionId, state);
-    if (!wasRunning) return;
+    if (!wasRunning) return sent;
     // worker 关闭会话时按 deny 结束待审批、不再发事件：这里替它收尾，Renderer 据此清掉审批条
     deliver(sessionId, state, { type: 'agent_settled', aborted: true });
     setStatus(sessionId, 'idle');
+    return sent;
   }
 
   async function remove(sessionId: string, force = false): Promise<Result> {
@@ -1622,7 +1651,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       return () => failureListeners.delete(listener);
     },
     async disposeSession(sessionId, options?: { clearError?: boolean }) {
-      disposeLive(sessionId);
+      const identity = disposeLive(sessionId);
+      // 先定好等待，再让出事件循环：回执只会在这之后到达
+      if (identity) await awaitDisposed(identity);
       if (options?.clearError !== true) return;
       const state = live.get(sessionId);
       if (state) {
