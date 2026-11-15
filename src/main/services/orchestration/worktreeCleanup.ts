@@ -19,20 +19,27 @@ export type MergedCleanupBlocker = 'not-merged' | 'dirty' | 'unmerged-commits';
 
 let treeFs: typeof nodeFs | undefined;
 
+/** 与 Node 内置 rimraf 重试的错误码一致 */
+const TRANSIENT_RM_CODES = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE', 'ENFILE']);
+
 /** 递归删除目录（只删链接本身，不跟随）；路径不存在算成功。 */
 export async function removeTree(path: string): Promise<void> {
   // Electron 打过补丁的 fs 把 .asar 文件当目录，rimraf 删不掉；original-fs 是未打补丁的 fs
   treeFs ??= process.versions.electron
     ? (createRequire(import.meta.url)('original-fs') as typeof nodeFs)
     : nodeFs;
-  for (let attempt = 1; ; attempt++) {
+  // Windows 上 agent 进程异步关闭 worker 会话，dispose 之后目录还会被占用片刻，所以重试约 5 秒
+  // shortcut: retry window instead of awaiting the agent's dispose; make dispose-session acknowledged if 5 s is not enough
+  const started = Date.now();
+  for (;;) {
     try {
       // 不用 maxRetries：rimraf 在每一层目录都重试，层层嵌套，深目录要几小时才失败
       await treeFs.promises.rm(path, { recursive: true, force: true });
       return;
     } catch (error) {
-      if (attempt >= 3) throw error;
-      await new Promise((done) => setTimeout(done, 200 * attempt));
+      const code = (error as NodeJS.ErrnoException).code ?? '';
+      if (!TRANSIENT_RM_CODES.has(code) || Date.now() - started >= 5000) throw error;
+      await new Promise((done) => setTimeout(done, 250));
     }
   }
 }
