@@ -362,6 +362,7 @@ export const zhCN = {
       revealed: '已在文件夹中显示',
     },
     copyCode: '复制代码',
+    mermaidFailed: '图表渲染失败：{error}',
     thinking: '思考中…',
     thoughts: '思考过程',
     tokensHint: '历史累计输入 / 输出 tokens（不是当前上下文占用）',
