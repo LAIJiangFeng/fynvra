@@ -424,6 +424,7 @@ describe('parseAgentWorkerEvent', () => {
     { type: 'ready' },
     { type: 'log', level: 'warn', message: 'skill missing' },
     { type: 'session-status', identity, status: 'waiting-approval' },
+    { type: 'session-disposed', identity },
     {
       type: 'host-invoke',
       identity,
@@ -648,6 +649,10 @@ describe('parseAgentWorkerEvent', () => {
       }),
     ],
     ['an unknown session status', { type: 'session-status', identity, status: 'busy' }],
+    [
+      'a session-disposed with a malformed identity',
+      { type: 'session-disposed', identity: { sessionId: 's1', generation: 0 } },
+    ],
     [
       'a host invoke of an unknown kind',
       { type: 'host-invoke', identity, callId: '1', kind: 'shell', method: 'run', input: {} },

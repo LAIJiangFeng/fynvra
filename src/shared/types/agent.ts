@@ -316,6 +316,8 @@ export type AgentWorkerEvent =
   /** `seq` 按 identity 从 1 递增，与 `event.seq` 相同 */
   | { type: 'session-event'; identity: SessionIdentity; seq: number; event: FynvraSessionEvent }
   | { type: 'session-status'; identity: SessionIdentity; status: SessionStatus }
+  /** dispose-session 的回执：worker 已关闭（或本就不持有）该会话，Main 可删其工作目录 */
+  | { type: 'session-disposed'; identity: SessionIdentity }
   | {
       type: 'compaction-recovery-result';
       identity: SessionIdentity;
@@ -518,6 +520,8 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       return isSessionStatus(record.status)
         ? { type: 'session-status', identity, status: record.status }
         : null;
+    case 'session-disposed':
+      return { type: 'session-disposed', identity };
     case 'host-invoke': {
       const { callId, kind, method } = record;
       if (!isNonEmptyString(callId) || !memberOf(HOST_KIND_SET, kind)) return null;

@@ -722,9 +722,12 @@ export class SessionSupervisor {
 
   async #dispose(identity: SessionIdentity): Promise<void> {
     const managed = this.#current(identity);
-    if (!managed) return;
-    this.#sessions.delete(identity.sessionId);
-    await this.#close(managed);
+    if (managed) {
+      this.#sessions.delete(identity.sessionId);
+      await this.#close(managed);
+    }
+    // Main 等这个回执才删工作目录；没持有该会话（未知 / 过期）也立刻回执
+    this.#post({ type: 'session-disposed', identity });
   }
 
   async #close(managed: ManagedSession): Promise<void> {

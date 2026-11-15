@@ -28,8 +28,8 @@ export async function removeTree(path: string): Promise<void> {
   treeFs ??= process.versions.electron
     ? (createRequire(import.meta.url)('original-fs') as typeof nodeFs)
     : nodeFs;
-  // Windows 上 agent 进程异步关闭 worker 会话，dispose 之后目录还会被占用片刻，所以重试约 5 秒
-  // shortcut: retry window instead of awaiting the agent's dispose; make dispose-session acknowledged if 5 s is not enough
+  // 会话的 dispose 已由调用方等到 worker 回执；这里重试约 5 秒，只为 Windows 上其他短暂占用
+  // （杀毒软件、索引服务、刚在退出的进程）
   const started = Date.now();
   for (;;) {
     try {
