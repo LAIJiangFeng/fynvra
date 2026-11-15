@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
 import { CharLru } from './highlighter';
+import { MermaidBlock } from './MermaidBlock';
 
 const REMARK_PLUGINS = [remarkGfm];
 /** 已完成消息的渲染结果：虚拟列表把行卸载后再滚回来不用重新解析 Markdown */
@@ -41,6 +42,8 @@ function componentsFor(streaming: boolean): Components {
       if (!code) return <pre>{children}</pre>;
       const lang = /language-(\S+)/.exec(code.props.className ?? '')?.[1] ?? '';
       const text = textOf(code.props.children).replace(/\n$/, '');
+      // 流式中源码不完整，结束后再出图
+      if (lang.toLowerCase() === 'mermaid' && !streaming) return <MermaidBlock code={text} />;
       // 流式中代码还在变，先不高亮，结束后再上色
       return <CodeBlock code={text} lang={lang} highlight={!streaming} />;
     },
