@@ -17,6 +17,19 @@ const cache = new Map<string, Result>();
 const keyOf = (code: string, dark: boolean) => `${dark ? 'dark' : 'light'}\u0000${code}`;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+// shortcut: fixed 0.75 display scale, make it a setting if users ask for different sizes
+const DISPLAY_SCALE = 0.75;
+
+/** 只缩放根 <svg> 开始标签里的 max-width；宽图仍因 width="100%" 继续缩到容器内 */
+export function shrinkSvg(svg: string): string {
+  return svg.replace(/^<svg\b[^>]*>/, (tag) =>
+    tag.replace(
+      /max-width:\s*([\d.]+)px/,
+      (_, px: string) => `max-width: ${+(Number(px) * DISPLAY_SCALE).toFixed(2)}px`
+    )
+  );
+}
+
 function remember(key: string, result: Result) {
   cache.delete(key);
   cache.set(key, result);
@@ -41,10 +54,12 @@ export function renderMermaid(code: string, dark: boolean): Promise<Result> {
       securityLevel: 'strict',
       theme: dark ? 'dark' : 'default',
       suppressErrorRendering: true,
+      // mermaid 12 约 120px 就换行，短标签被拆行、节点变大
+      flowchart: { wrappingWidth: 200 },
     });
     let result: Result;
     try {
-      result = { svg: (await mermaid.render(id, code)).svg };
+      result = { svg: shrinkSvg((await mermaid.render(id, code)).svg) };
     } catch (error) {
       for (const selector of [`#d${id}`, `#${id}`]) document.querySelector(selector)?.remove();
       result = { error: messageOf(error) };
