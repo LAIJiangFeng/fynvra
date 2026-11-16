@@ -32,6 +32,8 @@ export interface TimelineMessage extends ChatMessage {
   command?: true;
   /** A command notice line (`notice` event, role assistant); not in pi jsonl, gone after a history reload. */
   notice?: 'info' | 'warning' | 'error';
+  /** A manual compaction's result line (terminal state, no text); not in pi jsonl. */
+  compaction?: CompactionState;
 }
 
 /** 待审批请求；`toolCallId` 来自 approval_request 事件，工具开始或结束时据此出队。 */
@@ -320,10 +322,18 @@ function applyEvent(
 ): Slice {
   const fresh = { id: `live-${event.seq}`, sessionId, createdAt: now };
   switch (event.type) {
-    case 'context_runtime':
-      return { ...slice, runtime: runtimeWithContext(slice.runtime, event.snapshot) };
+    case 'context_runtime': {
+      const next = { ...slice, runtime: runtimeWithContext(slice.runtime, event.snapshot) };
+      const state = event.snapshot.compaction;
+      return state ? withCompactionResult(next, slice.runtime, state, fresh) : next;
+    }
     case 'compaction':
-      return { ...slice, runtime: withCompaction(slice.runtime, event.state) };
+      return withCompactionResult(
+        { ...slice, runtime: withCompaction(slice.runtime, event.state) },
+        slice.runtime,
+        event.state,
+        fresh
+      );
     case 'retry':
       return {
         ...slice,
@@ -497,6 +507,35 @@ function applyEvent(
   }
 }
 
+/**
+ * A manual compaction just ended: one result line for the operation. The event and a snapshot can
+ * both carry the end; only the first closes it. Automatic compaction and recovery (retry-compaction
+ * also runs as `manual`) keep their own progress display.
+ */
+function withCompactionResult(
+  next: Slice,
+  previous: SessionRuntime,
+  state: CompactionState,
+  fresh: Fresh
+): Slice {
+  if (
+    state.reason !== 'manual' ||
+    compactionActive(state) ||
+    isClosedCompaction(previous, state) ||
+    next.runtime.compaction !== state ||
+    previous.recoveryRequired ||
+    next.runtime.recoveryRequired
+  )
+    return next;
+  return {
+    ...next,
+    messages: insertAt(next.messages, authoritativeLength(next.messages), {
+      ...newMessage(fresh, 'assistant', '', false),
+      compaction: state,
+    }),
+  };
+}
+
 /** 运行中的会话：有待审批就是 waiting-approval，否则 running。 */
 function active(slice: Slice): Slice {
   const status: SessionStatus = slice.approvals.length > 0 ? 'waiting-approval' : 'running';
@@ -520,8 +559,9 @@ function authoritativeLength(messages: readonly TimelineMessage[]): number {
   return index < 0 ? messages.length : index;
 }
 
-// Notices are not replies: usage and tool calls never attach to them.
-const isAssistant = (message: TimelineMessage) => message.role === 'assistant' && !message.notice;
+// Notices and compaction results are not replies: usage and tool calls never attach to them.
+const isAssistant = (message: TimelineMessage) =>
+  message.role === 'assistant' && !message.notice && !message.compaction;
 
 function lastIndexOf(
   messages: readonly TimelineMessage[],

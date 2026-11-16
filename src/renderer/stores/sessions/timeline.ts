@@ -13,7 +13,7 @@ export function isReadonlyTool(name: string): boolean {
 
 /** 值得画出来的消息：没有正文、思考和工具调用的 assistant 占位不画 */
 export function isVisibleMessage(message: TimelineMessage): boolean {
-  if (message.role === 'user') return true;
+  if (message.role === 'user' || message.compaction) return true;
   return Boolean(message.text.trim() || message.thinking || message.toolCalls.length > 0);
 }
 
@@ -52,7 +52,14 @@ function assistantRows(messages: readonly TimelineMessage[], compact: boolean): 
   const blocks: { message: TimelineMessage; calls: ChatToolCall[] }[] = [];
   for (const message of messages) {
     const last = blocks.at(-1);
-    if (last && !last.message.notice && !message.text.trim() && !message.thinking)
+    if (
+      last &&
+      !last.message.notice &&
+      !last.message.compaction &&
+      !message.compaction &&
+      !message.text.trim() &&
+      !message.thinking
+    )
       last.calls.push(...message.toolCalls);
     else blocks.push({ message, calls: [...message.toolCalls] });
   }
