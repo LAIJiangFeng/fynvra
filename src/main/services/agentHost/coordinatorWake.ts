@@ -24,7 +24,7 @@ function nextStep(message: Message): string {
     case 'escalation':
       return `decide how to proceed (ask the user when the decision is theirs), then use the appropriate orchestration tool (${target}). To explicitly abandon a dispatched task, call cleanup_worktree with abandon: true; ordinary cleanup does not cancel or accept pending work.`;
     default:
-      return `check list_workers for the current task and attempt (${target}). A failed report needs diagnosis and a retry decision, not acceptance; a successful report needs review before acceptance.`;
+      return `check list_workers for the current task and attempt (${target}). A failed report needs diagnosis and a retry decision, not acceptance (retry with reject_work on the same worktree; send_to_worker cannot revive a failed attempt); a successful report needs review before acceptance.`;
   }
 }
 
@@ -68,13 +68,18 @@ export function wakePrompt(
 
 export interface CoordinatorWakeHosts {
   agentHost: Pick<AgentHostService, 'get' | 'promptWhenIdle' | 'observe'>;
-  registry: Pick<OrchestrationRegistry, 'onMessage' | 'coordinatorWork' | 'ackMessages'>;
+  registry: Pick<
+    OrchestrationRegistry,
+    'onMessage' | 'coordinatorWork' | 'ackMessages' | 'workerRunEnded'
+  >;
   log?(message: string): void;
 }
 
 export interface CoordinatorWakeOptions {
   /** Debounce and settling buffer, default 400ms. */
   delayMs?: number;
+  /** How long a worker session must stay idle after a normal run end before it counts as stopped, default 2s. */
+  workerIdleMs?: number;
 }
 
 interface WakeState {
@@ -99,6 +104,7 @@ export function installCoordinatorWake(
   options: CoordinatorWakeOptions = {}
 ): void {
   const delayMs = options.delayMs ?? 400;
+  const workerIdleMs = options.workerIdleMs ?? 2_000;
   const states = new Map<string, WakeState>();
   const log = hosts.log ?? ((message: string) => console.warn(`[coordinator-wake] ${message}`));
   const stateOf = (sessionId: string): WakeState => {
@@ -211,8 +217,18 @@ export function installCoordinatorWake(
     },
     event: ({ sessionId, event }) => {
       if (event.type !== 'agent_settled') return;
-      if (event.aborted) pause(sessionId);
-      else schedule(sessionId);
+      if (event.aborted) return pause(sessionId);
+      schedule(sessionId);
+      // Worker that ended its run without report_done: the registry tells its coordinator.
+      setTimeout(() => {
+        // Still idle: not running / waiting-approval again, not errored (failure recovery owns that), not deleted.
+        if (hosts.agentHost.get(sessionId)?.status !== 'idle') return;
+        try {
+          hosts.registry.workerRunEnded(sessionId);
+        } catch (error) {
+          log(`session ${sessionId}: worker run-end check failed: ${errorMessage(error)}`);
+        }
+      }, workerIdleMs);
     },
   });
 }

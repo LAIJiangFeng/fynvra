@@ -535,6 +535,24 @@ describe('sendToWorker', () => {
     expect(launcher.promptSession).not.toHaveBeenCalled();
   });
 
+  it('失败的任务不再接收指示：引导用 reject_work 重试；挂起的问题仍能回复', async () => {
+    const first = await dispatch();
+    expect(await worker(first.dispatch.id).reportDone('failed', 'Broke.')).toEqual({ ok: true });
+    expect(await host.sendToWorker({ dispatchId: first.dispatch.id, body: 'wake' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('use reject_work { dispatch_id } to retry'),
+    });
+    expect(launcher.promptSession).not.toHaveBeenCalled();
+
+    const second = await dispatch('Other');
+    const asking = worker(second.dispatch.id).askCoordinator('Which API?', 60_000);
+    store.tasks.update(second.dispatch.taskId, { status: 'failed' });
+    expect(
+      await host.sendToWorker({ dispatchId: second.dispatch.id, body: 'Use v2.' })
+    ).toMatchObject({ ok: true, type: 'reply' });
+    expect(await asking).toEqual({ ok: true, answer: 'Use v2.' });
+  });
+
   it('已完成的任务不再接收指示', async () => {
     const first = await reported();
     await host.mergeWorktree({ dispatchId: first.dispatch.id });

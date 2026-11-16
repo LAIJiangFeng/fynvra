@@ -939,6 +939,9 @@ function nextStep(message: Message): string {
     case 'escalation':
       return `decide how to proceed (ask the user when the decision is theirs), then send_to_worker, reject_work or explicitly cancel with cleanup_worktree and abandon: true (${target}).`;
     case 'worker_done':
+      if (message.subject === 'failed') {
+        return `read_worker_output to diagnose (${target}), then reject_work to retry on the same worktree, or cleanup_worktree with abandon: true.`;
+      }
       return `review_diff and run_checks (${target}), then merge_worktree if it passes or reject_work with concrete feedback.`;
     default:
       return 'no action required.';

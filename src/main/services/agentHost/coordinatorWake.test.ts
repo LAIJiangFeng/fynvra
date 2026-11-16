@@ -67,6 +67,7 @@ function fakes(status: SessionStatus = 'idle') {
       };
     },
     coordinatorWork: vi.fn(() => ({ messages: [...inbox], reviews: [...reviews] })),
+    workerRunEnded: vi.fn(),
     ackMessages: (ids: readonly string[]) => {
       acked.push(...ids);
       for (let i = inbox.length - 1; i >= 0; i--) {
@@ -122,6 +123,29 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+describe('worker run end', () => {
+  it('reports an idle session to the registry after the idle delay', () => {
+    const f = fakes();
+    install(f);
+    f.settle();
+    vi.advanceTimersByTime(1_999);
+    expect(f.registry.workerRunEnded).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(f.registry.workerRunEnded).toHaveBeenCalledWith(COORD);
+  });
+
+  it('skips aborted runs and sessions that started running again within the delay', () => {
+    const f = fakes();
+    install(f);
+    f.settle(true);
+    vi.advanceTimersByTime(2_000);
+    f.settle();
+    f.session.status = 'running';
+    vi.advanceTimersByTime(2_000);
+    expect(f.registry.workerRunEnded).not.toHaveBeenCalled();
+  });
+});
+
 describe('wakePrompt', () => {
   it('distinguishes reviews, failed reports and questions, including read-only work', () => {
     const text = wakePrompt(
@@ -144,6 +168,7 @@ describe('wakePrompt', () => {
     );
     expect(text).toContain('ordinary cleanup does not cancel or accept pending work');
     expect(text).toContain('A failed report needs diagnosis');
+    expect(text).toContain('retry with reject_work on the same worktree');
     expect(text).toContain('send_to_worker');
     expect(text).toContain('Do not merge solely');
     expect(text).toContain('stop requests and required approvals');

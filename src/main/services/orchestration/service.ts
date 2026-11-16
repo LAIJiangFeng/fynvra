@@ -107,6 +107,11 @@ export interface OrchestrationService {
   snapshot(options?: { reconcile?: boolean }): Promise<OrchestrationSnapshotView>;
   /** Only conclusive Main/session-registry evidence can settle an orphaned current attempt */
   reconcileWorkers(): void;
+  /**
+   * worker 会话一轮正常结束且已空闲（调用方负责延迟与会话状态检查）：当前尝试仍未结算时给主 agent 投一条
+   * escalation（同 dispatch 未确认的不重复投）。不改任何状态，空闲不算失败。
+   */
+  workerRunEnded(sessionId: string): void;
   readWorkerOutput(input: {
     dispatchId: string;
     cursor: number;
@@ -468,6 +473,41 @@ export function createOrchestrationService(
     hasDispatch: (dispatchId) => loaded && store.dispatches.get(dispatchId) !== undefined,
 
     reconcileWorkers,
+
+    workerRunEnded(sessionId) {
+      if (!loaded) return;
+      const dispatch = dispatchOfSession(sessionId);
+      if (dispatch === undefined || isDispatchSettled(dispatch)) return;
+      const task = store.tasks.get(dispatch.taskId);
+      const run = task && store.runs.get(task.runId);
+      if (task?.status !== 'in-progress' || run === undefined) return;
+      if (task.workflow !== undefined) {
+        if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
+      } else if (
+        store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
+      ) {
+        return;
+      }
+      const coordinator = run.coordinatorSessionId;
+      const duplicate = inbox
+        .peek({ to: coordinator })
+        .some(
+          (message) =>
+            message.type === 'escalation' &&
+            message.from === 'fynvra' &&
+            message.dispatchId === dispatch.id
+        );
+      if (duplicate) return;
+      inbox.post({
+        runId: run.id,
+        dispatchId: dispatch.id,
+        from: 'fynvra',
+        to: coordinator,
+        type: 'escalation',
+        subject: 'worker stopped without report_done',
+        body: `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`,
+      });
+    },
 
     async snapshot({ reconcile = true } = {}) {
       await ready;

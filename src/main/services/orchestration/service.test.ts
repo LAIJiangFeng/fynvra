@@ -206,6 +206,71 @@ describe('createOrchestrationService', () => {
     await service.flush();
   });
 
+  describe('workerRunEnded', () => {
+    const escalations = async (service: ReturnType<typeof make>) =>
+      (await service.snapshot({ reconcile: false })).messages.filter(
+        (message) => message.type === 'escalation'
+      );
+
+    it('escalates an unreported in-progress attempt to the coordinator once, without changing state', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      const before = await service.snapshot({ reconcile: false });
+      service.workerRunEnded(dispatch.workerSessionId);
+      service.workerRunEnded(dispatch.workerSessionId);
+      const sent = await escalations(service);
+      expect(sent).toEqual([
+        expect.objectContaining({
+          from: 'fynvra',
+          to: 'session_coord',
+          dispatchId: dispatch.id,
+        }),
+      ]);
+      expect(sent[0]?.body).toContain('without calling report_done');
+      expect(sent[0]?.body).toContain('send_to_worker');
+      const after = await service.snapshot({ reconcile: false });
+      expect(after.tasks).toEqual(before.tasks);
+      expect(after.dispatches).toEqual(before.dispatches);
+      expect(service.coordinatorWork('session_coord').messages).toHaveLength(1);
+      await service.flush();
+    });
+
+    it.each(['succeeded', 'failed'] as const)(
+      'stays quiet after report_done %s',
+      async (outcome) => {
+        const service = make();
+        const dispatch = await dispatchOn(service);
+        await service.workerHostFor(dispatch.workerSessionId)?.reportDone(outcome, 'Done.');
+        service.workerRunEnded(dispatch.workerSessionId);
+        expect(await escalations(service)).toEqual([]);
+        await service.flush();
+      }
+    );
+
+    it('stays quiet while a reject_work retry is being delivered and for unknown sessions', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'First');
+      let deliver: (result: { ok: true }) => void = () => {};
+      launcher.promptSession.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = resolve;
+          })
+      );
+      const retry = service
+        .hostFor('session_coord')
+        .rejectWork({ dispatchId: dispatch.id, feedback: 'Retry' });
+      await vi.waitFor(() => expect(launcher.promptSession).toHaveBeenCalled());
+      service.workerRunEnded(dispatch.workerSessionId);
+      service.workerRunEnded('session_unknown');
+      expect(await escalations(service)).toEqual([]);
+      deliver({ ok: true });
+      expect(await retry).toMatchObject({ ok: true });
+      await service.flush();
+    });
+  });
+
   it('list/wait reconcile missing sessions without requiring a panel snapshot', async () => {
     const service = make();
     await dispatchOn(service);
