@@ -57,7 +57,7 @@ import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
 import { getOrchestrationRegistry } from './orchestration';
 import { getPluginRegistry, installPlugin, setPluginEnabled } from './plugins';
-import { getProviderStore } from './providers';
+import { getModelLimitsProber, getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile, onConfirmDangerousActionsChanged } from './settings';
 import { getSkillRegistry } from './skills';
@@ -137,6 +137,7 @@ function createAppAgentHost(): AgentHostService {
     models: createModelResolver(),
     // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
     providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
+    modelLimits: getModelLimitsProber(),
     lastModels: createLastModelStore(getSettingsFile()),
     // 已删除的目录（如清理掉的 worktree）不起 git
     branches: createBranchTracker({

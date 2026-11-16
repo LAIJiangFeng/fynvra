@@ -31,6 +31,16 @@ export interface ProviderStore {
    * 入参须先经 parseProviderUpsert 且不带 id；结果与入参一一对应。
    */
   addMany(inputs: readonly ProviderUpsertInput[]): Promise<ProviderAddOutcome[]>;
+  /**
+   * 写一个模型条目的窗口 / 最大输出（自动探测的结果），其他字段不动，一次读改写。
+   * 不带 overwrite 时只补缺失的字段。服务或模型不存在、没有变化时返回 false。
+   */
+  updateModelLimits(
+    providerId: string,
+    modelId: string,
+    limits: Pick<ModelEntry, 'contextWindow' | 'maxOutput'>,
+    overwrite?: boolean
+  ): Promise<boolean>;
 }
 
 /** `userData/providers.json`：模型服务与明文 API key，原子写。 */
@@ -98,6 +108,24 @@ export function createProviderStore(options: {
           return { ok: true, provider };
         });
         return next.length > providers.length ? { next, result } : { result };
+      }),
+    updateModelLimits: (providerId, modelId, limits, overwrite = false) =>
+      registry.transact((providers) => {
+        const index = providers.findIndex((provider) => provider.id === providerId);
+        const provider = providers[index];
+        const model = provider?.models.find((entry) => entry.id === modelId);
+        if (!provider || !model) return { result: false };
+        const patch: Pick<ModelEntry, 'contextWindow' | 'maxOutput'> = {};
+        for (const field of ['contextWindow', 'maxOutput'] as const) {
+          const value = limits[field];
+          if (!isPositiveInt(value) || value === model[field]) continue;
+          if (overwrite || model[field] === undefined) patch[field] = value;
+        }
+        if (Object.keys(patch).length === 0) return { result: false };
+        const models = provider.models.map((entry) =>
+          entry.id === modelId ? { ...entry, ...patch } : entry
+        );
+        return { next: providers.with(index, { ...provider, models }), result: true };
       }),
   };
 }
