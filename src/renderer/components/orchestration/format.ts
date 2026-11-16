@@ -1,4 +1,5 @@
 import type { Dispatch, Message, MessageType, Task, TaskStatus } from '@fynvra/core';
+import type { SessionStatus } from '@shared/types/chat';
 import type { T } from '../../i18n';
 
 // 编排面板的配色与格式化（文案在字典 orchestration.* / time.*）。纯函数，不碰 DOM，可在 node 下测试。
@@ -8,10 +9,25 @@ export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
   'todo',
   'in-progress',
   'in-review',
-  'completed',
   'failed',
+  'completed',
   'abandoned',
 ];
+
+/**
+ * 任务卡上尝试的显示：未结算的尝试且 worker 会话已知且不忙 → 已停止未汇报；
+ * 会话未知（`sessionStatus` 为 undefined，例如工作区没加载）时按运行中显示。
+ */
+export function attemptDisplay(
+  unsettled: boolean,
+  sessionStatus: SessionStatus | undefined
+): 'none' | 'running' | 'stopped' {
+  if (!unsettled) return 'none';
+  if (sessionStatus === undefined) return 'running';
+  return sessionStatus === 'running' || sessionStatus === 'waiting-approval'
+    ? 'running'
+    : 'stopped';
+}
 
 /** 完成进度不计已放弃任务，单独返回其数量供入口展示。 */
 export function progressCounts(groups: Record<TaskStatus, readonly Task[]>) {

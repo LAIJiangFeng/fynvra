@@ -602,6 +602,8 @@ export const zhCN = {
     showAbandoned: '查看已放弃的任务',
     switchRun: '切换编排',
     attemptNth: '第 {count} 次尝试',
+    stoppedNotReported: '已停止 · 未汇报',
+    stoppedNotReportedHint: 'worker 这一轮已结束但没有调用 report_done，需要主 agent 跟进',
     dependsOn: '依赖：',
     nameSeparator: '、',
     noMessages: '还没有消息',

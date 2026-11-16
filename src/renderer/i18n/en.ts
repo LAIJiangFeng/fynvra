@@ -630,6 +630,9 @@ export const en: MessagesShape<typeof zhCN> = {
     showAbandoned: 'Show abandoned tasks',
     switchRun: 'Switch run',
     attemptNth: 'Attempt {count}',
+    stoppedNotReported: 'Stopped · not reported',
+    stoppedNotReportedHint:
+      'The worker finished its turn without calling report_done; the main agent needs to follow up',
     dependsOn: 'Depends on: ',
     nameSeparator: ', ',
     noMessages: 'No messages yet',

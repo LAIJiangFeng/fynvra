@@ -2,6 +2,7 @@ import type { Dispatch, Message, Task, TaskStatus } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import { translatorOf } from '../../i18n';
 import {
+  attemptDisplay,
   describeSubject,
   formatClock,
   formatDuration,
@@ -39,6 +40,27 @@ const dispatch: Dispatch = {
   branch: 'fynvra/x',
   startedAt: 0,
 };
+
+describe('TASK_STATUS_ORDER', () => {
+  it('puts failed before completed so failures are not buried', () => {
+    expect(TASK_STATUS_ORDER.indexOf('failed')).toBeLessThan(
+      TASK_STATUS_ORDER.indexOf('completed')
+    );
+  });
+});
+
+describe('attemptDisplay', () => {
+  it.each([
+    { unsettled: false, status: 'running', expected: 'none' },
+    { unsettled: true, status: 'running', expected: 'running' },
+    { unsettled: true, status: 'waiting-approval', expected: 'running' },
+    { unsettled: true, status: 'idle', expected: 'stopped' },
+    { unsettled: true, status: 'error', expected: 'stopped' },
+    { unsettled: true, status: undefined, expected: 'running' },
+  ] as const)('$unsettled + $status → $expected', ({ unsettled, status, expected }) => {
+    expect(attemptDisplay(unsettled, status)).toBe(expected);
+  });
+});
 
 describe('progressCounts', () => {
   function taskGroups(counts: Partial<Record<TaskStatus, number>>) {
