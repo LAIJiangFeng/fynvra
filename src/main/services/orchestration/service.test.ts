@@ -477,6 +477,54 @@ describe('createOrchestrationService', () => {
     expect(restored.hasActiveWork('session_other')).toBe(false);
   });
 
+  it.each([
+    ['failed', true],
+    ['in-progress', false],
+    ['in-review', false],
+    ['completed', false],
+    ['abandoned', false],
+  ] as const)('retryRequired for a settled attempt with task %s is %s', async (status, hit) => {
+    const first = make();
+    const dispatch = await dispatchOn(first);
+    await first.workerHostFor(dispatch.workerSessionId)?.reportDone('failed', 'Broke.');
+    await first.flush();
+    const snapshot = JSON.parse(readFileSync(statePath, 'utf8'));
+    snapshot.tasks[0].status = status;
+    writeFileSync(statePath, JSON.stringify(snapshot));
+    const restored = make();
+    expect(restored.retryRequired(dispatch.workerSessionId)).toBeUndefined(); // 未加载
+    await restored.ready;
+    expect(restored.retryRequired(dispatch.workerSessionId)).toEqual(
+      hit ? { taskId: dispatch.taskId, title: TASK.title } : undefined
+    );
+    expect(restored.retryRequired('session_coord')).toBeUndefined(); // 非 worker
+  });
+
+  it('retryRequired is undefined for an unsettled attempt and while reject_work is delivering', async () => {
+    const service = make();
+    const dispatch = await dispatchOn(service);
+    const session = dispatch.workerSessionId;
+    expect(service.retryRequired(session)).toBeUndefined();
+    await service.workerHostFor(session)?.reportDone('failed', 'Broke.');
+    expect(service.retryRequired(session)).toEqual({ taskId: dispatch.taskId, title: TASK.title });
+    let deliver: (result: { ok: true }) => void = () => {};
+    launcher.promptSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        })
+    );
+    const retry = service
+      .hostFor('session_coord')
+      .rejectWork({ dispatchId: dispatch.id, feedback: 'Retry' });
+    await vi.waitFor(() => expect(launcher.promptSession).toHaveBeenCalled());
+    expect(service.retryRequired(session)).toBeUndefined();
+    deliver({ ok: true });
+    expect(await retry).toMatchObject({ ok: true });
+    expect(service.retryRequired(session)).toBeUndefined();
+    await service.flush();
+  });
+
   it('快照加载完成前 workerHostFor 返回 null，加载后能找到磁盘上的 worker 会话', async () => {
     const first = make();
     await dispatchOn(first);

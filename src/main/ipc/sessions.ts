@@ -308,19 +308,29 @@ export function registerSessionHandlers(
     }
   );
 
+  // 只拦用户经 IPC 发的：send_to_worker / reject_work 走 launcher，不受影响
+  const retryBlocked = (sessionId: string): string | undefined => {
+    const failed = getOrchestrationRegistry().retryRequired(sessionId);
+    return failed && translate('sessions.workerRetryRequired', { title: failed.title });
+  };
+
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
-    return input
-      ? guard(() => host().prompt(input.sessionId, input.text, input.images))
-      : invalid(translate('sessions.invalidPrompt'));
+    if (!input) return invalid(translate('sessions.invalidPrompt'));
+    const blocked = retryBlocked(input.sessionId);
+    return blocked
+      ? invalid(blocked)
+      : guard(() => host().prompt(input.sessionId, input.text, input.images));
   });
 
   // 运行中插话：入参与 sessions:prompt 相同
   ipcMain.handle(IPC_CHANNELS.SESSIONS_STEER, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
-    return input
-      ? guard(() => host().steer(input.sessionId, input.text, input.images))
-      : invalid(translate('sessions.invalidPrompt'));
+    if (!input) return invalid(translate('sessions.invalidPrompt'));
+    const blocked = retryBlocked(input.sessionId);
+    return blocked
+      ? invalid(blocked)
+      : guard(() => host().steer(input.sessionId, input.text, input.images));
   });
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, (_event, raw: unknown) =>

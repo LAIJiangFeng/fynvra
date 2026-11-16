@@ -633,7 +633,7 @@ export interface SessionsApi {
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。`sessions:prompt` / `sessions:steer` 发给任务已 failed、当前尝试已结算的 worker 会话时直接拒绝，提示到主 agent 会话用 `reject_work` 重试（只拦用户经 IPC 发的消息，launcher 投递不受影响）。
 
 - **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
   归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经
