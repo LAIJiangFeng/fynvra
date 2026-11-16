@@ -89,7 +89,7 @@ describe('runtime strategy and current-context copy', () => {
     );
     expect(estimated.label).toBe('当前上下文约 363k · 窗口未知');
     expect(estimated.label).not.toContain('128k');
-    expect(estimated.hint).toBe(t('chat.contextWindowEstimatedHint', { window: '128k' }));
+    expect(estimated.hint).toBe('暂未获取到该模型的上下文窗口，自动压缩暂按 128k 估算');
     expect(
       contextLabel(
         {

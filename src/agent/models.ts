@@ -231,25 +231,64 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
  * 2. 否则找目录里同协议最接近的模型（{@link findClosestModel}）→ `inferred:<id>`：能力照搬它（档位映射、
  *    兼容开关、上下文、价格），id 与名字仍是设置里的；是否推理也看它，不看设置里的标记；
  * 3. 都没有 → `fallback`：保守上限；设置里标了推理才是推理模型，档位按协议兜底（{@link fallbackLevelMap}）。
+ * 2、3 的窗口是估计值；若目录里任一协议有同名模型（{@link findSameNamedModel}），上下文与最大输出改用它的（`catalog`），
+ *    档位、兼容开关仍按本协议的推断或兜底。
  */
 function defineModel(
   runtime: ModelRuntime,
   spec: ModelQuery & Pick<ResolvedModelSpec, 'reasoning'>,
   excluded: (provider: string) => boolean
-): { definition: ModelDefinition; source: ThinkingSource } {
+): { definition: ModelDefinition; source: ThinkingSource; windowSource: WindowSource } {
   const catalog = catalogOf(runtime, spec.api, excluded);
   const official = OFFICIAL_PROVIDERS[spec.api];
   const sameId = catalog.filter((model) => model.id === spec.modelId);
   const exact = sameId.find((model) => model.provider === official) ?? sameId[0];
-  if (exact) return { definition: definitionFor(spec, exact), source: 'catalog' };
-  const closest = findClosestModel(catalog, spec.modelId, official);
-  if (closest) {
-    return {
-      definition: { ...definitionFor(spec, closest), name: spec.modelId },
-      source: `inferred:${closest.id}`,
-    };
+  if (exact) {
+    return { definition: definitionFor(spec, exact), source: 'catalog', windowSource: 'catalog' };
   }
-  return { definition: fallbackDefinition(spec, catalog), source: 'fallback' };
+  const closest = findClosestModel(catalog, spec.modelId, official);
+  const estimated = closest
+    ? {
+        definition: { ...definitionFor(spec, closest), name: spec.modelId },
+        source: `inferred:${closest.id}` as const,
+      }
+    : { definition: fallbackDefinition(spec, catalog), source: 'fallback' as const };
+  const all = runtime.getModels().filter((model) => !excluded(model.provider));
+  const named = findSameNamedModel(all, spec.modelId, spec.api);
+  if (!named) return { ...estimated, windowSource: 'estimated' };
+  const { contextWindow, maxTokens } = named;
+  return {
+    ...estimated,
+    definition: { ...estimated.definition, contextWindow, maxTokens },
+    windowSource: 'catalog',
+  };
+}
+
+/** 同名比较用的 id：小写，去掉 `vendor/` 前缀（openai/gpt-6-sol → gpt-6-sol） */
+function bareModelId(id: string): string {
+  return id.slice(id.lastIndexOf('/') + 1).toLowerCase();
+}
+
+/**
+ * 目录里与 modelId 同名的模型（不区分大小写、忽略 vendor/ 前缀）：同协议优先，再跨协议、跨 provider；
+ * 同一层里本协议的官方 provider 优先，其次任一官方 provider，再取目录顺序第一个。
+ */
+export function findSameNamedModel<T extends { id: string; provider: string; api: string }>(
+  candidates: readonly T[],
+  modelId: string,
+  api: string
+): T | undefined {
+  const wanted = bareModelId(modelId);
+  const officials = new Set(Object.values(OFFICIAL_PROVIDERS));
+  const rank = (model: T) =>
+    (model.api === api ? 0 : 3) +
+    (model.provider === OFFICIAL_PROVIDERS[api] ? 0 : officials.has(model.provider) ? 1 : 2);
+  let best: T | undefined;
+  for (const model of candidates) {
+    if (bareModelId(model.id) !== wanted) continue;
+    if (!best || rank(model) < rank(best)) best = model;
+  }
+  return best;
 }
 
 /**
@@ -257,16 +296,12 @@ function defineModel(
  * （内部压缩仍按它算，界面标成「窗口未知」）。maxTokens 不超过 contextWindow。
  */
 export function withSpecLimits(
-  defined: { definition: ModelDefinition; source: ThinkingSource },
+  defined: { definition: ModelDefinition; windowSource: WindowSource },
   spec: Pick<ResolvedModelSpec, 'contextWindow' | 'maxOutput'>
 ): { definition: ModelDefinition; windowSource: WindowSource } {
   const contextWindow = spec.contextWindow ?? defined.definition.contextWindow;
   const maxTokens = Math.min(spec.maxOutput ?? defined.definition.maxTokens, contextWindow);
-  const windowSource: WindowSource = spec.contextWindow
-    ? 'settings'
-    : defined.source === 'catalog'
-      ? 'catalog'
-      : 'estimated';
+  const windowSource = spec.contextWindow ? 'settings' : defined.windowSource;
   return { definition: { ...defined.definition, contextWindow, maxTokens }, windowSource };
 }
 

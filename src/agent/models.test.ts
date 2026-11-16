@@ -18,6 +18,7 @@ import {
   createModelRegistry,
   createWorkerModelRuntime,
   findClosestModel,
+  findSameNamedModel,
   normalizeModelId,
 } from './models';
 
@@ -173,6 +174,33 @@ describe('createModelRegistry', () => {
     });
     expect(onlyMax.windowSource).toBe('estimated');
     expect(onlyMax.model.maxTokens).toBe(8_000);
+  });
+
+  it('takes the window of a same-named catalog model across protocols, vendor prefixes and case', async () => {
+    const registry = createModelRegistry(runtime);
+    const relay = {
+      providerId: KEY_B,
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'k',
+    };
+    // 中转的协议里没有这个 id：取其他协议官方 provider 的同名模型
+    for (const modelId of [
+      'claude-sonnet-5-5',
+      'anthropic/claude-sonnet-5-5',
+      'Claude-Sonnet-5-5',
+    ]) {
+      const resolved = await registry.resolve({ ...relay, api: 'google-generative-ai', modelId });
+      expect(resolved.windowSource).toBe('catalog');
+      expect(resolved.model).toMatchObject({ id: modelId, contextWindow: 1_000_000 });
+    }
+    // 大小写不同也算同名，同协议的官方 provider 优先（不取网关写的 1.05M）
+    const upper = await registry.resolve({
+      ...relay,
+      api: 'openai-responses',
+      modelId: 'GPT-6-SOL',
+    });
+    expect(upper.windowSource).toBe('catalog');
+    expect(upper.model.contextWindow).toBe(272_000);
   });
 
   it('falls back to the official endpoint of the api when the spec has no base URL', async () => {
@@ -645,10 +673,14 @@ describe('createModelRegistry thinking levels', () => {
       providerId: KEY_B,
       api: 'anthropic-messages',
       apiKey: 'k',
-      modelId: 'glm-4.7',
+      modelId: 'acme-relay-model',
       reasoning: true,
     });
-    expect(unknown).toMatchObject({ id: 'glm-4.7', contextWindow: 128_000, maxTokens: 32_000 });
+    expect(unknown).toMatchObject({
+      id: 'acme-relay-model',
+      contextWindow: 128_000,
+      maxTokens: 32_000,
+    });
     expect(unknown.compat).toBeUndefined();
   });
 
@@ -680,6 +712,24 @@ describe('createModelRegistry thinking levels', () => {
       thinking: 'high',
     });
     expect(plain.thinking).toBeUndefined();
+  });
+});
+
+describe('findSameNamedModel', () => {
+  const m = (provider: string, api: string, id: string) => ({ provider, api, id });
+  it('prefers the same api, then the official provider of the api, then any official provider', () => {
+    const gateway = m('gateway', 'anthropic-messages', 'x/claude-a');
+    const anthropic = m('anthropic', 'anthropic-messages', 'claude-a');
+    const openai = m('openai', 'openai-completions', 'CLAUDE-A');
+    const relay = m('relay', 'openai-completions', 'vendor/claude-a');
+    expect(findSameNamedModel([gateway, anthropic], 'claude-a', 'google-generative-ai')).toBe(
+      anthropic
+    );
+    expect(findSameNamedModel([relay, openai, anthropic], 'Claude-A', 'openai-completions')).toBe(
+      openai
+    );
+    expect(findSameNamedModel([anthropic, relay], 'claude-a', 'openai-completions')).toBe(relay);
+    expect(findSameNamedModel([anthropic], 'claude-a-1', 'anthropic-messages')).toBeUndefined();
   });
 });
 
