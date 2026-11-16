@@ -86,6 +86,8 @@ export const mainZhCN = {
   sessions: {
     invalidCreate: '无效的会话参数',
     invalidPrompt: '无效的消息',
+    workerRetryRequired:
+      '任务「{title}」已失败，这次尝试已结束，worker 继续工作也无法提交结果。请到主 agent 会话，让它用 reject_work 重试这个任务。',
     invalidApproval: '无效的审批结果',
     invalidModel: '无效的模型参数',
     invalidApprovalMode: '无效的审批档位',
@@ -99,6 +101,8 @@ export const mainZhCN = {
     workerUnavailable: 'agent worker 未就绪（正在重启或已停止），请稍后重试',
     compactionRecoveryRequired: '需要先恢复上下文：请重试压缩，尚未消费的输入已保留。',
     noCompactionRecovery: '此会话没有待恢复的压缩。',
+    compactWhileRunning: '会话正在运行或等待审批，等本轮结束再压缩上下文',
+    compactWhileCompacting: '上下文正在压缩，请等这次压缩结束',
     switchWhileRunning: '会话正在运行，等本轮结束再切换模型',
     planModeWorkerSession: '派发出的 worker 会话不能开启计划模式',
     roleNotFound: '角色不存在：{id}',

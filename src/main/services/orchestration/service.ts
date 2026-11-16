@@ -19,6 +19,7 @@ import {
   type RoleStore,
   recordWorkflowNodeReport,
   settleDispatch,
+  type Task,
   type Workflow,
   type Workspace,
   workflowRunningDispatchIds,
@@ -107,6 +108,11 @@ export interface OrchestrationService {
   snapshot(options?: { reconcile?: boolean }): Promise<OrchestrationSnapshotView>;
   /** Only conclusive Main/session-registry evidence can settle an orphaned current attempt */
   reconcileWorkers(): void;
+  /**
+   * worker 会话一轮正常结束且已空闲（调用方负责延迟与会话状态检查）：当前尝试仍未结算时给主 agent 投一条
+   * escalation（同 dispatch 未确认的不重复投）。不改任何状态，空闲不算失败。
+   */
+  workerRunEnded(sessionId: string): void;
   readWorkerOutput(input: {
     dispatchId: string;
     cursor: number;
@@ -131,10 +137,31 @@ export interface OrchestrationService {
   pendingMessagesTo(sessionId: string): Message[];
   /** Current attempts only; acknowledged reports remain reviewable until the task changes state. */
   coordinatorWork(sessionId: string): CoordinatorWork;
+  /** 该主 agent 会话的 Run 里有未完成的任务（口径同 {@link isIdle}）；状态未加载时 false。 */
+  hasActiveWork(sessionId: string): boolean;
+  /**
+   * worker 会话的当前尝试已结算且任务 failed：用户直接发消息也交不上结果，须由主 agent reject_work 重试。
+   * 其他情况（非 worker、未结算、其他状态、未加载）为 undefined。
+   */
+  retryRequired(sessionId: string): { taskId: string; title: string } | undefined;
+  /** 有未完成任务的主 agent 会话（口径同 {@link hasActiveWork}），注册表做翻转检测用。 */
+  activeCoordinators(): Set<string>;
   /** 确认已投递的消息（尽力而为，幂等）。 */
   ackMessages(ids: readonly string[]): void;
   /** 状态已加载且没有排队 / 进行中 / 待审的任务、没有运行中的工作流节点：可以换掉服务（如工作区 vcs 变了）。 */
   isIdle(): boolean;
+}
+
+/** 排队 / 进行中 / 待审，或工作流还有运行中节点、待启动意图的任务 */
+function isActiveTask(task: Task): boolean {
+  return (
+    task.status === 'todo' ||
+    task.status === 'in-progress' ||
+    task.status === 'in-review' ||
+    (task.workflow !== undefined &&
+      (task.workflow.launches.length > 0 ||
+        task.workflow.nodes.some((node) => node.status === 'running')))
+  );
 }
 
 function observe<T extends { id: string }>(
@@ -260,6 +287,10 @@ export function createOrchestrationService(
         throw error;
       }
     },
+    // Git for Windows 把 junction 当目录递归删除；macOS / Linux 的 git 不跟随符号链接，不注入以免碰被跟踪的链接
+    ...(process.platform === 'win32'
+      ? { detachLinks: (path: string) => unlinkLinksIn(path, { keepInside: path }) }
+      : {}),
   });
   const workflowEngine = createWorkflowEngine({
     workspace,
@@ -450,6 +481,19 @@ export function createOrchestrationService(
     };
   };
 
+  const activeCoordinators = (): Set<string> => {
+    if (!loaded) return new Set();
+    const runIds = new Set(store.tasks.list(isActiveTask).map((task) => task.runId));
+    for (const id of pendingDispatches) {
+      const taskId = store.dispatches.get(id)?.taskId;
+      const runId = taskId === undefined ? undefined : store.tasks.get(taskId)?.runId;
+      if (runId !== undefined) runIds.add(runId);
+    }
+    return new Set(
+      store.runs.list((run) => runIds.has(run.id)).map((run) => run.coordinatorSessionId)
+    );
+  };
+
   return {
     workspace,
     ready,
@@ -468,6 +512,41 @@ export function createOrchestrationService(
     hasDispatch: (dispatchId) => loaded && store.dispatches.get(dispatchId) !== undefined,
 
     reconcileWorkers,
+
+    workerRunEnded(sessionId) {
+      if (!loaded) return;
+      const dispatch = dispatchOfSession(sessionId);
+      if (dispatch === undefined || isDispatchSettled(dispatch)) return;
+      const task = store.tasks.get(dispatch.taskId);
+      const run = task && store.runs.get(task.runId);
+      if (task?.status !== 'in-progress' || run === undefined) return;
+      if (task.workflow !== undefined) {
+        if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
+      } else if (
+        store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
+      ) {
+        return;
+      }
+      const coordinator = run.coordinatorSessionId;
+      const duplicate = inbox
+        .peek({ to: coordinator })
+        .some(
+          (message) =>
+            message.type === 'escalation' &&
+            message.from === 'fynvra' &&
+            message.dispatchId === dispatch.id
+        );
+      if (duplicate) return;
+      inbox.post({
+        runId: run.id,
+        dispatchId: dispatch.id,
+        from: 'fynvra',
+        to: coordinator,
+        type: 'escalation',
+        subject: 'worker stopped without report_done',
+        body: `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`,
+      });
+    },
 
     async snapshot({ reconcile = true } = {}) {
       await ready;
@@ -557,17 +636,7 @@ export function createOrchestrationService(
     },
 
     isIdle: () =>
-      loaded &&
-      pendingDispatches.size === 0 &&
-      store.tasks.list(
-        (task) =>
-          task.status === 'todo' ||
-          task.status === 'in-progress' ||
-          task.status === 'in-review' ||
-          (task.workflow !== undefined &&
-            (task.workflow.launches.length > 0 ||
-              task.workflow.nodes.some((node) => node.status === 'running')))
-      ).length === 0,
+      loaded && pendingDispatches.size === 0 && store.tasks.list(isActiveTask).length === 0,
 
     pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
 
@@ -616,6 +685,16 @@ export function createOrchestrationService(
       );
       return { messages, reviews };
     },
+
+    hasActiveWork: (sessionId) => activeCoordinators().has(sessionId),
+    retryRequired(sessionId) {
+      if (!loaded) return undefined;
+      const dispatch = dispatchOfSession(sessionId);
+      if (dispatch === undefined || !isDispatchSettled(dispatch)) return undefined;
+      const task = store.tasks.get(dispatch.taskId);
+      return task?.status === 'failed' ? { taskId: task.id, title: task.title } : undefined;
+    },
+    activeCoordinators,
 
     ackMessages: (ids) => {
       for (const id of ids) inbox.ack(id);

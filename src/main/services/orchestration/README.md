@@ -72,7 +72,13 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
 - **`wait_for_workers`**：question / escalation 立即返回；`'any'` 收到 worker_done 返回；没有运行中的 dispatch 时
   立即返回；返回时 ack 期间收到的消息；超时 `timedOut: true`；中止时返回错误且不 ack。
 - **`send_to_worker`**：worker 正阻塞在 `ask_coordinator` → `reply`（并 ack 那条 question）；否则记 `instruction`
-  并以默认模式 `promptSession` 及时投递并返回，不等待 worker idle；投递失败则撤回消息。已 completed / abandoned 的任务拒绝。
+  并以默认模式 `promptSession` 及时投递并返回，不等待 worker idle；投递失败则撤回消息。已 completed / abandoned 的任务拒绝；failed 的任务也拒绝（attempt 已结算，worker 无法再汇报），错误引导用 `reject_work` 重试。
+- **用户直接给失败任务的 worker 发消息**：worker 会话当前 attempt 已结算且任务 `failed` 时（`service.retryRequired`），
+  `sessions:prompt` / `sessions:steer` 直接拒绝并提示到主 agent 会话用 `reject_work` 重试；不自动开新 attempt、不给主 agent 投消息。
+  只拦用户经 IPC 发的消息，`send_to_worker` / `reject_work` 走 launcher 不受影响；in-review / completed 的 worker 会话照常可聊。
+- **worker 未汇报即停**：worker 会话一轮正常结束（未 abort）约 2 秒后仍空闲、当前 attempt 未结算且任务 in-progress
+  （工作流须是运行中节点；`reject_work` 投递中不算）时，给主 agent 投一条 `from: fynvra` 的 `escalation`（同 dispatch 未确认的不重复投），
+  由唤醒器叫醒主 agent。不改任何状态，空闲仍不算失败。触发在 `coordinatorWake.ts`，判断在 `service.workerRunEnded`。
 - **`report_done`**：succeeded → task `in-review`，failed → task `failed`；先结算再投 `worker_done`。
   每个 attempt 只报告一次，重复/并发及旧 attempt 的迟到报告拒绝，不转发或改写既有报告。需要再次交付时用 `reject_work` 新建 attempt。
 - **`reject_work`**：只允许当前 attempt 的 `in-review` / `failed` 任务打回，同一 worktree / 会话上新建 Dispatch，
@@ -92,6 +98,8 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   停 worker 后不加 force 删除目录、用 `-d` 删分支。记录已清理时返回无资源可删，不按旧分支名删除可能被复用的分支。
   合并时在 Task 保存 `mergedDiff`（基准 / worker 提交），清理后 `review_diff` 与面板仍从主仓库读这对提交。
   旧记录没有固定范围时，使用尚存的 worktree 基准和 worker 分支，不在已注销的 worktree 目录里跑 diff。
+- **worktree 删除不跟随链接**：Windows 上每次 `git worktree remove` 之前，`GitWorktreeManager` 先经注入的
+  `detachLinks` 删掉 worktree 里指向它外面的符号链接 / junction（Git for Windows 会把 junction 当目录钻进去删）。
 - **`run_checks` 白名单**：每一段（`&&`、`;`、`|` 分隔）以 pnpm / npm / yarn / bun / node / npx / git / cargo / go /
   python / pytest / make 开头，其余 shell 元字符一律拒绝；默认另外只放行 git 只读子命令、拒绝 npm publish 之类的发布命令。
   这是护栏不是沙箱（node / npx / make 本身能执行任意代码），可通过 `checkPolicy` 替换。执行时关闭颜色、默认 20 分钟超时。

@@ -45,7 +45,11 @@ import type {
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
-import { type CompactionStrategy, compactionTimeoutMsOf } from '@shared/types/settings';
+import {
+  type CompactionStrategy,
+  compactionThresholdTokensOf,
+  compactionTimeoutMsOf,
+} from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
@@ -87,6 +91,14 @@ export interface AgentHostDeps {
    * （pi 目录外的模型靠它决定能不能思考）。缺省为空列表
    */
   providers?: { list(): Promise<readonly ModelProviderView[]> };
+  /**
+   * 模型真实窗口的自动探测（生产为 createModelLimitsProber）：写回 providers.json 后返回 true，
+   * 这里再把新窗口推给用着该模型的活会话。缺省不探测
+   */
+  modelLimits?: {
+    ensure(providerId: string, modelId: string): Promise<boolean>;
+    learn(providerId: string, modelId: string, message: string): Promise<boolean>;
+  };
   /** 每个工作区上一次用过的模型（settings.json）；缺省不记 */
   lastModels?: LastModelStore;
   /** 会话 cwd 当前检出的分支（生产为 readGitBranch 加缓存与节流）；缺省时会话不带分支 */
@@ -102,6 +114,8 @@ export interface AgentHostDeps {
   /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 Magic Context */
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
+  /** 自动压缩阈值（token）；缺省或返回 undefined 时按模型窗口自动决定 */
+  resolveCompactionThresholdTokens?(): number | undefined;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   /** 是否允许 web_fetch 访问本机回环地址（生产为 preferences.webFetchAllowLoopback）；缺省关闭 */
   resolveWebFetchAllowLoopback?(): boolean;
@@ -176,6 +190,8 @@ export interface AgentHostService extends AgentHost {
    * 此时 Dispatch 也还没写入）；由 orchestration 接线时注入，之前不设 parentSessionId。
    */
   setCoordinatorLookup(f: (workspaceId: string, runId: string) => string | undefined): void;
+  /** 主 agent 会话是否还有未完成的编排任务（摘要的 awaitingWorkers）；由 orchestration 接线时注入 */
+  setActiveWorkLookup(f: (sessionId: string) => boolean): void;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -193,6 +209,8 @@ export interface AgentHostService extends AgentHost {
   /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
   steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   retryCompaction(sessionId: string): Promise<IpcResult>;
+  /** Manual compaction of an idle session: ACK on acceptance, the worker result settles it; Stop cancels. */
+  compact(sessionId: string): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<
     IpcResult<{
@@ -244,6 +262,8 @@ interface PendingCompactionRecovery {
   requestId: string;
   phase: 'loading' | 'requested';
   cancelled: boolean;
+  /** Manual compaction shares the recovery slot (mutual exclusion, Stop, result settlement). */
+  manual?: boolean;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -259,6 +279,10 @@ interface LiveSession {
   respawn: boolean;
   /** 最近一次 spawn 的参数（含 API key，只在 Main 内存里），崩溃重启时原样重发 */
   spec: SpawnSessionSpec | null;
+  /** spec.model 对应的设置里的服务 id 与模型 id：探测到窗口后据此找要更新的会话 */
+  modelRef?: ModelRef;
+  /** 探测到新窗口时会话正忙：等这一轮结束再发 set-model */
+  modelPushPending?: boolean;
   /** 当前 generation 已转发的最大 worker seq */
   workerSeq: number;
   /** 推给 Renderer 的会话级 seq：跨 generation 单调递增，Renderer 的「过期 seq 丢弃」在重启后依然成立 */
@@ -361,6 +385,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   ) => OrchestrationHost | null = () => null;
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
   let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
+  let hasActiveWork: (sessionId: string) => boolean = () => false;
   const observers = new Set<SessionObserver>();
   const failureListeners = new Set<() => void>();
   const roundWaiters = new Set<() => void>();
@@ -436,10 +461,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.broadcast(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId);
   }
 
-  /** 带上缓存里 cwd 的分支（没读过或不是 git 目录时不带） */
+  /** 带上缓存里 cwd 的分支（没读过或不是 git 目录时不带），以及主 agent 是否还有 worker 在跑 */
   function withBranch(summary: SessionSummary): SessionSummary {
     const branch = deps.branches?.get(summary.cwd);
-    return branch ? { ...summary, branch } : summary;
+    const awaiting = hasActiveWork(summary.id);
+    if (!branch && !awaiting) return summary;
+    return {
+      ...summary,
+      ...(branch ? { branch } : {}),
+      ...(awaiting ? { awaitingWorkers: true as const } : {}),
+    };
   }
 
   /** IPC 视图：去掉内部字段，带上分支 */
@@ -504,6 +535,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (event.type === 'context_runtime') {
       state.contextRuntime = event.snapshot;
       state.contextRuntimeSeq = state.sessionSeq;
+      // prober 自带去重：重复的快照不会重复请求
+      if (event.snapshot.context.windowSource === 'estimated' && state.modelRef)
+        probeModelLimits(state.modelRef);
     }
     const envelope: SessionEventEnvelope = {
       sessionId,
@@ -582,7 +616,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     return state.spawned;
   }
 
-  async function buildSpec(stored: StoredSession): Promise<Result<{ spec: SpawnSessionSpec }>> {
+  async function buildSpec(
+    stored: StoredSession
+  ): Promise<Result<{ spec: SpawnSessionSpec; ref: ModelRef }>> {
     try {
       const role = await deps.roles.get(stored.roleId);
       if (!role) return fail(translate('agent.roleNotFound', { id: stored.roleId }));
@@ -601,10 +637,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ? await pluginProvidersFor(stored.id)
         : undefined;
       const compactionStrategy = resolveCompactionStrategy();
+      const compactionThresholdTokens = compactionThresholdTokensOf({
+        compactionThresholdTokens: deps.resolveCompactionThresholdTokens?.(),
+      });
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
         ok: true,
+        ref: resolved.ref,
         spec: {
           // 审批门按会话自己的档位建（创建时取自角色，之后可能被用户切过）
           role: { ...role, approvalMode: stored.approvalMode },
@@ -630,6 +670,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           compactionTimeoutMs: compactionTimeoutMsOf({
             compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
           }),
+          ...(compactionThresholdTokens !== undefined ? { compactionThresholdTokens } : {}),
           ...(inPlace ? { inPlace: true } : {}),
           // 计划模式按会话记录，不分角色：派发出的 worker 会话永远不带
           ...(stored.planMode === true && stored.dispatchId === undefined
@@ -847,9 +888,69 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!wanted()) return fail('The session operation was cancelled.');
     if (state.spawned && !reload) return { ok: true };
     // 构建 spec 的这段等待里用户可能切过计划模式：以记录的当前值为准
+    // 先记引用：spawn 后的第一个 context_runtime 快照就要用它判断是否探测
+    state.modelRef = built.ref;
     return spawnWith(stored.id, state, withPlanMode(built.spec, current))
       ? { ok: true }
       : fail(translate('agent.workerUnavailable'));
+  }
+
+  /**
+   * worker 报窗口是估计值时在后台探测（不等它），写回后推给活会话。
+   * 设置值、pi 目录里有的不探测：目录值不写进设置，随 pi 目录更新
+   */
+  function probeModelLimits(ref: ModelRef): void {
+    if (!deps.modelLimits) return;
+    void deps.modelLimits
+      .ensure(ref.providerId, ref.modelId)
+      .then((updated) => (updated ? pushModelLimits(ref) : undefined))
+      .catch((error: unknown) => log('warn', `model ${ref.modelId}: ${errorMessage(error)}`));
+  }
+
+  /** 模型请求因上下文超限失败：从报错里学服务端的真实上限，写回后推给活会话 */
+  function learnModelLimits(state: LiveSession, message: string): void {
+    const ref = state.modelRef;
+    if (!deps.modelLimits || !ref) return;
+    void deps.modelLimits
+      .learn(ref.providerId, ref.modelId, message)
+      .then((updated) => (updated ? pushModelLimits(ref) : undefined))
+      .catch((error: unknown) => log('warn', `model ${ref.modelId}: ${errorMessage(error)}`));
+  }
+
+  /**
+   * 把设置里新的窗口 / 最大输出推给用着这个服务 + 模型的活会话：只改这两个字段，思考档位、Fast 等不动。
+   * 走 set-model；会话正忙时等这一轮结束再发。
+   */
+  async function pushModelLimits(ref: ModelRef): Promise<void> {
+    const resolved = await deps.models.resolve(bareRef(ref));
+    if (!resolved.ok) return;
+    const { contextWindow, maxOutput } = resolved.model;
+    for (const [sessionId, state] of live) {
+      const current = state.modelRef;
+      if (!state.spec || current?.providerId !== ref.providerId || current.modelId !== ref.modelId)
+        continue;
+      const { contextWindow: _window, maxOutput: _output, ...rest } = state.spec.model;
+      const model: ResolvedModelSpec = {
+        ...rest,
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(maxOutput ? { maxOutput } : {}),
+      };
+      state.spec = { ...state.spec, model };
+      if (!state.spawned) continue;
+      const stored = deps.store.get(sessionId);
+      if (stored && isBusy(stored)) state.modelPushPending = true;
+      else sendModel(sessionId, state);
+    }
+  }
+
+  /** 发缓存 spec 里的模型；发不出去时下次使用前重新 spawn */
+  function sendModel(sessionId: string, state: LiveSession): void {
+    state.modelPushPending = false;
+    if (!state.spec) return;
+    if (
+      !send({ type: 'set-model', identity: identityOf(sessionId, state), model: state.spec.model })
+    )
+      detach(sessionId, state);
   }
 
   function finishRecovery(
@@ -889,8 +990,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // Explicit recovery reloads a suspended Magic binding using the same jsonl/DB.
       // The worker closes the previous generation before opening its replacement.
       const reload =
-        resolveCompactionStrategy() === 'magic-context' ||
-        state.spec?.compactionStrategy === 'magic-context';
+        !operation.manual &&
+        (resolveCompactionStrategy() === 'magic-context' ||
+          state.spec?.compactionStrategy === 'magic-context');
       const spawned = await ensureSpawned(stored, wanted, reload);
       if (!wanted()) return;
       if (!spawned.ok) {
@@ -900,7 +1002,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       operation.phase = 'requested';
       if (
         !send({
-          type: 'retry-compaction',
+          type: operation.manual ? 'compact' : 'retry-compaction',
           identity: identityOf(stored.id, state),
           requestId: operation.requestId,
         })
@@ -931,7 +1033,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!state || event.seq <= state.workerSeq) return;
         state.workerSeq = event.seq;
         const { sessionId } = event.identity;
-        if (event.event.type === 'error') state.lastError = event.event.message;
+        if (event.event.type === 'error') {
+          state.lastError = event.event.message;
+          if (event.event.source === 'model') learnModelLimits(state, event.event.message);
+        }
         if (event.event.type === 'agent_settled' && event.event.aborted) {
           interrupted(sessionId, state, 'Worker attempt interrupted: the agent run was aborted');
           state.lastSettledSeq = 0;
@@ -948,6 +1053,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           for (const [requestId, pending] of approvals) {
             if (pending.sessionId === sessionId) approvals.delete(requestId);
           }
+          if (state.modelPushPending && state.spawned) sendModel(sessionId, state);
           // 这一轮里 agent 可能切过分支：不等节流，重读一次
           const stored = deps.store.get(sessionId);
           if (stored) rereadBranches([stored.cwd], true);
@@ -1396,6 +1502,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     // 缓存的 spawn spec 一并改掉（含崩溃后等着重建的会话），重建时不会退回旧模型
     const spec = withReasoning(withThinking(resolved.model, next.thinking), reasoning);
     if (state?.spec) state.spec = { ...state.spec, model: spec };
+    if (state) {
+      state.modelRef = resolved.ref;
+      state.modelPushPending = false;
+    }
     if (state?.spawned) {
       // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
       if (!send({ type: 'set-model', identity: identityOf(sessionId, state), model: spec })) {
@@ -1678,6 +1788,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     setCoordinatorLookup(lookup) {
       coordinatorOf = lookup;
     },
+    setActiveWorkLookup(lookup) {
+      hasActiveWork = lookup;
+    },
     start() {
       client.start();
     },
@@ -1772,6 +1885,32 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       state.lastError = undefined;
       setStatus(sessionId, 'running');
       // ACK acceptance now. Opening the original jsonl and checking its checkpoint happen asynchronously.
+      void startRecovery(stored, state, operation);
+      return { ok: true };
+    },
+    async compact(sessionId) {
+      const stored = deps.store.get(sessionId);
+      if (!stored) return fail(translate('common.sessionNotFound'));
+      const state = liveOf(sessionId);
+      if (isBusy(stored)) return fail(translate('agent.compactWhileRunning'));
+      const phase = state.contextRuntime?.compaction?.phase;
+      if (phase === 'running' || phase === 'backoff')
+        return fail(translate('agent.compactWhileCompacting'));
+      if (state.contextRuntime?.recoveryRequired)
+        return fail(translate('agent.compactionRecoveryRequired'));
+      invalidateSuggestion(sessionId, state);
+      const operation: PendingCompactionRecovery = {
+        requestId: `compaction-manual-${++recoverySeq}`,
+        phase: 'loading',
+        cancelled: false,
+        manual: true,
+      };
+      state.recovery = operation;
+      state.running = true;
+      state.interruption = undefined;
+      state.lastError = undefined;
+      setStatus(sessionId, 'running');
+      // Loading an unloaded session and compacting happen asynchronously after the ACK.
       void startRecovery(stored, state, operation);
       return { ok: true };
     },

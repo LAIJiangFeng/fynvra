@@ -4,6 +4,7 @@ import {
   appearancePreferencesOf,
   type CompactionStrategy,
   compactionStrategyOf,
+  compactionThresholdTokensOf,
   compactionTimeoutMsOf,
   type PickWorktreesRootResult,
   type Preferences,
@@ -155,6 +156,7 @@ type GeneralPatch = Partial<
       Preferences,
       | 'compactionStrategy'
       | 'compactionTimeoutMs'
+      | 'compactionThresholdTokens'
       | 'webFetchAllowLoopback'
       | 'confirmDangerousActions'
     >
@@ -166,6 +168,8 @@ export interface GeneralPreferencesState {
   timeline: TimelinePreferences;
   compaction: CompactionStrategy;
   compactionTimeoutMs: number;
+  /** 自动压缩阈值（token）；undefined 为按模型窗口自动 */
+  compactionThresholdTokens: number | undefined;
   /** web_fetch 是否允许访问本机回环地址；缺省关闭 */
   webFetchAllowLoopback: boolean;
   /** 完全放行档下危险操作是否仍要确认；缺省关闭 */
@@ -183,6 +187,7 @@ function resolveGeneral(preferences: GeneralPatch) {
     timeline: timelinePreferencesOf(preferences),
     compaction: compactionStrategyOf(preferences),
     compactionTimeoutMs: compactionTimeoutMsOf(preferences),
+    compactionThresholdTokens: compactionThresholdTokensOf(preferences),
     webFetchAllowLoopback: preferences.webFetchAllowLoopback === true,
     confirmDangerousActions: preferences.confirmDangerousActions === true,
   };
@@ -215,6 +220,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
           ...state.timeline,
           compactionStrategy: state.compaction,
           compactionTimeoutMs: state.compactionTimeoutMs,
+          compactionThresholdTokens: state.compactionThresholdTokens,
           webFetchAllowLoopback: state.webFetchAllowLoopback,
           confirmDangerousActions: state.confirmDangerousActions,
           ...patch,

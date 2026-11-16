@@ -95,6 +95,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   sessions: {
     invalidCreate: 'Invalid session arguments',
     invalidPrompt: 'Invalid message',
+    workerRetryRequired:
+      'Task "{title}" has failed and this attempt is over, so the worker cannot submit results even if it keeps working. Go to the coordinator session and have it retry the task with reject_work.',
     invalidApproval: 'Invalid approval decision',
     invalidModel: 'Invalid model arguments',
     invalidApprovalMode: 'Invalid approval mode',
@@ -110,6 +112,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     compactionRecoveryRequired:
       'Context recovery is required. Retry compaction to resume; your pending input is retained.',
     noCompactionRecovery: 'This session has no pending compaction recovery.',
+    compactWhileRunning:
+      'Session is running or waiting for approval; compact the context after this turn',
+    compactWhileCompacting: 'Context compaction is already in progress',
     switchWhileRunning: 'Session is running; switch models after this turn',
     planModeWorkerSession: "Dispatched worker sessions can't turn on plan mode",
     roleNotFound: 'Role not found: {id}',

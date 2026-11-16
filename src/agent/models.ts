@@ -8,7 +8,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ResolvedModel } from '@fynvra/agent-runtime';
-import type { ThinkingLevel } from '@fynvra/core';
+import type { ContextRuntimeSnapshot, ThinkingLevel } from '@fynvra/core';
 import type { ModelQuery, PluginProviderSpec, ResolvedModelSpec } from '@shared/types/agent';
 import {
   type ModelThinkingCapability,
@@ -44,7 +44,13 @@ const OFFICIAL_PROVIDERS: Readonly<Record<string, string>> = {
 /** pi 新会话的默认思考档位（pi-coding-agent 的 DEFAULT_THINKING_LEVEL）：按模型能力 clamp 后就是模型的默认档位 */
 const PI_DEFAULT_THINKING = 'medium';
 
-/** pi 目录里查不到、也推断不出的模型用保守默认值 */
+/** 上下文窗口的来源：设置里的真实值、pi 目录同名条目，或推断 / 兜底的估计值 */
+export type WindowSource = NonNullable<ContextRuntimeSnapshot['context']['windowSource']>;
+
+/** worker 内的解析结果：多带窗口来源，快照据此告诉界面窗口是否可信 */
+export type WorkerResolvedModel = ResolvedModel & { windowSource?: WindowSource };
+
+/** pi 目录里查不到、也推断不出的模型用保守默认值（估计值） */
 const FALLBACK_LIMITS = { contextWindow: 128_000, maxTokens: 32_000 } as const;
 
 /** Main 的运行时 provider 键都带这个前缀，与 pi 内置目录的 provider 名分开 */
@@ -89,7 +95,7 @@ export interface ModelRegistry {
    * Main 交来的可序列化模型描述 → agent-runtime 的 ResolvedModel；失败抛错（由 spawn 转成 session-error）。
    * 思考档位按 {@link pickThinkingLevel} 落到模型的可选集合里。
    */
-  resolve(spec: ResolvedModelSpec): Promise<ResolvedModel>;
+  resolve(spec: ResolvedModelSpec): Promise<WorkerResolvedModel>;
   /** 模型的思考档位与来源：与 resolve 注册的是同一份定义，界面列出的档位就是 pi 接受的档位 */
   describe(query: ModelQuery): ModelThinkingCapability;
   /**
@@ -189,7 +195,8 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
         );
       }
 
-      const definition = forEndpoint(defineModel(runtime, spec, excluded).definition, baseUrl);
+      const defined = withSpecLimits(defineModel(runtime, spec, excluded), spec);
+      const definition = forEndpoint(defined.definition, baseUrl);
       const models = definitions.get(providerId) ?? new Map<string, ModelDefinition>();
       models.set(spec.modelId, definition);
       definitions.set(providerId, models);
@@ -204,7 +211,12 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
       const model = runtime.getModel(providerId, spec.modelId);
       if (!model) throw new Error(`model ${spec.modelId} is missing after registration`);
       const thinking = pickThinkingLevel(capabilityOf(definition), spec.thinking);
-      return { runtime, model, ...(thinking ? { thinking } : {}) };
+      return {
+        runtime,
+        model,
+        windowSource: defined.windowSource,
+        ...(thinking ? { thinking } : {}),
+      };
     },
     describe(query) {
       const { definition, source } = defineModel(runtime, query, excluded);
@@ -216,28 +228,96 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
 /**
  * 模型在 pi 里的定义与档位来源：
  * 1. 目录里同协议、同 id 的模型（官方 provider 优先）→ `catalog`；
+ *    没有就找任一协议、任一 provider 的同名模型（{@link findSameNamedModel}）→ 也是 `catalog`；
+ *    跨协议时不带它的兼容开关（compat 按协议各不相同）；
  * 2. 否则找目录里同协议最接近的模型（{@link findClosestModel}）→ `inferred:<id>`：能力照搬它（档位映射、
  *    兼容开关、上下文、价格），id 与名字仍是设置里的；是否推理也看它，不看设置里的标记；
  * 3. 都没有 → `fallback`：保守上限；设置里标了推理才是推理模型，档位按协议兜底（{@link fallbackLevelMap}）。
+ * 2、3 的窗口是估计值（`estimated`）。
  */
 function defineModel(
   runtime: ModelRuntime,
   spec: ModelQuery & Pick<ResolvedModelSpec, 'reasoning'>,
   excluded: (provider: string) => boolean
-): { definition: ModelDefinition; source: ThinkingSource } {
+): { definition: ModelDefinition; source: ThinkingSource; windowSource: WindowSource } {
   const catalog = catalogOf(runtime, spec.api, excluded);
   const official = OFFICIAL_PROVIDERS[spec.api];
   const sameId = catalog.filter((model) => model.id === spec.modelId);
   const exact = sameId.find((model) => model.provider === official) ?? sameId[0];
-  if (exact) return { definition: definitionFor(spec, exact), source: 'catalog' };
+  if (exact) {
+    return { definition: definitionFor(spec, exact), source: 'catalog', windowSource: 'catalog' };
+  }
+  const all = runtime.getModels().filter((model) => !excluded(model.provider));
+  const named = findSameNamedModel(all, spec.modelId, spec.api);
+  if (named) {
+    const full = definitionFor(spec, named);
+    const { compat: _protocolSpecific, ...definition } = full;
+    return {
+      definition: named.api === spec.api ? full : definition,
+      source: 'catalog',
+      windowSource: 'catalog',
+    };
+  }
   const closest = findClosestModel(catalog, spec.modelId, official);
   if (closest) {
     return {
       definition: { ...definitionFor(spec, closest), name: spec.modelId },
       source: `inferred:${closest.id}`,
+      windowSource: 'estimated',
     };
   }
-  return { definition: fallbackDefinition(spec, catalog), source: 'fallback' };
+  return {
+    definition: fallbackDefinition(spec, catalog),
+    source: 'fallback',
+    windowSource: 'estimated',
+  };
+}
+
+/** 同名比较用的 id：小写，去掉 `vendor/` 前缀（openai/gpt-6-sol → gpt-6-sol） */
+function bareModelId(id: string): string {
+  return id.slice(id.lastIndexOf('/') + 1).toLowerCase();
+}
+
+/**
+ * 目录里与 modelId 同名的模型（不区分大小写、忽略 vendor/ 前缀），跨协议、跨 provider：
+ * 官方 provider 优先（本协议的官方在前），其次非官方里同协议的，再取目录顺序第一个。
+ * 不带前缀的名字多是官方模型经中转转发，官方规格才是真实规格；窗口估大会直接超限报错，官方值更稳妥。
+ */
+export function findSameNamedModel<T extends { id: string; provider: string; api: string }>(
+  candidates: readonly T[],
+  modelId: string,
+  api: string
+): T | undefined {
+  const wanted = bareModelId(modelId);
+  const officials = new Set(Object.values(OFFICIAL_PROVIDERS));
+  const rank = (model: T) =>
+    model.provider === OFFICIAL_PROVIDERS[api]
+      ? 0
+      : officials.has(model.provider)
+        ? 1
+        : model.api === api
+          ? 2
+          : 3;
+  let best: T | undefined;
+  for (const model of candidates) {
+    if (bareModelId(model.id) !== wanted) continue;
+    if (!best || rank(model) < rank(best)) best = model;
+  }
+  return best;
+}
+
+/**
+ * 设置里的窗口 / 最大输出最优先，覆盖目录、推断与兜底；其次是目录同名条目；推断与兜底只是估计值
+ * （内部压缩仍按它算，界面标成「窗口未知」）。maxTokens 不超过 contextWindow。
+ */
+export function withSpecLimits(
+  defined: { definition: ModelDefinition; windowSource: WindowSource },
+  spec: Pick<ResolvedModelSpec, 'contextWindow' | 'maxOutput'>
+): { definition: ModelDefinition; windowSource: WindowSource } {
+  const contextWindow = spec.contextWindow ?? defined.definition.contextWindow;
+  const maxTokens = Math.min(spec.maxOutput ?? defined.definition.maxTokens, contextWindow);
+  const windowSource = spec.contextWindow ? 'settings' : defined.windowSource;
+  return { definition: { ...defined.definition, contextWindow, maxTokens }, windowSource };
 }
 
 /** pi 目录里某个协议的模型（不含 fynvra 自己注册的运行时 provider 与插件别名） */

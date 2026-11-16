@@ -16,6 +16,7 @@ import {
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   compactionStrategyOf,
+  compactionThresholdTokensOf,
   compactionTimeoutMsOf,
   sessionPreferencesOf,
 } from '@shared/types/settings';
@@ -32,6 +33,7 @@ import {
   type SetPlanModeInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
+import { writeMagicContextConfig } from '../services/agentHost/magicContextHost';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
 import { createConfigHost } from '../services/configHost/configHost';
@@ -55,7 +57,7 @@ import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
 import { getOrchestrationRegistry } from './orchestration';
 import { getPluginRegistry, installPlugin, setPluginEnabled } from './plugins';
-import { getProviderStore } from './providers';
+import { getModelLimitsProber, getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile, onConfirmDangerousActionsChanged } from './settings';
 import { getSkillRegistry } from './skills';
@@ -117,6 +119,7 @@ export function getArchiveSweeper(): ArchiveSweeper {
     archive: (sessionId) => getSessionArchive().archive(sessionId),
     remove: (sessionId) => getAgentHost().remove(sessionId),
     preferences: sessionPreferences,
+    hasActiveWork: (sessionId) => getOrchestrationRegistry().hasActiveWork(sessionId),
   });
   return archiveSweeper;
 }
@@ -125,7 +128,8 @@ function createAppAgentHost(): AgentHostService {
   const userData = app.getPath('userData');
   const agentDir = join(userData, 'agent');
   return createAgentHost({
-    fork: () => forkAgentWorker(agentDir),
+    fork: () =>
+      forkAgentWorker(agentDir, compactionThresholdTokensOf(getSettingsFile().read().preferences)),
     agentDir,
     store: getSessionStore(),
     workspaces: getWorkspaceService(),
@@ -133,6 +137,7 @@ function createAppAgentHost(): AgentHostService {
     models: createModelResolver(),
     // 脱敏视图：model-options 不带 key；reasoning 标记也从这里取
     providers: { list: async () => (await getProviderStore().list()).map(toProviderView) },
+    modelLimits: getModelLimitsProber(),
     lastModels: createLastModelStore(getSettingsFile()),
     // 已删除的目录（如清理掉的 worktree）不起 git
     branches: createBranchTracker({
@@ -146,6 +151,12 @@ function createAppAgentHost(): AgentHostService {
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
     resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),
+    // Read at every spawn; Magic rereads its config per session load, so refresh it here too.
+    resolveCompactionThresholdTokens: () => {
+      const tokens = compactionThresholdTokensOf(getSettingsFile().read().preferences);
+      writeMagicContextConfig(tokens);
+      return tokens;
+    },
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>
@@ -298,23 +309,37 @@ export function registerSessionHandlers(
     }
   );
 
+  // 只拦用户经 IPC 发的：send_to_worker / reject_work 走 launcher，不受影响
+  const retryBlocked = (sessionId: string): string | undefined => {
+    const failed = getOrchestrationRegistry().retryRequired(sessionId);
+    return failed && translate('sessions.workerRetryRequired', { title: failed.title });
+  };
+
   ipcMain.handle(IPC_CHANNELS.SESSIONS_PROMPT, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
-    return input
-      ? guard(() => host().prompt(input.sessionId, input.text, input.images))
-      : invalid(translate('sessions.invalidPrompt'));
+    if (!input) return invalid(translate('sessions.invalidPrompt'));
+    const blocked = retryBlocked(input.sessionId);
+    return blocked
+      ? invalid(blocked)
+      : guard(() => host().prompt(input.sessionId, input.text, input.images));
   });
 
   // 运行中插话：入参与 sessions:prompt 相同
   ipcMain.handle(IPC_CHANNELS.SESSIONS_STEER, (_event, raw: unknown) => {
     const input = parsePromptInput(raw);
-    return input
-      ? guard(() => host().steer(input.sessionId, input.text, input.images))
-      : invalid(translate('sessions.invalidPrompt'));
+    if (!input) return invalid(translate('sessions.invalidPrompt'));
+    const blocked = retryBlocked(input.sessionId);
+    return blocked
+      ? invalid(blocked)
+      : guard(() => host().steer(input.sessionId, input.text, input.images));
   });
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, (_event, raw: unknown) =>
     withSessionId(raw, (sessionId) => host().retryCompaction(sessionId))
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_COMPACT, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => host().compact(sessionId))
   );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>

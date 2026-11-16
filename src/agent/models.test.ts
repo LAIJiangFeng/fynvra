@@ -18,6 +18,7 @@ import {
   createModelRegistry,
   createWorkerModelRuntime,
   findClosestModel,
+  findSameNamedModel,
   normalizeModelId,
 } from './models';
 
@@ -126,6 +127,105 @@ describe('createModelRegistry', () => {
       contextWindow: 128_000,
       maxTokens: 32_000,
     });
+  });
+
+  it('marks the window source: settings over catalog, exact catalog id, otherwise estimated', async () => {
+    const registry = createModelRegistry(runtime);
+    const base = {
+      providerId: KEY_A,
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'k',
+    };
+    const catalog = await registry.resolve({ ...base, modelId: 'claude-sonnet-5-5' });
+    expect(catalog.windowSource).toBe('catalog');
+    expect(catalog.model.contextWindow).toBe(1_000_000);
+
+    // 设置里的值覆盖目录；maxTokens 不超过窗口
+    const settings = await registry.resolve({
+      ...base,
+      modelId: 'claude-sonnet-5-5',
+      contextWindow: 200_000,
+      maxOutput: 500_000,
+    });
+    expect(settings.windowSource).toBe('settings');
+    expect(settings.model).toMatchObject({ contextWindow: 200_000, maxTokens: 200_000 });
+
+    // 推断（目录里没有同名，按最接近的）与兜底都是估计值，内部仍有窗口
+    const inferred = await registry.resolve({ ...base, modelId: 'claude-sonnet-5-5-20990101' });
+    expect(inferred.windowSource).toBe('estimated');
+    expect(inferred.model.contextWindow).toBe(1_000_000);
+    const fallback = await registry.resolve({
+      ...base,
+      api: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      modelId: 'my-local-model',
+    });
+    expect(fallback.windowSource).toBe('estimated');
+    expect(fallback.model).toMatchObject({ contextWindow: 128_000, maxTokens: 32_000 });
+
+    // 只填了最大输出：窗口仍是估计值
+    const onlyMax = await registry.resolve({
+      ...base,
+      api: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      modelId: 'my-local-model',
+      maxOutput: 8_000,
+    });
+    expect(onlyMax.windowSource).toBe('estimated');
+    expect(onlyMax.model.maxTokens).toBe(8_000);
+  });
+
+  it('takes the window of a same-named catalog model across protocols, vendor prefixes and case', async () => {
+    const registry = createModelRegistry(runtime);
+    const relay = {
+      providerId: KEY_B,
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'k',
+    };
+    // 中转的协议里没有这个 id：取其他协议官方 provider 的同名模型
+    for (const modelId of [
+      'claude-sonnet-5-5',
+      'anthropic/claude-sonnet-5-5',
+      'Claude-Sonnet-5-5',
+    ]) {
+      const resolved = await registry.resolve({ ...relay, api: 'google-generative-ai', modelId });
+      expect(resolved.windowSource).toBe('catalog');
+      expect(resolved.model).toMatchObject({ id: modelId, contextWindow: 1_000_000 });
+      // 跨协议不带另一协议的兼容开关
+      expect(resolved.model.compat).toBeUndefined();
+    }
+    expect(
+      registry.describe({ api: 'openai-completions', modelId: 'anthropic/claude-sonnet-5-5' })
+        .source
+    ).toBe('catalog');
+    // 大小写不同也算同名，同协议的官方 provider 优先（不取网关写的 1.05M）
+    const upper = await registry.resolve({
+      ...relay,
+      api: 'openai-responses',
+      modelId: 'GPT-6-SOL',
+    });
+    expect(upper.windowSource).toBe('catalog');
+    expect(upper.model.contextWindow).toBe(272_000);
+    // 不带前缀经中转：官方 openai 的 272k，不取同协议 openrouter 的 1.05M
+    const bare = await registry.resolve({
+      ...relay,
+      api: 'openai-completions',
+      modelId: 'gpt-6-sol',
+    });
+    expect(bare.windowSource).toBe('catalog');
+    expect(bare.model.contextWindow).toBe(272_000);
+    // 写了 openai/ 前缀：第 1 步同协议完全同名就命中 openrouter 的条目
+    const routed = await registry.resolve({
+      ...relay,
+      api: 'openai-completions',
+      modelId: 'openai/gpt-6-sol',
+    });
+    expect(routed.windowSource).toBe('catalog');
+    expect(routed.model.contextWindow).toBe(1_050_000);
+    expect(runtime.getModels().find((model) => model.id === 'openai/gpt-6-sol')?.provider).toBe(
+      'openrouter'
+    );
   });
 
   it('falls back to the official endpoint of the api when the spec has no base URL', async () => {
@@ -426,11 +526,11 @@ describe('createModelRegistry thinking levels', () => {
   });
 
   describe('models the catalog does not list: the closest catalog model of the same api', () => {
-    it('lowercases the id', () => {
+    it('matches the catalog id case-insensitively', () => {
       expect(anthropic('Claude-Fable-5-1')).toEqual({
         thinkingLevels: piLevelsOf('anthropic', 'claude-fable-5-1'),
         defaultThinking: 'medium',
-        source: 'inferred:claude-fable-5-1',
+        source: 'catalog',
       });
     });
 
@@ -488,25 +588,25 @@ describe('createModelRegistry thinking levels', () => {
       ).toEqual(anthropic('claude-opus-4-8[1m]'));
     });
 
-    it('does not count a shared family name alone, and never looks at another api', () => {
+    it('does not count a shared family name alone; same-named models count across apis', () => {
       // 只共享「gpt」：不算接近，按协议兜底（没标推理就没有档位）
       expect(openai('gpt-7-sol')).toEqual({ thinkingLevels: [], source: 'fallback' });
-      expect(openai('gpt-oss-120b')).toEqual({ thinkingLevels: [], source: 'fallback' });
-      // 目录里 gpt-6.1-sol 只在 openai-responses 下：openai-completions 的同名模型不借它的档位
+      expect(openai('gpt-oss-999b')).toEqual({ thinkingLevels: [], source: 'fallback' });
+      // 完全同名的模型跨协议也算目录里有：gpt-6.1-sol 只在 openai-responses 下，openai-completions 照样取它
       expect(levelsOf({ api: 'openai-completions', modelId: 'gpt-6.1-sol' }).source).toBe(
-        'fallback'
+        'catalog'
       );
     });
   });
 
   describe('falling back by protocol when nothing in the catalog is close', () => {
     it("gives an Anthropic model marked as reasoning pi's levels for the current Claude generation", () => {
-      expect(anthropic('glm-4.7', true)).toEqual({
+      expect(anthropic('acme-relay-model', true)).toEqual({
         thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
         defaultThinking: 'medium',
         source: 'fallback',
       });
-      expect(anthropic('glm-4.7', true).thinkingLevels).toEqual(
+      expect(anthropic('acme-relay-model', true).thinkingLevels).toEqual(
         piLevelsOf('anthropic', 'claude-opus-5-5')
       );
     });
@@ -537,7 +637,7 @@ describe('createModelRegistry thinking levels', () => {
       expect(
         levelsOf({ api: 'mystery-api', modelId: 'm', reasoning: true }).thinkingLevels
       ).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
-      expect(anthropic('glm-4.7')).toEqual({ thinkingLevels: [], source: 'fallback' });
+      expect(anthropic('acme-relay-model')).toEqual({ thinkingLevels: [], source: 'fallback' });
       // 目录里有的模型以目录为准：标记改不了它的能力
       expect(openai('gpt-4.1', true)).toEqual({ thinkingLevels: [], source: 'catalog' });
       expect(
@@ -554,7 +654,7 @@ describe('createModelRegistry thinking levels', () => {
       { api: 'anthropic-messages', modelId: 'claude-haiku-5-5' },
       { api: 'anthropic-messages', modelId: 'claude-fable-5-1' },
       { api: 'anthropic-messages', modelId: 'claude-opus-4-8[1m]' },
-      { api: 'anthropic-messages', modelId: 'glm-4.7', reasoning: true },
+      { api: 'anthropic-messages', modelId: 'acme-relay-model', reasoning: true },
       { api: 'openai-responses', modelId: 'gpt-5.5' },
       { api: 'openai-responses', modelId: 'gpt-6.2-sol' },
       { api: 'openai-responses', modelId: 'gpt-7-sol', reasoning: true },
@@ -598,10 +698,14 @@ describe('createModelRegistry thinking levels', () => {
       providerId: KEY_B,
       api: 'anthropic-messages',
       apiKey: 'k',
-      modelId: 'glm-4.7',
+      modelId: 'acme-relay-model',
       reasoning: true,
     });
-    expect(unknown).toMatchObject({ id: 'glm-4.7', contextWindow: 128_000, maxTokens: 32_000 });
+    expect(unknown).toMatchObject({
+      id: 'acme-relay-model',
+      contextWindow: 128_000,
+      maxTokens: 32_000,
+    });
     expect(unknown.compat).toBeUndefined();
   });
 
@@ -633,6 +737,31 @@ describe('createModelRegistry thinking levels', () => {
       thinking: 'high',
     });
     expect(plain.thinking).toBeUndefined();
+  });
+});
+
+describe('findSameNamedModel', () => {
+  const m = (provider: string, api: string, id: string) => ({ provider, api, id });
+  it('prefers official providers in any api (own api first), then non-official of the same api, then catalog order', () => {
+    const gateway = m('gateway', 'anthropic-messages', 'x/claude-a');
+    const anthropic = m('anthropic', 'anthropic-messages', 'claude-a');
+    const openai = m('openai', 'openai-completions', 'CLAUDE-A');
+    const relay = m('relay', 'openai-completions', 'vendor/claude-a');
+    const other = m('other', 'google-generative-ai', 'claude-a');
+    // 官方 provider 跨协议也先于同协议的非官方
+    expect(findSameNamedModel([relay, anthropic], 'claude-a', 'openai-completions')).toBe(
+      anthropic
+    );
+    // 本协议的官方先于其他官方
+    expect(findSameNamedModel([relay, anthropic, openai], 'Claude-A', 'openai-completions')).toBe(
+      openai
+    );
+    // 非官方里同协议优先，再取目录顺序
+    expect(findSameNamedModel([other, gateway, relay], 'claude-a', 'openai-completions')).toBe(
+      relay
+    );
+    expect(findSameNamedModel([other, gateway], 'claude-a', 'openai-completions')).toBe(other);
+    expect(findSameNamedModel([anthropic], 'claude-a-1', 'anthropic-messages')).toBeUndefined();
   });
 });
 
@@ -690,7 +819,7 @@ describe('findClosestModel', () => {
   });
 
   it('needs at least two shared segments', () => {
-    expect(findClosestModel(entries('gpt-5', 'gpt-6-sol'), 'gpt-oss-120b')).toBeUndefined();
+    expect(findClosestModel(entries('gpt-5', 'gpt-6-sol'), 'gpt-oss-999b')).toBeUndefined();
     expect(findClosestModel(entries('o3', 'o4-mini'), 'o5')).toBeUndefined();
     expect(findClosestModel(entries('gpt-6-sol'), 'gpt-6-nova')?.id).toBe('gpt-6-sol');
   });

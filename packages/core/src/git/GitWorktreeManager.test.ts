@@ -19,7 +19,8 @@ interface Step {
 function scriptedGit(
   steps: Step[],
   removeDir?: (path: string) => Promise<void>,
-  pathKind?: (path: string) => Promise<PathKind>
+  pathKind?: (path: string) => Promise<PathKind>,
+  detachLinks?: (worktreePath: string) => Promise<void>
 ) {
   const calls: { cmd: string; args: string[]; cwd: string }[] = [];
   const exec: ExecFn = async (cmd, args, cwd) => {
@@ -31,7 +32,11 @@ function scriptedGit(
   // 每条命令都带 -c core.longpaths=true（Windows 长路径）
   const expected = () =>
     steps.map(({ args, cwd }) => ({ cmd: 'git', args: [...LONGPATHS, ...args], cwd }));
-  return { manager: new GitWorktreeManager({ exec, removeDir, pathKind }), calls, expected };
+  return {
+    manager: new GitWorktreeManager({ exec, removeDir, pathKind, detachLinks }),
+    calls,
+    expected,
+  };
 }
 
 const LONGPATHS = ['-c', 'core.longpaths=true'];
@@ -760,6 +765,81 @@ describe('GitWorktreeManager.remove / prune / deleteBranch', () => {
     );
     const result = await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true });
     expect(!result.ok && result.error).toMatch(/still registered/);
+  });
+
+  describe('detachLinks', () => {
+    /** 记录 detachLinks 调用，以及调用时已执行过几条 git 命令。 */
+    function detachRecorder(calls: () => number, error?: Error) {
+      const detached: { path: string; gitCallsBefore: number }[] = [];
+      return {
+        detached,
+        detachLinks: async (path: string) => {
+          detached.push({ path, gitCallsBefore: calls() });
+          if (error) throw error;
+        },
+      };
+    }
+    function withDetach(steps: Step[], error?: Error) {
+      const ref: { calls?: unknown[] } = {};
+      const recorder = detachRecorder(() => ref.calls?.length ?? 0, error);
+      const git = scriptedGit(steps, undefined, undefined, recorder.detachLinks);
+      ref.calls = git.calls;
+      return { git, detached: recorder.detached };
+    }
+
+    it('登记的 worktree：非 force 与 force 都先 detachLinks 再 worktree remove', async () => {
+      const { git, detached } = withDetach([
+        list(listing(REPO, worktree.path)),
+        { args: ['worktree', 'remove', '--', worktree.path], cwd: REPO },
+        list(listing(REPO, worktree.path)),
+        forceRemove(worktree.path, {}),
+      ]);
+      expect(await git.manager.remove({ repoPath: REPO, path: worktree.path })).toEqual({
+        ok: true,
+      });
+      expect(
+        await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true })
+      ).toEqual({ ok: true });
+      expect(detached).toEqual([
+        { path: worktree.path, gitCallsBefore: 1 },
+        { path: worktree.path, gitCallsBefore: 3 },
+      ]);
+      expect(git.calls).toEqual(git.expected());
+    });
+
+    it('主 worktree 与未登记的路径不调用 detachLinks', async () => {
+      const { git, detached } = withDetach([
+        list(listing(REPO, worktree.path)),
+        { args: ['worktree', 'remove', '--', REPO], cwd: REPO, ...notATree },
+        list(listing(REPO)),
+        forceRemove(worktree.path, notATree),
+      ]);
+      expect((await git.manager.remove({ repoPath: REPO, path: REPO })).ok).toBe(false);
+      expect(
+        (await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true })).ok
+      ).toBe(false);
+      expect(detached).toEqual([]);
+      expect(git.calls).toEqual(git.expected());
+    });
+
+    it('detachLinks 抛错：返回失败，不执行 worktree remove', async () => {
+      const { git } = withDetach([list(listing(REPO, worktree.path))], new Error('EPERM'));
+      const result = await git.manager.remove({ repoPath: REPO, path: worktree.path });
+      expect(!result.ok && result.error).toBe(
+        `could not detach links in ${worktree.path} before removing it: EPERM`
+      );
+      expect(git.calls).toEqual(git.expected());
+    });
+
+    it('取不到 worktree 列表：返回失败，不执行 worktree remove', async () => {
+      const { git, detached } = withDetach([
+        { args: ['worktree', 'list', '--porcelain'], cwd: REPO, code: 128 },
+      ]);
+      const result = await git.manager.remove({ repoPath: REPO, path: worktree.path, force: true });
+      expect(result.ok).toBe(false);
+      expect(detached).toEqual([]);
+      expect(git.calls).toEqual(git.expected());
+    });
   });
 
   it('prune 执行 git worktree prune', async () => {

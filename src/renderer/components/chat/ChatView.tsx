@@ -28,7 +28,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   return (
     <main className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2.5 border-b px-4">
-        <StatusDot status={status} />
+        <StatusDot status={status} awaitingWorkers={session?.awaitingWorkers} />
         <h1 className="min-w-0 truncate font-medium">{session?.title ?? t('sessions.title')}</h1>
         {session && <RoleBadge roleId={session.roleId} />}
         {branch && <BranchBadge branch={branch.branch} cwd={branch.cwd} />}

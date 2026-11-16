@@ -58,6 +58,7 @@ Renderer(React) ⇄ preload(typed API) ⇄ Main(ipc/*, services/*) ⇄ Agent Wor
 - Main 是权威：settings、roles、workspaces、orchestration 状态、worktree 注册表都在 Main 持久化。
 - 一个 Agent Worker 进程托管多个 pi 会话。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
 - Renderer 只持有投影；pi jsonl 是会话正文权威源。
+- macOS / Linux 启动时 Main 先用交互式登录 shell 读一次 PATH 合并进 `process.env.PATH`（`services/shellEnv.ts`，失败只记警告），再启动 Agent Worker，worker 的 bash 与 run_checks 由此继承。
 
 ## 4. 领域模型（`packages/core`，`@fynvra/core`）
 
@@ -376,14 +377,16 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模型：把被压缩的历史用 pi 的 `serializeConversation` 序列化，接在上一份 snapcompact 存档文本之后（上一份是文本摘要时作为开头的摘要），用纯 TypeScript 渲染为 1-bit PNG 文字帧（内嵌公有领域 X11 misc-fixed 8x13 字体，`node:zlib` 编码）。帧形：Anthropic `11on16-bw` 1568px，Gemini `8on22-bw` 2048px，其余 `8on22-bw` 1568px；帧宽固定、高度贴合行数（最低 64px）。预算：每次请求最多 20 帧（未知线协议 5 帧）、base64 合计 ≤3MB、帧 token 估算 ≤ 阈值的 50%（激进轮 25%），超出时保留首帧与最新帧、丢弃最旧的中段并在摘要里注明丢弃字数。帧与存档文本存在 compaction 条目的 `details.snapcompact`（随 pi jsonl 持久化），始终注册的 `context` 扩展钩子在每次构建上下文时把最新 compaction 的帧作为 `custom` 图片消息插在压缩摘要之后（按当前模型的帧数与字节预算取最新帧）；当前模型不收图片时改为附上存档最新 40k 字符的文本。仅当前模型 `input` 含 `image` 时可用。字体只有 Latin-1：超过 5% 的字符无法绘制（如中文为主的会话）时 skip，交给 handoff/shake/soft 的文本摘要，避免中文被印成 `?` 丢失；比例以内的少量无法绘制字符印为 `?`，摘要提示模型需要时回读源文件。日志不记录消息正文。
 
-分层与必改文件：core 事件类型 → agent-runtime normalize → shared unknown parser → agent piSession / supervisor → Main agentHost 快照与 sessions IPC → typed preload；Renderer 只消费快照并传 sessionId。`preferences.compactionTimeoutMs` 是原生压缩总超时，默认 10 分钟、合法范围 30 秒至 30 分钟，spawn 时取快照；策略与超时在新加载（包括显式恢复重载）/重启生效。旁路状态参与 seq 但不推进灰字建议活动轮次；四种 SessionStatus、最终 agent_settled、generation、审批/编排结算不变。当前 context 使用 resolved model 窗口与 SDK getContextUsage，压缩后 tokens:null 明确未知，不复用旧用量、不改变窗口、不与累计计费混合。不改网站、SDK/node_modules、Magic 算法，不新增普通手动压缩入口，只提供失败恢复操作。
+分层与必改文件：core 事件类型 → agent-runtime normalize → shared unknown parser → agent piSession / supervisor → Main agentHost 快照与 sessions IPC → typed preload；Renderer 只消费快照并传 sessionId。`preferences.compactionTimeoutMs` 是原生压缩总超时，默认 10 分钟、合法范围 30 秒至 30 分钟，spawn 时取快照；策略与超时在新加载（包括显式恢复重载）/重启生效。旁路状态参与 seq 但不推进灰字建议活动轮次；四种 SessionStatus、最终 agent_settled、generation、审批/编排结算不变。当前 context 使用 resolved model 窗口与 SDK getContextUsage，压缩后 tokens:null 明确未知，不复用旧用量、不改变窗口、不与累计计费混合。不改网站、SDK/node_modules、Magic 算法。除失败恢复操作外，任何空闲会话都可在状态栏「立即压缩上下文」手动压缩（`sessions:compact`，见下）；不加设置项，也不加 `/compact` 文本命令。
 
-- 原生生命周期使用 `compaction` / `retry` 事件与 `context_runtime.snapshot` 旁路快照；`operationId` 是每次压缩独立生成的 UUID 标识，不因重建实例或 worker 而复用，`startedAt` 只表示时间。Main 以 sessionId/generation 丢弃旧实例事件，并将 worker 每代 seq 重写为当前 Main 生命周期内跨 generation 单调递增的会话 seq。Main 的 `SessionSummary`、get/history 返回 `contextRuntime` 及对应的 `contextRuntimeSeq`；未加载或卸载后不声明引擎已生效。列表/历史迟到响应必须按该 seq 与实时事件比较。history 另可返回 `contextRecovery?: { recoveryRequired: boolean }`：只读当前 jsonl 分支最后有效的恢复 checkpoint，不包含正文或引擎信息；无 checkpoint 省略，已完成恢复返回 false。冷 history 始终返回读取开始前捕获的 `contextRuntimeSeq` 水位（新 Main 为 0），不用读取结束后的新 seq 标注旧磁盘结果。加载中或读期间有新 live 事实时省略冷提示，存在真实 runtime 则优先返回 runtime 及其对应 seq。list 不为此读全量文件，sessions.json 不存恢复提示。快照分开记录 configured/effective 策略（Magic 故障后 effective 为 native，表示已改用回退链；recoveryRequired 只表示回退链也未完成）、timeout、实际 contextWindow、SDK tokens 或明确 null、原生实际阈值，以及恢复锁/未消费输入数。
+- 原生生命周期使用 `compaction` / `retry` 事件与 `context_runtime.snapshot` 旁路快照；`operationId` 是每次压缩独立生成的 UUID 标识，不因重建实例或 worker 而复用，`startedAt` 只表示时间。Main 以 sessionId/generation 丢弃旧实例事件，并将 worker 每代 seq 重写为当前 Main 生命周期内跨 generation 单调递增的会话 seq。Main 的 `SessionSummary`、get/history 返回 `contextRuntime` 及对应的 `contextRuntimeSeq`；未加载或卸载后不声明引擎已生效。列表/历史迟到响应必须按该 seq 与实时事件比较。history 另可返回 `contextRecovery?: { recoveryRequired: boolean }`：只读当前 jsonl 分支最后有效的恢复 checkpoint，不包含正文或引擎信息；无 checkpoint 省略，已完成恢复返回 false。冷 history 始终返回读取开始前捕获的 `contextRuntimeSeq` 水位（新 Main 为 0），不用读取结束后的新 seq 标注旧磁盘结果。加载中或读期间有新 live 事实时省略冷提示，存在真实 runtime 则优先返回 runtime 及其对应 seq。list 不为此读全量文件，sessions.json 不存恢复提示。快照分开记录 configured/effective 策略（Magic 故障后 effective 为 native，表示已改用回退链；recoveryRequired 只表示回退链也未完成）、timeout、实际 contextWindow 及其来源 `windowSource`（settings / catalog / estimated；estimated 时状态栏只显示用量与「窗口未知」）、SDK tokens 或明确 null、原生实际阈值，以及恢复锁/未消费输入数。
 - `sessions:retry-compaction` / preload `sessions.retryCompaction(sessionId)` 仅接收会话 id。Main 互斥接受后立即 ACK，压缩及恢复结果由事件结算；未加载或 worker 退出后也可仅凭 sessionId 加载原 jsonl，由真实 worker 检查 checkpoint，没有恢复锁则清晰失败、不压缩普通 idle 会话。内部 requestId 将载入与恢复完成绑定为同一个互斥操作，匹配的 worker result 才释放；Stop 作废载入令牌，并在 worker 等待 opening 的边界复验取消代际，迟到 spawn/result 不启动恢复。加载失败不改 checkpoint、历史或未消费输入，effective 引擎只由真实加载实例发布。原生压缩成功前 provider 请求被锁住；Magic 只在显式恢复期间允许进入受保护的 context 处理，未就绪或变换失败仍拒绝请求，恢复原输入期间 UI 队列只暂时等待：运行、压缩/退避、恢复锁及宿主未消费输入都阻止投递；恢复完成、pending 归零且会话不再运行（idle 或 error）后自动按 FIFO 继续。恢复失败只等待显式恢复，不自动重试。UI 队列没有手动暂停：每轮结算后（正常结束、报错或用户 Stop）自动发出下一条，Stop 请求在途时等它返回再继续；待审批、prompt 在途同样只是暂时等待。未确认的 prompt 失败把消息放回队首并提示错误，但不立即重试，等下一次会话结算、新发消息或队列项「立即发送」再继续，避免持续失败的会话死循环；会话空闲但队列非空时，新消息排到队尾并触发发送，不插队。宿主将未消费输入及恢复锁作为 `fynvra-context-recovery` custom entry 保存于 pi jsonl；持久 `blocked` 标记贯穿压缩成功后的原输入恢复阶段，只有恢复完成才清除。`resumeCompactionId` 仅用于原生模式，关联当前分支上已提交的压缩边界，重载后仅由新的显式操作继续原输入，不重复压缩已经缩短的上下文；后续压缩失败会清除此边界。Magic 恢复会重新加载同一 jsonl/SQLite，supervisor 等旧实例 dispose 完成后才打开新代。确有中断轮次或未消费输入时，由 context 钩子重新变换并校验就绪/取消状态，完整 run 成功结算后才解除持久锁；SDK transient 重试的中间错误不提前上锁，只认归一化最终 error / agent_settled，Stop 与真正 Magic 故障立即阻断。纯空闲/初始化故障没有待继续的任务时，直接通过公开、受保护的 `transformContext(session.messages, signal)` 校验当前投影（包括空历史），不造输入、不调用 `sendCustomMessage` 或触发新的对话轮次；校验成功后解锁，后续后台 Magic 故障仍会重新暂停并保留恢复锁。两条路径都不把旧 native checkpoint、插件 ready 或旧 marker 当作已完成恢复，不调用 `session.compact()`；若重载后 Magic 仍未就绪，会话改用回退链，按原生路径恢复（仅在超过阈值时压缩，小会话直接继续原输入）。依据 SDK user message_end（持久化之后记录消费）区分已写和未写，不依赖 Renderer 重发。已写的中断输入通过公开 `sendCustomMessage(..., { triggerTurn: true })` 发一个 `display:false` 的 `fynvra-compaction-resume` 控制标记继续完整 run；标记不是 user entry，不进入普通聊天投影或用户消息计数，原 user 不再写一次。仍未消费的原输入由后台补发一次。所有恢复只由显式操作开始，Stop 不自动继续。
+- `sessions:compact` / preload `sessions.compact(sessionId)` 仅接收会话 id（`unknown` 收窄，非字符串或路径样式拒绝），Renderer 不传其他内容。Main 在会话运行中、等待审批、压缩/退避进行中、有恢复锁或已有压缩/恢复操作在途时以可读错误拒绝；否则与 retry-compaction 共用同一互斥槽，接受后立即 ACK，未加载的会话先加载（不为 Magic 重载），再发 worker `compact` 命令，同一 requestId 的 `compaction-recovery-result` 结算。worker 内：Magic 当前生效且就绪时经扩展命令路径运行 Magic 自己注册的 `/ctx-wrapup`，但不发 command 事件、不进聊天提示：它走与原生手动压缩相同的 compaction 生命周期（reason `manual`，running → succeeded / cancelled / failed），插件状态文字只在 worker 内解析成 `outcome` 计数（`compactedMessages`、`appliesOnNextMessage`），失败原因去掉标题只留一句进 `errorMessage`；native、off 与 Magic 已回退时调用 `session.compact()`，经 Fynvra 方法链（`session_before_compact`，reason `manual`）压缩，进度与失败照常展示。off 也安装方法链，但只在手动压缩进行期间 active，自动压缩仍关闭，永不落到 pi 默认摘要。Stop 取消：原生走 abortCompaction，扩展命令走 `SlashCommandRun.stop()`；失败或取消不改写历史，不留恢复锁。Fynvra 桥接只注册 Magic 的 `ctx-wrapup`（在宿主生命周期内运行：boot/operation 检查、受控 ctx、Stop 中断信号、失败挂起），其状态文字不展示、不写入 transcript。手动压缩（含 Magic 与原生）结束时，Renderer 按终态在聊天流插入一条本地化结果行（同一 operationId 只一条，不进 jsonl；自动压缩与恢复期间的压缩不插）。
 
 本轮修复的行为差异：Magic 只在 historian 校验并发布后记录成功；超时、最终校验/无进展与存储失败按会话退役，Stop/关闭只取消。Agent host 与 vendored 插件共同为异步操作绑定会话取消代际，在 SQLite、context 返回及 marker 追加处复验，防止退役或关闭后的迟到写入。预算使用当前模型的保守 UTF-8 字节估算并按完整块切分，不截断 XML。必改范围为 `src/agent/magicContext.ts` / `piSession.ts`、vendored Magic、会话 warning / suggestion 投影及本节文档；不改变工具审批、权限、官网、Fast 或模型路由配置。
 
 - 通用设置 `preferences.compactionStrategy` 有 `magic-context`（默认）、`native`、`off` 三种；`settings:update` 严格校验枚举，旧记录缺省或磁盘上的非法值按 `magic-context` 读取，合法 native/off 不被覆盖。显式 `native` 沿用 pi 原生自动压缩及其阈值 / 保留量默认值。
+- 通用设置 `preferences.compactionThresholdTokens`（可选整数，64,000–2,000,000 token；缺省 = 自动，行为与生成的 Magic 配置都不变；`settings:update` 里 `undefined` 清除）是全局自动压缩阈值 T。Main 在每次 spawn 时读入 `SpawnSessionSpec.compactionThresholdTokens`：native 与 Magic 回退链由 `createSessionSettings` 按当前模型把 pi 的 reserve 解析为 `max(默认 reserve, contextWindow − T)`，即有效阈值 `min(T, 窗口 − 默认 reserve)`，切换模型按新窗口重算，状态栏与快照里的阈值随之一致；Magic Context 在生成的配置里写 `execute_threshold_tokens: { default: T }`（超过 90% 可用窗口由插件钳制）。插件在每个会话加载时重读配置，Main 在 fork worker 和每次 spawn 前以临时文件 + rename 原子重写它。两类引擎都对之后新建或重新加载的会话生效，无需重启；已加载的会话沿用原值。
 - Main 每次构建 spawn spec 时读取保存的设置，始终显式传递 `SpawnSessionSpec.compactionStrategy`（包括 native），worker 也独立解析缺省为 Magic。每个会话新建内存 `SettingsManager`，只有显式 native 开启 SDK `compaction.enabled`，Magic/off 均关闭；Magic 会话回退后由宿主通过公开 `setAutoCompactionEnabled(true)` 为该会话开启。Magic 内联扩展仍通过 context hooks 执行正常后台分段和注入；摘要一律由回退链生成，不调用 pi 默认摘要。主会话、worker、重启恢复使用同一策略解析；每个会话独立暂停，不影响其他会话。
 - Magic Context 固定为 `@cortexkit/pi-magic-context` 0.41.3（MIT），资源在 `packages/agent-runtime/vendor/magic-context/`：只保留扩展入口、storage/core、日志/路径所需分片、TUI 桩与许可证，不包含 OpenCode/OMP TUI、子进程 runner、dreamer/sidekick/memory/embedding/quickjs/transformers 分片。打包时固定从 `resources/magic-context` 解析，开发时固定从 `app.getAppPath()/packages/agent-runtime/vendor/magic-context` 解析；资源缺失就暂停 Magic 会话并提示恢复，不回退到 `process.cwd()` 或用户工作目录里的副本。不扫描外部扩展，不读本机 `~/.pi` / `~/.config/cortexkit`，不迁移或共享终端 Magic 数据库。
 - 插件数据全部在应用目录：配置 `userData/magic-context/config/cortexkit/magic-context.jsonc`，SQLite `userData/magic-context/storage/context.db`，historian dump `userData/magic-context/artifacts/`，日志 `userData/magic-context/magic-context.log`。配置只读 Main 生成的固定文件，缺失/损坏不扫描终端或工作区、不降为启用可选功能的默认配置；禁用旧终端 DB 迁移、终端 tokenizer 搜索、window overlay 与 CortexKit wake 服务探测。生成的配置关闭 dreamer、sidekick、跨会话 memory/auto-search、embedding 与 todowrite；`ctx_search` 显式关闭 memory/embedding/git 检索，smart note 条件因 dreamer 关闭而不可用。环境变量在 worker 生命周期内固定，不按会话 `chdir` 或改 env。
@@ -568,6 +571,7 @@ export interface SessionSummary {
   model?: SessionModelRef;
   planMode?: boolean;    // 计划模式（§7.10）：仅开启时为 true，随会话记录保存在 sessions.json
   archivedAt?: number;   // 归档时间（Task 26）：手动归档或闲置扫描；恢复、会话再次运行时清除
+  awaitingWorkers?: true; // 主 agent 还有未完成的编排任务（Main 现算，见 §9.3「等待 worker 的主 agent」）
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {
@@ -629,7 +633,7 @@ export interface SessionsApi {
   onApprovalRequest(cb: (request: ApprovalRequest) => void): Unsubscribe;
 }
 ```
-通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。
+通道：`sessions:list|create|remove|prompt|abort|history|respond-approval|set-model|model-options|set-plan-mode|archive|unarchive|sweep`，推送 `sessions:event`、`sessions:changed`、`sessions:approval-request`。审批响应只接收 session / request id 和 decision，不接收工具参数或路径；Main 核验真实待审批请求后才转发答复。`sessions:prompt` / `sessions:steer` 发给任务已 failed、当前尝试已结算的 worker 会话时直接拒绝，提示到主 agent 会话用 `reject_work` 重试（只拦用户经 IPC 发的消息，launcher 投递不受影响）。
 
 - **归档**（Task 26）：`sessions:list` 传 workspaceId 时不列归档的会话，传 `{ workspaceId, includeArchived: true }` 一并列出。
   归档只记 `archivedAt`（不改 `updatedAt`），并让会话退出 worker；`preferences.cleanupWorktreeOnArchive` 打开时经
@@ -637,6 +641,10 @@ export interface SessionsApi {
   恢复清掉 `archivedAt` 并把 `updatedAt` 设为当前时间；会话再次运行（用户发消息、主 agent 打回）时注册表自动清掉 `archivedAt`。
   Main 启动后 30 秒、之后每小时按 `preferences.archiveIdleDays` / `deleteArchivedDays` 扫描（`sessions:sweep` 立即扫一次），
   删除与 `sessions:remove` 相同（pi jsonl 保留）。
+- **等待 worker 的主 agent**：会话作为 `coordinatorSessionId` 的 Run 里还有 todo / in-progress / in-review 任务（或工作流有运行中节点、待启动意图）时，
+  Main 在摘要上现算 `awaitingWorkers: true`（`OrchestrationRegistry.hasActiveWork`，不落盘；`SessionStatus` 仍是四种），
+  只在某工作区该集合翻转时广播 `sessions:changed`。空闲且带标志的会话显示蓝色空心圆环「等待 worker 回复」；批量归档（含归档闲置、全选）
+  与闲置扫描都跳过它（批量操作提示跳过数量），免得留下没人审查、合并的 worker；会话菜单里的单个「归档」不受限。
 
 - **换模型 / Fast**（`sessions:set-model`）：Main 用 `ModelResolver` 解析（协议不支持 Fast 时清掉该开关）→ 更新会话记录（sessions.json）→
   会话已在 worker 里时发 `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`，带 `fastMode`）→ worker 注册 provider 后调 pi 的
@@ -700,6 +708,7 @@ export interface ResolvedModelSpec {
   providerId: string; api: string; baseUrl?: string; apiKey?: string; modelId: string; thinking?: ThinkingLevel;
   fastMode?: boolean; // 会话自己的 Fast 开关；只对 OpenAI Responses / Chat Completions 发送 service_tier
   reasoning?: boolean; // 设置里模型条目的 reasoning 标记：只对 pi 目录里没有的模型生效（Task 17）
+  contextWindow?: number; maxOutput?: number; // 设置里模型条目的窗口 / 最大输出（正整数，非法值丢弃）
 }
 export interface AgentHost {
   implementsLauncher(): WorkerSessionLauncher;      // 供 orchestration-host 使用
@@ -711,6 +720,8 @@ export interface AgentHost {
 - **模型引用与运行时 provider 键**：`ResolvedModelSpec.providerId` 是运行时 provider 键（`fynvra-` + baseUrl 与 key 的哈希），
   worker 按它注册 pi provider，不是设置里的服务 id；`ref` 是实际解析的设置引用（ref 缺省时即选中的默认模型），
   会话记录与 `SessionSummary.model` 存它，每次 spawn 再按它解析。`fastMode` 只在服务协议支持时写进 spec，Main 解析时统一校验。
+  窗口优先级（`src/agent/models.ts`）：spec 带的设置值（用户填写或导入 / 远程列表带来的真实值）> pi 目录同名条目（先同协议、再跨协议跨 provider；不区分大小写、忽略 `vendor/` 前缀，官方 provider 优先；能力照搬它，跨协议时不带它的 compat）> 推断与兜底（估计值，内部压缩仍按它算）；`maxTokens` 不超过 `contextWindow`，来源记为 `windowSource`。
+  设置值由 Main 自动探测补齐（`src/main/services/providers/modelLimits.ts`，不让用户手填）：worker 的 `context_runtime` 快照报 `windowSource: 'estimated'` 时才在后台探测（会话打开即发首个快照，所以启动后就开始；不阻塞启动，同一服务 + 模型每次运行只探一次）；设置值与 pi 目录里有的模型不探测，目录值不写进设置、随 pi 目录更新，来源依次为① 服务端列模型接口条目里的元数据（`context_length` / `max_model_len` / `max_input_tokens` / `top_provider.context_length` 等）② 公开目录 models.dev（匿名 GET `https://models.dev/api.json`，不带 key 与用户数据，走 net.fetch 与应用代理；压缩成 id → 上限缓存在 `userData/model-metadata/models.dev.json`，7 天有效，离线时用旧缓存；id 不区分大小写、去 `vendor/`，官方厂商优先），取第一个查到的，只补缺失字段；③ 任何来源下，会话的 `error`（source `model`）是上下文超限且报错里带上限时，覆盖写入该值（端点自己报的最可信）。写回 providers.json 后 agentHost 对用着该模型的活会话发 `set-model`（只改窗口 / 最大输出，忙时等本轮结束）。失败静默，只记一条不含 key 的日志。
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。

@@ -6,9 +6,12 @@ import {
   DELETE_ARCHIVED_DAYS,
   isArchiveIdleDays,
   isCompactionStrategy,
+  isCompactionThresholdTokens,
   isDeleteArchivedDays,
   languageOf,
+  MAX_COMPACTION_THRESHOLD_TOKENS,
   MAX_COMPACTION_TIMEOUT_MS,
+  MIN_COMPACTION_THRESHOLD_TOKENS,
   MIN_COMPACTION_TIMEOUT_MS,
   type Preferences,
   parseShellPreference,
@@ -638,8 +641,62 @@ function CompactionSection() {
         </li>
       </ul>
       <p className="mt-2 text-muted-foreground text-xs">{hint}</p>
+      <CompactionThresholdSetting disabled={compaction === 'off'} />
       <CompactionTimeoutSetting />
     </section>
+  );
+}
+
+/** 单位 k token（200 = 200,000）；留空保存 = 恢复自动 */
+function CompactionThresholdSetting({ disabled }: { disabled: boolean }) {
+  const threshold = useGeneralPreferencesStore((state) => state.compactionThresholdTokens);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const [value, setValue] = useState(threshold === undefined ? '' : String(threshold / 1_000));
+  const [saving, setSaving] = useState(false);
+  const t = useT();
+  const id = useId();
+  useEffect(() => setValue(threshold === undefined ? '' : String(threshold / 1_000)), [threshold]);
+  const tokens = value.trim() === '' ? undefined : Number(value) * 1_000;
+  const valid = tokens === undefined || isCompactionThresholdTokens(tokens);
+  return (
+    <form
+      className="mt-3 grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || saving || disabled) return;
+        setSaving(true);
+        void update({ compactionThresholdTokens: tokens }).finally(() => setSaving(false));
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="mr-auto text-sm">
+          {t('settings.general.compactionThreshold')}
+        </label>
+        <Input
+          id={id}
+          className="w-28"
+          type="number"
+          min={MIN_COMPACTION_THRESHOLD_TOKENS / 1_000}
+          max={MAX_COMPACTION_THRESHOLD_TOKENS / 1_000}
+          step="1"
+          placeholder={t('settings.general.compactionThresholdAuto')}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={saving || disabled}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={!valid || saving || disabled || tokens === threshold}
+        >
+          {t('common.save')}
+        </Button>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        {t('settings.general.compactionThresholdHint')}
+      </p>
+    </form>
   );
 }
 

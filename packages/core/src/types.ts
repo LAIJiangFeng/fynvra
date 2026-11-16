@@ -276,6 +276,8 @@ export interface CompactionState {
   durationMs?: number;
   cancelSource?: 'user' | 'timeout' | 'shutdown' | 'exception' | 'sdk';
   errorMessage?: string;
+  /** Magic manual compaction result: counts only, never plugin text. */
+  outcome?: { compactedMessages: number; appliesOnNextMessage: boolean };
 }
 export interface RetryState {
   kind: 'model' | 'summarization';
@@ -294,6 +296,8 @@ export interface ContextRuntimeSnapshot {
     contextWindow: number;
     source: 'sdk' | 'unknown';
     compactionThresholdTokens?: number;
+    /** Where contextWindow came from; `estimated` = inferred / fallback, not shown as the real window. */
+    windowSource?: 'settings' | 'catalog' | 'estimated';
   };
   compaction?: CompactionState;
   retry?: RetryState;

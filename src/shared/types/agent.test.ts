@@ -89,6 +89,20 @@ describe('parseAgentCommand', () => {
       expect(parseAgentCommand(withSpec({ instructionFile: invalid }))).toBeNull();
     }
   });
+  it('accepts an optional compaction threshold within range', () => {
+    for (const tokens of [64_000, 200_000, 2_000_000]) {
+      expect(parseAgentCommand(withSpec({ compactionThresholdTokens: tokens }))).toEqual(
+        withSpec({ compactionThresholdTokens: tokens })
+      );
+    }
+    for (const invalid of [63_999, 2_000_001, 100_000.5, '200000', null]) {
+      expect(parseAgentCommand(withSpec({ compactionThresholdTokens: invalid }))).toBeNull();
+    }
+    const parsed = parseAgentCommand(withSpec({}));
+    expect(parsed?.type === 'spawn-session' && parsed.spec).not.toHaveProperty(
+      'compactionThresholdTokens'
+    );
+  });
   const valid: AgentCommand[] = [
     { type: 'spawn-session', identity, spec },
     {
@@ -131,6 +145,11 @@ describe('parseAgentCommand', () => {
     },
     { type: 'set-model', identity, model: spec.model },
     { type: 'set-model', identity, model: { ...spec.model, thinking: 'max' } },
+    {
+      type: 'set-model',
+      identity,
+      model: { ...spec.model, contextWindow: 1_000_000, maxOutput: 128_000 },
+    },
     {
       type: 'set-model',
       identity,
@@ -210,6 +229,18 @@ describe('parseAgentCommand', () => {
   it('keeps inPlace only when it is true (false is the default)', () => {
     const parsed = parseAgentCommand(withSpec({ inPlace: false }));
     expect(parsed?.type === 'spawn-session' && parsed.spec).not.toHaveProperty('inPlace');
+  });
+
+  it('keeps valid model window limits and drops invalid ones without rejecting the spec', () => {
+    for (const bad of [0, -1, 1.5, '1000', Number.NaN, null]) {
+      expect(
+        parseAgentCommand({
+          type: 'set-model',
+          identity,
+          model: { ...spec.model, contextWindow: bad, maxOutput: bad },
+        })
+      ).toEqual({ type: 'set-model', identity, model: spec.model });
+    }
   });
 
   it('normalizes the none alias of off in a model spec', () => {

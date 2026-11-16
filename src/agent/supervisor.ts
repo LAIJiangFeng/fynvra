@@ -61,6 +61,8 @@ export interface SupervisedSession {
   /** 可选：切换「危险操作需要确认」，下一次工具调用起生效；未实现时忽略 */
   setConfirmDangerousActions?(enabled: boolean): void;
   retryCompaction?(): Promise<void>;
+  /** 可选：手动压缩空闲会话；Stop 取消时正常返回，失败抛错（错误事件已由会话自己发出） */
+  compact?(): Promise<void>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -171,6 +173,9 @@ export class SessionSupervisor {
         return;
       case 'retry-compaction':
         void this.#retryCompaction(command.identity, command.requestId);
+        return;
+      case 'compact':
+        void this.#compact(command.identity, command.requestId);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -699,6 +704,43 @@ export class SessionSupervisor {
       failure = errorMessage(error);
       managed.failed = true;
       managed.events?.emit({ type: 'error', source: 'compaction', message: failure });
+    }
+    this.#settleIfIdle(managed, session);
+    finish(failure);
+  }
+
+  async #compact(identity: SessionIdentity, requestId: string): Promise<void> {
+    const finish = (error?: string) =>
+      this.#post({
+        type: 'compaction-recovery-result',
+        identity,
+        requestId,
+        result: error ? { ok: false, error } : { ok: true },
+      });
+    const managed = this.#current(identity);
+    if (!managed) {
+      finish('The session is not loaded.');
+      return;
+    }
+    const epoch = managed.approvalEpoch;
+    const session = await managed.opening;
+    if (!session || managed.closed || managed.approvalEpoch !== epoch) {
+      finish('Compaction was cancelled.');
+      return;
+    }
+    if (!session.compact || !session.isIdle()) {
+      finish('The session is busy.');
+      return;
+    }
+    this.#cancelSuggestions(identity.sessionId);
+    managed.failed = false;
+    this.#setStatus(managed, 'running');
+    let failure: string | undefined;
+    try {
+      await session.compact();
+    } catch (error) {
+      failure = errorMessage(error);
+      managed.failed = true;
     }
     this.#settleIfIdle(managed, session);
     finish(failure);

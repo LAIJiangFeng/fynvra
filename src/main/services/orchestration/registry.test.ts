@@ -233,6 +233,46 @@ describe('createOrchestrationRegistry', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  it('hasActiveWork 跨工作区查找；activeWorkChanged 只在主 agent 的标志翻转时调用', async () => {
+    const notifyChanged = vi.fn();
+    const activeWorkChanged = vi.fn();
+    const registry = make({ launcher: createFakeLauncher(), notifyChanged, activeWorkChanged });
+    expect(registry.hasActiveWork('session_coord')).toBe(false);
+    const result = await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK);
+    if (!result?.ok || result.dispatch === undefined) throw new Error('dispatch failed');
+    await registry.flushAll();
+    expect(registry.hasActiveWork('session_coord')).toBe(true);
+    expect(registry.hasActiveWork('session_other')).toBe(false);
+    // 派发产生多次编排变更，标志只翻转一次
+    expect(notifyChanged.mock.calls.length).toBeGreaterThan(1);
+    expect(activeWorkChanged.mock.calls).toEqual([['ws_2']]);
+
+    // 最后一个任务失败：标志清除，再通知一次
+    const changes = notifyChanged.mock.calls.length;
+    const worker = registry.workerHostFor(result.dispatch.workerSessionId);
+    await worker?.reportDone('failed', 'Cannot compile.');
+    await registry.flushAll();
+    expect(notifyChanged.mock.calls.length).toBeGreaterThan(changes);
+    expect((await registry.readSnapshot('ws_2'))?.tasks[0]?.status).toBe('failed');
+    expect(registry.hasActiveWork('session_coord')).toBe(false);
+    expect(activeWorkChanged.mock.calls).toEqual([['ws_2'], ['ws_2']]);
+  });
+
+  it('retryRequired 跨工作区查找失败任务的 worker 会话', async () => {
+    const registry = make({ launcher: createFakeLauncher() });
+    const result = await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK);
+    if (!result?.ok || result.dispatch === undefined) throw new Error('dispatch failed');
+    const session = result.dispatch.workerSessionId;
+    expect(registry.retryRequired(session)).toBeUndefined();
+    await registry.workerHostFor(session)?.reportDone('failed', 'Cannot compile.');
+    expect(registry.retryRequired(session)).toEqual({
+      taskId: result.dispatch.taskId,
+      title: TASK.title,
+    });
+    expect(registry.retryRequired('session_coord')).toBeUndefined();
+    await registry.flushAll();
+  });
+
   it('openAll 之后 workerHostFor 能找到磁盘快照里的 worker 会话', async () => {
     const first = make({ launcher: createFakeLauncher() });
     await first.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);

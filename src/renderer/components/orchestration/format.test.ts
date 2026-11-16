@@ -2,6 +2,7 @@ import type { Dispatch, Message, Task, TaskStatus } from '@fynvra/core';
 import { describe, expect, it } from 'vitest';
 import { translatorOf } from '../../i18n';
 import {
+  attemptDisplay,
   describeSubject,
   formatClock,
   formatDuration,
@@ -11,6 +12,7 @@ import {
   outputLineKind,
   progressCounts,
   reportOutcome,
+  splitSummary,
   TASK_STATUS_ORDER,
 } from './format';
 
@@ -39,6 +41,27 @@ const dispatch: Dispatch = {
   branch: 'fynvra/x',
   startedAt: 0,
 };
+
+describe('TASK_STATUS_ORDER', () => {
+  it('puts failed before completed so failures are not buried', () => {
+    expect(TASK_STATUS_ORDER.indexOf('failed')).toBeLessThan(
+      TASK_STATUS_ORDER.indexOf('completed')
+    );
+  });
+});
+
+describe('attemptDisplay', () => {
+  it.each([
+    { unsettled: false, status: 'running', expected: 'none' },
+    { unsettled: true, status: 'running', expected: 'running' },
+    { unsettled: true, status: 'waiting-approval', expected: 'running' },
+    { unsettled: true, status: 'idle', expected: 'stopped' },
+    { unsettled: true, status: 'error', expected: 'stopped' },
+    { unsettled: true, status: undefined, expected: 'running' },
+  ] as const)('$unsettled + $status → $expected', ({ unsettled, status, expected }) => {
+    expect(attemptDisplay(unsettled, status)).toBe(expected);
+  });
+});
 
 describe('progressCounts', () => {
   function taskGroups(counts: Partial<Record<TaskStatus, number>>) {
@@ -192,5 +215,37 @@ describe('outputLineKind', () => {
     expect(outputLineKind('[aborted]')).toBe('notice');
     expect(outputLineKind('[settled]')).toBe('settled');
     expect(outputLineKind('[1/3] step')).toBe('text');
+  });
+});
+
+describe('splitSummary', () => {
+  it('splits the first paragraph from the rest', () => {
+    expect(splitSummary('Did X.\nAnd Y.\n\n- a\n- b\n\nMore.\n')).toEqual({
+      lead: 'Did X.\nAnd Y.',
+      rest: '- a\n- b\n\nMore.',
+    });
+  });
+
+  it('has an empty rest without a blank line', () => {
+    expect(splitSummary('one\ntwo')).toEqual({ lead: 'one\ntwo', rest: '' });
+  });
+
+  it('normalizes CRLF', () => {
+    expect(splitSummary('a\r\nb\r\n\r\nc')).toEqual({ lead: 'a\nb', rest: 'c' });
+  });
+
+  it('skips leading blank lines', () => {
+    expect(splitSummary('\n\n  \nlead\n\nrest')).toEqual({ lead: 'lead', rest: 'rest' });
+  });
+
+  it('merges a lone heading with the next paragraph', () => {
+    expect(splitSummary('## Done\n\nChanged X.\n\nDetails')).toEqual({
+      lead: '## Done\n\nChanged X.',
+      rest: 'Details',
+    });
+  });
+
+  it('handles an empty string', () => {
+    expect(splitSummary('')).toEqual({ lead: '', rest: '' });
   });
 });

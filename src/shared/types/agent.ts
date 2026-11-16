@@ -22,7 +22,12 @@ import {
 } from './chat';
 import { parseCompactionState, parseContextRuntime, parseRetryState } from './contextRuntime';
 import { isPluginProviderName, isRegistryId } from './plugins';
-import { type CompactionStrategy, isCompactionStrategy, isCompactionTimeoutMs } from './settings';
+import {
+  type CompactionStrategy,
+  isCompactionStrategy,
+  isCompactionThresholdTokens,
+  isCompactionTimeoutMs,
+} from './settings';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -53,6 +58,9 @@ export interface ResolvedModelSpec {
    * 目录里有的、按目录推断出来的，以目录为准
    */
   reasoning?: boolean;
+  /** 设置里模型条目的上下文窗口 / 最大输出（token，正整数）：优先于 pi 目录、推断与兜底 */
+  contextWindow?: number;
+  maxOutput?: number;
 }
 
 /**
@@ -172,6 +180,8 @@ export interface SpawnSessionSpec {
    */
   compactionStrategy?: CompactionStrategy;
   compactionTimeoutMs?: number;
+  /** 用户设定的自动压缩阈值（token）；缺省按模型窗口自动决定。Main 在 spawn 时读取设置 */
+  compactionThresholdTokens?: number;
   /**
    * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
@@ -263,6 +273,8 @@ export type AgentCommand =
    */
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: ChatImage[] }
   | { type: 'retry-compaction'; identity: SessionIdentity; requestId: string }
+  /** 手动压缩空闲会话；结果回同一 requestId 的 compaction-recovery-result，Stop 经 abort 取消 */
+  | { type: 'compact'; identity: SessionIdentity; requestId: string }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -454,6 +466,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       return isNonEmptyString(record.requestId)
         ? { type: 'retry-compaction', identity, requestId: record.requestId }
         : null;
+    case 'compact':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'compact', identity, requestId: record.requestId }
+        : null;
     case 'abort':
       return { type: 'abort', identity };
     case 'dispose-session':
@@ -644,6 +660,7 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
   const { providerId, api, baseUrl, apiKey, modelId, thinking, fastMode, reasoning } = record;
+  const { contextWindow, maxOutput } = record;
   if (!isNonEmptyString(providerId) || !isNonEmptyString(api) || !isNonEmptyString(modelId)) {
     return null;
   }
@@ -665,6 +682,9 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(level ? { thinking: level } : {}),
     ...(fastMode === true ? { fastMode: true } : {}),
     ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
+    // 非法的窗口值只丢弃这一项，不作废整个 spec
+    ...(isPositiveInteger(contextWindow) ? { contextWindow } : {}),
+    ...(isPositiveInteger(maxOutput) ? { maxOutput } : {}),
   };
 }
 
@@ -855,6 +875,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
         : null;
   if (compactionStrategy === null || !isOptional(record.compactionTimeoutMs, isCompactionTimeoutMs))
     return null;
+  if (!isOptional(record.compactionThresholdTokens, isCompactionThresholdTokens)) return null;
   const instructionFile =
     record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
   if (
@@ -900,6 +921,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     ...(compactionStrategy ? { compactionStrategy } : {}),
     ...(record.compactionTimeoutMs !== undefined
       ? { compactionTimeoutMs: record.compactionTimeoutMs as number }
+      : {}),
+    ...(record.compactionThresholdTokens !== undefined
+      ? { compactionThresholdTokens: record.compactionThresholdTokens as number }
       : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
     ...(planMode === true ? { planMode: true } : {}),

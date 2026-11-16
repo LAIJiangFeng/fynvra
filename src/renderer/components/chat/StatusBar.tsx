@@ -1,7 +1,8 @@
-import { GitBranch, Zap } from 'lucide-react';
+import { FoldVertical, GitBranch, Loader2, Zap } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
-import { useSessionsStore } from '@/stores/sessions';
+import { isBusy, statusOf, useSessionsStore } from '@/stores/sessions';
+import { compactionActive } from '@/stores/sessions/reducer';
 import { useGeneralPreferencesStore } from '@/stores/settings';
 import { ApprovalModeStatus } from './ApprovalModePicker';
 import { contextLabel, strategyLabel, strategyNotice } from './contextDisplay';
@@ -20,6 +21,23 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const reportedModel = useSessionsStore((state) => state.runtimeBySession[sessionId]?.model);
   const branch = useSessionBranch(sessionId);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
+  const compactContext = useSessionsStore((state) => state.compactContext);
+  const compactDisabled = useSessionsStore((state) => {
+    const runtime = state.runtimeBySession[sessionId];
+    return (
+      isBusy(statusOf(state, sessionId)) ||
+      compactionActive(runtime?.compaction) ||
+      runtime?.recoveryRequired === true ||
+      state.compactRequests[sessionId] === true ||
+      state.recoveringCompaction[sessionId] === true ||
+      state.stopping[sessionId] === true
+    );
+  });
+  const compacting = useSessionsStore(
+    (state) =>
+      compactionActive(state.runtimeBySession[sessionId]?.compaction) ||
+      state.compactRequests[sessionId] === true
+  );
   const t = useT();
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
   const { label, fastMode } = useSessionModel(sessionId);
@@ -31,6 +49,7 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const details = [
     context.label,
     context.nearThreshold ? t('chat.contextNearThreshold') : '',
+    context.hint,
     engine,
     t('chat.configuredEngine', { engine: strategyLabel(snapshot?.configuredStrategy, t) }),
     t('chat.selectedEngine', { engine: strategyLabel(selected, t) }),
@@ -55,6 +74,21 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
         </TooltipTrigger>
         <TooltipContent className="max-w-sm whitespace-pre-line">{details}</TooltipContent>
       </Tooltip>
+      <button
+        type="button"
+        aria-label={t('chat.compactNow')}
+        title={t('chat.compactNow')}
+        disabled={compactDisabled}
+        className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground text-xs outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        onClick={() => void compactContext(sessionId)}
+      >
+        {compacting ? (
+          <Loader2 aria-hidden className="size-3 animate-spin" />
+        ) : (
+          <FoldVertical aria-hidden className="size-3" />
+        )}
+        {compacting ? t('chat.compactingShort') : t('chat.compactShort')}
+      </button>
       <span className="min-w-0 max-w-full truncate" title={details}>
         {engine}
       </span>

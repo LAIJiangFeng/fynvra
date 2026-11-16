@@ -9,16 +9,30 @@ import type { CompactionStrategy } from '@shared/types/settings';
  * 仅显式 native 启用 SDK 原生自动压缩；Magic Context 通过自己的 context hooks 整理历史，
  * 插件未就绪或失败时也不启用原生摘要。Main 和 worker 的缺省策略均为 Magic。
  * Main 默认探测 Git Bash，也可指定 PowerShell；不自动退回 WSL。
+ * 设了自动压缩阈值 T 时，reserve 按当前模型窗口取 max(默认 reserve, 窗口 − T)，
+ * 即有效阈值 = min(T, 窗口 − 默认 reserve)；每次解析都重算，换模型后自动跟随新窗口。
  */
 export function createSessionSettings(
   shellPath: string | undefined,
-  compactionStrategy?: CompactionStrategy
+  compactionStrategy?: CompactionStrategy,
+  compactionThresholdTokens?: number
 ): SettingsManager {
-  return SettingsManager.inMemory({
+  const settings = SettingsManager.inMemory({
     enableInstallTelemetry: false,
     ...(shellPath ? { shellPath } : {}),
     compaction: { enabled: compactionStrategy === 'native' },
   });
+  if (compactionThresholdTokens === undefined) return settings;
+  const reserveOf = settings.getCompactionReserveTokens.bind(settings);
+  // pi 的 getCompactionSettings(model) 经由这个方法取 reserve；调用方传的是完整 Model（含 contextWindow）
+  settings.getCompactionReserveTokens = (model) => {
+    const reserve = reserveOf(model);
+    const window = (model as { contextWindow?: unknown } | undefined)?.contextWindow;
+    return typeof window === 'number' && Number.isFinite(window) && window > 0
+      ? Math.max(reserve, Math.floor(window) - compactionThresholdTokens)
+      : reserve;
+  };
+  return settings;
 }
 
 /** Feed the shell instruction through createRoleSession's existing role prompt append path. */

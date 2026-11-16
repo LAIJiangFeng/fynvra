@@ -349,6 +349,20 @@ describe('wait_for_workers', () => {
     expect(run.text).toContain('review_diff');
   });
 
+  it('points a failed worker_done at reject_work, not merge', async () => {
+    const host = createHost();
+    host.waitForWorkers.mockResolvedValueOnce({
+      ok: true,
+      timedOut: false,
+      pending: 0,
+      messages: [message({ type: 'worker_done', subject: 'failed', dispatchId: 'd3' })],
+    });
+    const run = await runTool(toolByName(createOrchestrationTools(host), 'wait_for_workers'), {});
+    expect(run.text).toContain('read_worker_output to diagnose');
+    expect(run.text).toContain('reject_work to retry on the same worktree');
+    expect(run.text).not.toContain('merge_worktree');
+  });
+
   it('explains that a timeout is not a failure', async () => {
     const host = createHost();
     host.waitForWorkers.mockResolvedValueOnce({

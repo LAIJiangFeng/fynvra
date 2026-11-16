@@ -43,6 +43,12 @@ export interface GitWorktreeManagerOptions {
    * 仅用于兜底删除 git 已注销的残留目录（见 {@link RemoveWorktreeInput.ownedRoot}）；不传则不处理残留目录。
    */
   pathKind?: (path: string) => Promise<PathKind>;
+  /**
+   * 在 `git worktree remove` 之前调用：删掉 worktree 内指向它外面的链接（符号链接 / junction），
+   * 避免删除时顺着链接跟进去删掉外部文件（Git for Windows 把 junction 当目录递归删除）。
+   * 只对登记的非主 worktree 调用；抛错则不删。不传则不处理链接。
+   */
+  detachLinks?: (worktreePath: string) => Promise<void>;
 }
 
 /** {@link GitWorktreeManagerOptions.pathKind} 的结果。 */
@@ -192,6 +198,12 @@ function parseWorktreeList(output: string): string[] {
     .map((field) => field.slice('worktree '.length));
 }
 
+/** `path` 是登记的非主 worktree（列表第一个是主 worktree）。 */
+function isRegisteredIn(entries: string[], path: string): boolean {
+  const target = comparablePath(path);
+  return entries.slice(1).some((entry) => comparablePath(entry) === target);
+}
+
 function fail(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
@@ -210,6 +222,7 @@ export class GitWorktreeManager {
   readonly #exec: ExecFn;
   readonly #removeDir: ((path: string) => Promise<void>) | undefined;
   readonly #pathKind: ((path: string) => Promise<PathKind>) | undefined;
+  readonly #detachLinks: ((worktreePath: string) => Promise<void>) | undefined;
   #pendingCreate: Promise<unknown> = Promise.resolve();
 
   /** @param options - 注入的 {@link ExecFn} 与可选的 `removeDir`。 */
@@ -217,6 +230,7 @@ export class GitWorktreeManager {
     this.#exec = options.exec;
     this.#removeDir = options.removeDir;
     this.#pathKind = options.pathKind;
+    this.#detachLinks = options.detachLinks;
   }
 
   /**
@@ -302,7 +316,23 @@ export class GitWorktreeManager {
   async remove(input: RemoveWorktreeInput): Promise<GitResult> {
     // 先记下登记列表：git 删到一半失败时已经注销了该 worktree，事后就查不到了
     const before =
-      this.#removeDir === undefined ? undefined : await this.#listWorktrees(input.repoPath);
+      this.#removeDir === undefined && this.#detachLinks === undefined
+        ? undefined
+        : await this.#listWorktrees(input.repoPath);
+    if (this.#detachLinks !== undefined) {
+      if (before === undefined) {
+        return fail(`could not list worktrees before removing ${input.path}`);
+      }
+      if (isRegisteredIn(before, input.path)) {
+        try {
+          await this.#detachLinks(input.path);
+        } catch (error) {
+          return fail(
+            `could not detach links in ${input.path} before removing it: ${errorMessage(error)}`
+          );
+        }
+      }
+    }
     const args = ['worktree', 'remove', ...(input.force ? ['--force'] : []), '--', input.path];
     const result = await this.#git(args, input.repoPath);
     if (result.code === 0) return { ok: true };
@@ -326,8 +356,7 @@ export class GitWorktreeManager {
     }
     const listed = await this.#listWorktrees(repoPath);
     if (listed === undefined) return skipped('cannot list worktrees');
-    const isRegistered = (entries: string[]) =>
-      entries.slice(1).some((entry) => comparablePath(entry) === target);
+    const isRegistered = (entries: string[]) => isRegisteredIn(entries, path);
     if (isRegistered(listed)) {
       if (!input.force) {
         // 非 force：git 的拒绝可能是因为有改动；只有确认干净时才认定是文件系统错误

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ImageContent } from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import type { NormalizedSubscription } from '@fynvra/agent-runtime';
@@ -7,6 +8,7 @@ import type { ChatImage } from '@shared/types/chat';
 import { parseChatImages, stripImageHints } from '@shared/types/chat';
 import type { CompactionStrategy } from '@shared/types/settings';
 import { type SlashCommandRun, startExtensionCommand } from './slashCommands';
+import { parseWrapupResult } from './wrapupResult';
 
 const CHECKPOINT = 'fynvra-context-recovery';
 const BLOCKED = 'Context recovery required. Retry context recovery before continuing.';
@@ -22,6 +24,8 @@ interface Options {
   strategy: CompactionStrategy;
   timeoutMs: number;
   contextWindow(): number;
+  /** Where contextWindow came from; `estimated` tells the UI not to show it as the real window. */
+  windowSource?(): ContextRuntimeSnapshot['context']['windowSource'];
   log(message: string): void;
   /** Readiness plus the Magic cancellation generation; never authorizes native compaction. */
   magicReady?(): AbortSignal;
@@ -37,6 +41,7 @@ export function createContextRecovery({
   strategy,
   timeoutMs,
   contextWindow,
+  windowSource,
   log,
   magicReady,
   mcpServers,
@@ -63,6 +68,10 @@ export function createContextRecovery({
   let recoveryAbort: AbortController | undefined;
   let magicPrepared = false;
   let running = false;
+  /** A manual native compaction is in flight: the off strategy's method chain is active only then. */
+  let manualCompacting = false;
+  /** The running Magic `/ctx-wrapup`, reported as a manual compaction operation. */
+  let wrapup: CompactionState | undefined;
   let resume = false;
   let resumeCompactionId: string | undefined;
   let lastCompactionId: string | undefined;
@@ -131,6 +140,7 @@ export function createContextRecovery({
     const window = contextWindow();
     const settings = session.settingsManager.getCompactionSettings(session.model);
     const tokens = usage?.tokens ?? null;
+    const source = windowSource?.();
     return {
       configuredStrategy: strategy,
       effectiveStrategy: effective,
@@ -139,6 +149,7 @@ export function createContextRecovery({
         tokens,
         contextWindow: window,
         source: tokens === null ? 'unknown' : 'sdk',
+        ...(source ? { windowSource: source } : {}),
         ...(effective === 'native'
           ? { compactionThresholdTokens: Math.max(0, window - settings.reserveTokens) }
           : {}),
@@ -159,6 +170,31 @@ export function createContextRecovery({
       /* A disconnected diagnostic channel must not bypass cancellation. */
     }
   }
+  /** End the Magic wrapup operation the way the SDK lifecycle ends a native one. */
+  function endWrapup(patch: Partial<CompactionState>) {
+    if (!wrapup) return;
+    const endedAt = Date.now();
+    const state = {
+      ...wrapup,
+      ...patch,
+      endedAt,
+      durationMs: Math.max(0, endedAt - wrapup.startedAt),
+    };
+    wrapup = undefined;
+    events?.emit({ type: 'compaction', state });
+  }
+  function cancelWrapup(source: NonNullable<CompactionState['cancelSource']>) {
+    if (!wrapup) return;
+    stopCommands();
+    endWrapup({
+      phase: 'cancelled',
+      cancelSource: source,
+      errorMessage:
+        source === 'timeout'
+          ? 'Compaction timed out. Retry compaction to resume.'
+          : 'Compaction cancelled.',
+    });
+  }
   function clearTimer() {
     clearTimeout(timer);
     timer = undefined;
@@ -173,6 +209,7 @@ export function createContextRecovery({
     session.clearQueue();
     void session.abort().catch(() => undefined);
     events?.cancelCompaction(source);
+    cancelWrapup(source);
   }
   function requestBlocked() {
     return (
@@ -196,6 +233,7 @@ export function createContextRecovery({
     stopTurn();
     session.abortCompaction();
     events?.cancelCompaction('timeout');
+    cancelWrapup('timeout');
   }
   function overThreshold() {
     const tokens = session.getContextUsage()?.tokens;
@@ -322,29 +360,14 @@ export function createContextRecovery({
       turnStopped = false;
       session.setAutoCompactionEnabled(effective === 'native');
     }
-    const command = startExtensionCommand(
-      session,
-      input.text,
-      (level, text) => events?.emit({ type: 'notice', level, text }),
-      { ...(mcpServers ? { mcpServers } : {}), ...(commandHintMs ? { hintMs: commandHintMs } : {}) }
-    );
+    const command = startCommand(input.text);
     if (command) {
       // The command consumes its input at once: a reload must not run it (e.g. a sign-in) again.
       const index = pending.indexOf(input);
       if (index >= 0) pending.splice(index, 1);
       checkpoint();
       publish();
-      events?.emit({ type: 'command', text: input.text });
-      commands.add(command);
-      let aborted = true;
-      try {
-        await command.done;
-      } finally {
-        // stopCommands() already removed a stopped command.
-        aborted = !commands.delete(command);
-      }
-      // A command typed during a turn must not settle it; that turn's agent_settled will.
-      if (!session.isStreaming) events?.emit({ type: 'command_end', aborted });
+      await runCommand(command, input.text);
       return;
     }
     const images: ImageContent[] | undefined = input.images?.map((image) => ({
@@ -366,6 +389,27 @@ export function createContextRecovery({
         }
       },
     });
+  }
+  function startCommand(text: string) {
+    return startExtensionCommand(
+      session,
+      text,
+      (level, notice) => events?.emit({ type: 'notice', level, text: notice }),
+      { ...(mcpServers ? { mcpServers } : {}), ...(commandHintMs ? { hintMs: commandHintMs } : {}) }
+    );
+  }
+  async function runCommand(command: SlashCommandRun, text: string) {
+    events?.emit({ type: 'command', text });
+    commands.add(command);
+    let aborted = true;
+    try {
+      await command.done;
+    } finally {
+      // stopCommands() already removed a stopped command.
+      aborted = !commands.delete(command);
+    }
+    // A command typed during a turn must not settle it; that turn's agent_settled will.
+    if (!session.isStreaming) events?.emit({ type: 'command_end', aborted });
   }
   async function drain(duringRecovery = false) {
     const allowed = () => !blocked || (duringRecovery && magicActive() && !recoveryFailed);
@@ -508,6 +552,77 @@ export function createContextRecovery({
         checkpoint();
         publish();
       }
+    },
+    /**
+     * Manual compaction of an idle session. Healthy Magic runs its own `/ctx-wrapup` as a manual
+     * compaction operation (no command echo or plugin text, a counted outcome); native, off
+     * and a Magic fallback compact through the method chain (reason `manual`). Stop resolves quietly.
+     */
+    async compact() {
+      if (blocked || recovering || running || commands.size > 0 || !session.isIdle)
+        throw new Error('The session is busy.');
+      stopped = false;
+      if (magicActive()) {
+        if (!magicReady) throw new Error(BLOCKED);
+        try {
+          magicReady();
+        } catch (error) {
+          // An unready plugin switches the session to the fallback chain (handled below).
+          if (!magicFallback) throw error;
+        }
+      }
+      if (magicActive()) {
+        // The plugin's status texts are collected, not shown: the result is a counted outcome.
+        const texts: string[] = [];
+        const command = startExtensionCommand(session, '/ctx-wrapup', (_level, text) =>
+          texts.push(text)
+        );
+        if (!command) throw new Error('Magic Context has no /ctx-wrapup command.');
+        const startedAt = Date.now();
+        const state: CompactionState = {
+          operationId: `compaction-${randomUUID()}`,
+          reason: 'manual',
+          phase: 'running',
+          startedAt,
+          deadlineAt: startedAt + timeoutMs,
+          attempt: 1,
+          maxAttempts: 1,
+        };
+        wrapup = state;
+        commands.add(command);
+        events?.emit({ type: 'compaction', state });
+        try {
+          await command.done;
+        } finally {
+          commands.delete(command);
+        }
+        // Stop, timeout or shutdown already ended the operation.
+        if (wrapup !== state) return;
+        const result = parseWrapupResult(texts);
+        endWrapup(
+          result.ok
+            ? { phase: 'succeeded', outcome: result.outcome }
+            : { phase: 'failed', errorMessage: result.errorMessage }
+        );
+        if (!result.ok) throw new Error(COMPACTION_FAILED);
+        return;
+      }
+      const before = compaction;
+      manualCompacting = true;
+      try {
+        await session.compact();
+      } catch (error) {
+        if (stopped || disposed) return;
+        // onEvent already reported the failed operation with this fixed text.
+        if (compaction !== before && compaction?.phase !== 'succeeded')
+          throw new Error(COMPACTION_FAILED);
+        throw error;
+      } finally {
+        manualCompacting = false;
+      }
+    },
+    manualCompacting() {
+      return manualCompacting;
     },
     async abort() {
       const stoppedCommand = stopCommands();

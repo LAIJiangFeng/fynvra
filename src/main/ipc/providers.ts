@@ -16,6 +16,11 @@ import {
   type ProviderImporter,
 } from '../services/providers/import/providerImporter';
 import { isRegistryId } from '../services/providers/jsonRegistry';
+import {
+  createModelLimitsProber,
+  createModelsDevCatalog,
+  type ModelLimitsProber,
+} from '../services/providers/modelLimits';
 import { parseProviderUpsert } from '../services/providers/parseProviderInput';
 import {
   createProviderStore,
@@ -27,7 +32,7 @@ import {
   remoteModelsTarget,
 } from '../services/providers/remoteModels/input';
 import { listRemoteModels } from '../services/providers/remoteModels/listRemoteModels';
-import { testProvider } from '../services/providers/testProvider';
+import { type FetchLike, testProvider } from '../services/providers/testProvider';
 import { sendToAllWindows } from '../windows/createAppWindow';
 
 let store: ProviderStore | null = null;
@@ -39,6 +44,34 @@ let store: ProviderStore | null = null;
 export function getProviderStore(): ProviderStore {
   store ??= createProviderStore({ filePath: join(app.getPath('userData'), 'providers.json') });
   return store;
+}
+
+let modelLimits: ModelLimitsProber | null = null;
+
+/**
+ * 模型真实窗口的自动探测：与「列远程模型」同一条网络路径（net.fetch，走应用代理），models.dev 缓存在
+ * userData/model-metadata。写回 providers.json 后通知设置页重拉。
+ */
+export function getModelLimitsProber(): ModelLimitsProber {
+  const fetch: FetchLike = (url, init) => net.fetch(url, init);
+  const store = getProviderStore();
+  modelLimits ??= createModelLimitsProber({
+    store: {
+      get: (id) => store.get(id),
+      async updateModelLimits(...args) {
+        const updated = await store.updateModelLimits(...args);
+        if (updated) sendToAllWindows(IPC_CHANNELS.PROVIDERS_CHANGED);
+        return updated;
+      },
+    },
+    fetch,
+    catalog: createModelsDevCatalog({
+      fetch,
+      cacheFile: join(app.getPath('userData'), 'model-metadata', 'models.dev.json'),
+    }),
+    log: (level, message) => console[level](`[model-limits] ${message}`),
+  });
+  return modelLimits;
 }
 
 let importer: ProviderImporter | null = null;

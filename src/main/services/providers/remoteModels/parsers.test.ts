@@ -138,3 +138,39 @@ describe('parseGoogleModels', () => {
     expect(parseGoogleModels({ models: [{ displayName: 'Gemini' }] })).toBeNull();
   });
 });
+
+describe('服务端列表里的窗口与最大输出', () => {
+  it.each([
+    ['context_length', { context_length: 1_000_000 }],
+    ['context_window', { context_window: 1_000_000 }],
+    ['max_context_length', { max_context_length: 1_000_000 }],
+    ['max_model_len（vLLM）', { max_model_len: 1_000_000 }],
+    ['max_input_tokens（LiteLLM）', { max_input_tokens: 1_000_000 }],
+    ['input_token_limit', { input_token_limit: 1_000_000 }],
+    ['top_provider.context_length（OpenRouter）', { top_provider: { context_length: 1_000_000 } }],
+  ])('窗口：%s', (_name, fields) => {
+    expect(parseOpenAiModels({ data: [{ id: 'm', ...fields }] })?.models[0]).toEqual({
+      id: 'm',
+      contextWindow: 1_000_000,
+    });
+  });
+
+  it.each([
+    ['max_output_tokens', { max_output_tokens: 64_000 }],
+    ['max_completion_tokens', { max_completion_tokens: 64_000 }],
+    ['output_token_limit', { output_token_limit: 64_000 }],
+    ['top_provider.max_completion_tokens', { top_provider: { max_completion_tokens: 64_000 } }],
+  ])('最大输出：%s', (_name, fields) => {
+    expect(parseAnthropicModels({ data: [{ id: 'm', ...fields }] })?.models[0]).toEqual({
+      id: 'm',
+      maxOutput: 64_000,
+    });
+  });
+
+  it('只接受正整数', () => {
+    const list = parseOpenAiModels({
+      data: [{ id: 'm', context_length: '128000', context_window: -1, max_model_len: 1.5 }],
+    });
+    expect(list?.models[0]).toEqual({ id: 'm' });
+  });
+});

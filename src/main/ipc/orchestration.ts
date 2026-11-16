@@ -47,6 +47,9 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
       workflows: getWorkflowRegistry(),
       notifyChanged: (workspaceId) =>
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId),
+      // 会话摘要的 awaitingWorkers 翻转：让会话列表重拉
+      activeWorkChanged: (workspaceId) =>
+        sendToAllWindows(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId),
     });
   }
   return registry;

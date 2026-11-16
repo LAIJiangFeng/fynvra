@@ -2,6 +2,7 @@ import type { CompactionState, ContextRuntimeSnapshot, RetryState } from '@fynvr
 import { asRecord, isNonEmptyString } from '../guards';
 import { isCompactionStrategy, isCompactionTimeoutMs } from './settings';
 
+type WindowSource = NonNullable<ContextRuntimeSnapshot['context']['windowSource']>;
 const count = (x: unknown): x is number =>
   typeof x === 'number' && Number.isSafeInteger(x) && x >= 0;
 const optionalCount = (x: unknown) => x === undefined || count(x);
@@ -10,6 +11,13 @@ const member = <T extends string>(x: unknown, values: readonly T[]): x is T =>
 
 export function parseCompactionState(raw: unknown): CompactionState | null {
   const r = asRecord(raw);
+  const outcome = r?.outcome === undefined ? undefined : asRecord(r.outcome);
+  if (
+    outcome === null ||
+    (outcome &&
+      (!count(outcome.compactedMessages) || typeof outcome.appliesOnNextMessage !== 'boolean'))
+  )
+    return null;
   if (
     !r ||
     !isNonEmptyString(r.operationId) ||
@@ -45,6 +53,14 @@ export function parseCompactionState(raw: unknown): CompactionState | null {
       ? { cancelSource: r.cancelSource as CompactionState['cancelSource'] }
       : {}),
     ...(r.errorMessage !== undefined ? { errorMessage: r.errorMessage as string } : {}),
+    ...(outcome
+      ? {
+          outcome: {
+            compactedMessages: outcome.compactedMessages as number,
+            appliesOnNextMessage: outcome.appliesOnNextMessage as boolean,
+          },
+        }
+      : {}),
   };
 }
 export function parseRetryState(raw: unknown): RetryState | null {
@@ -83,6 +99,9 @@ export function parseContextRuntime(raw: unknown): ContextRuntimeSnapshot | null
     !member(c.source, ['sdk', 'unknown']) ||
     (c.source === 'unknown' && c.tokens !== null) ||
     !optionalCount(c.compactionThresholdTokens) ||
+    !(
+      c.windowSource === undefined || member(c.windowSource, ['settings', 'catalog', 'estimated'])
+    ) ||
     typeof r.recoveryRequired !== 'boolean' ||
     !count(r.pendingPromptCount)
   )
@@ -101,6 +120,7 @@ export function parseContextRuntime(raw: unknown): ContextRuntimeSnapshot | null
       ...(c.compactionThresholdTokens !== undefined
         ? { compactionThresholdTokens: c.compactionThresholdTokens as number }
         : {}),
+      ...(c.windowSource !== undefined ? { windowSource: c.windowSource as WindowSource } : {}),
     },
     recoveryRequired: r.recoveryRequired,
     pendingPromptCount: r.pendingPromptCount,

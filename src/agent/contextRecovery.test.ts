@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai';
-import { ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import {
+  type InlineExtension,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} from '@earendil-works/pi-coding-agent';
 import { createRoleSession, subscribeNormalized } from '@fynvra/agent-runtime';
 import type { ContextRuntimeSnapshot, FynvraSessionEvent } from '@fynvra/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +20,9 @@ interface Extra {
   magicReady?: (fallBack: () => void) => AbortSignal;
   /** Install the compaction method chain as the session's compaction hook. */
   chain?: boolean;
+  /** Chain active only during a manual compaction (the off strategy's wiring in piSession). */
+  manualChain?: boolean;
+  extensions?: InlineExtension[];
   beforeOpen?: (manager: SessionManager) => void;
 }
 
@@ -58,6 +66,7 @@ async function setup(
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const resolved = { runtime, model: faux.getModel() };
   let current = manager;
+  let chainActive = () => true;
   const options: Parameters<typeof createRoleSession>[0] = {
     role: {
       id: 'worker',
@@ -73,17 +82,18 @@ async function setup(
     model: resolved,
     sessionManager: manager,
     resourcePaths: { skills: [], mcpServers: [] },
-    ...(extra.chain
-      ? {
-          extensions: [
+    extensions: [
+      ...(extra.chain || extra.manualChain
+        ? [
             createCompactionChainExtension({
               getModel: () => resolved,
               getSessionManager: () => current,
-              active: () => true,
+              active: () => chainActive(),
             }),
-          ],
-        }
-      : {}),
+          ]
+        : []),
+      ...(extra.extensions ?? []),
+    ],
     settingsManager: SettingsManager.inMemory({
       compaction: {
         enabled: strategy !== 'magic-context',
@@ -96,6 +106,7 @@ async function setup(
   };
   const created = await createRoleSession(options);
   const monitored = monitor(created, strategy, extra.magicReady);
+  if (extra.manualChain) chainActive = () => monitored.recovery.manualCompacting();
   return {
     ...monitored,
     manager,
@@ -498,5 +509,166 @@ describe('Magic Context falls back to the compaction chain', () => {
       recoveryRequired: false,
       pendingPromptCount: 0,
     });
+  });
+});
+
+describe('manual compaction', () => {
+  // The chain's soft summary request contains `<conversation>`; anything else is an ordinary turn.
+  const chainSummary = () =>
+    Array.from(
+      { length: 40 },
+      () => (context: { messages: unknown[] }) =>
+        fauxAssistantMessage(
+          JSON.stringify(context.messages).includes('<conversation>') ? 'chain summary' : 'answer'
+        )
+    );
+  type Notifying = { ui: { notify(message: string, type?: 'info' | 'warning' | 'error'): void } };
+  const wrapup = (handler: (args: string, ctx: Notifying) => Promise<void>): InlineExtension => ({
+    name: 'fake-magic',
+    hidden: true,
+    factory: (pi) => pi.registerCommand('ctx-wrapup', { description: 'test', handler }),
+  });
+
+  it('native compacts through the method chain with reason manual', async () => {
+    const env = await setup(true, 0, 'native', { chain: true });
+    env.faux.setResponses(chainSummary());
+    await env.recovery.compact();
+    expect(compactionsIn(env.manager)).toMatchObject([{ fromHook: true }]);
+    expect(JSON.stringify(compactionsIn(env.manager))).toContain('chain summary');
+    expect(env.latest().compaction).toMatchObject({ phase: 'succeeded', reason: 'manual' });
+    expect(env.recovery.isIdle()).toBe(true);
+  });
+
+  it('off compacts through the method chain, active only during the manual compaction', async () => {
+    const env = await setup(true, 0, 'off', { manualChain: true });
+    expect(env.recovery.manualCompacting()).toBe(false);
+    env.faux.setResponses(chainSummary());
+    await env.recovery.compact();
+    // fromHook: the chain answered, not pi's default summary.
+    expect(compactionsIn(env.manager)).toMatchObject([{ fromHook: true }]);
+    expect(JSON.stringify(compactionsIn(env.manager))).toContain('chain summary');
+    expect(env.recovery.manualCompacting()).toBe(false);
+  });
+
+  it('a Magic fallback compacts through the method chain', async () => {
+    const env = await setup(true, 0, 'magic-context', {
+      chain: true,
+      magicReady: (fallBack) => {
+        fallBack();
+        throw new Error('Magic Context is unavailable.');
+      },
+    });
+    env.faux.setResponses(chainSummary());
+    await env.recovery.compact();
+    expect(compactionsIn(env.manager)).toMatchObject([{ fromHook: true }]);
+    expect(env.latest().effectiveStrategy).toBe('native');
+  });
+
+  const notifying =
+    (text: string, level: 'info' | 'error' = 'info') =>
+    async (_args: string, ctx: Notifying) => {
+      ctx.ui.notify(text, level);
+    };
+  const magicEnv = (handler: (args: string, ctx: Notifying) => Promise<void>) =>
+    setup(true, 0, 'magic-context', {
+      chain: true,
+      magicReady: () => new AbortController().signal,
+      extensions: [wrapup(handler)],
+    });
+  // Neither the command echo nor the plugin's text reaches the chat.
+  const noChatOutput = (events: FynvraSessionEvent[]) =>
+    expect(events.filter((e) => ['command', 'command_end', 'notice'].includes(e.type))).toEqual([]);
+  const compactions = (events: FynvraSessionEvent[]) =>
+    events.flatMap((e) => (e.type === 'compaction' ? [e.state] : []));
+
+  it('healthy Magic runs /ctx-wrapup as a manual compaction with a counted outcome', async () => {
+    const handler = vi.fn(
+      notifying(
+        '## Magic Wrapup\n\nWrapped up 58 messages into 3 compartments. The compacted history is queued and materializes on your next message.'
+      )
+    );
+    const env = await magicEnv(handler);
+    const compact = vi.spyOn(env.session, 'compact');
+    await env.recovery.compact();
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(compact).not.toHaveBeenCalled();
+    const [running, done] = compactions(env.events);
+    expect(running).toMatchObject({ reason: 'manual', phase: 'running' });
+    expect(done).toMatchObject({
+      operationId: running?.operationId,
+      reason: 'manual',
+      phase: 'succeeded',
+      outcome: { compactedMessages: 58, appliesOnNextMessage: true },
+    });
+    expect(env.latest().compaction).toEqual(done);
+    expect(env.latest().recoveryRequired).toBe(false);
+    noChatOutput(env.events);
+    expect(compactionsIn(env.manager)).toHaveLength(0);
+    expect(env.recovery.isIdle()).toBe(true);
+  });
+
+  it('nothing to wrap up succeeds with 0 compacted messages', async () => {
+    const env = await magicEnv(
+      notifying(
+        '## Magic Wrapup — Partial\n\nNo runnable wrapup boundary is available yet; wrapped up 0 messages into 0 compartments. Run /ctx-wrapup again to continue.',
+        'error'
+      )
+    );
+    await env.recovery.compact();
+    expect(env.latest().compaction).toMatchObject({
+      phase: 'succeeded',
+      outcome: { compactedMessages: 0, appliesOnNextMessage: false },
+    });
+    noChatOutput(env.events);
+    expect(env.events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('a failed /ctx-wrapup ends the operation failed with the plugin reason', async () => {
+    const env = await magicEnv(async () => {
+      throw new Error('database is locked');
+    });
+    await expect(env.recovery.compact()).rejects.toThrow(FAILED);
+    expect(env.latest().compaction).toMatchObject({
+      reason: 'manual',
+      phase: 'failed',
+      errorMessage: '/ctx-wrapup failed: database is locked',
+    });
+    expect(env.latest().compaction).not.toHaveProperty('outcome');
+    noChatOutput(env.events);
+    expect(env.latest().recoveryRequired).toBe(false);
+    expect(env.recovery.isIdle()).toBe(true);
+  });
+
+  it('Stop cancels a running /ctx-wrapup', async () => {
+    const env = await magicEnv(() => new Promise(() => {}));
+    const run = env.recovery.compact();
+    await flush();
+    expect(env.recovery.isIdle()).toBe(false);
+    expect(env.latest().compaction).toMatchObject({ reason: 'manual', phase: 'running' });
+    await env.recovery.abort();
+    await expect(run).resolves.toBeUndefined();
+    expect(env.recovery.isIdle()).toBe(true);
+    expect(compactions(env.events).map((state) => state.phase)).toEqual(['running', 'cancelled']);
+    expect(env.latest().compaction).toMatchObject({ phase: 'cancelled', cancelSource: 'user' });
+    noChatOutput(env.events);
+  });
+
+  it('Stop cancels a native manual compaction without rewriting history', async () => {
+    const env = await setup(true, 0, 'native', { chain: true });
+    const pending = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    env.faux.setResponses(Array.from({ length: 40 }, () => () => pending.promise));
+    const run = env.recovery.compact();
+    await vi.waitFor(() => expect(env.latest().compaction?.phase).toBe('running'));
+    await env.recovery.abort();
+    pending.resolve(fauxAssistantMessage('late summary'));
+    await expect(run).resolves.toBeUndefined();
+    expect(compactionsIn(env.manager)).toHaveLength(0);
+    expect(env.latest().compaction).toMatchObject({ cancelSource: 'user' });
+    expect(env.recovery.isIdle()).toBe(true);
+  });
+
+  it('rejects while busy', async () => {
+    const env = await setup(true, 0, 'native', { beforeOpen: legacyLock({}) });
+    await expect(env.recovery.compact()).rejects.toThrow('busy');
   });
 });

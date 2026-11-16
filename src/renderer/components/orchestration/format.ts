@@ -1,4 +1,5 @@
 import type { Dispatch, Message, MessageType, Task, TaskStatus } from '@fynvra/core';
+import type { SessionStatus } from '@shared/types/chat';
 import type { T } from '../../i18n';
 
 // 编排面板的配色与格式化（文案在字典 orchestration.* / time.*）。纯函数，不碰 DOM，可在 node 下测试。
@@ -8,10 +9,25 @@ export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
   'todo',
   'in-progress',
   'in-review',
-  'completed',
   'failed',
+  'completed',
   'abandoned',
 ];
+
+/**
+ * 任务卡上尝试的显示：未结算的尝试且 worker 会话已知且不忙 → 已停止未汇报；
+ * 会话未知（`sessionStatus` 为 undefined，例如工作区没加载）时按运行中显示。
+ */
+export function attemptDisplay(
+  unsettled: boolean,
+  sessionStatus: SessionStatus | undefined
+): 'none' | 'running' | 'stopped' {
+  if (!unsettled) return 'none';
+  if (sessionStatus === undefined) return 'running';
+  return sessionStatus === 'running' || sessionStatus === 'waiting-approval'
+    ? 'running'
+    : 'stopped';
+}
 
 /** 完成进度不计已放弃任务，单独返回其数量供入口展示。 */
 export function progressCounts(groups: Record<TaskStatus, readonly Task[]>) {
@@ -116,6 +132,21 @@ export function messageSummary(message: Message, t: T, max = 80): string {
 export function oneLine(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}…` : flat;
+}
+
+/** worker 汇报拆成首段（`lead`）和其余部分（`rest`）；首段只有一行标题时并上下一段。 */
+export function splitSummary(text: string): { lead: string; rest: string } {
+  const paragraphs = text
+    .replace(/\r\n?/g, '\n')
+    .replace(/^\s*\n/, '')
+    .split(/\n[ \t]*\n/);
+  let take = 1;
+  if (/^#/.test(paragraphs[0] ?? '') && !paragraphs[0]?.includes('\n') && paragraphs.length > 1)
+    take = 2;
+  return {
+    lead: paragraphs.slice(0, take).join('\n\n').trim(),
+    rest: paragraphs.slice(take).join('\n\n').trim(),
+  };
 }
 
 const pad = (value: number) => String(value).padStart(2, '0');

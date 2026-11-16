@@ -25,7 +25,11 @@ export interface ParsedModelList {
 export function parseAnthropicModels(body: unknown): ParsedModelList | null {
   const record = asRecord(body);
   if (!record || !Array.isArray(record.data)) return null;
-  const list = collect(record.data, (item) => ({ id: item.id, name: item.display_name }));
+  const list = collect(record.data, (item) => ({
+    id: item.id,
+    name: item.display_name,
+    ...servedLimits(item),
+  }));
   return list && { ...list, more: record.has_more === true };
 }
 
@@ -33,8 +37,29 @@ export function parseAnthropicModels(body: unknown): ParsedModelList | null {
 export function parseOpenAiModels(body: unknown): ParsedModelList | null {
   const record = asRecord(body);
   if (!record || !Array.isArray(record.data)) return null;
-  const list = collect(record.data, (item) => ({ id: item.id }));
+  const list = collect(record.data, (item) => ({ id: item.id, ...servedLimits(item) }));
   return list && { ...list, more: false };
+}
+
+/** 各家服务端 / 中转在列表条目里给窗口用的字段名（vLLM、LiteLLM、OpenRouter 等），取第一个正整数 */
+const WINDOW_FIELDS = [
+  'context_length',
+  'context_window',
+  'max_context_length',
+  'max_model_len',
+  'max_input_tokens',
+  'input_token_limit',
+] as const;
+const OUTPUT_FIELDS = ['max_output_tokens', 'max_completion_tokens', 'output_token_limit'] as const;
+
+function servedLimits(item: Record<string, unknown>): Pick<Picked, 'contextWindow' | 'maxOutput'> {
+  const top = asRecord(item.top_provider);
+  const first = (fields: readonly string[], nested: unknown) =>
+    [...fields.map((field) => item[field]), nested].find(isPositiveInt);
+  return {
+    contextWindow: first(WINDOW_FIELDS, top?.context_length),
+    maxOutput: first(OUTPUT_FIELDS, top?.max_completion_tokens),
+  };
 }
 
 /**

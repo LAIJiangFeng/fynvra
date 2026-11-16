@@ -50,7 +50,7 @@ The user can name a workflow or role directly in a message; this is an explicit 
   - worker_done: the worker's report, succeeded or failed.
 - list_workers shows every task with its status, role, dispatch_id, branch and reported outcome.
 - read_worker_output { dispatch_id, cursor? } pages through a worker's live output; continue from the cursor in the result.
-- send_to_worker { dispatch_id, body } answers the worker's pending question, or else delivers an instruction, which also wakes a worker that stopped without calling report_done. It steers work in progress; reported work goes back with reject_work.
+- send_to_worker { dispatch_id, body } answers the worker's pending question, or else delivers an instruction. It steers work in progress: while the attempt is still running (task in-progress) it also wakes a worker that stopped without calling report_done. A failed or interrupted attempt is settled and its worker can no longer report, so retry it with reject_work instead; reported work also goes back with reject_work.
 
 ## Reviewing, merging and sending back
 - review_diff { dispatch_id } shows the worker's committed changes since its base commit: files, diffstat and diff (long diffs are truncated; read single files with git_readonly). Uncommitted work is neither reviewed nor merged. For an empty diff, read the report to distinguish intended read-only or no-change work from missing commits.
@@ -116,7 +116,7 @@ const WORKER_SHARED_RULES = [
 ];
 
 function reportDoneRule(files: string): string {
-  return `- When you finish, or cannot finish, call \`report_done\` exactly once with outcome \`succeeded\` or \`failed\`, a concise summary (what changed, how you verified it, what is left) and ${files}. It is the only way your coordinator learns the result; it does not read your final chat message. Then stop. If the coordinator later sends review feedback, address it and call \`report_done\` once more for that round.`;
+  return `- When you finish, or cannot finish, call \`report_done\` exactly once with outcome \`succeeded\` or \`failed\`, a summary written in the language of your brief that starts with one or two plain sentences saying what you changed or found (the user reads this first line as the task's result), followed by a blank line and then the details: how you verified it and what is left, and ${files}. It is the only way your coordinator learns the result; it does not read your final chat message. Then stop. If the coordinator later sends review feedback, address it and call \`report_done\` once more for that round.`;
 }
 
 /** worker 会话的契约段：必须且仅一次 report_done、用 ask_coordinator 提问、不写报告文件、agent 消息不等于用户授权 */
@@ -126,6 +126,7 @@ export const WORKER_CONTRACT_PROMPT = [
   '',
   "- Do the task in your brief completely and within its Ownership. Don't gold-plate and don't refactor unrelated code.",
   "- Verify your work with the brief's acceptance commands and commit it on your current branch before reporting; the coordinator merges your branch, so uncommitted changes are lost. Push or create/update pull requests only when your brief asks you to; never force-push or rewrite published history.",
+  "- Your worktree is yours alone. When you need dependencies or build outputs, install or build them inside your worktree with the project's own tooling (for example `pnpm install --frozen-lockfile --prefer-offline`). Never link, junction or symlink anything in your worktree (such as `node_modules`) to the main checkout or to another worktree, and never write outside your worktree: removing the worktree later can follow such links and delete the files they point to.",
   reportDoneRule('the files you modified'),
   ...WORKER_SHARED_RULES,
 ].join('\n');

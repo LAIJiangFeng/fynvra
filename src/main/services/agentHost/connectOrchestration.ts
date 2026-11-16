@@ -21,5 +21,6 @@ export async function connectOrchestration(
   agentHost.setCoordinatorLookup((workspaceId, runId) =>
     registry.coordinatorOf(workspaceId, runId)
   );
+  agentHost.setActiveWorkLookup((sessionId) => registry.hasActiveWork(sessionId));
   await registry.openAll();
 }

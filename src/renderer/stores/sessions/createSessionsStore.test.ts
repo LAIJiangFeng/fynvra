@@ -120,6 +120,7 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
     ),
     abort: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     retryCompaction: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
+    compact: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     history: vi.fn(
       async (_sessionId: string): ReturnType<SessionsApi['history']> => ({
         ok: true,
@@ -519,6 +520,25 @@ describe('createSessionsStore · 归档', () => {
     expect(findSession(store.getState(), 's1')?.archivedAt).toBe(30);
     expect(store.getState().notice).toBe('恢复失败：会话不存在');
   });
+
+  it('compactContext：空闲会话发请求并在 ACK 前标记在途；运行中不发；失败给提示', async () => {
+    const { store, api } = await setup([summary('s1'), summary('run', { status: 'running' })]);
+    store.getState().selectSession('s1');
+    const ack = Promise.withResolvers<IpcResult>();
+    api.compact.mockReturnValueOnce(ack.promise);
+    const request = store.getState().compactContext('s1');
+    expect(store.getState().compactRequests.s1).toBe(true);
+    await store.getState().compactContext('s1');
+    ack.resolve({ ok: true });
+    await request;
+    expect(api.compact).toHaveBeenCalledTimes(1);
+    expect(store.getState().compactRequests.s1).toBeUndefined();
+    await store.getState().compactContext('run');
+    expect(api.compact).toHaveBeenCalledTimes(1);
+    api.compact.mockResolvedValueOnce({ ok: false, error: 'boom' });
+    await store.getState().compactContext('s1');
+    expect(store.getState().notice).toBe('无法压缩上下文：boom');
+  });
 });
 
 describe('createSessionsStore · 批量归档与删除', () => {
@@ -570,6 +590,31 @@ describe('createSessionsStore · 批量归档与删除', () => {
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(store.getState().notice).toBeNull();
     expect(store.getState().bulkWorkspaceId).toBeNull();
+  });
+
+  it('批量归档跳过还有 worker 在跑的主 agent 并提示', async () => {
+    const { store, api } = await bulkSetup([
+      summary('idle'),
+      summary('coord', { awaitingWorkers: true }),
+      summary('coord2', { awaitingWorkers: true }),
+    ]);
+    expect(await store.getState().archiveIdleSessions(WS)).toEqual({
+      done: 1,
+      failed: 0,
+      skipped: 2,
+    });
+    expect(api.archive.mock.calls.map(([id]) => id)).toEqual(['idle']);
+    expect(store.getState().notice).toBe('2 个主 agent 仍有 worker 在运行，已跳过');
+
+    store.getState().dismissNotice();
+    api.archive.mockClear();
+    expect(await store.getState().archiveSessions(WS, ['coord'])).toEqual({
+      done: 0,
+      failed: 0,
+      skipped: 1,
+    });
+    expect(api.archive).not.toHaveBeenCalled();
+    expect(store.getState().notice).toBe('1 个主 agent 仍有 worker 在运行，已跳过');
   });
 
   it('批量归档的失败汇总成一条提示，不逐个重拉', async () => {
@@ -1763,6 +1808,50 @@ describe('createSessionsStore · slash command settlement', () => {
     expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'next' });
     expect(selectQueueOf('s1')(store.getState())).toEqual([]);
     expect(api.suggestReply).not.toHaveBeenCalled();
+  });
+
+  it('settles a manual compaction from its events and sends the queue, even if the list sync is skipped', async () => {
+    const fake = fakeApi();
+    const flushes: (() => void)[] = [];
+    const store = createSessionsStore(fake.api, {
+      schedule: (flush) => flushes.push(flush),
+      now: () => 100,
+    });
+    connectSessionsStore(store, fake.api);
+    store.getState().setWorkspace(WS);
+    await settle();
+    await store.getState().selectSession('s1');
+    const base = {
+      operationId: 'compaction-1',
+      reason: 'manual' as const,
+      startedAt: 100,
+      deadlineAt: 600_100,
+      attempt: 1,
+      maxAttempts: 1,
+    };
+    fake.emitEvent(1, { type: 'compaction', state: { ...base, phase: 'running' } });
+    for (const flush of flushes.splice(0)) flush();
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    await store.getState().send('next');
+    expect(selectQueueOf('s1')(store.getState())).toHaveLength(1);
+
+    fake.emitEvent(2, {
+      type: 'compaction',
+      state: {
+        ...base,
+        phase: 'succeeded',
+        endedAt: 105,
+        durationMs: 5,
+        outcome: { compactedMessages: 0, appliesOnNextMessage: false },
+      },
+    });
+    // The list reload sees a newer local seq and skips this session's status.
+    fake.emitChanged();
+    await settle();
+    for (const flush of flushes.splice(0)) flush();
+    await settle();
+    expect(fake.api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'next' });
+    expect(selectQueueOf('s1')(store.getState())).toEqual([]);
   });
 
   it('Stop resyncs a stuck status from the session list', async () => {

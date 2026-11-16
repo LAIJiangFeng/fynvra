@@ -38,6 +38,7 @@ class FakeSession implements SupervisedSession {
   /** 每次 steer 带的图片，与 steers 一一对应（没带时为 undefined） */
   steerImages: (ChatImage[] | undefined)[] = [];
   retryCompaction = vi.fn(async () => {});
+  compact = vi.fn(async () => {});
   aborts = 0;
   disposals = 0;
   idle = true;
@@ -219,6 +220,31 @@ describe('SessionSupervisor compaction recovery', () => {
     });
     await settle();
     expect(session.retryCompaction).toHaveBeenCalledTimes(2);
+    await env.supervisor.shutdown();
+  });
+  it('runs a manual compaction on an idle session and reports the result', async () => {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    await settle();
+    const session = env.sessions[0];
+    if (!session) throw new Error('missing session');
+    env.supervisor.handle({ type: 'compact', identity: id1, requestId: 'ok' });
+    await settle();
+    expect(session.compact).toHaveBeenCalledTimes(1);
+    expect(env.of('session-status').at(-1)?.status).toBe('idle');
+    session.compact.mockRejectedValueOnce(new Error('compaction failed'));
+    env.supervisor.handle({ type: 'compact', identity: id1, requestId: 'failed' });
+    await settle();
+    expect(env.of('session-status').at(-1)?.status).toBe('error');
+    session.idle = false;
+    env.supervisor.handle({ type: 'compact', identity: id1, requestId: 'busy' });
+    await settle();
+    expect(session.compact).toHaveBeenCalledTimes(2);
+    expect(env.of('compaction-recovery-result')).toMatchObject([
+      { requestId: 'ok', result: { ok: true } },
+      { requestId: 'failed', result: { ok: false, error: 'compaction failed' } },
+      { requestId: 'busy', result: { ok: false } },
+    ]);
     await env.supervisor.shutdown();
   });
 });

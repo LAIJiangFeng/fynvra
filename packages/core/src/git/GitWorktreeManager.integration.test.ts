@@ -1,5 +1,14 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -203,4 +212,26 @@ describe.skipIf(!hasGit)('GitWorktreeManager（真实 git）', () => {
     expect(await manager.prune(repo)).toEqual({ ok: true });
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('pruned');
   });
+
+  it.runIf(process.platform === 'win32')(
+    'remove：先拆掉指向外部的 junction，不顺着它删外部文件',
+    async () => {
+      // Main 侧 unlinkLinksIn 的最小版本：只拆 worktree 顶层的链接本身
+      const detachLinks = async (path: string) => {
+        for (const entry of readdirSync(path, { withFileTypes: true })) {
+          if (entry.isSymbolicLink()) unlinkSync(join(path, entry.name));
+        }
+      };
+      const guarded = new GitWorktreeManager({ exec, detachLinks });
+      const worktree = await create('junction');
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'keep.txt'), 'keep');
+      symlinkSync(outside, join(worktree.path, 'node_modules'), 'junction');
+
+      expect(await guarded.remove({ repoPath: repo, path: worktree.path })).toEqual({ ok: true });
+      expect(existsSync(worktree.path)).toBe(false);
+      expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
+    }
+  );
 });

@@ -1,3 +1,5 @@
+import type { CompactionState } from '@fynvra/core';
+import { Archive, CircleAlert } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
@@ -30,6 +32,7 @@ export const MessageItem = memo(function MessageItem({
   tools?: ToolItem[];
   live?: boolean;
 }) {
+  if (message.compaction) return <CompactionResultLine state={message.compaction} />;
   if (message.notice) return <NoticeLine message={message} />;
   return message.role === 'user' ? (
     <UserMessage message={message} />
@@ -104,6 +107,34 @@ function NoticeLine({ message }: { message: TimelineMessage }) {
       )}
     >
       <ChatMarkdown sessionId={message.sessionId} text={message.text} />
+    </div>
+  );
+}
+
+/** A manual compaction's result: one localized line, never the plugin's own text. */
+function CompactionResultLine({ state }: { state: CompactionState }) {
+  const t = useT();
+  const failed = state.phase === 'failed';
+  const count = state.outcome?.compactedMessages;
+  const text = failed
+    ? t('chat.compactFailed', { error: state.errorMessage ?? '' })
+    : state.phase === 'cancelled'
+      ? t('chat.compactCancelled')
+      : count === undefined
+        ? t('chat.compactDone')
+        : count === 0
+          ? t('chat.compactNothing')
+          : t('chat.compactDoneMagic', { count });
+  const Icon = failed ? CircleAlert : Archive;
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-1.5 text-xs',
+        failed ? 'text-destructive' : 'text-muted-foreground'
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0 break-words">{text}</span>
     </div>
   );
 }

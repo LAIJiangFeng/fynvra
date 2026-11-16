@@ -47,15 +47,20 @@ export function shouldRemove(session: SweepCandidate, days: number, now: number)
 /**
  * 按设置与当前时间决定哪些会话归档、哪些删除记录（纯函数，时钟由调用方传入）。
  * 删除按归档时间算：这一轮才归档的会话不会在同一轮被删除。
+ * `hasActiveWork` 为真的主 agent 会话（还有 worker 在跑）不归档。
  */
 export function planArchiveSweep(
   sessions: readonly SweepCandidate[],
   policy: SweepPolicy,
-  now: number
+  now: number,
+  hasActiveWork: (sessionId: string) => boolean = () => false
 ): SweepPlan {
   return {
     archive: sessions
-      .filter((session) => shouldArchive(session, policy.archiveIdleDays, now))
+      .filter(
+        (session) =>
+          shouldArchive(session, policy.archiveIdleDays, now) && !hasActiveWork(session.id)
+      )
       .map((session) => session.id),
     remove: sessions
       .filter((session) => shouldRemove(session, policy.deleteArchivedDays, now))
@@ -71,6 +76,8 @@ export interface ArchiveSweeperDeps {
   remove(sessionId: string): Promise<IpcResult>;
   /** 「通用 → 会话」的设置，每次扫描现读 */
   preferences(): SweepPolicy;
+  /** 主 agent 会话是否还有未完成的编排任务；是则不自动归档 */
+  hasActiveWork?(sessionId: string): boolean;
   now?(): number;
   log?(message: string): void;
   startupDelayMs?: number;
@@ -120,10 +127,12 @@ export function createArchiveSweeper(deps: ArchiveSweeperDeps): ArchiveSweeper {
 
   async function runSweep(): Promise<ArchiveSweepResult> {
     const policy = deps.preferences();
-    const plan = planArchiveSweep(deps.store.all(), policy, now());
+    const hasActiveWork = (sessionId: string) => deps.hasActiveWork?.(sessionId) ?? false;
+    const plan = planArchiveSweep(deps.store.all(), policy, now(), hasActiveWork);
     const archived = await act(
       plan.archive,
-      (session) => shouldArchive(session, policy.archiveIdleDays, now()),
+      (session) =>
+        shouldArchive(session, policy.archiveIdleDays, now()) && !hasActiveWork(session.id),
       deps.archive,
       '归档'
     );

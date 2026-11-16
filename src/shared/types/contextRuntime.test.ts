@@ -50,12 +50,38 @@ describe('context runtime protocol', () => {
       expect(compactionTimeoutMsOf({ compactionTimeoutMs: value })).toBe(value);
     }
   });
+  it('keeps a valid manual compaction outcome and rejects a malformed one', () => {
+    const done = {
+      ...state,
+      reason: 'manual',
+      phase: 'succeeded',
+      attempt: 1,
+      outcome: { compactedMessages: 12, appliesOnNextMessage: true },
+    };
+    expect(parseCompactionState(done)).toEqual(done);
+    expect(parseContextRuntime({ ...snapshot, compaction: done })?.compaction).toEqual(done);
+    expect(
+      parseCompactionState({
+        ...done,
+        outcome: { compactedMessages: -1, appliesOnNextMessage: true },
+      })
+    ).toBeNull();
+    expect(parseCompactionState({ ...done, outcome: { compactedMessages: 1 } })).toBeNull();
+    expect(parseCompactionState({ ...done, outcome: 'text' })).toBeNull();
+  });
   it('preserves unknown context and actual effective strategy across the unknown boundary', () => {
     expect(parseContextRuntime(snapshot)).toEqual(snapshot);
     expect(
       parseContextRuntime({ ...snapshot, context: { ...snapshot.context, tokens: 256000 } })
     ).toBeNull();
     expect(parseContextRuntime({ ...snapshot, compactionTimeoutMs: 1 })).toBeNull();
+    for (const windowSource of ['settings', 'catalog', 'estimated']) {
+      const withSource = { ...snapshot, context: { ...snapshot.context, windowSource } };
+      expect(parseContextRuntime(withSource)).toEqual(withSource);
+    }
+    expect(
+      parseContextRuntime({ ...snapshot, context: { ...snapshot.context, windowSource: 'guess' } })
+    ).toBeNull();
     expect(parseCompactionState({ ...state, durationMs: -1 })).toBeNull();
     expect(parseCompactionState({ ...state, attempt: 5 })).toBeNull();
     expect(parseCompactionState({ ...state, cancelSource: 'unknown' })).toBeNull();
@@ -84,6 +110,12 @@ describe('context runtime protocol', () => {
       requestId: 'r1',
     });
     expect(parseAgentCommand({ type: 'retry-compaction', identity })).toBeNull();
+    expect(parseAgentCommand({ type: 'compact', identity, requestId: 'r2' })).toEqual({
+      type: 'compact',
+      identity,
+      requestId: 'r2',
+    });
+    expect(parseAgentCommand({ type: 'compact', identity, requestId: 42 })).toBeNull();
     expect(
       parseAgentWorkerEvent({
         type: 'compaction-recovery-result',

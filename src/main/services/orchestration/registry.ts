@@ -36,6 +36,8 @@ export interface OrchestrationRegistryOptions {
   worktreesRoot?: () => string | undefined;
   roles: RoleStore;
   notifyChanged: (workspaceId: string) => void;
+  /** 工作区里某个主 agent 会话的 {@link OrchestrationRegistry.hasActiveWork} 翻转了（生产广播 sessions:changed） */
+  activeWorkChanged?: (workspaceId: string) => void;
   /** 缺省时起 worker 会话一律失败，直到 {@link OrchestrationRegistry.setLauncher}。 */
   launcher?: WorkerSessionLauncher;
   exec?: ExecFn;
@@ -65,10 +67,16 @@ export interface OrchestrationRegistry {
   coordinatorOf(workspaceId: string, runId: string): string | undefined;
   /** 持有该 dispatch 的服务（先打开全部工作区）。 */
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
+  /** worker 会话一轮正常结束且已空闲：转给各服务，当前尝试未汇报的通知主 agent。协调者唤醒器用。 */
+  workerRunEnded(sessionId: string): void;
   /** 收件箱里发给该会话、未确认的消息（跨工作区查找，不消费）。协调者唤醒器用。 */
   pendingMessagesTo(sessionId: string): Message[];
   /** Read current actionable messages and unresolved successful attempts, without consuming either. */
   coordinatorWork(sessionId: string): CoordinatorWork;
+  /** 主 agent 会话在任一已打开的工作区里有未完成的编排任务 */
+  hasActiveWork(sessionId: string): boolean;
+  /** worker 会话的任务已失败、当前尝试已结算（跨工作区查找）：用户消息应拒绝，提示由主 agent reject_work 重试 */
+  retryRequired(sessionId: string): { taskId: string; title: string } | undefined;
   /** 确认已投递的消息（各服务尽力而为）。 */
   ackMessages(ids: readonly string[]): void;
   flushAll(): Promise<void>;
@@ -128,6 +136,18 @@ export function createOrchestrationRegistry(
     }
   };
 
+  // 各工作区上次通知时有未完成任务的主 agent；只在集合变了时通知，避免每次编排变更都广播
+  const lastActive = new Map<string, Set<string>>();
+  const checkActiveWork = (workspaceId: string): void => {
+    const service = services.get(workspaceId);
+    if (service === undefined || options.activeWorkChanged === undefined) return;
+    const next = service.activeCoordinators();
+    const previous = lastActive.get(workspaceId) ?? new Set<string>();
+    lastActive.set(workspaceId, next);
+    if (next.size !== previous.size || [...next].some((id) => !previous.has(id)))
+      options.activeWorkChanged(workspaceId);
+  };
+
   const open = (workspace: Workspace): OrchestrationService => {
     const existing = services.get(workspace.id);
     if (existing !== undefined) return existing;
@@ -140,7 +160,10 @@ export function createOrchestrationRegistry(
       exec,
       runChecks,
       fs,
-      notifyChanged: options.notifyChanged,
+      notifyChanged: (workspaceId) => {
+        options.notifyChanged(workspaceId);
+        checkActiveWork(workspaceId);
+      },
       onMessagePosted: (message) => announce(workspace.id, message),
       checkPolicy: options.checkPolicy,
       ...(options.workflows ? { workflows: options.workflows } : {}),
@@ -237,6 +260,9 @@ export function createOrchestrationRegistry(
     async flushAll() {
       await Promise.all([...services.values()].map((service) => service.flush()));
     },
+    workerRunEnded(sessionId) {
+      for (const service of services.values()) service.workerRunEnded(sessionId);
+    },
     pendingMessagesTo(sessionId: string): Message[] {
       for (const service of services.values()) {
         const pending = service.pendingMessagesTo(sessionId);
@@ -250,6 +276,15 @@ export function createOrchestrationRegistry(
         messages: work.flatMap((entry) => entry.messages),
         reviews: work.flatMap((entry) => entry.reviews),
       };
+    },
+    hasActiveWork: (sessionId) =>
+      [...services.values()].some((service) => service.hasActiveWork(sessionId)),
+    retryRequired(sessionId) {
+      for (const service of services.values()) {
+        const found = service.retryRequired(sessionId);
+        if (found) return found;
+      }
+      return undefined;
     },
     ackMessages(ids: readonly string[]): void {
       for (const service of services.values()) service.ackMessages(ids);

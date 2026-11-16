@@ -36,24 +36,34 @@ export function strategyNotice(
   return undefined;
 }
 
-/** Only backend-resolved context/window/threshold values are used, never cumulative usage. */
+/**
+ * Only backend-resolved context/window/threshold values are used, never cumulative usage.
+ * An estimated window (inferred / fallback) is not shown as the model's window; `hint` explains it.
+ */
 export function contextLabel(
   snapshot: ContextRuntimeSnapshot | undefined,
   t: T
-): { label: string; nearThreshold: boolean } {
+): { label: string; nearThreshold: boolean; hint?: string } {
   const context = snapshot?.context;
   if (!context || context.contextWindow <= 0)
     return { label: t('chat.contextUnknown'), nearThreshold: false };
+  const window = formatTokens(context.contextWindow);
+  const estimated = context.windowSource === 'estimated';
+  const hint = estimated ? { hint: t('chat.contextWindowEstimatedHint', { window }) } : {};
   if (context.tokens === null || context.source === 'unknown')
     return {
-      label: t('chat.contextReestimating', { window: formatTokens(context.contextWindow) }),
+      label: estimated
+        ? t('chat.contextReestimatingUnknownWindow')
+        : t('chat.contextReestimating', { window }),
       nearThreshold: false,
+      ...hint,
     };
+  const tokens = formatTokens(context.tokens);
   return {
-    label: t('chat.contextUsage', {
-      tokens: formatTokens(context.tokens),
-      window: formatTokens(context.contextWindow),
-    }),
+    ...hint,
+    label: estimated
+      ? t('chat.contextUsageUnknownWindow', { tokens })
+      : t('chat.contextUsage', { tokens, window }),
     nearThreshold:
       snapshot.effectiveStrategy !== 'off' &&
       context.compactionThresholdTokens !== undefined &&

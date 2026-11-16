@@ -14,13 +14,28 @@ const STATUS_DOT: Record<SessionStatus, string> = {
   error: 'bg-destructive',
 };
 
-/** 会话状态点：空闲灰、运行中蓝、等待审批琥珀、出错红。 */
-export function StatusDot({ status, className }: { status: SessionStatus; className?: string }) {
+/** 会话状态点：空闲灰、运行中蓝、等待审批琥珀、出错红；空闲但还有 worker 在跑的主 agent 为蓝色空心圆环。 */
+export function StatusDot({
+  status,
+  awaitingWorkers,
+  className,
+}: {
+  status: SessionStatus;
+  awaitingWorkers?: boolean;
+  className?: string;
+}) {
   const t = useT();
-  const label = t(`sessions.status.${status}`);
+  const awaiting = status === 'idle' && awaitingWorkers === true;
+  const label = awaiting ? t('sessions.status.awaitingWorkers') : t(`sessions.status.${status}`);
   return (
     <span className={cn('relative inline-flex shrink-0', className)} title={label}>
-      <span aria-hidden className={cn('size-2 rounded-full', STATUS_DOT[status])} />
+      <span
+        aria-hidden
+        className={cn(
+          'size-2 rounded-full',
+          awaiting ? 'ring-[1.5px] ring-sky-500 ring-inset' : STATUS_DOT[status]
+        )}
+      />
       <span className="sr-only">{label}</span>
     </span>
   );

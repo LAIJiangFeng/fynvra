@@ -22,6 +22,7 @@ import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/setti
 import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
+import type { WorkerResolvedModel } from './models';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import { createSnapcompactExtension } from './snapcompact/snapcompact';
 import type { OpenSession } from './supervisor';
@@ -62,7 +63,7 @@ export interface PiSessionFactoryOptions {
   /** fynvra 的 pi agentDir（userData/agent），与 PI_CODING_AGENT_DIR 相同 */
   agentDir: string;
   /** 注册 provider 并取 pi 的模型；思考档位按模型的可选集合落定（见 models.ts） */
-  resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
+  resolveModel(spec: ResolvedModelSpec): Promise<WorkerResolvedModel>;
   /** 把 spec.pluginProviders 按服务 id 注册给插件查找（见 models.ts 的 exposeProviders）；只在 spec 带了时调用 */
   exposePluginProviders?(providers: readonly PluginProviderSpec[]): Promise<void>;
   /** 登记 spec.pluginRefs（插件 id 与根路径），用于识别插件按名字找了哪些模型服务；只在 spec 带了时调用 */
@@ -116,16 +117,15 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       options.onContextLog?.(
         `session=${identity.sessionId} generation=${identity.generation} ${message}`
       );
-    // Native always compacts through the method chain; Magic only after it stopped.
-    const compactionChain =
-      strategy === 'off'
-        ? undefined
-        : createCompactionChainExtension({
-            getModel: () => activeModel,
-            getSessionManager: () => sessionManager,
-            active: () => strategy === 'native' || magicFailed,
-            log: logContext,
-          });
+    // Native always compacts through the method chain; Magic only after it stopped; off only
+    // during a manual compaction (never pi's default summary).
+    const compactionChain = createCompactionChainExtension({
+      getModel: () => activeModel,
+      getSessionManager: () => sessionManager,
+      active: () =>
+        strategy === 'native' || magicFailed || recoveryGate?.manualCompacting() === true,
+      log: logContext,
+    });
     // Snapcompact re-attaches archived frames whatever the strategy: older entries may carry them.
     const extensions = [magic?.extension, compactionChain, createSnapcompactExtension()].filter(
       (ext) => ext !== undefined
@@ -171,7 +171,11 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         ...(spec.inPlace ? { inPlace: true } : {}),
         planMode: () => planMode,
         ...(extensions.length ? { extensions } : {}),
-        settingsManager: createSessionSettings(spec.shellPath, strategy),
+        settingsManager: createSessionSettings(
+          spec.shellPath,
+          strategy,
+          spec.compactionThresholdTokens
+        ),
         ...(spec.networkProxy
           ? {
               commandEnv: (env: NodeJS.ProcessEnv) =>
@@ -191,6 +195,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       ...(magic ? { magicReady: () => magic.assertReady() } : {}),
       timeoutMs,
       contextWindow: () => activeModel.model?.contextWindow ?? 0,
+      windowSource: () => activeModel.windowSource,
       log: logContext,
       mcpServers: spec.mcpServers.map((server) => server.name),
     });
@@ -256,6 +261,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       prompt: (text, images) => recovery.prompt(text, images),
       steer: (text, images) => recovery.prompt(text, images, true),
       retryCompaction: () => recovery.retryCompaction(),
+      compact: () => recovery.compact(),
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）
