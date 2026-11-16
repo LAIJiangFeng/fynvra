@@ -1,7 +1,6 @@
 import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
 import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Markdown } from '@/components/chat/Markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -9,6 +8,7 @@ import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { dispatchesOf, latestDispatchOf, messagesOf } from '@/stores/orchestration';
+import { CompactMarkdown } from './CompactMarkdown';
 import {
   RoleBadge,
   SectionTitle,
@@ -213,7 +213,7 @@ export function TaskDrawer({
                 open={outputOpen}
                 onOpenChange={setOutputOpen}
               >
-                <WorkerOutput key={outputId} dispatchId={outputId} />
+                <WorkerOutput key={outputId} dispatchId={outputId} hideTitle />
               </Fold>
             ) : (
               <WorkerOutput key={outputId} dispatchId={outputId} />
@@ -256,7 +256,7 @@ function BriefSection({ spec }: { spec: string }) {
         <p className="text-muted-foreground text-xs">{t('orchestration.emptyBrief')}</p>
       ) : (
         <div className="rounded-md border bg-card px-2.5 py-2">
-          <Markdown text={spec} className="text-xs leading-relaxed" />
+          <CompactMarkdown text={spec} className="text-xs leading-relaxed" />
         </div>
       )}
     </Fold>
@@ -294,7 +294,7 @@ function ResultCard({ dispatch, attempt }: { dispatch: Dispatch; attempt: number
       >
         {t(failed ? 'orchestration.whyFailed' : 'orchestration.whatWasDone')}
       </h3>
-      <Markdown text={lead} className="mt-1 text-[13px] leading-relaxed" />
+      <CompactMarkdown text={lead} className="mt-1 text-[13px] leading-relaxed" />
       <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">{meta.join(' · ')}</p>
       {rest && (
         <Collapsible className="mt-1">
@@ -303,7 +303,7 @@ function ResultCard({ dispatch, attempt }: { dispatch: Dispatch; attempt: number
             {t('orchestration.fullReport')}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <Markdown text={rest} className="mt-1 pl-4 text-xs" />
+            <CompactMarkdown text={rest} className="mt-1 pl-4 text-xs" />
           </CollapsibleContent>
         </Collapsible>
       )}

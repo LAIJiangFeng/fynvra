@@ -24,7 +24,14 @@ const STICK_PX = 24;
  * 一次尝试的 worker 输出：等宽、自动滚到底；向上滚动或点「暂停」后停止跟随，
  * 暂停时画面冻结在当时的内容（后台照常拉取），继续后一次补齐。
  */
-export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
+export function WorkerOutput({
+  dispatchId,
+  hideTitle = false,
+}: {
+  dispatchId: string;
+  /** 外层折叠区已有同名标签时只留状态与控件 */
+  hideTitle?: boolean;
+}) {
   const watchOutput = useOrchestrationStore((state) => state.watchOutput);
   const retryOutput = useOrchestrationStore((state) => state.retryOutput);
   const entry = useOrchestrationStore((state) => state.outputs[dispatchId]);
@@ -95,7 +102,7 @@ export function WorkerOutput({ dispatchId }: { dispatchId: string }) {
           </>
         }
       >
-        {t('orchestration.output')}
+        {hideTitle ? null : t('orchestration.output')}
       </SectionTitle>
       <div
         ref={scrollRef}

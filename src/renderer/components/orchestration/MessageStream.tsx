@@ -10,12 +10,12 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Markdown } from '@/components/chat/Markdown';
 import { Badge } from '@/components/ui/badge';
 import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { messagesOf } from '@/stores/orchestration';
+import { CompactMarkdown } from './CompactMarkdown';
 import {
   describeSubject,
   formatClock,
@@ -161,7 +161,7 @@ function MessageBubble({
             {formatClock(message.createdAt)}
           </time>
         </header>
-        <Markdown text={expanded ? message.body : lead} className="text-xs" />
+        <CompactMarkdown text={expanded ? message.body : lead} className="text-xs" />
         {rest && (
           <button
             type="button"
