@@ -182,6 +182,8 @@ export interface AgentHostService extends AgentHost {
    * 此时 Dispatch 也还没写入）；由 orchestration 接线时注入，之前不设 parentSessionId。
    */
   setCoordinatorLookup(f: (workspaceId: string, runId: string) => string | undefined): void;
+  /** 主 agent 会话是否还有未完成的编排任务（摘要的 awaitingWorkers）；由 orchestration 接线时注入 */
+  setActiveWorkLookup(f: (sessionId: string) => boolean): void;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -371,6 +373,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   ) => OrchestrationHost | null = () => null;
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
   let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
+  let hasActiveWork: (sessionId: string) => boolean = () => false;
   const observers = new Set<SessionObserver>();
   const failureListeners = new Set<() => void>();
   const roundWaiters = new Set<() => void>();
@@ -446,10 +449,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     deps.broadcast(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId);
   }
 
-  /** 带上缓存里 cwd 的分支（没读过或不是 git 目录时不带） */
+  /** 带上缓存里 cwd 的分支（没读过或不是 git 目录时不带），以及主 agent 是否还有 worker 在跑 */
   function withBranch(summary: SessionSummary): SessionSummary {
     const branch = deps.branches?.get(summary.cwd);
-    return branch ? { ...summary, branch } : summary;
+    const awaiting = hasActiveWork(summary.id);
+    if (!branch && !awaiting) return summary;
+    return {
+      ...summary,
+      ...(branch ? { branch } : {}),
+      ...(awaiting ? { awaitingWorkers: true as const } : {}),
+    };
   }
 
   /** IPC 视图：去掉内部字段，带上分支 */
@@ -1692,6 +1701,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setCoordinatorLookup(lookup) {
       coordinatorOf = lookup;
+    },
+    setActiveWorkLookup(lookup) {
+      hasActiveWork = lookup;
     },
     start() {
       client.start();

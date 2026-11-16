@@ -592,6 +592,31 @@ describe('createSessionsStore · 批量归档与删除', () => {
     expect(store.getState().bulkWorkspaceId).toBeNull();
   });
 
+  it('批量归档跳过还有 worker 在跑的主 agent 并提示', async () => {
+    const { store, api } = await bulkSetup([
+      summary('idle'),
+      summary('coord', { awaitingWorkers: true }),
+      summary('coord2', { awaitingWorkers: true }),
+    ]);
+    expect(await store.getState().archiveIdleSessions(WS)).toEqual({
+      done: 1,
+      failed: 0,
+      skipped: 2,
+    });
+    expect(api.archive.mock.calls.map(([id]) => id)).toEqual(['idle']);
+    expect(store.getState().notice).toBe('2 个主 agent 仍有 worker 在运行，已跳过');
+
+    store.getState().dismissNotice();
+    api.archive.mockClear();
+    expect(await store.getState().archiveSessions(WS, ['coord'])).toEqual({
+      done: 0,
+      failed: 0,
+      skipped: 1,
+    });
+    expect(api.archive).not.toHaveBeenCalled();
+    expect(store.getState().notice).toBe('1 个主 agent 仍有 worker 在运行，已跳过');
+  });
+
   it('批量归档的失败汇总成一条提示，不逐个重拉', async () => {
     const { store, api } = await bulkSetup([
       summary('a'),

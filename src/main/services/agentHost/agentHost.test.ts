@@ -1107,6 +1107,17 @@ describe('createAgentHost sessions', () => {
     expect(env.sent()).toEqual([]);
   });
 
+  it('summaries carry awaitingWorkers from the injected active-work lookup', async () => {
+    const env = setup();
+    const coordinator = await createSession(env, 'orchestrator');
+    expect(env.host.get(coordinator.id)?.awaitingWorkers).toBeUndefined();
+    let active = true;
+    env.host.setActiveWorkLookup((sessionId) => active && sessionId === coordinator.id);
+    expect(env.host.list('ws-1')[0]?.awaitingWorkers).toBe(true);
+    active = false;
+    expect(env.host.list('ws-1')[0]).not.toHaveProperty('awaitingWorkers');
+  });
+
   it("records the role's approval mode; a dispatched worker inherits the coordinator's current one", async () => {
     const careful: Role = { ...tester, id: 'careful', name: 'Careful', approvalMode: 'supervised' };
     const env = setup({

@@ -240,6 +240,7 @@ export const en: MessagesShape<typeof zhCN> = {
       running: 'Running',
       'waiting-approval': 'Awaiting approval',
       error: 'Error',
+      awaitingWorkers: 'Waiting for workers',
     },
     loadFailed: 'Failed to load sessions: {error}',
     empty: 'No sessions',
@@ -266,6 +267,8 @@ export const en: MessagesShape<typeof zhCN> = {
         '{count} of these sessions have unmerged or uncommitted work in their worktrees; they are skipped unless you check the box below',
       forceUnmerged: 'Also delete the unmerged work',
       unmergedSkipped: 'skipped: unmerged work',
+      awaitingWorkersSkipped:
+        'Skipped {count} main agent session(s) whose workers are still running',
       archiving: 'Archiving {done}/{total}…',
       removing: 'Deleting {done}/{total}…',
       archivePartial: 'Archived {done}, {failed} not processed ({reasons})',

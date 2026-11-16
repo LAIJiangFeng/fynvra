@@ -571,6 +571,7 @@ export interface SessionSummary {
   model?: SessionModelRef;
   planMode?: boolean;    // 计划模式（§7.10）：仅开启时为 true，随会话记录保存在 sessions.json
   archivedAt?: number;   // 归档时间（Task 26）：手动归档或闲置扫描；恢复、会话再次运行时清除
+  awaitingWorkers?: true; // 主 agent 还有未完成的编排任务（Main 现算，见 §9.3「等待 worker 的主 agent」）
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {
@@ -640,6 +641,10 @@ export interface SessionsApi {
   恢复清掉 `archivedAt` 并把 `updatedAt` 设为当前时间；会话再次运行（用户发消息、主 agent 打回）时注册表自动清掉 `archivedAt`。
   Main 启动后 30 秒、之后每小时按 `preferences.archiveIdleDays` / `deleteArchivedDays` 扫描（`sessions:sweep` 立即扫一次），
   删除与 `sessions:remove` 相同（pi jsonl 保留）。
+- **等待 worker 的主 agent**：会话作为 `coordinatorSessionId` 的 Run 里还有 todo / in-progress / in-review 任务（或工作流有运行中节点、待启动意图）时，
+  Main 在摘要上现算 `awaitingWorkers: true`（`OrchestrationRegistry.hasActiveWork`，不落盘；`SessionStatus` 仍是四种），
+  只在某工作区该集合翻转时广播 `sessions:changed`。空闲且带标志的会话显示蓝色空心圆环「等待 worker 回复」；批量归档（含归档闲置、全选）
+  与闲置扫描都跳过它（批量操作提示跳过数量），免得留下没人审查、合并的 worker；会话菜单里的单个「归档」不受限。
 
 - **换模型 / Fast**（`sessions:set-model`）：Main 用 `ModelResolver` 解析（协议不支持 Fast 时清掉该开关）→ 更新会话记录（sessions.json）→
   会话已在 worker 里时发 `set-model`（spec 同 `spawn-session` 的 `ResolvedModelSpec`，带 `fastMode`）→ worker 注册 provider 后调 pi 的
