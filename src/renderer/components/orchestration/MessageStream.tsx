@@ -9,18 +9,20 @@ import {
   MessageCircleQuestion,
   MessageSquare,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
 import { messagesOf } from '@/stores/orchestration';
+import { CompactMarkdown } from './CompactMarkdown';
 import {
   describeSubject,
   formatClock,
   isFromWorker,
   messageTypeLabel,
   reportOutcome,
+  splitSummary,
 } from './format';
 
 interface StreamItem {
@@ -131,6 +133,10 @@ function MessageBubble({
   const subject = describeSubject(message, t);
   const sender = t(fromWorker ? 'orchestration.worker' : 'orchestration.coordinator');
   const type = messageTypeLabel(message.type, t);
+  // 汇报默认只显示首段：完整汇报在顶部结果卡里
+  const [expanded, setExpanded] = useState(false);
+  const { lead, rest } =
+    message.type === 'worker_done' ? splitSummary(message.body) : { lead: message.body, rest: '' };
   return (
     <div className={cn('flex', fromWorker ? 'justify-start' : 'justify-end')}>
       <article
@@ -155,7 +161,17 @@ function MessageBubble({
             {formatClock(message.createdAt)}
           </time>
         </header>
-        <p className="whitespace-pre-wrap break-words">{message.body}</p>
+        <CompactMarkdown text={expanded ? message.body : lead} className="text-xs" />
+        {rest && (
+          <button
+            type="button"
+            className="mt-0.5 rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {t(expanded ? 'orchestration.collapseReport' : 'orchestration.expandReport')}
+          </button>
+        )}
       </article>
     </div>
   );

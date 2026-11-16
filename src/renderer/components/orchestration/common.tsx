@@ -234,7 +234,7 @@ export function SectionTitle({
 }) {
   return (
     <div className="mb-1.5 flex items-center gap-2">
-      <h3 className="font-medium text-muted-foreground text-xs">{children}</h3>
+      {children && <h3 className="font-medium text-muted-foreground text-xs">{children}</h3>}
       {aside && <div className="ml-auto flex items-center gap-1">{aside}</div>}
     </div>
   );
