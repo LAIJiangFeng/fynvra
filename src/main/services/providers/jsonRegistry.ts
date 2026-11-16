@@ -105,7 +105,7 @@ async function readEntries<T extends { id: string }>(
 }
 
 /** 先写同目录临时文件再 rename 覆盖，进程中途退出也不会留下半截文件。文件里可能有密钥，权限 0600。 */
-async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+export async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${randomUUID()}.tmp`;
   try {

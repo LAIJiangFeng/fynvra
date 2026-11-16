@@ -2957,3 +2957,128 @@ describe('titleFrom', () => {
     expect(titleFrom(text)).toBe(title);
   });
 });
+
+describe('automatic model limits', () => {
+  function limitsEnv(contextWindow?: number) {
+    const providers: StoredProvider[] = [
+      {
+        ...anthropic,
+        models: [
+          {
+            id: 'claude-sonnet-5-5',
+            name: 'Claude Sonnet 5.5',
+            ...(contextWindow ? { contextWindow } : {}),
+          },
+        ],
+      },
+    ];
+    const probed = Promise.withResolvers<boolean>();
+    const modelLimits = {
+      ensure: vi.fn(() => probed.promise),
+      learn: vi.fn(async (_providerId: string, _modelId: string, _message: string) => false),
+    };
+    const env = setup({ models: modelsOf(providers), modelLimits });
+    return { env, providers, probed, modelLimits };
+  }
+  const identityOf = (sessionId: string) => ({ sessionId, generation: 1 });
+  function settle(env: ReturnType<typeof setup>, sessionId: string, seq: number) {
+    const identity = identityOf(sessionId);
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq,
+      event: { type: 'agent_settled', aborted: false, seq },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'idle' });
+  }
+  const spawnedModel = (env: ReturnType<typeof setup>) =>
+    (env.sent('spawn-session')[0] as { spec: SpawnSessionSpec }).spec.model;
+  function report(
+    env: ReturnType<typeof setup>,
+    sessionId: string,
+    seq: number,
+    windowSource: 'settings' | 'catalog' | 'estimated'
+  ) {
+    const snapshot = {
+      configuredStrategy: 'native',
+      effectiveStrategy: 'native',
+      compactionTimeoutMs: 600000,
+      context: { tokens: null, contextWindow: 128000, source: 'unknown', windowSource },
+      recoveryRequired: false,
+      pendingPromptCount: 0,
+    } as const;
+    env.worker().emit({
+      type: 'session-event',
+      identity: identityOf(sessionId),
+      seq,
+      event: { type: 'context_runtime', snapshot, seq },
+    });
+  }
+
+  it('probes when the worker reports an estimated window and pushes it to the idle session', async () => {
+    const { env, providers, probed, modelLimits } = limitsEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    expect(modelLimits.ensure).not.toHaveBeenCalled();
+    report(env, session.id, 1, 'estimated');
+    expect(modelLimits.ensure).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5-5');
+    settle(env, session.id, 2);
+    const model = providers[0]?.models[0];
+    if (model) model.contextWindow = 1_000_000;
+    probed.resolve(true);
+    await vi.waitFor(() => expect(env.sent('set-model')).toHaveLength(1));
+    expect(env.sent('set-model')[0]).toMatchObject({
+      identity: identityOf(session.id),
+      model: { ...spawnedModel(env), contextWindow: 1_000_000 },
+    });
+  });
+
+  it('waits for the running turn to settle before pushing', async () => {
+    const { env, providers, probed } = limitsEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    report(env, session.id, 1, 'estimated');
+    const model = providers[0]?.models[0];
+    if (model) model.contextWindow = 1_000_000;
+    probed.resolve(true);
+    await flush();
+    await flush();
+    expect(env.sent('set-model')).toHaveLength(0);
+    settle(env, session.id, 2);
+    expect(env.sent('set-model')[0]).toMatchObject({ model: { contextWindow: 1_000_000 } });
+  });
+
+  it.each(['catalog', 'settings'] as const)('does not probe a %s window', async (source) => {
+    const { env, modelLimits } = limitsEnv();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    report(env, session.id, 1, source);
+    expect(env.sent('spawn-session')).toHaveLength(1);
+    expect(modelLimits.ensure).not.toHaveBeenCalled();
+  });
+
+  it('learns the limit from a model overflow error and pushes it', async () => {
+    const { env, providers, modelLimits } = limitsEnv(1_000_000);
+    const message = 'prompt is too long: 300000 tokens > 272000 maximum';
+    modelLimits.learn.mockImplementation(async () => {
+      const model = providers[0]?.models[0];
+      if (model) model.contextWindow = 272_000;
+      return true;
+    });
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    env.worker().emit({
+      type: 'session-event',
+      identity: identityOf(session.id),
+      seq: 1,
+      event: { type: 'error', source: 'model', message, seq: 1 },
+    });
+    expect(modelLimits.learn).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5-5', message);
+    await flush();
+    await flush();
+    settle(env, session.id, 2);
+    await vi.waitFor(() =>
+      expect(env.sent('set-model').at(-1)).toMatchObject({ model: { contextWindow: 272_000 } })
+    );
+  });
+});
