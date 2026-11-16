@@ -78,6 +78,10 @@ export interface SessionsState extends ChatProjection {
   recoveringCompaction: Record<string, true>;
   stopping: Record<string, true>;
   retryCompaction(sessionId: string): Promise<void>;
+  /** 手动压缩请求在途（只到 ACK 为止，之后由会话状态与压缩事件接管） */
+  compactRequests: Record<string, true>;
+  /** 立即压缩空闲会话的上下文；忙时忽略，失败给提示 */
+  compactContext(sessionId: string): Promise<void>;
   /** 正在拉 history 的会话 */
   loadingHistory: Record<string, true>;
   /** 拉列表失败的工作区 → 错误信息 */
@@ -738,6 +742,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       replySuggestions: {},
       queuedBySession: {},
       recoveringCompaction: {},
+      compactRequests: {},
       stopping: {},
       loadingHistory: {},
       listErrors: {},
@@ -1106,6 +1111,32 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         // ACK only accepts the request. If completion events arrived first, re-check now
         // that request exclusion is gone; otherwise the runtime gate still blocks delivery.
         drainQueue(sessionId);
+      },
+
+      async compactContext(sessionId) {
+        flushEvents();
+        const runtime = get().runtimeBySession[sessionId];
+        if (
+          runtime?.recoveryRequired ||
+          recoveryRequests.has(sessionId) ||
+          get().compactRequests[sessionId] ||
+          get().recoveringCompaction[sessionId] ||
+          get().stopping[sessionId] ||
+          sending.has(sessionId) ||
+          isBusy(statusOf(get(), sessionId)) ||
+          compactionActive(runtime?.compaction)
+        )
+          return;
+        clearSuggestion(sessionId);
+        set((state) => ({ compactRequests: { ...state.compactRequests, [sessionId]: true } }));
+        const result = await safely(() => api.compact(sessionId));
+        flushEvents();
+        set((state) => ({
+          compactRequests: omitKey(state.compactRequests, sessionId),
+          ...(!result.ok && state.activeSessionId === sessionId
+            ? { notice: translate('chat.compactFailed', { error: result.error }) }
+            : {}),
+        }));
       },
 
       removeQueued(sessionId, queuedId) {

@@ -193,6 +193,8 @@ export interface AgentHostService extends AgentHost {
   /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
   steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   retryCompaction(sessionId: string): Promise<IpcResult>;
+  /** Manual compaction of an idle session: ACK on acceptance, the worker result settles it; Stop cancels. */
+  compact(sessionId: string): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<
     IpcResult<{
@@ -244,6 +246,8 @@ interface PendingCompactionRecovery {
   requestId: string;
   phase: 'loading' | 'requested';
   cancelled: boolean;
+  /** Manual compaction shares the recovery slot (mutual exclusion, Stop, result settlement). */
+  manual?: boolean;
 }
 
 /** Main 侧每个会话的运行态（不落盘） */
@@ -889,8 +893,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // Explicit recovery reloads a suspended Magic binding using the same jsonl/DB.
       // The worker closes the previous generation before opening its replacement.
       const reload =
-        resolveCompactionStrategy() === 'magic-context' ||
-        state.spec?.compactionStrategy === 'magic-context';
+        !operation.manual &&
+        (resolveCompactionStrategy() === 'magic-context' ||
+          state.spec?.compactionStrategy === 'magic-context');
       const spawned = await ensureSpawned(stored, wanted, reload);
       if (!wanted()) return;
       if (!spawned.ok) {
@@ -900,7 +905,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       operation.phase = 'requested';
       if (
         !send({
-          type: 'retry-compaction',
+          type: operation.manual ? 'compact' : 'retry-compaction',
           identity: identityOf(stored.id, state),
           requestId: operation.requestId,
         })
@@ -1772,6 +1777,32 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       state.lastError = undefined;
       setStatus(sessionId, 'running');
       // ACK acceptance now. Opening the original jsonl and checking its checkpoint happen asynchronously.
+      void startRecovery(stored, state, operation);
+      return { ok: true };
+    },
+    async compact(sessionId) {
+      const stored = deps.store.get(sessionId);
+      if (!stored) return fail(translate('common.sessionNotFound'));
+      const state = liveOf(sessionId);
+      if (isBusy(stored)) return fail(translate('agent.compactWhileRunning'));
+      const phase = state.contextRuntime?.compaction?.phase;
+      if (phase === 'running' || phase === 'backoff')
+        return fail(translate('agent.compactWhileCompacting'));
+      if (state.contextRuntime?.recoveryRequired)
+        return fail(translate('agent.compactionRecoveryRequired'));
+      invalidateSuggestion(sessionId, state);
+      const operation: PendingCompactionRecovery = {
+        requestId: `compaction-manual-${++recoverySeq}`,
+        phase: 'loading',
+        cancelled: false,
+        manual: true,
+      };
+      state.recovery = operation;
+      state.running = true;
+      state.interruption = undefined;
+      state.lastError = undefined;
+      setStatus(sessionId, 'running');
+      // Loading an unloaded session and compacting happen asynchronously after the ACK.
       void startRecovery(stored, state, operation);
       return { ok: true };
     },

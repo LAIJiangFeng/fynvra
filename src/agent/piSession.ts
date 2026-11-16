@@ -116,16 +116,15 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       options.onContextLog?.(
         `session=${identity.sessionId} generation=${identity.generation} ${message}`
       );
-    // Native always compacts through the method chain; Magic only after it stopped.
-    const compactionChain =
-      strategy === 'off'
-        ? undefined
-        : createCompactionChainExtension({
-            getModel: () => activeModel,
-            getSessionManager: () => sessionManager,
-            active: () => strategy === 'native' || magicFailed,
-            log: logContext,
-          });
+    // Native always compacts through the method chain; Magic only after it stopped; off only
+    // during a manual compaction (never pi's default summary).
+    const compactionChain = createCompactionChainExtension({
+      getModel: () => activeModel,
+      getSessionManager: () => sessionManager,
+      active: () =>
+        strategy === 'native' || magicFailed || recoveryGate?.manualCompacting() === true,
+      log: logContext,
+    });
     // Snapcompact re-attaches archived frames whatever the strategy: older entries may carry them.
     const extensions = [magic?.extension, compactionChain, createSnapcompactExtension()].filter(
       (ext) => ext !== undefined
@@ -256,6 +255,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       prompt: (text, images) => recovery.prompt(text, images),
       steer: (text, images) => recovery.prompt(text, images, true),
       retryCompaction: () => recovery.retryCompaction(),
+      compact: () => recovery.compact(),
       setModel: async (next) => {
         const resolved = await options.resolveModel(withRoleThinking(next, spec.role));
         // pi 先按新模型 clamp 当前档位；再显式设上已按可选集合落定的档位（含 max；不支持推理时没有）

@@ -120,6 +120,7 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
     ),
     abort: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     retryCompaction: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
+    compact: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     history: vi.fn(
       async (_sessionId: string): ReturnType<SessionsApi['history']> => ({
         ok: true,
@@ -518,6 +519,25 @@ describe('createSessionsStore · 归档', () => {
     expect(await store.getState().unarchiveSession('s1')).toMatchObject({ ok: false });
     expect(findSession(store.getState(), 's1')?.archivedAt).toBe(30);
     expect(store.getState().notice).toBe('恢复失败：会话不存在');
+  });
+
+  it('compactContext：空闲会话发请求并在 ACK 前标记在途；运行中不发；失败给提示', async () => {
+    const { store, api } = await setup([summary('s1'), summary('run', { status: 'running' })]);
+    store.getState().selectSession('s1');
+    const ack = Promise.withResolvers<IpcResult>();
+    api.compact.mockReturnValueOnce(ack.promise);
+    const request = store.getState().compactContext('s1');
+    expect(store.getState().compactRequests.s1).toBe(true);
+    await store.getState().compactContext('s1');
+    ack.resolve({ ok: true });
+    await request;
+    expect(api.compact).toHaveBeenCalledTimes(1);
+    expect(store.getState().compactRequests.s1).toBeUndefined();
+    await store.getState().compactContext('run');
+    expect(api.compact).toHaveBeenCalledTimes(1);
+    api.compact.mockResolvedValueOnce({ ok: false, error: 'boom' });
+    await store.getState().compactContext('s1');
+    expect(store.getState().notice).toBe('无法压缩上下文：boom');
   });
 });
 

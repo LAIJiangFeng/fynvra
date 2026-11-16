@@ -624,6 +624,14 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: false, error: translate('chat.noCompactionRecovery') };
     },
 
+    // mock 没有真实上下文可压缩：空闲时直接接受，运行中与 Main 一样拒绝
+    async compact(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) return missing();
+      if (session.run) return { ok: false, error: translate('chat.compactBusy') };
+      return { ok: true };
+    },
+
     async abort(sessionId) {
       const session = sessions.get(sessionId);
       if (!session) return missing();

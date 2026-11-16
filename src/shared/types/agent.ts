@@ -263,6 +263,8 @@ export type AgentCommand =
    */
   | { type: 'steer'; identity: SessionIdentity; text: string; images?: ChatImage[] }
   | { type: 'retry-compaction'; identity: SessionIdentity; requestId: string }
+  /** 手动压缩空闲会话；结果回同一 requestId 的 compaction-recovery-result，Stop 经 abort 取消 */
+  | { type: 'compact'; identity: SessionIdentity; requestId: string }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -453,6 +455,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
     case 'retry-compaction':
       return isNonEmptyString(record.requestId)
         ? { type: 'retry-compaction', identity, requestId: record.requestId }
+        : null;
+    case 'compact':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'compact', identity, requestId: record.requestId }
         : null;
     case 'abort':
       return { type: 'abort', identity };
