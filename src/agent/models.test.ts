@@ -207,6 +207,25 @@ describe('createModelRegistry', () => {
     });
     expect(upper.windowSource).toBe('catalog');
     expect(upper.model.contextWindow).toBe(272_000);
+    // 不带前缀经中转：官方 openai 的 272k，不取同协议 openrouter 的 1.05M
+    const bare = await registry.resolve({
+      ...relay,
+      api: 'openai-completions',
+      modelId: 'gpt-6-sol',
+    });
+    expect(bare.windowSource).toBe('catalog');
+    expect(bare.model.contextWindow).toBe(272_000);
+    // 写了 openai/ 前缀：第 1 步同协议完全同名就命中 openrouter 的条目
+    const routed = await registry.resolve({
+      ...relay,
+      api: 'openai-completions',
+      modelId: 'openai/gpt-6-sol',
+    });
+    expect(routed.windowSource).toBe('catalog');
+    expect(routed.model.contextWindow).toBe(1_050_000);
+    expect(runtime.getModels().find((model) => model.id === 'openai/gpt-6-sol')?.provider).toBe(
+      'openrouter'
+    );
   });
 
   it('falls back to the official endpoint of the api when the spec has no base URL', async () => {
@@ -723,18 +742,25 @@ describe('createModelRegistry thinking levels', () => {
 
 describe('findSameNamedModel', () => {
   const m = (provider: string, api: string, id: string) => ({ provider, api, id });
-  it('prefers the same api, then the official provider of the api, then any official provider', () => {
+  it('prefers official providers in any api (own api first), then non-official of the same api, then catalog order', () => {
     const gateway = m('gateway', 'anthropic-messages', 'x/claude-a');
     const anthropic = m('anthropic', 'anthropic-messages', 'claude-a');
     const openai = m('openai', 'openai-completions', 'CLAUDE-A');
     const relay = m('relay', 'openai-completions', 'vendor/claude-a');
-    expect(findSameNamedModel([gateway, anthropic], 'claude-a', 'google-generative-ai')).toBe(
+    const other = m('other', 'google-generative-ai', 'claude-a');
+    // 官方 provider 跨协议也先于同协议的非官方
+    expect(findSameNamedModel([relay, anthropic], 'claude-a', 'openai-completions')).toBe(
       anthropic
     );
-    expect(findSameNamedModel([relay, openai, anthropic], 'Claude-A', 'openai-completions')).toBe(
+    // 本协议的官方先于其他官方
+    expect(findSameNamedModel([relay, anthropic, openai], 'Claude-A', 'openai-completions')).toBe(
       openai
     );
-    expect(findSameNamedModel([anthropic, relay], 'claude-a', 'openai-completions')).toBe(relay);
+    // 非官方里同协议优先，再取目录顺序
+    expect(findSameNamedModel([other, gateway, relay], 'claude-a', 'openai-completions')).toBe(
+      relay
+    );
+    expect(findSameNamedModel([other, gateway], 'claude-a', 'openai-completions')).toBe(other);
     expect(findSameNamedModel([anthropic], 'claude-a-1', 'anthropic-messages')).toBeUndefined();
   });
 });

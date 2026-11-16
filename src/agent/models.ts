@@ -250,9 +250,10 @@ function defineModel(
   const all = runtime.getModels().filter((model) => !excluded(model.provider));
   const named = findSameNamedModel(all, spec.modelId, spec.api);
   if (named) {
-    const { compat: _protocolSpecific, ...definition } = definitionFor(spec, named);
+    const full = definitionFor(spec, named);
+    const { compat: _protocolSpecific, ...definition } = full;
     return {
-      definition: named.api === spec.api ? definitionFor(spec, named) : definition,
+      definition: named.api === spec.api ? full : definition,
       source: 'catalog',
       windowSource: 'catalog',
     };
@@ -278,8 +279,9 @@ function bareModelId(id: string): string {
 }
 
 /**
- * 目录里与 modelId 同名的模型（不区分大小写、忽略 vendor/ 前缀）：同协议优先，再跨协议、跨 provider；
- * 同一层里本协议的官方 provider 优先，其次任一官方 provider，再取目录顺序第一个。
+ * 目录里与 modelId 同名的模型（不区分大小写、忽略 vendor/ 前缀），跨协议、跨 provider：
+ * 官方 provider 优先（本协议的官方在前），其次非官方里同协议的，再取目录顺序第一个。
+ * 不带前缀的名字多是官方模型经中转转发，官方规格才是真实规格；窗口估大会直接超限报错，官方值更稳妥。
  */
 export function findSameNamedModel<T extends { id: string; provider: string; api: string }>(
   candidates: readonly T[],
@@ -289,8 +291,13 @@ export function findSameNamedModel<T extends { id: string; provider: string; api
   const wanted = bareModelId(modelId);
   const officials = new Set(Object.values(OFFICIAL_PROVIDERS));
   const rank = (model: T) =>
-    (model.api === api ? 0 : 3) +
-    (model.provider === OFFICIAL_PROVIDERS[api] ? 0 : officials.has(model.provider) ? 1 : 2);
+    model.provider === OFFICIAL_PROVIDERS[api]
+      ? 0
+      : officials.has(model.provider)
+        ? 1
+        : model.api === api
+          ? 2
+          : 3;
   let best: T | undefined;
   for (const model of candidates) {
     if (bareModelId(model.id) !== wanted) continue;
