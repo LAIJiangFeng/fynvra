@@ -58,6 +58,7 @@ Renderer(React) ⇄ preload(typed API) ⇄ Main(ipc/*, services/*) ⇄ Agent Wor
 - Main 是权威：settings、roles、workspaces、orchestration 状态、worktree 注册表都在 Main 持久化。
 - 一个 Agent Worker 进程托管多个 pi 会话。Main ⇄ Worker 走 `parentPort` 消息，协议是 tagged union `AgentCommand` / `AgentWorkerEvent`，每条事件带 `identity: { sessionId, generation }` 和递增 `seq`。
 - Renderer 只持有投影；pi jsonl 是会话正文权威源。
+- macOS / Linux 启动时 Main 先用交互式登录 shell 读一次 PATH 合并进 `process.env.PATH`（`services/shellEnv.ts`，失败只记警告），再启动 Agent Worker，worker 的 bash 与 run_checks 由此继承。
 
 ## 4. 领域模型（`packages/core`，`@fynvra/core`）
 
