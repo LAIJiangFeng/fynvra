@@ -684,6 +684,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (task.status === 'completed' || task.status === 'abandoned') {
       return fail(`task ${task.id} is ${task.status}; dispatch a new task for further work`);
     }
+    if (task.status === 'failed') {
+      return fail(
+        `task ${task.id} failed and its attempt is settled, so the worker can no longer report; use reject_work { dispatch_id } to retry it on the same worktree`
+      );
+    }
     if (!isInPlace(dispatch) && found.worktree === undefined) return fail(cleanedUp(dispatch));
     if (task.workflow !== undefined) {
       // 工作流的每个节点是独立会话：只能指挥运行中的节点

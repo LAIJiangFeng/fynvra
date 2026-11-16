@@ -42,6 +42,11 @@ describe('ORCHESTRATOR_PROMPT', () => {
   it('describes what happens after reject_work', () => {
     expect(ORCHESTRATOR_PROMPT).toContain('new attempt with a new dispatch_id');
     expect(ORCHESTRATOR_PROMPT).toContain('must call report_done again');
+    expect(ORCHESTRATOR_PROMPT).toContain('while the attempt is still running (task in-progress)');
+    expect(ORCHESTRATOR_PROMPT).toContain(
+      'A failed or interrupted attempt is settled and its worker can no longer report, so retry it with reject_work'
+    );
+    expect(ORCHESTRATOR_PROMPT).not.toContain('which also wakes a worker');
     expect(ORCHESTRATOR_PROMPT).toContain("never on the worker's word alone");
   });
 
