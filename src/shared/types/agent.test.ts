@@ -89,6 +89,20 @@ describe('parseAgentCommand', () => {
       expect(parseAgentCommand(withSpec({ instructionFile: invalid }))).toBeNull();
     }
   });
+  it('accepts an optional compaction threshold within range', () => {
+    for (const tokens of [64_000, 200_000, 2_000_000]) {
+      expect(parseAgentCommand(withSpec({ compactionThresholdTokens: tokens }))).toEqual(
+        withSpec({ compactionThresholdTokens: tokens })
+      );
+    }
+    for (const invalid of [63_999, 2_000_001, 100_000.5, '200000', null]) {
+      expect(parseAgentCommand(withSpec({ compactionThresholdTokens: invalid }))).toBeNull();
+    }
+    const parsed = parseAgentCommand(withSpec({}));
+    expect(parsed?.type === 'spawn-session' && parsed.spec).not.toHaveProperty(
+      'compactionThresholdTokens'
+    );
+  });
   const valid: AgentCommand[] = [
     { type: 'spawn-session', identity, spec },
     {

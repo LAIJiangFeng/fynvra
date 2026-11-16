@@ -22,7 +22,12 @@ import {
 } from './chat';
 import { parseCompactionState, parseContextRuntime, parseRetryState } from './contextRuntime';
 import { isPluginProviderName, isRegistryId } from './plugins';
-import { type CompactionStrategy, isCompactionStrategy, isCompactionTimeoutMs } from './settings';
+import {
+  type CompactionStrategy,
+  isCompactionStrategy,
+  isCompactionThresholdTokens,
+  isCompactionTimeoutMs,
+} from './settings';
 
 /**
  * Main ⇄ Agent Worker（utilityProcess，`src/agent`）的消息协议（ARCHITECTURE §3）。
@@ -172,6 +177,8 @@ export interface SpawnSessionSpec {
    */
   compactionStrategy?: CompactionStrategy;
   compactionTimeoutMs?: number;
+  /** 用户设定的自动压缩阈值（token）；缺省按模型窗口自动决定。Main 在 spawn 时读取设置 */
+  compactionThresholdTokens?: number;
   /**
    * 会话所在工作区没有 git（`vcs: 'none'`），编排原地进行：orchestrator 的提示词追加非 git 模式说明，
    * 派发的 worker 换用不提交的契约。Main 每次 spawn 时按工作区决定
@@ -855,6 +862,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
         : null;
   if (compactionStrategy === null || !isOptional(record.compactionTimeoutMs, isCompactionTimeoutMs))
     return null;
+  if (!isOptional(record.compactionThresholdTokens, isCompactionThresholdTokens)) return null;
   const instructionFile =
     record.instructionFile === undefined ? undefined : asRecord(record.instructionFile);
   if (
@@ -900,6 +908,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     ...(compactionStrategy ? { compactionStrategy } : {}),
     ...(record.compactionTimeoutMs !== undefined
       ? { compactionTimeoutMs: record.compactionTimeoutMs as number }
+      : {}),
+    ...(record.compactionThresholdTokens !== undefined
+      ? { compactionThresholdTokens: record.compactionThresholdTokens as number }
       : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
     ...(planMode === true ? { planMode: true } : {}),

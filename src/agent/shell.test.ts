@@ -45,4 +45,34 @@ describe('createSessionSettings', () => {
       compaction: { enabled: false },
     });
   });
+
+  const model = (id: string, contextWindow: number) => ({ provider: 'p', id, contextWindow });
+  const threshold = (
+    settings: ReturnType<typeof createSessionSettings>,
+    m: ReturnType<typeof model>
+  ) => m.contextWindow - settings.getCompactionSettings(m).reserveTokens;
+
+  it('caps the native threshold at the configured token count', () => {
+    const settings = createSessionSettings(undefined, 'native', 200_000);
+    expect(threshold(settings, model('big', 1_000_000))).toBe(200_000);
+    expect(settings.getCompactionSettings(model('big', 1_000_000)).enabled).toBe(true);
+  });
+
+  it('never raises the threshold above the default window minus reserve', () => {
+    const settings = createSessionSettings(undefined, 'native', 300_000);
+    expect(threshold(settings, model('mid', 272_000))).toBe(255_616);
+  });
+
+  it('recomputes for the current model after a switch to a smaller window', () => {
+    const settings = createSessionSettings(undefined, 'native', 200_000);
+    expect(threshold(settings, model('big', 1_000_000))).toBe(200_000);
+    expect(threshold(settings, model('small', 128_000))).toBe(128_000 - 16_384);
+    expect(threshold(settings, model('mid', 400_000))).toBe(200_000);
+  });
+
+  it('keeps the default reserve without a threshold', () => {
+    const settings = createSessionSettings(undefined, 'native');
+    expect(threshold(settings, model('big', 1_000_000))).toBe(1_000_000 - 16_384);
+    expect(threshold(settings, model('mid', 272_000))).toBe(255_616);
+  });
 });

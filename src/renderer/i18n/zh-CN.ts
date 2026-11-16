@@ -861,6 +861,10 @@ export const zhCN = {
       compactionSelected: '设置选择的策略',
       compactionTimeout: '原生压缩总等待时限（秒）',
       compactionTimeoutHint: '30～1800 秒，默认 600；超时后保留会话和消息，可手动重试',
+      compactionThreshold: '自动压缩阈值（k token）',
+      compactionThresholdAuto: '自动',
+      compactionThresholdHint:
+        '上下文达到该值时自动压缩，64～2000（单位千 token，填 200 即 200,000）；留空则按模型窗口自动决定；高于模型可用窗口时以模型上限为准。对之后新建或重新加载的会话生效，无需重启应用；已打开的会话沿用原值',
       compactionNative: 'pi 原生自动压缩',
       compactionMagic: 'Magic Context（默认）',
       compactionOff: '关闭自动压缩',
