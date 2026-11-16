@@ -92,8 +92,9 @@ export function fynvraBindSession(pi, sessionId, capture) {
         }
         return scoped.isCurrent() ? result : undefined;
       } catch (error) {
-        if (!shutdown && scoped.isCurrent()) operation.onFailure(event === "session_start" ? "startup" : "context");
-        if (isTool) throw error;
+        if (!shutdown && scoped.isCurrent()) operation.onFailure(event === "session_start" ? "startup" : event === "command" ? "runtime" : "context");
+        // Tools and commands report their own failure (tool result / chat notice).
+        if (isTool || event === "command") throw error;
         // The host aborts the run and checks readiness after the SDK context transform.
         return;
       } finally {
@@ -112,9 +113,16 @@ export function fynvraBindSession(pi, sessionId, capture) {
         assertFynvraOperation();
         pi.registerTool({ ...tool, execute: wrap(tool.execute, "tool", true) });
       };
-      // Fynvra exposes no terminal plugin commands; do not register hidden
-      // recomp/wrapup/update entry points that bypass the hosted lifecycle.
-      if (key === "registerCommand" || key === "registerShortcut") return () => {};
+      // Only ctx-wrapup is exposed: it backs the status-bar "Compact" button and
+      // runs inside the hosted lifecycle (boot/operation checks, guarded ctx,
+      // Stop/interrupt signal, onFailure). Other terminal commands (recomp,
+      // upgrade, flush, dream, ...) stay unregistered so nothing bypasses it.
+      if (key === "registerCommand") return (name, command) => {
+        if (name !== "ctx-wrapup") return;
+        assertFynvraOperation();
+        pi.registerCommand(name, { ...command, handler: wrap(command.handler, "command") });
+      };
+      if (key === "registerShortcut") return () => {};
       const value = Reflect.get(pi, key, pi);
       if (typeof value !== "function") return value;
       return (...args) => {

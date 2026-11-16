@@ -12685,7 +12685,19 @@ function createCtxStatusSender(pi, ctx, signal) {
 function sendCtxStatusMessage(pi, content, details, ctx, signal) {
   // Desktop fallback is the host's fixed, nonblocking warning event. Terminal
   // status entries must not persist provider errors into the Pi transcript.
-  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") return;
+  if (process.env.MAGIC_CONTEXT_FYNVRA_HOST === "1") {
+    // Fynvra patch 20: a host command ctx (hasUI only for Fynvra's command
+    // scope) shows the status as a chat notice; still nothing in the transcript.
+    if (signal?.aborted)
+      return;
+    try {
+      if (ctx?.hasUI) {
+        const level = content.level === "error" || content.level === "warning" ? content.level : "info";
+        ctx.ui.notify(content.text, level);
+      }
+    } catch {}
+    return;
+  }
   if (signal?.aborted)
     return;
   const data = {
