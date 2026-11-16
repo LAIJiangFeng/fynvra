@@ -116,7 +116,7 @@ const WORKER_SHARED_RULES = [
 ];
 
 function reportDoneRule(files: string): string {
-  return `- When you finish, or cannot finish, call \`report_done\` exactly once with outcome \`succeeded\` or \`failed\`, a concise summary (what changed, how you verified it, what is left) and ${files}. It is the only way your coordinator learns the result; it does not read your final chat message. Then stop. If the coordinator later sends review feedback, address it and call \`report_done\` once more for that round.`;
+  return `- When you finish, or cannot finish, call \`report_done\` exactly once with outcome \`succeeded\` or \`failed\`, a summary written in the language of your brief that starts with one or two plain sentences saying what you changed or found (the user reads this first line as the task's result), followed by a blank line and then the details: how you verified it and what is left, and ${files}. It is the only way your coordinator learns the result; it does not read your final chat message. Then stop. If the coordinator later sends review feedback, address it and call \`report_done\` once more for that round.`;
 }
 
 /** worker 会话的契约段：必须且仅一次 report_done、用 ask_coordinator 提问、不写报告文件、agent 消息不等于用户授权 */
