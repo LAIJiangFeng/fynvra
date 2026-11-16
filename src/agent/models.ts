@@ -228,11 +228,12 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
 /**
  * 模型在 pi 里的定义与档位来源：
  * 1. 目录里同协议、同 id 的模型（官方 provider 优先）→ `catalog`；
+ *    没有就找任一协议、任一 provider 的同名模型（{@link findSameNamedModel}）→ 也是 `catalog`；
+ *    跨协议时不带它的兼容开关（compat 按协议各不相同）；
  * 2. 否则找目录里同协议最接近的模型（{@link findClosestModel}）→ `inferred:<id>`：能力照搬它（档位映射、
  *    兼容开关、上下文、价格），id 与名字仍是设置里的；是否推理也看它，不看设置里的标记；
  * 3. 都没有 → `fallback`：保守上限；设置里标了推理才是推理模型，档位按协议兜底（{@link fallbackLevelMap}）。
- * 2、3 的窗口是估计值；若目录里任一协议有同名模型（{@link findSameNamedModel}），上下文与最大输出改用它的（`catalog`），
- *    档位、兼容开关仍按本协议的推断或兜底。
+ * 2、3 的窗口是估计值（`estimated`）。
  */
 function defineModel(
   runtime: ModelRuntime,
@@ -246,21 +247,28 @@ function defineModel(
   if (exact) {
     return { definition: definitionFor(spec, exact), source: 'catalog', windowSource: 'catalog' };
   }
-  const closest = findClosestModel(catalog, spec.modelId, official);
-  const estimated = closest
-    ? {
-        definition: { ...definitionFor(spec, closest), name: spec.modelId },
-        source: `inferred:${closest.id}` as const,
-      }
-    : { definition: fallbackDefinition(spec, catalog), source: 'fallback' as const };
   const all = runtime.getModels().filter((model) => !excluded(model.provider));
   const named = findSameNamedModel(all, spec.modelId, spec.api);
-  if (!named) return { ...estimated, windowSource: 'estimated' };
-  const { contextWindow, maxTokens } = named;
+  if (named) {
+    const { compat: _protocolSpecific, ...definition } = definitionFor(spec, named);
+    return {
+      definition: named.api === spec.api ? definitionFor(spec, named) : definition,
+      source: 'catalog',
+      windowSource: 'catalog',
+    };
+  }
+  const closest = findClosestModel(catalog, spec.modelId, official);
+  if (closest) {
+    return {
+      definition: { ...definitionFor(spec, closest), name: spec.modelId },
+      source: `inferred:${closest.id}`,
+      windowSource: 'estimated',
+    };
+  }
   return {
-    ...estimated,
-    definition: { ...estimated.definition, contextWindow, maxTokens },
-    windowSource: 'catalog',
+    definition: fallbackDefinition(spec, catalog),
+    source: 'fallback',
+    windowSource: 'estimated',
   };
 }
 

@@ -192,7 +192,13 @@ describe('createModelRegistry', () => {
       const resolved = await registry.resolve({ ...relay, api: 'google-generative-ai', modelId });
       expect(resolved.windowSource).toBe('catalog');
       expect(resolved.model).toMatchObject({ id: modelId, contextWindow: 1_000_000 });
+      // 跨协议不带另一协议的兼容开关
+      expect(resolved.model.compat).toBeUndefined();
     }
+    expect(
+      registry.describe({ api: 'openai-completions', modelId: 'anthropic/claude-sonnet-5-5' })
+        .source
+    ).toBe('catalog');
     // 大小写不同也算同名，同协议的官方 provider 优先（不取网关写的 1.05M）
     const upper = await registry.resolve({
       ...relay,
@@ -501,11 +507,11 @@ describe('createModelRegistry thinking levels', () => {
   });
 
   describe('models the catalog does not list: the closest catalog model of the same api', () => {
-    it('lowercases the id', () => {
+    it('matches the catalog id case-insensitively', () => {
       expect(anthropic('Claude-Fable-5-1')).toEqual({
         thinkingLevels: piLevelsOf('anthropic', 'claude-fable-5-1'),
         defaultThinking: 'medium',
-        source: 'inferred:claude-fable-5-1',
+        source: 'catalog',
       });
     });
 
@@ -563,25 +569,25 @@ describe('createModelRegistry thinking levels', () => {
       ).toEqual(anthropic('claude-opus-4-8[1m]'));
     });
 
-    it('does not count a shared family name alone, and never looks at another api', () => {
+    it('does not count a shared family name alone; same-named models count across apis', () => {
       // 只共享「gpt」：不算接近，按协议兜底（没标推理就没有档位）
       expect(openai('gpt-7-sol')).toEqual({ thinkingLevels: [], source: 'fallback' });
-      expect(openai('gpt-oss-120b')).toEqual({ thinkingLevels: [], source: 'fallback' });
-      // 目录里 gpt-6.1-sol 只在 openai-responses 下：openai-completions 的同名模型不借它的档位
+      expect(openai('gpt-oss-999b')).toEqual({ thinkingLevels: [], source: 'fallback' });
+      // 完全同名的模型跨协议也算目录里有：gpt-6.1-sol 只在 openai-responses 下，openai-completions 照样取它
       expect(levelsOf({ api: 'openai-completions', modelId: 'gpt-6.1-sol' }).source).toBe(
-        'fallback'
+        'catalog'
       );
     });
   });
 
   describe('falling back by protocol when nothing in the catalog is close', () => {
     it("gives an Anthropic model marked as reasoning pi's levels for the current Claude generation", () => {
-      expect(anthropic('glm-4.7', true)).toEqual({
+      expect(anthropic('acme-relay-model', true)).toEqual({
         thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
         defaultThinking: 'medium',
         source: 'fallback',
       });
-      expect(anthropic('glm-4.7', true).thinkingLevels).toEqual(
+      expect(anthropic('acme-relay-model', true).thinkingLevels).toEqual(
         piLevelsOf('anthropic', 'claude-opus-5-5')
       );
     });
@@ -612,7 +618,7 @@ describe('createModelRegistry thinking levels', () => {
       expect(
         levelsOf({ api: 'mystery-api', modelId: 'm', reasoning: true }).thinkingLevels
       ).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
-      expect(anthropic('glm-4.7')).toEqual({ thinkingLevels: [], source: 'fallback' });
+      expect(anthropic('acme-relay-model')).toEqual({ thinkingLevels: [], source: 'fallback' });
       // 目录里有的模型以目录为准：标记改不了它的能力
       expect(openai('gpt-4.1', true)).toEqual({ thinkingLevels: [], source: 'catalog' });
       expect(
@@ -629,7 +635,7 @@ describe('createModelRegistry thinking levels', () => {
       { api: 'anthropic-messages', modelId: 'claude-haiku-5-5' },
       { api: 'anthropic-messages', modelId: 'claude-fable-5-1' },
       { api: 'anthropic-messages', modelId: 'claude-opus-4-8[1m]' },
-      { api: 'anthropic-messages', modelId: 'glm-4.7', reasoning: true },
+      { api: 'anthropic-messages', modelId: 'acme-relay-model', reasoning: true },
       { api: 'openai-responses', modelId: 'gpt-5.5' },
       { api: 'openai-responses', modelId: 'gpt-6.2-sol' },
       { api: 'openai-responses', modelId: 'gpt-7-sol', reasoning: true },
@@ -787,7 +793,7 @@ describe('findClosestModel', () => {
   });
 
   it('needs at least two shared segments', () => {
-    expect(findClosestModel(entries('gpt-5', 'gpt-6-sol'), 'gpt-oss-120b')).toBeUndefined();
+    expect(findClosestModel(entries('gpt-5', 'gpt-6-sol'), 'gpt-oss-999b')).toBeUndefined();
     expect(findClosestModel(entries('o3', 'o4-mini'), 'o5')).toBeUndefined();
     expect(findClosestModel(entries('gpt-6-sol'), 'gpt-6-nova')?.id).toBe('gpt-6-sol');
   });

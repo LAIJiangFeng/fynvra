@@ -720,7 +720,7 @@ export interface AgentHost {
 - **模型引用与运行时 provider 键**：`ResolvedModelSpec.providerId` 是运行时 provider 键（`fynvra-` + baseUrl 与 key 的哈希），
   worker 按它注册 pi provider，不是设置里的服务 id；`ref` 是实际解析的设置引用（ref 缺省时即选中的默认模型），
   会话记录与 `SessionSummary.model` 存它，每次 spawn 再按它解析。`fastMode` 只在服务协议支持时写进 spec，Main 解析时统一校验。
-  窗口优先级（`src/agent/models.ts`）：spec 带的设置值（用户填写或导入 / 远程列表带来的真实值）> pi 目录同名条目（先同协议、再跨协议跨 provider；不区分大小写、忽略 `vendor/` 前缀，官方 provider 优先；跨协议只取上下文与最大输出）> 推断与兜底（估计值，内部压缩仍按它算）；`maxTokens` 不超过 `contextWindow`，来源记为 `windowSource`。
+  窗口优先级（`src/agent/models.ts`）：spec 带的设置值（用户填写或导入 / 远程列表带来的真实值）> pi 目录同名条目（先同协议、再跨协议跨 provider；不区分大小写、忽略 `vendor/` 前缀，官方 provider 优先；能力照搬它，跨协议时不带它的 compat）> 推断与兜底（估计值，内部压缩仍按它算）；`maxTokens` 不超过 `contextWindow`，来源记为 `windowSource`。
 - **接线**（`src/main/index.ts` 调 `connectOrchestration`）：`setLauncher(agentHost.implementsLauncher())`；两个 Host 工厂在
   host 调用到达时按会话查编排注册表（Dispatch 在 `createWorkerSession` resolve 之后才写入）；worker 会话的 `parentSessionId`
   经 `Run.coordinatorSessionId` 反查（launcher 入参只有 runId）；启动或恢复任何会话之前 `await openAll()`。
