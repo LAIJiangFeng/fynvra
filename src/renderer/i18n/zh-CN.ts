@@ -228,7 +228,13 @@ export const zhCN = {
   },
   sessions: {
     title: '会话',
-    status: { idle: '空闲', running: '运行中', 'waiting-approval': '等待审批', error: '出错' },
+    status: {
+      idle: '空闲',
+      running: '运行中',
+      'waiting-approval': '等待审批',
+      error: '出错',
+      awaitingWorkers: '等待 worker 回复',
+    },
     loadFailed: '读取会话失败：{error}',
     empty: '暂无会话',
     noMatch: '没有匹配的会话',
@@ -252,6 +258,7 @@ export const zhCN = {
       unmergedCount: '{count} 个会话的 worktree 有未合并或未提交的改动，不勾选下项时会跳过它们',
       forceUnmerged: '也删除未合并的改动',
       unmergedSkipped: '有未合并的改动，已跳过',
+      awaitingWorkersSkipped: '{count} 个主 agent 仍有 worker 在运行，已跳过',
       archiving: '正在归档 {done}/{total}…',
       removing: '正在删除 {done}/{total}…',
       archivePartial: '已归档 {done} 个，{failed} 个未处理（{reasons}）',

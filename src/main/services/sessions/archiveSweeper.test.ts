@@ -85,6 +85,20 @@ describe('planArchiveSweep（注入时钟的纯函数）', () => {
     );
   });
 
+  it('还有 worker 在跑的主 agent 会话不归档', () => {
+    const sessions = [
+      candidate('coord', { updatedAt: NOW - 30 * DAY_MS }),
+      candidate('plain', { updatedAt: NOW - 30 * DAY_MS }),
+    ];
+    const plan = planArchiveSweep(
+      sessions,
+      { ...off, archiveIdleDays: 7 },
+      NOW,
+      (id) => id === 'coord'
+    );
+    expect(plan.archive).toEqual(['plain']);
+  });
+
   it('时钟往回拨（最后更新在「现在」之后）：不归档', () => {
     const sessions = [candidate('future', { updatedAt: NOW + DAY_MS })];
     expect(planArchiveSweep(sessions, { ...off, archiveIdleDays: 7 }, NOW).archive).toEqual([]);
@@ -124,6 +138,25 @@ describe('createArchiveSweeper', () => {
     expect(await sweeper.sweep()).toEqual({ archived: 1, removed: 1 });
     expect(deps.archive.mock.calls).toEqual([['idle']]);
     expect(deps.remove.mock.calls).toEqual([['expired']]);
+  });
+
+  it('sweep 跳过注入的 hasActiveWork 为真的会话', async () => {
+    const sessions = [
+      candidate('coord', { updatedAt: NOW - 8 * DAY_MS }),
+      candidate('idle', { updatedAt: NOW - 8 * DAY_MS }),
+    ];
+    const records = new Map(sessions.map((session) => [session.id, session]));
+    const archive = vi.fn(async (): Promise<IpcResult> => ({ ok: true }));
+    const sweeper = createArchiveSweeper({
+      store: { all: () => [...records.values()], get: (id) => records.get(id) },
+      archive,
+      remove: async () => ({ ok: true }),
+      preferences: () => ({ archiveIdleDays: 7, deleteArchivedDays: 30 }),
+      hasActiveWork: (id) => id === 'coord',
+      now: () => NOW,
+    });
+    expect(await sweeper.sweep()).toEqual({ archived: 1, removed: 0 });
+    expect(archive.mock.calls).toEqual([['idle']]);
   });
 
   it('动手前按最新记录再判一次：计划之后开始运行或已被删除的会话跳过', async () => {

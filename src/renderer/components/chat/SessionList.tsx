@@ -77,11 +77,15 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   // 已不在列表里的（别处删掉的）不算
   const picked = [...all, ...archived].filter((session) => selected.has(session.id));
   const pickedActive = picked.filter((session) => session.archivedAt === undefined);
-  // 全选：当前显示的、能操作的会话（运行中、等审批的未归档会话不勾）
+  // 全选：当前显示的、能操作的会话（运行中、等审批、还有 worker 在跑的未归档会话不勾）
   const selectable = () => {
     const state = useSessionsStore.getState();
     return [...sessions, ...(archivedOpen ? archived : [])]
-      .filter((session) => session.archivedAt !== undefined || !isBusy(statusOf(state, session.id)))
+      .filter(
+        (session) =>
+          session.archivedAt !== undefined ||
+          (!isBusy(statusOf(state, session.id)) && !session.awaitingWorkers)
+      )
       .map((session) => session.id);
   };
   const allPicked = picked.length > 0 && selectable().every((id) => selected.has(id));
@@ -421,7 +425,7 @@ const SessionRow = memo(function SessionRow({
         }}
         className={cn(rowClass, selecting && pickDisabled && 'cursor-default')}
       >
-        <StatusDot status={status} />
+        <StatusDot status={status} awaitingWorkers={session.awaitingWorkers} />
         <span className="min-w-0 flex-1">
           {/* Only the title reserves space for the hover actions; metadata gets the full width. */}
           <span className="block h-7 truncate pr-14 leading-7" title={session.title}>

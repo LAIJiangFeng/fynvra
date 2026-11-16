@@ -19,6 +19,7 @@ import {
   type RoleStore,
   recordWorkflowNodeReport,
   settleDispatch,
+  type Task,
   type Workflow,
   type Workspace,
   workflowRunningDispatchIds,
@@ -131,10 +132,26 @@ export interface OrchestrationService {
   pendingMessagesTo(sessionId: string): Message[];
   /** Current attempts only; acknowledged reports remain reviewable until the task changes state. */
   coordinatorWork(sessionId: string): CoordinatorWork;
+  /** 该主 agent 会话的 Run 里有未完成的任务（口径同 {@link isIdle}）；状态未加载时 false。 */
+  hasActiveWork(sessionId: string): boolean;
+  /** 有未完成任务的主 agent 会话（口径同 {@link hasActiveWork}），注册表做翻转检测用。 */
+  activeCoordinators(): Set<string>;
   /** 确认已投递的消息（尽力而为，幂等）。 */
   ackMessages(ids: readonly string[]): void;
   /** 状态已加载且没有排队 / 进行中 / 待审的任务、没有运行中的工作流节点：可以换掉服务（如工作区 vcs 变了）。 */
   isIdle(): boolean;
+}
+
+/** 排队 / 进行中 / 待审，或工作流还有运行中节点、待启动意图的任务 */
+function isActiveTask(task: Task): boolean {
+  return (
+    task.status === 'todo' ||
+    task.status === 'in-progress' ||
+    task.status === 'in-review' ||
+    (task.workflow !== undefined &&
+      (task.workflow.launches.length > 0 ||
+        task.workflow.nodes.some((node) => node.status === 'running')))
+  );
 }
 
 function observe<T extends { id: string }>(
@@ -450,6 +467,19 @@ export function createOrchestrationService(
     };
   };
 
+  const activeCoordinators = (): Set<string> => {
+    if (!loaded) return new Set();
+    const runIds = new Set(store.tasks.list(isActiveTask).map((task) => task.runId));
+    for (const id of pendingDispatches) {
+      const taskId = store.dispatches.get(id)?.taskId;
+      const runId = taskId === undefined ? undefined : store.tasks.get(taskId)?.runId;
+      if (runId !== undefined) runIds.add(runId);
+    }
+    return new Set(
+      store.runs.list((run) => runIds.has(run.id)).map((run) => run.coordinatorSessionId)
+    );
+  };
+
   return {
     workspace,
     ready,
@@ -557,17 +587,7 @@ export function createOrchestrationService(
     },
 
     isIdle: () =>
-      loaded &&
-      pendingDispatches.size === 0 &&
-      store.tasks.list(
-        (task) =>
-          task.status === 'todo' ||
-          task.status === 'in-progress' ||
-          task.status === 'in-review' ||
-          (task.workflow !== undefined &&
-            (task.workflow.launches.length > 0 ||
-              task.workflow.nodes.some((node) => node.status === 'running')))
-      ).length === 0,
+      loaded && pendingDispatches.size === 0 && store.tasks.list(isActiveTask).length === 0,
 
     pendingMessagesTo: (sessionId) => (loaded ? inbox.peek({ to: sessionId }) : []),
 
@@ -616,6 +636,9 @@ export function createOrchestrationService(
       );
       return { messages, reviews };
     },
+
+    hasActiveWork: (sessionId) => activeCoordinators().has(sessionId),
+    activeCoordinators,
 
     ackMessages: (ids) => {
       for (const id of ids) inbox.ack(id);

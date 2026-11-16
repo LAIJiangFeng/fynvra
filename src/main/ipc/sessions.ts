@@ -119,6 +119,7 @@ export function getArchiveSweeper(): ArchiveSweeper {
     archive: (sessionId) => getSessionArchive().archive(sessionId),
     remove: (sessionId) => getAgentHost().remove(sessionId),
     preferences: sessionPreferences,
+    hasActiveWork: (sessionId) => getOrchestrationRegistry().hasActiveWork(sessionId),
   });
   return archiveSweeper;
 }

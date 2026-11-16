@@ -390,6 +390,28 @@ describe('createOrchestrationService', () => {
     }
   );
 
+  it.each([
+    ['todo', true],
+    ['in-progress', true],
+    ['in-review', true],
+    ['completed', false],
+    ['failed', false],
+    ['abandoned', false],
+  ] as const)('hasActiveWork for restored task status %s is %s', async (status, active) => {
+    const first = make();
+    await dispatchOn(first);
+    await first.flush();
+    const snapshot = JSON.parse(readFileSync(statePath, 'utf8'));
+    snapshot.tasks[0].status = status;
+    writeFileSync(statePath, JSON.stringify(snapshot));
+    const restored = make();
+    expect(restored.hasActiveWork('session_coord')).toBe(false); // 未加载
+    await restored.ready;
+    expect(restored.hasActiveWork('session_coord')).toBe(active);
+    expect(restored.activeCoordinators()).toEqual(new Set(active ? ['session_coord'] : []));
+    expect(restored.hasActiveWork('session_other')).toBe(false);
+  });
+
   it('快照加载完成前 workerHostFor 返回 null，加载后能找到磁盘上的 worker 会话', async () => {
     const first = make();
     await dispatchOn(first);

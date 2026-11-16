@@ -52,6 +52,11 @@ export interface SessionSummary {
   branch?: string;
   /** 归档时间（手动归档或闲置扫描）；恢复或会话再次运行时清除。`sessions:list` 默认不列归档的会话 */
   archivedAt?: number;
+  /**
+   * 主 agent 会话作为协调者的 Run 里还有未完成的编排任务（Main 现算，不落盘）：空闲时显示「等待 worker 回复」，
+   * 不被批量归档、自动归档。没有时省略
+   */
+  awaitingWorkers?: true;
 }
 export type ChatRole = 'user' | 'assistant';
 export interface ChatToolCall {

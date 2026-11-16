@@ -191,7 +191,8 @@ export interface SessionsState extends ChatProjection {
   removeSession(sessionId: string, force?: boolean): Promise<IpcResult>;
   /**
    * 批量归档 / 删除工作区里的会话：逐个调用单个会话的操作，期间合并列表刷新，结束后只重拉一次；
-   * 运行中、等审批的会话照单个操作的规则拒绝，失败汇总成一条提示。另一批进行中时什么都不做。
+   * 运行中、等审批的会话照单个操作的规则拒绝，失败汇总成一条提示；还有 worker 在跑的主 agent（awaitingWorkers）跳过并提示。
+   * 另一批进行中时什么都不做。
    */
   archiveSessions(workspaceId: string, sessionIds: readonly string[]): Promise<BulkResult>;
   /**
@@ -201,7 +202,7 @@ export interface SessionsState extends ChatProjection {
   requestRemoveSessions(workspaceId: string, sessionIds: readonly string[]): void;
   confirmRemoveSessions(force?: boolean): Promise<BulkResult>;
   cancelRemoveSessions(): void;
-  /** 一键归档工作区里的闲置会话：跳过运行中、等审批、消息在途、正在查看与已归档的 */
+  /** 一键归档工作区里的闲置会话：跳过运行中、等审批、消息在途、正在查看与已归档的；还有 worker 在跑的主 agent 经 archiveSessions 跳过并提示 */
   archiveIdleSessions(workspaceId: string): Promise<BulkResult>;
   /** Main 推送的会话事件：攒批后经 reducer 归并 */
   receiveEvent(envelope: SessionEventEnvelope): void;
@@ -223,6 +224,8 @@ const EVENT_BATCH_MS = 16;
 export interface BulkResult {
   done: number;
   failed: number;
+  /** 批量归档时跳过的、还有 worker 在跑的主 agent 会话；没有时省略 */
+  skipped?: number;
 }
 
 async function safely<T extends object>(call: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
@@ -696,11 +699,19 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       workspaceId: string,
       sessionIds: readonly string[],
       kind: 'archive' | 'remove',
-      run: (sessionId: string) => Promise<IpcResult>
+      run: (sessionId: string) => Promise<IpcResult>,
+      skipped = 0
     ): Promise<BulkResult> {
       if (get().bulkWorkspaceId !== null) return { done: 0, failed: 0 };
+      const skippedNotice =
+        skipped > 0 ? translate('sessions.bulk.awaitingWorkersSkipped', { count: skipped }) : null;
+      const withSkipped = (result: BulkResult): BulkResult =>
+        skipped > 0 ? { ...result, skipped } : result;
       const ids = [...new Set(sessionIds)];
-      if (ids.length === 0) return { done: 0, failed: 0 };
+      if (ids.length === 0) {
+        if (skippedNotice) set({ notice: skippedNotice });
+        return withSkipped({ done: 0, failed: 0 });
+      }
       // 删正在查看的会话会跳到下一个：放到最后删，免得跳到一个马上要删的会话
       const active = get().activeSessionId;
       ids.sort((a, b) => Number(a === active) - Number(b === active));
@@ -719,16 +730,17 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         set({ bulkWorkspaceId: null, bulkProgress: null });
       }
       const failed = ids.length - done;
-      if (failed > 0) {
-        set({
-          notice: translate(
-            kind === 'archive' ? 'sessions.bulk.archivePartial' : 'sessions.bulk.removePartial',
-            { done, failed, reasons: [...reasons].join('；') }
-          ),
-        });
-      }
+      const partial =
+        failed > 0
+          ? translate(
+              kind === 'archive' ? 'sessions.bulk.archivePartial' : 'sessions.bulk.removePartial',
+              { done, failed, reasons: [...reasons].join('；') }
+            )
+          : null;
+      const notice = [partial, skippedNotice].filter((part) => part !== null).join(' ');
+      if (notice) set({ notice });
       await get().loadSessions(workspaceId);
-      return { done, failed };
+      return withSkipped({ done, failed });
     }
 
     return {
@@ -1449,10 +1461,22 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
 
       unarchiveSession: (sessionId) => setArchived(sessionId, false),
 
-      archiveSessions: (workspaceId, sessionIds) =>
-        runBulk(workspaceId, sessionIds, 'archive', (sessionId) =>
-          setArchived(sessionId, true, true)
-        ),
+      archiveSessions(workspaceId, sessionIds) {
+        // 主 agent 还有 worker 在跑：归档会留下没人审查、合并的「无头 worker」，批量操作跳过
+        const ids = [...new Set(sessionIds)];
+        const awaiting = (id: string) => {
+          const session = findSession(get(), id);
+          return session?.awaitingWorkers === true && session.archivedAt === undefined;
+        };
+        const kept = ids.filter((id) => !awaiting(id));
+        return runBulk(
+          workspaceId,
+          kept,
+          'archive',
+          (sessionId) => setArchived(sessionId, true, true),
+          ids.length - kept.length
+        );
+      },
 
       requestRemoveSessions(workspaceId, sessionIds) {
         if (sessionIds.length === 0) return;
