@@ -276,6 +276,8 @@ export interface CompactionState {
   durationMs?: number;
   cancelSource?: 'user' | 'timeout' | 'shutdown' | 'exception' | 'sdk';
   errorMessage?: string;
+  /** Magic manual compaction result: counts only, never plugin text. */
+  outcome?: { compactedMessages: number; appliesOnNextMessage: boolean };
 }
 export interface RetryState {
   kind: 'model' | 'summarization';

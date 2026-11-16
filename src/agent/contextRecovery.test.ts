@@ -522,7 +522,8 @@ describe('manual compaction', () => {
           JSON.stringify(context.messages).includes('<conversation>') ? 'chain summary' : 'answer'
         )
     );
-  const wrapup = (handler: () => Promise<void>): InlineExtension => ({
+  type Notifying = { ui: { notify(message: string, type?: 'info' | 'warning' | 'error'): void } };
+  const wrapup = (handler: (args: string, ctx: Notifying) => Promise<void>): InlineExtension => ({
     name: 'fake-magic',
     hidden: true,
     factory: (pi) => pi.registerCommand('ctx-wrapup', { description: 'test', handler }),
@@ -563,38 +564,93 @@ describe('manual compaction', () => {
     expect(env.latest().effectiveStrategy).toBe('native');
   });
 
-  it('healthy Magic runs /ctx-wrapup instead of session.compact()', async () => {
-    const handler = vi.fn(async () => {});
-    const env = await setup(true, 0, 'magic-context', {
+  const notifying =
+    (text: string, level: 'info' | 'error' = 'info') =>
+    async (_args: string, ctx: Notifying) => {
+      ctx.ui.notify(text, level);
+    };
+  const magicEnv = (handler: (args: string, ctx: Notifying) => Promise<void>) =>
+    setup(true, 0, 'magic-context', {
       chain: true,
       magicReady: () => new AbortController().signal,
       extensions: [wrapup(handler)],
     });
+  // Neither the command echo nor the plugin's text reaches the chat.
+  const noChatOutput = (events: FynvraSessionEvent[]) =>
+    expect(events.filter((e) => ['command', 'command_end', 'notice'].includes(e.type))).toEqual([]);
+  const compactions = (events: FynvraSessionEvent[]) =>
+    events.flatMap((e) => (e.type === 'compaction' ? [e.state] : []));
+
+  it('healthy Magic runs /ctx-wrapup as a manual compaction with a counted outcome', async () => {
+    const handler = vi.fn(
+      notifying(
+        '## Magic Wrapup\n\nWrapped up 58 messages into 3 compartments. The compacted history is queued and materializes on your next message.'
+      )
+    );
+    const env = await magicEnv(handler);
     const compact = vi.spyOn(env.session, 'compact');
     await env.recovery.compact();
     expect(handler).toHaveBeenCalledTimes(1);
     expect(compact).not.toHaveBeenCalled();
-    expect(env.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'command', text: '/ctx-wrapup' }),
-        expect.objectContaining({ type: 'command_end', aborted: false }),
-      ])
-    );
+    const [running, done] = compactions(env.events);
+    expect(running).toMatchObject({ reason: 'manual', phase: 'running' });
+    expect(done).toMatchObject({
+      operationId: running?.operationId,
+      reason: 'manual',
+      phase: 'succeeded',
+      outcome: { compactedMessages: 58, appliesOnNextMessage: true },
+    });
+    expect(env.latest().compaction).toEqual(done);
+    expect(env.latest().recoveryRequired).toBe(false);
+    noChatOutput(env.events);
     expect(compactionsIn(env.manager)).toHaveLength(0);
+    expect(env.recovery.isIdle()).toBe(true);
+  });
+
+  it('nothing to wrap up succeeds with 0 compacted messages', async () => {
+    const env = await magicEnv(
+      notifying(
+        '## Magic Wrapup — Partial\n\nNo runnable wrapup boundary is available yet; wrapped up 0 messages into 0 compartments. Run /ctx-wrapup again to continue.',
+        'error'
+      )
+    );
+    await env.recovery.compact();
+    expect(env.latest().compaction).toMatchObject({
+      phase: 'succeeded',
+      outcome: { compactedMessages: 0, appliesOnNextMessage: false },
+    });
+    noChatOutput(env.events);
+    expect(env.events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('a failed /ctx-wrapup ends the operation failed with the plugin reason', async () => {
+    const env = await magicEnv(async () => {
+      throw new Error('database is locked');
+    });
+    await expect(env.recovery.compact()).rejects.toThrow(FAILED);
+    expect(env.latest().compaction).toMatchObject({
+      reason: 'manual',
+      phase: 'failed',
+      errorMessage: '/ctx-wrapup failed: database is locked',
+    });
+    expect(env.latest().compaction).not.toHaveProperty('outcome');
+    noChatOutput(env.events);
+    expect(env.latest().recoveryRequired).toBe(false);
+    expect(env.recovery.isIdle()).toBe(true);
   });
 
   it('Stop cancels a running /ctx-wrapup', async () => {
-    const env = await setup(true, 0, 'magic-context', {
-      magicReady: () => new AbortController().signal,
-      extensions: [wrapup(() => new Promise(() => {}))],
-    });
+    const env = await magicEnv(() => new Promise(() => {}));
     const run = env.recovery.compact();
     await flush();
     expect(env.recovery.isIdle()).toBe(false);
+    expect(env.latest().compaction).toMatchObject({ reason: 'manual', phase: 'running' });
     await env.recovery.abort();
-    await run;
+    await expect(run).resolves.toBeUndefined();
     expect(env.recovery.isIdle()).toBe(true);
-    expect(env.events.findLast((e) => e.type === 'command_end')).toMatchObject({ aborted: true });
+    expect(compactions(env.events).map((state) => state.phase)).toEqual(['running', 'cancelled']);
+    expect(env.latest().compaction).toMatchObject({ phase: 'cancelled', cancelSource: 'user' });
+    noChatOutput(env.events);
   });
 
   it('Stop cancels a native manual compaction without rewriting history', async () => {

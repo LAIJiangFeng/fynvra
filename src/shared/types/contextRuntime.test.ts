@@ -50,6 +50,25 @@ describe('context runtime protocol', () => {
       expect(compactionTimeoutMsOf({ compactionTimeoutMs: value })).toBe(value);
     }
   });
+  it('keeps a valid manual compaction outcome and rejects a malformed one', () => {
+    const done = {
+      ...state,
+      reason: 'manual',
+      phase: 'succeeded',
+      attempt: 1,
+      outcome: { compactedMessages: 12, appliesOnNextMessage: true },
+    };
+    expect(parseCompactionState(done)).toEqual(done);
+    expect(parseContextRuntime({ ...snapshot, compaction: done })?.compaction).toEqual(done);
+    expect(
+      parseCompactionState({
+        ...done,
+        outcome: { compactedMessages: -1, appliesOnNextMessage: true },
+      })
+    ).toBeNull();
+    expect(parseCompactionState({ ...done, outcome: { compactedMessages: 1 } })).toBeNull();
+    expect(parseCompactionState({ ...done, outcome: 'text' })).toBeNull();
+  });
   it('preserves unknown context and actual effective strategy across the unknown boundary', () => {
     expect(parseContextRuntime(snapshot)).toEqual(snapshot);
     expect(
