@@ -326,6 +326,10 @@ export function registerSessionHandlers(
     withSessionId(raw, (sessionId) => host().retryCompaction(sessionId))
   );
 
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_COMPACT, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => host().compact(sessionId))
+  );
+
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>
     withSessionId(raw, (sessionId) => host().abort(sessionId))
   );

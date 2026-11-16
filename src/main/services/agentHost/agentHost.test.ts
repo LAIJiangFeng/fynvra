@@ -197,6 +197,41 @@ describe('context runtime snapshots and recovery', () => {
     });
     expect(env.sent('prompt')).toHaveLength(0);
   });
+
+  it('compacts an idle session on demand: loads it first, ACKs, and settles on the result', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    expect(await env.host.compact(session.id)).toEqual({ ok: true });
+    expect(env.host.get(session.id)?.status).toBe('running');
+    // Mutual exclusion while the operation is in flight.
+    expect(await env.host.compact(session.id)).toMatchObject({ ok: false });
+    await vi.waitFor(() => expect(env.sent('compact')).toHaveLength(1));
+    expect(env.sent('spawn-session')).toHaveLength(1);
+    expect(env.sent('retry-compaction')).toHaveLength(0);
+    const command = env.sent('compact')[0];
+    if (command?.type !== 'compact') throw new Error('missing compact command');
+    env.worker().emit({
+      type: 'compaction-recovery-result',
+      identity: command.identity,
+      requestId: command.requestId,
+      result: { ok: true },
+    });
+    expect(env.host.get(session.id)?.status).toBe('idle');
+    // Already loaded: the next compaction does not spawn again.
+    expect(await env.host.compact(session.id)).toEqual({ ok: true });
+    await vi.waitFor(() => expect(env.sent('compact')).toHaveLength(2));
+    expect(env.sent('spawn-session')).toHaveLength(1);
+  });
+
+  it('rejects manual compaction while the session is running', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    expect(await env.host.prompt(session.id, 'work')).toEqual({ ok: true });
+    expect(await env.host.compact(session.id)).toMatchObject({ ok: false });
+    expect(env.sent('compact')).toHaveLength(0);
+    expect(await env.host.compact('missing')).toMatchObject({ ok: false });
+  });
+
   it('keeps grey reply suggestions valid across context metadata events', async () => {
     const env = setup();
     const session = await createSession(env);

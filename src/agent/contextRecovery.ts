@@ -63,6 +63,8 @@ export function createContextRecovery({
   let recoveryAbort: AbortController | undefined;
   let magicPrepared = false;
   let running = false;
+  /** A manual native compaction is in flight: the off strategy's method chain is active only then. */
+  let manualCompacting = false;
   let resume = false;
   let resumeCompactionId: string | undefined;
   let lastCompactionId: string | undefined;
@@ -322,29 +324,14 @@ export function createContextRecovery({
       turnStopped = false;
       session.setAutoCompactionEnabled(effective === 'native');
     }
-    const command = startExtensionCommand(
-      session,
-      input.text,
-      (level, text) => events?.emit({ type: 'notice', level, text }),
-      { ...(mcpServers ? { mcpServers } : {}), ...(commandHintMs ? { hintMs: commandHintMs } : {}) }
-    );
+    const command = startCommand(input.text);
     if (command) {
       // The command consumes its input at once: a reload must not run it (e.g. a sign-in) again.
       const index = pending.indexOf(input);
       if (index >= 0) pending.splice(index, 1);
       checkpoint();
       publish();
-      events?.emit({ type: 'command', text: input.text });
-      commands.add(command);
-      let aborted = true;
-      try {
-        await command.done;
-      } finally {
-        // stopCommands() already removed a stopped command.
-        aborted = !commands.delete(command);
-      }
-      // A command typed during a turn must not settle it; that turn's agent_settled will.
-      if (!session.isStreaming) events?.emit({ type: 'command_end', aborted });
+      await runCommand(command, input.text);
       return;
     }
     const images: ImageContent[] | undefined = input.images?.map((image) => ({
@@ -366,6 +353,27 @@ export function createContextRecovery({
         }
       },
     });
+  }
+  function startCommand(text: string) {
+    return startExtensionCommand(
+      session,
+      text,
+      (level, notice) => events?.emit({ type: 'notice', level, text: notice }),
+      { ...(mcpServers ? { mcpServers } : {}), ...(commandHintMs ? { hintMs: commandHintMs } : {}) }
+    );
+  }
+  async function runCommand(command: SlashCommandRun, text: string) {
+    events?.emit({ type: 'command', text });
+    commands.add(command);
+    let aborted = true;
+    try {
+      await command.done;
+    } finally {
+      // stopCommands() already removed a stopped command.
+      aborted = !commands.delete(command);
+    }
+    // A command typed during a turn must not settle it; that turn's agent_settled will.
+    if (!session.isStreaming) events?.emit({ type: 'command_end', aborted });
   }
   async function drain(duringRecovery = false) {
     const allowed = () => !blocked || (duringRecovery && magicActive() && !recoveryFailed);
@@ -508,6 +516,46 @@ export function createContextRecovery({
         checkpoint();
         publish();
       }
+    },
+    /**
+     * Manual compaction of an idle session. Healthy Magic runs its own `/ctx-wrapup`; native, off
+     * and a Magic fallback compact through the method chain (reason `manual`). Stop resolves quietly.
+     */
+    async compact() {
+      if (blocked || recovering || running || commands.size > 0 || !session.isIdle)
+        throw new Error('The session is busy.');
+      stopped = false;
+      if (magicActive()) {
+        if (!magicReady) throw new Error(BLOCKED);
+        try {
+          magicReady();
+        } catch (error) {
+          // An unready plugin switches the session to the fallback chain (handled below).
+          if (!magicFallback) throw error;
+        }
+      }
+      if (magicActive()) {
+        const command = startCommand('/ctx-wrapup');
+        if (!command) throw new Error('Magic Context has no /ctx-wrapup command.');
+        await runCommand(command, '/ctx-wrapup');
+        return;
+      }
+      const before = compaction;
+      manualCompacting = true;
+      try {
+        await session.compact();
+      } catch (error) {
+        if (stopped || disposed) return;
+        // onEvent already reported the failed operation with this fixed text.
+        if (compaction !== before && compaction?.phase !== 'succeeded')
+          throw new Error(COMPACTION_FAILED);
+        throw error;
+      } finally {
+        manualCompacting = false;
+      }
+    },
+    manualCompacting() {
+      return manualCompacting;
     },
     async abort() {
       const stoppedCommand = stopCommands();

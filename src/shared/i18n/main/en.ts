@@ -110,6 +110,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     compactionRecoveryRequired:
       'Context recovery is required. Retry compaction to resume; your pending input is retained.',
     noCompactionRecovery: 'This session has no pending compaction recovery.',
+    compactWhileRunning:
+      'Session is running or waiting for approval; compact the context after this turn',
+    compactWhileCompacting: 'Context compaction is already in progress',
     switchWhileRunning: 'Session is running; switch models after this turn',
     planModeWorkerSession: "Dispatched worker sessions can't turn on plan mode",
     roleNotFound: 'Role not found: {id}',

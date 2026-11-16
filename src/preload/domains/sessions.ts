@@ -39,6 +39,8 @@ export interface SessionsApi {
   steer(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   /** Accept an explicit recovery attempt; progress and failure arrive through session events. */
   retryCompaction(sessionId: string): Promise<IpcResult>;
+  /** Accept a manual compaction of an idle session; progress and failure arrive through session events. */
+  compact(sessionId: string): Promise<IpcResult>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<
@@ -123,6 +125,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
     steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
     retryCompaction: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, sessionId),
+    compact: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_COMPACT, sessionId),
     abort: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ABORT, sessionId),
     history: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_HISTORY, sessionId),
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),

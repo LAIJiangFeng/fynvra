@@ -84,6 +84,12 @@ describe('context runtime protocol', () => {
       requestId: 'r1',
     });
     expect(parseAgentCommand({ type: 'retry-compaction', identity })).toBeNull();
+    expect(parseAgentCommand({ type: 'compact', identity, requestId: 'r2' })).toEqual({
+      type: 'compact',
+      identity,
+      requestId: 'r2',
+    });
+    expect(parseAgentCommand({ type: 'compact', identity, requestId: 42 })).toBeNull();
     expect(
       parseAgentWorkerEvent({
         type: 'compaction-recovery-result',

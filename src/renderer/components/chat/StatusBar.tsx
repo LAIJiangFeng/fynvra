@@ -1,7 +1,8 @@
-import { GitBranch, Zap } from 'lucide-react';
+import { GitBranch, Minimize2, Zap } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
-import { useSessionsStore } from '@/stores/sessions';
+import { isBusy, statusOf, useSessionsStore } from '@/stores/sessions';
+import { compactionActive } from '@/stores/sessions/reducer';
 import { useGeneralPreferencesStore } from '@/stores/settings';
 import { ApprovalModeStatus } from './ApprovalModePicker';
 import { contextLabel, strategyLabel, strategyNotice } from './contextDisplay';
@@ -20,6 +21,18 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const reportedModel = useSessionsStore((state) => state.runtimeBySession[sessionId]?.model);
   const branch = useSessionBranch(sessionId);
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
+  const compactContext = useSessionsStore((state) => state.compactContext);
+  const compactDisabled = useSessionsStore((state) => {
+    const runtime = state.runtimeBySession[sessionId];
+    return (
+      isBusy(statusOf(state, sessionId)) ||
+      compactionActive(runtime?.compaction) ||
+      runtime?.recoveryRequired === true ||
+      state.compactRequests[sessionId] === true ||
+      state.recoveringCompaction[sessionId] === true ||
+      state.stopping[sessionId] === true
+    );
+  });
   const t = useT();
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
   const { label, fastMode } = useSessionModel(sessionId);
@@ -55,6 +68,16 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
         </TooltipTrigger>
         <TooltipContent className="max-w-sm whitespace-pre-line">{details}</TooltipContent>
       </Tooltip>
+      <button
+        type="button"
+        aria-label={t('chat.compactNow')}
+        title={t('chat.compactNow')}
+        disabled={compactDisabled}
+        className="-ml-2 shrink-0 rounded-sm p-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        onClick={() => void compactContext(sessionId)}
+      >
+        <Minimize2 aria-hidden className="size-3" />
+      </button>
       <span className="min-w-0 max-w-full truncate" title={details}>
         {engine}
       </span>
