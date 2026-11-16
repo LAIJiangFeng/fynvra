@@ -900,6 +900,10 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionTimeout: 'Total native compaction wait limit (seconds)',
       compactionTimeoutHint:
         '30–1800 seconds, default 600. On timeout, the session and messages are kept for manual retry',
+      compactionThreshold: 'Auto-compaction threshold (k tokens)',
+      compactionThresholdAuto: 'Auto',
+      compactionThresholdHint:
+        'Compacts automatically when the context reaches this size, 64–2000 (thousands of tokens; 200 = 200,000). Leave empty to decide from the model window. Values above the model’s usable window are capped at the model limit. Applies to sessions created or reloaded afterwards, no app restart needed; open sessions keep their current value',
       compactionNative: 'pi native auto-compaction',
       compactionMagic: 'Magic Context (default)',
       compactionOff: 'Turn off auto-compaction',

@@ -171,7 +171,11 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         ...(spec.inPlace ? { inPlace: true } : {}),
         planMode: () => planMode,
         ...(extensions.length ? { extensions } : {}),
-        settingsManager: createSessionSettings(spec.shellPath, strategy),
+        settingsManager: createSessionSettings(
+          spec.shellPath,
+          strategy,
+          spec.compactionThresholdTokens
+        ),
         ...(spec.networkProxy
           ? {
               commandEnv: (env: NodeJS.ProcessEnv) =>

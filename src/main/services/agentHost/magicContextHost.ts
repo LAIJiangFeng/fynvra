@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 
@@ -17,12 +17,14 @@ import { app } from 'electron';
  * model string is a placeholder used only for Magic's chunk budget; the
  * selected model is always the current session model (see src/agent/magicContext.ts).
  */
-export function prepareMagicContextHost(): Record<string, string> {
-  const root = join(app.getPath('userData'), 'magic-context');
+export function prepareMagicContextHost(
+  compactionThresholdTokens?: number
+): Record<string, string> {
+  const root = magicContextRoot();
   const configHome = join(root, 'config');
   const configRoot = join(root, 'config-root');
   const configDir = join(configHome, 'cortexkit');
-  const configFile = join(configDir, 'magic-context.jsonc');
+  const configFile = magicContextConfigFile();
   const storageDir = join(root, 'storage');
   const artifactDir = join(root, 'artifacts');
   const logPath = join(root, 'magic-context.log');
@@ -32,7 +34,7 @@ export function prepareMagicContextHost(): Record<string, string> {
     for (const dir of [root, configHome, configDir, configRoot, storageDir, artifactDir]) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(configFile, `${JSON.stringify(HOST_CONFIG, null, 2)}\n`, 'utf8');
+    writeConfigAtomically(configFile, compactionThresholdTokens);
   } catch (error) {
     // The worker blocks Magic requests and reports a recoverable session warning;
     // failure here must not take the whole app down.
@@ -53,6 +55,48 @@ export function prepareMagicContextHost(): Record<string, string> {
     MAGIC_CONTEXT_ARTIFACT_DIR: artifactDir,
     MAGIC_CONTEXT_LOG_PATH: logPath,
   };
+}
+
+/**
+ * The plugin rereads the config file each time a session loads, so rewriting it
+ * before a spawn makes a changed threshold apply to new (and reloaded) sessions
+ * without restarting the worker. Running sessions keep what they loaded.
+ */
+export function writeMagicContextConfig(compactionThresholdTokens?: number): void {
+  try {
+    writeConfigAtomically(magicContextConfigFile(), compactionThresholdTokens);
+  } catch (error) {
+    // Keep the previous file: the session still loads, just with the old threshold.
+    console.warn(`[magic-context] could not update host config: ${String(error)}`);
+  }
+}
+
+/** The generated config; without a threshold it is exactly the fixed host policy. */
+export function magicContextHostConfig(compactionThresholdTokens?: number) {
+  return compactionThresholdTokens === undefined
+    ? HOST_CONFIG
+    : { ...HOST_CONFIG, execute_threshold_tokens: { default: compactionThresholdTokens } };
+}
+
+function magicContextRoot(): string {
+  return join(app.getPath('userData'), 'magic-context');
+}
+
+function magicContextConfigFile(): string {
+  return join(magicContextRoot(), 'config', 'cortexkit', 'magic-context.jsonc');
+}
+
+/** Temp file + rename so a worker loading a session never reads a half-written config. */
+function writeConfigAtomically(configFile: string, compactionThresholdTokens?: number): void {
+  const temp = `${configFile}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const content = `${JSON.stringify(magicContextHostConfig(compactionThresholdTokens), null, 2)}\n`;
+  try {
+    writeFileSync(temp, content, 'utf8');
+    renameSync(temp, configFile);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 /** Packaged: extraResources/magic-context. Dev: the fixed app-owned vendor tree. */

@@ -9,13 +9,16 @@ import type { WorkerProcess } from './workerClient';
  * PI_CODING_AGENT_DIR 指向 fynvra 的 agentDir：pi 在模块加载时读它，不设会落到用户的 ~/.pi/agent。
  * 模型 key 来自 providers.json，只经 spawn-session 交给 worker，不走环境变量。
  */
-export function forkAgentWorker(agentDir: string): WorkerProcess {
+export function forkAgentWorker(
+  agentDir: string,
+  compactionThresholdTokens?: number
+): WorkerProcess {
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: 'fynvra-agent-worker',
     env: {
       ...process.env,
       PI_CODING_AGENT_DIR: agentDir,
-      ...prepareMagicContextHost(),
+      ...prepareMagicContextHost(compactionThresholdTokens),
     },
   });
   return {

@@ -195,6 +195,8 @@ export interface Preferences {
   compactionStrategy?: CompactionStrategy;
   /** Native compaction total deadline, including retries and backoff; snapshotted at spawn. */
   compactionTimeoutMs?: number;
+  /** 自动压缩阈值（token）；没写过时按模型窗口自动决定（读取用 {@link compactionThresholdTokensOf}） */
+  compactionThresholdTokens?: number;
   // --- appearance ---（没写过时取 DEFAULT_APPEARANCE_PREFERENCES；读取用 appearancePreferencesOf）
   /** 界面字体：CSS font-family 列表；没写过时用内置字体栈 */
   uiFontFamily?: string;
@@ -298,6 +300,27 @@ export function compactionTimeoutMsOf(
   return isCompactionTimeoutMs(preferences.compactionTimeoutMs)
     ? preferences.compactionTimeoutMs
     : DEFAULT_COMPACTION_TIMEOUT_MS;
+}
+
+export const MIN_COMPACTION_THRESHOLD_TOKENS = 64_000;
+export const MAX_COMPACTION_THRESHOLD_TOKENS = 2_000_000;
+
+export function isCompactionThresholdTokens(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= MIN_COMPACTION_THRESHOLD_TOKENS &&
+    value <= MAX_COMPACTION_THRESHOLD_TOKENS
+  );
+}
+
+/** 用户设定的自动压缩阈值；undefined 表示按模型窗口自动决定 */
+export function compactionThresholdTokensOf(
+  preferences: Pick<Preferences, 'compactionThresholdTokens'>
+): number | undefined {
+  return isCompactionThresholdTokens(preferences.compactionThresholdTokens)
+    ? preferences.compactionThresholdTokens
+    : undefined;
 }
 
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
@@ -599,6 +622,9 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(isCompactionTimeoutMs(record?.compactionTimeoutMs)
       ? { compactionTimeoutMs: record.compactionTimeoutMs }
       : {}),
+    ...(isCompactionThresholdTokens(record?.compactionThresholdTokens)
+      ? { compactionThresholdTokens: record.compactionThresholdTokens }
+      : {}),
     ...(isCompactionStrategy(compactionStrategy) ? { compactionStrategy } : {}),
   };
 }
@@ -712,6 +738,11 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
       case 'compactionTimeoutMs':
         if (!isCompactionTimeoutMs(value)) return null;
         patch.compactionTimeoutMs = value;
+        break;
+      case 'compactionThresholdTokens':
+        // undefined 是恢复自动（删掉该字段）
+        if (value !== undefined && !isCompactionThresholdTokens(value)) return null;
+        patch.compactionThresholdTokens = value;
         break;
       case 'compactionStrategy':
         if (!isCompactionStrategy(value)) return null;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ARCHIVE_IDLE_DAYS,
+  compactionThresholdTokensOf,
   createDefaultSettings,
   DEFAULT_PREFERENCES,
   DELETE_ARCHIVED_DAYS,
@@ -15,6 +16,38 @@ import {
   sidebarOpenOf,
   timelinePreferencesOf,
 } from './settings';
+
+describe('preferences.compactionThresholdTokens（自动压缩阈值）', () => {
+  it('只保留 64k–2M 的整数，其余视为自动', () => {
+    for (const tokens of [64_000, 200_000, 2_000_000]) {
+      expect(
+        parsePreferences({ compactionThresholdTokens: tokens }).compactionThresholdTokens
+      ).toBe(tokens);
+      expect(compactionThresholdTokensOf({ compactionThresholdTokens: tokens })).toBe(tokens);
+    }
+    for (const invalid of [63_999, 2_000_001, 100_000.5, '200000', null]) {
+      expect(parsePreferences({ compactionThresholdTokens: invalid })).not.toHaveProperty(
+        'compactionThresholdTokens'
+      );
+    }
+    expect(compactionThresholdTokensOf({})).toBeUndefined();
+  });
+
+  it('patch 严格校验，undefined 清除', () => {
+    expect(parsePreferencesPatch({ compactionThresholdTokens: 64_000 })).toEqual({
+      compactionThresholdTokens: 64_000,
+    });
+    expect(parsePreferencesPatch({ compactionThresholdTokens: 2_000_000 })).toEqual({
+      compactionThresholdTokens: 2_000_000,
+    });
+    const cleared = parsePreferencesPatch({ compactionThresholdTokens: undefined });
+    expect(cleared).toEqual({ compactionThresholdTokens: undefined });
+    expect(cleared).toHaveProperty('compactionThresholdTokens');
+    for (const invalid of [63_999, 2_000_001, 100_000.5, '200000', null]) {
+      expect(parsePreferencesPatch({ compactionThresholdTokens: invalid })).toBeNull();
+    }
+  });
+});
 
 const workspace = {
   id: 'ws-1',

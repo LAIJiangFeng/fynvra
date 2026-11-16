@@ -233,6 +233,21 @@ describe('context runtime snapshots and recovery', () => {
       suggestion: { text: 'Show the next step.', roundId: 1 },
     });
   });
+  it('passes the configured compaction threshold into the spawn spec only when set', async () => {
+    let threshold: number | undefined = 200_000;
+    const env = setup({ resolveCompactionThresholdTokens: () => threshold });
+    await env.host.prompt((await createSession(env)).id, 'first');
+    expect(env.sent('spawn-session')[0]).toMatchObject({
+      spec: { compactionThresholdTokens: 200_000 },
+    });
+    threshold = undefined;
+    const other = setup({ resolveCompactionThresholdTokens: () => threshold });
+    await other.host.prompt((await createSession(other)).id, 'first');
+    expect((other.sent('spawn-session')[0] as { spec: object }).spec).not.toHaveProperty(
+      'compactionThresholdTokens'
+    );
+  });
+
   it('snapshots spawn policy, forwards ordered state, and accepts one explicit recovery without awaiting compaction', async () => {
     let timeout = 30_000;
     const env = setup({

@@ -16,6 +16,7 @@ import {
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   compactionStrategyOf,
+  compactionThresholdTokensOf,
   compactionTimeoutMsOf,
   sessionPreferencesOf,
 } from '@shared/types/settings';
@@ -32,6 +33,7 @@ import {
   type SetPlanModeInput,
 } from '../services/agentHost/agentHost';
 import { forkAgentWorker } from '../services/agentHost/electronWorker';
+import { writeMagicContextConfig } from '../services/agentHost/magicContextHost';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
 import { createConfigHost } from '../services/configHost/configHost';
@@ -125,7 +127,8 @@ function createAppAgentHost(): AgentHostService {
   const userData = app.getPath('userData');
   const agentDir = join(userData, 'agent');
   return createAgentHost({
-    fork: () => forkAgentWorker(agentDir),
+    fork: () =>
+      forkAgentWorker(agentDir, compactionThresholdTokensOf(getSettingsFile().read().preferences)),
     agentDir,
     store: getSessionStore(),
     workspaces: getWorkspaceService(),
@@ -146,6 +149,12 @@ function createAppAgentHost(): AgentHostService {
     }),
     resolveShellPath: createShellPathResolver({ settings: getSettingsFile() }),
     resolveCompactionTimeoutMs: () => compactionTimeoutMsOf(getSettingsFile().read().preferences),
+    // Read at every spawn; Magic rereads its config per session load, so refresh it here too.
+    resolveCompactionThresholdTokens: () => {
+      const tokens = compactionThresholdTokensOf(getSettingsFile().read().preferences);
+      writeMagicContextConfig(tokens);
+      return tokens;
+    },
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
     resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
     resolveWebFetchAllowLoopback: () =>

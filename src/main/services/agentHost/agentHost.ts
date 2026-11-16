@@ -45,7 +45,11 @@ import type {
 import { normalizeReplySuggestion } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
-import { type CompactionStrategy, compactionTimeoutMsOf } from '@shared/types/settings';
+import {
+  type CompactionStrategy,
+  compactionThresholdTokensOf,
+  compactionTimeoutMsOf,
+} from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
 import type { BranchTracker } from '../sessions/branches';
@@ -102,6 +106,8 @@ export interface AgentHostDeps {
   /** 上下文自动压缩策略（生产为 settings 的 preferences.compactionStrategy）；缺省 Magic Context */
   resolveCompactionStrategy?(): CompactionStrategy;
   resolveCompactionTimeoutMs?(): number;
+  /** 自动压缩阈值（token）；缺省或返回 undefined 时按模型窗口自动决定 */
+  resolveCompactionThresholdTokens?(): number | undefined;
   resolveNetworkProxy?(): SpawnSessionSpec['networkProxy'];
   /** 是否允许 web_fetch 访问本机回环地址（生产为 preferences.webFetchAllowLoopback）；缺省关闭 */
   resolveWebFetchAllowLoopback?(): boolean;
@@ -601,6 +607,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         ? await pluginProvidersFor(stored.id)
         : undefined;
       const compactionStrategy = resolveCompactionStrategy();
+      const compactionThresholdTokens = compactionThresholdTokensOf({
+        compactionThresholdTokens: deps.resolveCompactionThresholdTokens?.(),
+      });
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
       return {
@@ -630,6 +639,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           compactionTimeoutMs: compactionTimeoutMsOf({
             compactionTimeoutMs: deps.resolveCompactionTimeoutMs?.(),
           }),
+          ...(compactionThresholdTokens !== undefined ? { compactionThresholdTokens } : {}),
           ...(inPlace ? { inPlace: true } : {}),
           // 计划模式按会话记录，不分角色：派发出的 worker 会话永远不带
           ...(stored.planMode === true && stored.dispatchId === undefined
