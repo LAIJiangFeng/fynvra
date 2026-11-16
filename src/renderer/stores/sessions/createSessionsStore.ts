@@ -534,6 +534,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }
         // A finished slash command sends the queue on, but never asks for a reply suggestion.
         if (event.type === 'command_end') settled.add(sessionId);
+        // A finished manual compaction settles the session in the reducer; drainQueue skips busy ones.
+        if (event.type === 'compaction' && !compactionActive(event.state)) settled.add(sessionId);
         if (event.type !== 'agent_settled') continue;
         if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);

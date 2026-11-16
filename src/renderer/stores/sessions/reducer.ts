@@ -508,9 +508,10 @@ function applyEvent(
 }
 
 /**
- * A manual compaction just ended: one result line for the operation. The event and a snapshot can
- * both carry the end; only the first closes it. Automatic compaction and recovery (retry-compaction
- * also runs as `manual`) keep their own progress display.
+ * A manual compaction just ended: one result line for the operation, and the session settles like
+ * `command_end` (Main's list snapshot need not cover the closing `compaction` event). The event and
+ * a snapshot can both carry the end; only the first closes it. Automatic compaction and recovery
+ * (retry-compaction also runs as `manual`, then its recovery turn) keep their own progress display.
  */
 function withCompactionResult(
   next: Slice,
@@ -533,6 +534,15 @@ function withCompactionResult(
       ...newMessage(fresh, 'assistant', '', false),
       compaction: state,
     }),
+    // Manual compaction starts only on an idle session (Main and store gate it): no turn to end.
+    ...(next.runtime.status === 'running'
+      ? {
+          runtime: {
+            ...endProgress(next.runtime, fresh.createdAt),
+            status: next.runtime.error === undefined ? ('idle' as const) : ('error' as const),
+          },
+        }
+      : {}),
   };
 }
 
