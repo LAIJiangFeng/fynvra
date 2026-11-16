@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { type Context, fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
-import { ModelRuntime, SessionManager } from '@earendil-works/pi-coding-agent';
+import { ExtensionRunner, ModelRuntime, SessionManager } from '@earendil-works/pi-coding-agent';
 import type { FynvraSessionEvent } from '@fynvra/core';
 import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
@@ -206,6 +206,42 @@ it('boots the generated host config and handles the first prompt through Magic',
     } finally {
       db.close();
     }
+
+    // Manual compaction under Magic runs the real vendored /ctx-wrapup through
+    // contextRecovery.compact() -> startExtensionCommand.
+    const getCommand = vi.spyOn(ExtensionRunner.prototype, 'getCommand');
+    const before = events.length;
+    assert(session.compact, 'Fynvra sessions support manual compaction');
+    await session.compact();
+    const runner = getCommand.mock.contexts[0] as ExtensionRunner | undefined;
+    getCommand.mockRestore();
+    assert(runner, 'compact() must look up /ctx-wrapup on the extension runner');
+    expect(runner.getCommand('ctx-wrapup')).toBeDefined();
+    for (const hidden of [
+      'ctx-status',
+      'ctx-flush',
+      'ctx-recomp',
+      'ctx-session-upgrade',
+      'ctx-dream',
+      'ctx-embed',
+      'ctx-aug',
+    ]) {
+      expect(runner.getCommand(hidden), hidden).toBeUndefined();
+    }
+    const compactEvents = events.slice(before);
+    expect(compactEvents.map(({ type }) => type)).toEqual(['command', 'notice', 'command_end']);
+    expect(compactEvents).toMatchObject([
+      { text: '/ctx-wrapup' },
+      { level: 'info', text: expect.stringContaining('Nothing to wrap up') },
+      { aborted: false },
+    ]);
+    expect(compactEvents.filter((e) => e.type === 'warning' || e.type === 'error')).toEqual([]);
+    expect(snapshots().at(-1)).toMatchObject({ effectiveStrategy: 'magic-context' });
+    expect(vendor.fynvraIsSessionReady(manager.getSessionId())).toBe(true);
+    const after = SessionManager.open(sessionFile, join(sandbox, 'agent', 'sessions'), cwd);
+    expect(
+      after.getEntries().filter((e) => e.type === 'custom' && e.customType === 'ctx-status')
+    ).toEqual([]);
   } finally {
     await session?.dispose();
     for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
