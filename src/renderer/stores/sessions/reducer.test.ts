@@ -848,5 +848,40 @@ describe('manual compaction result line', () => {
       { type: 'context_runtime', snapshot: snapshot(done, true) },
     ]);
     expect(results(state)).toEqual([]);
+    expect(runtimeOf(state)?.status).toBe('running');
+  });
+
+  it('settles the session when a manual compaction ends, once per operation', () => {
+    const succeeded = run([
+      { type: 'compaction', state: running },
+      { type: 'compaction', state: done },
+    ]);
+    expect(runtimeOf(succeeded)?.status).toBe('idle');
+    const cancelled = { ...done, phase: 'cancelled' as const, outcome: undefined };
+    expect(
+      runtimeOf(
+        run([
+          { type: 'compaction', state: running },
+          { type: 'compaction', state: cancelled },
+        ])
+      )?.status
+    ).toBe('idle');
+    // Main reports the failure after the terminal event; it must win.
+    const failed = { ...done, phase: 'failed' as const, errorMessage: 'boom', outcome: undefined };
+    const errored = run([
+      { type: 'compaction', state: running },
+      { type: 'compaction', state: failed },
+      { type: 'error', source: 'compaction', message: 'boom' },
+      { type: 'context_runtime', snapshot: snapshot(failed as never) },
+    ]);
+    expect(runtimeOf(errored)).toMatchObject({ status: 'error', error: 'boom' });
+  });
+
+  it('does not settle automatic compaction', () => {
+    const state = run([
+      { type: 'compaction', state: { ...running, reason: 'threshold' } },
+      { type: 'compaction', state: { ...done, reason: 'threshold' } },
+    ]);
+    expect(runtimeOf(state)?.status).toBe('running');
   });
 });

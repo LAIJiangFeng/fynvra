@@ -1810,6 +1810,50 @@ describe('createSessionsStore · slash command settlement', () => {
     expect(api.suggestReply).not.toHaveBeenCalled();
   });
 
+  it('settles a manual compaction from its events and sends the queue, even if the list sync is skipped', async () => {
+    const fake = fakeApi();
+    const flushes: (() => void)[] = [];
+    const store = createSessionsStore(fake.api, {
+      schedule: (flush) => flushes.push(flush),
+      now: () => 100,
+    });
+    connectSessionsStore(store, fake.api);
+    store.getState().setWorkspace(WS);
+    await settle();
+    await store.getState().selectSession('s1');
+    const base = {
+      operationId: 'compaction-1',
+      reason: 'manual' as const,
+      startedAt: 100,
+      deadlineAt: 600_100,
+      attempt: 1,
+      maxAttempts: 1,
+    };
+    fake.emitEvent(1, { type: 'compaction', state: { ...base, phase: 'running' } });
+    for (const flush of flushes.splice(0)) flush();
+    expect(selectStatusOf('s1')(store.getState())).toBe('running');
+    await store.getState().send('next');
+    expect(selectQueueOf('s1')(store.getState())).toHaveLength(1);
+
+    fake.emitEvent(2, {
+      type: 'compaction',
+      state: {
+        ...base,
+        phase: 'succeeded',
+        endedAt: 105,
+        durationMs: 5,
+        outcome: { compactedMessages: 0, appliesOnNextMessage: false },
+      },
+    });
+    // The list reload sees a newer local seq and skips this session's status.
+    fake.emitChanged();
+    await settle();
+    for (const flush of flushes.splice(0)) flush();
+    await settle();
+    expect(fake.api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'next' });
+    expect(selectQueueOf('s1')(store.getState())).toEqual([]);
+  });
+
   it('Stop resyncs a stuck status from the session list', async () => {
     const { store, api } = await setup();
     await store.getState().selectSession('s1');
