@@ -24,6 +24,8 @@ interface Options {
   strategy: CompactionStrategy;
   timeoutMs: number;
   contextWindow(): number;
+  /** Where contextWindow came from; `estimated` tells the UI not to show it as the real window. */
+  windowSource?(): ContextRuntimeSnapshot['context']['windowSource'];
   log(message: string): void;
   /** Readiness plus the Magic cancellation generation; never authorizes native compaction. */
   magicReady?(): AbortSignal;
@@ -39,6 +41,7 @@ export function createContextRecovery({
   strategy,
   timeoutMs,
   contextWindow,
+  windowSource,
   log,
   magicReady,
   mcpServers,
@@ -137,6 +140,7 @@ export function createContextRecovery({
     const window = contextWindow();
     const settings = session.settingsManager.getCompactionSettings(session.model);
     const tokens = usage?.tokens ?? null;
+    const source = windowSource?.();
     return {
       configuredStrategy: strategy,
       effectiveStrategy: effective,
@@ -145,6 +149,7 @@ export function createContextRecovery({
         tokens,
         contextWindow: window,
         source: tokens === null ? 'unknown' : 'sdk',
+        ...(source ? { windowSource: source } : {}),
         ...(effective === 'native'
           ? { compactionThresholdTokens: Math.max(0, window - settings.reserveTokens) }
           : {}),

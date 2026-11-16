@@ -128,6 +128,53 @@ describe('createModelRegistry', () => {
     });
   });
 
+  it('marks the window source: settings over catalog, exact catalog id, otherwise estimated', async () => {
+    const registry = createModelRegistry(runtime);
+    const base = {
+      providerId: KEY_A,
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'k',
+    };
+    const catalog = await registry.resolve({ ...base, modelId: 'claude-sonnet-5-5' });
+    expect(catalog.windowSource).toBe('catalog');
+    expect(catalog.model.contextWindow).toBe(1_000_000);
+
+    // 设置里的值覆盖目录；maxTokens 不超过窗口
+    const settings = await registry.resolve({
+      ...base,
+      modelId: 'claude-sonnet-5-5',
+      contextWindow: 200_000,
+      maxOutput: 500_000,
+    });
+    expect(settings.windowSource).toBe('settings');
+    expect(settings.model).toMatchObject({ contextWindow: 200_000, maxTokens: 200_000 });
+
+    // 推断（目录里没有同名，按最接近的）与兜底都是估计值，内部仍有窗口
+    const inferred = await registry.resolve({ ...base, modelId: 'claude-sonnet-5-5-20990101' });
+    expect(inferred.windowSource).toBe('estimated');
+    expect(inferred.model.contextWindow).toBe(1_000_000);
+    const fallback = await registry.resolve({
+      ...base,
+      api: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      modelId: 'my-local-model',
+    });
+    expect(fallback.windowSource).toBe('estimated');
+    expect(fallback.model).toMatchObject({ contextWindow: 128_000, maxTokens: 32_000 });
+
+    // 只填了最大输出：窗口仍是估计值
+    const onlyMax = await registry.resolve({
+      ...base,
+      api: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      modelId: 'my-local-model',
+      maxOutput: 8_000,
+    });
+    expect(onlyMax.windowSource).toBe('estimated');
+    expect(onlyMax.model.maxTokens).toBe(8_000);
+  });
+
   it('falls back to the official endpoint of the api when the spec has no base URL', async () => {
     const registry = createModelRegistry(runtime);
     const { model } = await registry.resolve({

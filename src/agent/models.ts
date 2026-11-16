@@ -8,7 +8,7 @@ import {
 } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ResolvedModel } from '@fynvra/agent-runtime';
-import type { ThinkingLevel } from '@fynvra/core';
+import type { ContextRuntimeSnapshot, ThinkingLevel } from '@fynvra/core';
 import type { ModelQuery, PluginProviderSpec, ResolvedModelSpec } from '@shared/types/agent';
 import {
   type ModelThinkingCapability,
@@ -44,7 +44,13 @@ const OFFICIAL_PROVIDERS: Readonly<Record<string, string>> = {
 /** pi 新会话的默认思考档位（pi-coding-agent 的 DEFAULT_THINKING_LEVEL）：按模型能力 clamp 后就是模型的默认档位 */
 const PI_DEFAULT_THINKING = 'medium';
 
-/** pi 目录里查不到、也推断不出的模型用保守默认值 */
+/** 上下文窗口的来源：设置里的真实值、pi 目录同名条目，或推断 / 兜底的估计值 */
+export type WindowSource = NonNullable<ContextRuntimeSnapshot['context']['windowSource']>;
+
+/** worker 内的解析结果：多带窗口来源，快照据此告诉界面窗口是否可信 */
+export type WorkerResolvedModel = ResolvedModel & { windowSource?: WindowSource };
+
+/** pi 目录里查不到、也推断不出的模型用保守默认值（估计值） */
 const FALLBACK_LIMITS = { contextWindow: 128_000, maxTokens: 32_000 } as const;
 
 /** Main 的运行时 provider 键都带这个前缀，与 pi 内置目录的 provider 名分开 */
@@ -89,7 +95,7 @@ export interface ModelRegistry {
    * Main 交来的可序列化模型描述 → agent-runtime 的 ResolvedModel；失败抛错（由 spawn 转成 session-error）。
    * 思考档位按 {@link pickThinkingLevel} 落到模型的可选集合里。
    */
-  resolve(spec: ResolvedModelSpec): Promise<ResolvedModel>;
+  resolve(spec: ResolvedModelSpec): Promise<WorkerResolvedModel>;
   /** 模型的思考档位与来源：与 resolve 注册的是同一份定义，界面列出的档位就是 pi 接受的档位 */
   describe(query: ModelQuery): ModelThinkingCapability;
   /**
@@ -189,7 +195,8 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
         );
       }
 
-      const definition = forEndpoint(defineModel(runtime, spec, excluded).definition, baseUrl);
+      const defined = withSpecLimits(defineModel(runtime, spec, excluded), spec);
+      const definition = forEndpoint(defined.definition, baseUrl);
       const models = definitions.get(providerId) ?? new Map<string, ModelDefinition>();
       models.set(spec.modelId, definition);
       definitions.set(providerId, models);
@@ -204,7 +211,12 @@ export function createModelRegistry(runtime: ModelRuntime): ModelRegistry {
       const model = runtime.getModel(providerId, spec.modelId);
       if (!model) throw new Error(`model ${spec.modelId} is missing after registration`);
       const thinking = pickThinkingLevel(capabilityOf(definition), spec.thinking);
-      return { runtime, model, ...(thinking ? { thinking } : {}) };
+      return {
+        runtime,
+        model,
+        windowSource: defined.windowSource,
+        ...(thinking ? { thinking } : {}),
+      };
     },
     describe(query) {
       const { definition, source } = defineModel(runtime, query, excluded);
@@ -238,6 +250,24 @@ function defineModel(
     };
   }
   return { definition: fallbackDefinition(spec, catalog), source: 'fallback' };
+}
+
+/**
+ * 设置里的窗口 / 最大输出最优先，覆盖目录、推断与兜底；其次是目录同名条目；推断与兜底只是估计值
+ * （内部压缩仍按它算，界面标成「窗口未知」）。maxTokens 不超过 contextWindow。
+ */
+export function withSpecLimits(
+  defined: { definition: ModelDefinition; source: ThinkingSource },
+  spec: Pick<ResolvedModelSpec, 'contextWindow' | 'maxOutput'>
+): { definition: ModelDefinition; windowSource: WindowSource } {
+  const contextWindow = spec.contextWindow ?? defined.definition.contextWindow;
+  const maxTokens = Math.min(spec.maxOutput ?? defined.definition.maxTokens, contextWindow);
+  const windowSource: WindowSource = spec.contextWindow
+    ? 'settings'
+    : defined.source === 'catalog'
+      ? 'catalog'
+      : 'estimated';
+  return { definition: { ...defined.definition, contextWindow, maxTokens }, windowSource };
 }
 
 /** pi 目录里某个协议的模型（不含 fynvra 自己注册的运行时 provider 与插件别名） */

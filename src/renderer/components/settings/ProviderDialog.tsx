@@ -28,12 +28,14 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { useProvidersStore } from '@/stores/providers';
+import { formatTokens } from '../chat/format';
 import { Field, InlineMessage } from './common';
 import {
   addModel,
   draftToUpsertInput,
   type ProviderDraft,
   reasoningControl,
+  setModelLimit,
   setModelReasoning,
 } from './providerForm';
 import { RemoteModelsPicker } from './RemoteModelsPicker';
@@ -270,57 +272,96 @@ function ProviderForm({
             onClose={() => setRemote(null)}
           />
         )}
-        <ul className="max-h-44 divide-y overflow-y-auto rounded-md border">
+        <ul className="max-h-64 divide-y overflow-y-auto rounded-md border">
           {draft.models.map((model) => {
             const control = reasoningControl(draft.api, model.id, described, initial.id);
             const switchId = `${id}-reasoning-${model.id}`;
             return (
-              <li key={model.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  {model.name}
-                  {model.name !== model.id && (
-                    <span className="ml-2 text-muted-foreground text-xs">{model.id}</span>
-                  )}
-                </span>
-                {control.kind === 'catalog' ? (
-                  <Badge
-                    variant="outline"
-                    title={t('settings.providers.catalogDecides')}
-                    className={control.reasoning ? undefined : 'opacity-60'}
-                  >
-                    {t(
-                      control.reasoning
-                        ? 'settings.providers.reasoning'
-                        : 'settings.providers.noReasoning'
+              <li key={model.id} className="px-3 py-1.5 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate">
+                    {model.name}
+                    {model.name !== model.id && (
+                      <span className="ml-2 text-muted-foreground text-xs">{model.id}</span>
                     )}
-                  </Badge>
-                ) : (
-                  <span
-                    className="flex shrink-0 items-center gap-1.5"
-                    title={t('settings.providers.reasoningHint')}
-                  >
-                    <Switch
-                      id={switchId}
-                      aria-label={t('settings.providers.reasoningFor', { id: model.id })}
-                      checked={model.reasoning === true}
-                      onCheckedChange={(on) =>
-                        update({ models: setModelReasoning(draft.models, model.id, on) })
-                      }
-                    />
-                    <label htmlFor={switchId} className="text-muted-foreground text-xs">
-                      {t('settings.providers.reasoning')}
-                    </label>
                   </span>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t('settings.providers.removeModel', { id: model.id })}
-                  onClick={() => update({ models: draft.models.filter((m) => m.id !== model.id) })}
-                >
-                  <X />
-                </Button>
+                  {control.kind === 'catalog' ? (
+                    <Badge
+                      variant="outline"
+                      title={t('settings.providers.catalogDecides')}
+                      className={control.reasoning ? undefined : 'opacity-60'}
+                    >
+                      {t(
+                        control.reasoning
+                          ? 'settings.providers.reasoning'
+                          : 'settings.providers.noReasoning'
+                      )}
+                    </Badge>
+                  ) : (
+                    <span
+                      className="flex shrink-0 items-center gap-1.5"
+                      title={t('settings.providers.reasoningHint')}
+                    >
+                      <Switch
+                        id={switchId}
+                        aria-label={t('settings.providers.reasoningFor', { id: model.id })}
+                        checked={model.reasoning === true}
+                        onCheckedChange={(on) =>
+                          update({ models: setModelReasoning(draft.models, model.id, on) })
+                        }
+                      />
+                      <label htmlFor={switchId} className="text-muted-foreground text-xs">
+                        {t('settings.providers.reasoning')}
+                      </label>
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t('settings.providers.removeModel', { id: model.id })}
+                    onClick={() =>
+                      update({ models: draft.models.filter((m) => m.id !== model.id) })
+                    }
+                  >
+                    <X />
+                  </Button>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground text-xs">
+                  {(['contextWindow', 'maxOutput'] as const).map((key) => {
+                    const value = model[key];
+                    const inputId = `${id}-${key}-${model.id}`;
+                    return (
+                      <span key={key} className="flex items-center gap-1.5">
+                        <label htmlFor={inputId}>{t(`settings.providers.${key}`)}</label>
+                        <Input
+                          id={inputId}
+                          type="number"
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          aria-label={t(`settings.providers.${key}For`, { id: model.id })}
+                          placeholder={t('settings.providers.limitPlaceholder')}
+                          className="h-7 w-32 text-xs"
+                          value={value ?? ''}
+                          onChange={(event) =>
+                            update({
+                              models: setModelLimit(
+                                draft.models,
+                                model.id,
+                                key,
+                                event.target.value
+                              ),
+                            })
+                          }
+                        />
+                        {value !== undefined && Number.isSafeInteger(value) && value > 0 && (
+                          <span>= {formatTokens(value)}</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
               </li>
             );
           })}

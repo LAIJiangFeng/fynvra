@@ -79,6 +79,14 @@ export function draftToUpsertInput(
   if (/\s/.test(apiKey)) {
     return { ok: false, error: translate('settings.remoteModels.apiKeyWhitespace') };
   }
+  for (const { id, contextWindow, maxOutput } of draft.models) {
+    if (!isOptionalPositiveInt(contextWindow) || !isOptionalPositiveInt(maxOutput)) {
+      return { ok: false, error: translate('settings.providers.limitInvalid', { id }) };
+    }
+    if (contextWindow !== undefined && maxOutput !== undefined && maxOutput > contextWindow) {
+      return { ok: false, error: translate('settings.providers.maxOutputTooLarge', { id }) };
+    }
+  }
   return {
     ok: true,
     input: {
@@ -120,6 +128,28 @@ export function setModelReasoning(
     const { reasoning: _omit, ...rest } = model;
     return on ? { ...rest, reasoning: true } : rest;
   });
+}
+
+/**
+ * 模型行的「上下文窗口」「最大输出」输入：留空去掉字段（未填），否则按数字写入；
+ * 非法值（小数、负数）原样留在草稿里，保存时由 {@link draftToUpsertInput} 拦下。
+ */
+export function setModelLimit(
+  models: readonly ModelEntry[],
+  id: string,
+  key: 'contextWindow' | 'maxOutput',
+  raw: string
+): ModelEntry[] {
+  const text = raw.trim();
+  return models.map((model) => {
+    if (model.id !== id) return model;
+    const { [key]: _omit, ...rest } = model;
+    return text ? { ...rest, [key]: Number(text) } : rest;
+  });
+}
+
+function isOptionalPositiveInt(value: number | undefined): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && value > 0);
 }
 
 /** sessions:model-options 的回答，连同发请求时的服务列表（档位按其中的 reasoning 标记算出） */

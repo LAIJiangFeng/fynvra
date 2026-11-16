@@ -75,6 +75,13 @@ describe('context runtime protocol', () => {
       parseContextRuntime({ ...snapshot, context: { ...snapshot.context, tokens: 256000 } })
     ).toBeNull();
     expect(parseContextRuntime({ ...snapshot, compactionTimeoutMs: 1 })).toBeNull();
+    for (const windowSource of ['settings', 'catalog', 'estimated']) {
+      const withSource = { ...snapshot, context: { ...snapshot.context, windowSource } };
+      expect(parseContextRuntime(withSource)).toEqual(withSource);
+    }
+    expect(
+      parseContextRuntime({ ...snapshot, context: { ...snapshot.context, windowSource: 'guess' } })
+    ).toBeNull();
     expect(parseCompactionState({ ...state, durationMs: -1 })).toBeNull();
     expect(parseCompactionState({ ...state, attempt: 5 })).toBeNull();
     expect(parseCompactionState({ ...state, cancelSource: 'unknown' })).toBeNull();

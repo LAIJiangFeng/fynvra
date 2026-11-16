@@ -72,6 +72,35 @@ describe('runtime strategy and current-context copy', () => {
     ).toBe(false);
   });
 
+  it('shows the window only when it is real (settings / catalog), never an estimated one', () => {
+    const t = translatorOf('zh-CN');
+    const at = (windowSource: 'settings' | 'catalog' | 'estimated') => ({
+      ...runtime,
+      context: { tokens: 363_000, contextWindow: 1_000_000, source: 'sdk' as const, windowSource },
+    });
+    expect(contextLabel(at('settings'), t)).toEqual({
+      label: '当前上下文约 363k / 1M',
+      nearThreshold: false,
+    });
+    expect(contextLabel(at('catalog'), t).label).toBe('当前上下文约 363k / 1M');
+    const estimated = contextLabel(
+      { ...at('estimated'), context: { ...at('estimated').context, contextWindow: 128_000 } },
+      t
+    );
+    expect(estimated.label).toBe('当前上下文约 363k · 窗口未知');
+    expect(estimated.label).not.toContain('128k');
+    expect(estimated.hint).toBe(t('chat.contextWindowEstimatedHint', { window: '128k' }));
+    expect(
+      contextLabel(
+        {
+          ...at('estimated'),
+          context: { ...at('estimated').context, tokens: null, source: 'unknown' },
+        },
+        t
+      ).label
+    ).toBe('当前上下文：等待重新估算 · 窗口未知');
+  });
+
   it('unknown post-compaction usage never shows an obsolete count or a threshold warning', () => {
     const t = translatorOf('zh-CN');
     expect(

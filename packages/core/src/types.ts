@@ -296,6 +296,8 @@ export interface ContextRuntimeSnapshot {
     contextWindow: number;
     source: 'sdk' | 'unknown';
     compactionThresholdTokens?: number;
+    /** Where contextWindow came from; `estimated` = inferred / fallback, not shown as the real window. */
+    windowSource?: 'settings' | 'catalog' | 'estimated';
   };
   compaction?: CompactionState;
   retry?: RetryState;

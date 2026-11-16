@@ -49,6 +49,7 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
   const details = [
     context.label,
     context.nearThreshold ? t('chat.contextNearThreshold') : '',
+    context.hint,
     engine,
     t('chat.configuredEngine', { engine: strategyLabel(snapshot?.configuredStrategy, t) }),
     t('chat.selectedEngine', { engine: strategyLabel(selected, t) }),

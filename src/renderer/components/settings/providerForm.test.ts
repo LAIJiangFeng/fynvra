@@ -9,6 +9,7 @@ import {
   draftToUpsertInput,
   type ProviderDraft,
   reasoningControl,
+  setModelLimit,
   setModelReasoning,
 } from './providerForm';
 
@@ -124,6 +125,36 @@ describe('providerForm', () => {
       models: on,
     };
     expect(draftToUpsertInput(draft)).toMatchObject({ ok: true, input: { models: on } });
+  });
+
+  it('上下文窗口 / 最大输出：回显并原样保存；留空去掉字段；非正整数或输出大于窗口不能保存', () => {
+    const models = [
+      { id: 'claude-opus-5-5', name: 'Opus', contextWindow: 1_000_000, maxOutput: 128_000 },
+    ];
+    const draft = draftFromProvider({ ...saved, models });
+    expect(draft.models).toEqual(models);
+    expect(draftToUpsertInput(draft)).toMatchObject({ ok: true, input: { models } });
+
+    const cleared = setModelLimit(models, 'claude-opus-5-5', 'maxOutput', ' ');
+    expect(cleared).toEqual([{ id: 'claude-opus-5-5', name: 'Opus', contextWindow: 1_000_000 }]);
+    expect(setModelLimit(cleared, 'claude-opus-5-5', 'maxOutput', '64000')[0]?.maxOutput).toBe(
+      64_000
+    );
+
+    for (const raw of ['1.5', '-1', '0', 'abc']) {
+      expect(
+        draftToUpsertInput({
+          ...draft,
+          models: setModelLimit(models, 'claude-opus-5-5', 'contextWindow', raw),
+        })
+      ).toMatchObject({ ok: false });
+    }
+    expect(
+      draftToUpsertInput({
+        ...draft,
+        models: setModelLimit(models, 'claude-opus-5-5', 'maxOutput', '2000000'),
+      })
+    ).toMatchObject({ ok: false });
   });
 });
 
