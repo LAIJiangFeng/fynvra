@@ -2993,13 +2993,36 @@ describe('automatic model limits', () => {
   }
   const spawnedModel = (env: ReturnType<typeof setup>) =>
     (env.sent('spawn-session')[0] as { spec: SpawnSessionSpec }).spec.model;
+  function report(
+    env: ReturnType<typeof setup>,
+    sessionId: string,
+    seq: number,
+    windowSource: 'settings' | 'catalog' | 'estimated'
+  ) {
+    const snapshot = {
+      configuredStrategy: 'native',
+      effectiveStrategy: 'native',
+      compactionTimeoutMs: 600000,
+      context: { tokens: null, contextWindow: 128000, source: 'unknown', windowSource },
+      recoveryRequired: false,
+      pendingPromptCount: 0,
+    } as const;
+    env.worker().emit({
+      type: 'session-event',
+      identity: identityOf(sessionId),
+      seq,
+      event: { type: 'context_runtime', snapshot, seq },
+    });
+  }
 
-  it('probes a model without a window and pushes the new window to the idle live session', async () => {
+  it('probes when the worker reports an estimated window and pushes it to the idle session', async () => {
     const { env, providers, probed, modelLimits } = limitsEnv();
     const session = await createSession(env);
     await env.host.prompt(session.id, 'hi');
+    expect(modelLimits.ensure).not.toHaveBeenCalled();
+    report(env, session.id, 1, 'estimated');
     expect(modelLimits.ensure).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5-5');
-    settle(env, session.id, 1);
+    settle(env, session.id, 2);
     const model = providers[0]?.models[0];
     if (model) model.contextWindow = 1_000_000;
     probed.resolve(true);
@@ -3014,20 +3037,22 @@ describe('automatic model limits', () => {
     const { env, providers, probed } = limitsEnv();
     const session = await createSession(env);
     await env.host.prompt(session.id, 'hi');
+    report(env, session.id, 1, 'estimated');
     const model = providers[0]?.models[0];
     if (model) model.contextWindow = 1_000_000;
     probed.resolve(true);
     await flush();
     await flush();
     expect(env.sent('set-model')).toHaveLength(0);
-    settle(env, session.id, 1);
+    settle(env, session.id, 2);
     expect(env.sent('set-model')[0]).toMatchObject({ model: { contextWindow: 1_000_000 } });
   });
 
-  it('does not probe when the settings entry already has a window', async () => {
-    const { env, modelLimits } = limitsEnv(200_000);
+  it.each(['catalog', 'settings'] as const)('does not probe a %s window', async (source) => {
+    const { env, modelLimits } = limitsEnv();
     const session = await createSession(env);
     await env.host.prompt(session.id, 'hi');
+    report(env, session.id, 1, source);
     expect(env.sent('spawn-session')).toHaveLength(1);
     expect(modelLimits.ensure).not.toHaveBeenCalled();
   });

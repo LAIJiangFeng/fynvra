@@ -151,8 +151,8 @@ const OVERFLOW_PATTERNS: readonly RegExp[] = [
   /exceeds? the context window (?:size )?of (\d[\d,]*)/i,
   // vLLM：maximum model length is 32768 / longer than the maximum model length of 32768
   /maximum model length (?:is|of) (\d[\d,]*)/i,
-  // 中转：context_length_exceeded … limit of 272000 tokens
-  /context_length_exceeded[\s\S]*?(?:limit|maximum|max|window)\D{0,30}?(\d[\d,]*)/i,
+  // 中转：context_length_exceeded … limit of 272000 tokens。只认紧贴 is/of 的措辞，不把 max_tokens 等当窗口
+  /context_length_exceeded[\s\S]*?\b(?:limit|maximum|window)\s+(?:is|of)\s+(\d[\d,]*)/i,
 ];
 
 /** 从上下文超限的报错文字里取出服务端给的窗口上限；不是溢出报错或取不到时返回 undefined。纯函数。 */

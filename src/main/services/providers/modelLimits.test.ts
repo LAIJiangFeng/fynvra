@@ -107,6 +107,10 @@ describe('parseOverflowLimit', () => {
     ["This model's maximum model length is 32768 tokens", 32_768],
     ['The decoder prompt (length 40000) is longer than the maximum model length of 32768.', 32_768],
     [
+      'context_length_exceeded: input 300000 + maximum output 32000 exceeds the limit of 272000',
+      272_000,
+    ],
+    [
       '{"code":"context_length_exceeded","message":"Input exceeds the limit of 272000 tokens"}',
       272_000,
     ],
@@ -118,6 +122,7 @@ describe('parseOverflowLimit', () => {
     'Rate limit reached: limit 30000 tokens per minute',
     '401 invalid api key',
     'context_length_exceeded',
+    'context_length_exceeded: max_tokens 32000',
     'Your input exceeds the context window of this model.',
   ])('不是带上限的溢出报错：%s', (message) => {
     expect(parseOverflowLimit(message)).toBeUndefined();

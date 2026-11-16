@@ -535,6 +535,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (event.type === 'context_runtime') {
       state.contextRuntime = event.snapshot;
       state.contextRuntimeSeq = state.sessionSeq;
+      // prober 自带去重：重复的快照不会重复请求
+      if (event.snapshot.context.windowSource === 'estimated' && state.modelRef)
+        probeModelLimits(state.modelRef);
     }
     const envelope: SessionEventEnvelope = {
       sessionId,
@@ -885,16 +888,19 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (!wanted()) return fail('The session operation was cancelled.');
     if (state.spawned && !reload) return { ok: true };
     // 构建 spec 的这段等待里用户可能切过计划模式：以记录的当前值为准
-    if (!spawnWith(stored.id, state, withPlanMode(built.spec, current)))
-      return fail(translate('agent.workerUnavailable'));
+    // 先记引用：spawn 后的第一个 context_runtime 快照就要用它判断是否探测
     state.modelRef = built.ref;
-    probeModelLimits(built.ref, built.spec.model);
-    return { ok: true };
+    return spawnWith(stored.id, state, withPlanMode(built.spec, current))
+      ? { ok: true }
+      : fail(translate('agent.workerUnavailable'));
   }
 
-  /** 设置条目缺窗口时在后台探测（不等它），写回后推给活会话 */
-  function probeModelLimits(ref: ModelRef, model: ResolvedModelSpec): void {
-    if (!deps.modelLimits || model.contextWindow !== undefined) return;
+  /**
+   * worker 报窗口是估计值时在后台探测（不等它），写回后推给活会话。
+   * 设置值、pi 目录里有的不探测：目录值不写进设置，随 pi 目录更新
+   */
+  function probeModelLimits(ref: ModelRef): void {
+    if (!deps.modelLimits) return;
     void deps.modelLimits
       .ensure(ref.providerId, ref.modelId)
       .then((updated) => (updated ? pushModelLimits(ref) : undefined))
@@ -1500,7 +1506,6 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       state.modelRef = resolved.ref;
       state.modelPushPending = false;
     }
-    probeModelLimits(resolved.ref, spec);
     if (state?.spawned) {
       // 发不出去（worker 正在退出）：会话不再算在 worker 里，下次使用前按新记录重新 spawn
       if (!send({ type: 'set-model', identity: identityOf(sessionId, state), model: spec })) {
