@@ -1,8 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, promises, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  promises,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mergedCleanupBlocker, removeTree } from './worktreeCleanup';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mergedCleanupBlocker, removeTree, unlinkLinksIn } from './worktreeCleanup';
 
 const clean = { dirty: false, ahead: 0, behind: 3 };
 
@@ -83,5 +92,60 @@ describe('removeTree', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('unlinkLinksIn', () => {
+  let base: string;
+  let wt: string;
+  let outside: string;
+  // Windows 上建 junction 不需要管理员权限；POSIX 忽略类型参数
+  const link = (target: string, path: string) => symlinkSync(target, path, 'junction');
+  const linkExists = (path: string) => {
+    try {
+      return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'fynvra-unlink-'));
+    wt = join(base, 'wt');
+    outside = join(base, 'outside');
+    mkdirSync(join(wt, 'pkg', 'inner'), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'keep.txt'), 'x');
+    writeFileSync(join(wt, 'pkg', 'inner', 'a.txt'), 'a');
+    link(outside, join(wt, 'pkg', 'out'));
+    link(join(wt, 'pkg', 'inner'), join(wt, 'in'));
+    link(wt, join(wt, 'self'));
+    const gone = join(base, 'gone');
+    mkdirSync(gone);
+    link(gone, join(wt, 'dangling'));
+    rmSync(gone, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('keepInside：删指向外部 / 根本身 / 悬空的链接，保留指向内部的；真实目录递归处理且不删', async () => {
+    await unlinkLinksIn(wt, { keepInside: wt });
+    expect(linkExists(join(wt, 'pkg', 'out'))).toBe(false);
+    expect(linkExists(join(wt, 'self'))).toBe(false);
+    expect(linkExists(join(wt, 'dangling'))).toBe(false);
+    expect(linkExists(join(wt, 'in'))).toBe(true);
+    expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
+    expect(existsSync(join(wt, 'pkg', 'inner', 'a.txt'))).toBe(true);
+  });
+
+  it('不带参数：所有链接都删，目标文件保留', async () => {
+    await unlinkLinksIn(wt);
+    for (const name of [join('pkg', 'out'), 'in', 'self', 'dangling']) {
+      expect(linkExists(join(wt, name))).toBe(false);
+    }
+    expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
+    expect(existsSync(join(wt, 'pkg', 'inner', 'a.txt'))).toBe(true);
   });
 });

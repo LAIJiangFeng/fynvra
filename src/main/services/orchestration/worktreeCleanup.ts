@@ -1,6 +1,6 @@
 import type { Dirent } from 'node:fs';
 import * as nodeFs from 'node:fs';
-import { lstat, readdir, rmdir, unlink } from 'node:fs/promises';
+import { lstat, readdir, realpath, rmdir, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import type {
@@ -13,6 +13,7 @@ import type {
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type { WorkerSessionLauncher } from './launcher';
+import { isInsideDirectory } from './worktreesRoot';
 
 /** 不能删的原因：没经 merge_worktree 合并、有未提交改动或未跟踪文件、合并之后又有新提交 */
 export type MergedCleanupBlocker = 'not-merged' | 'dirty' | 'unmerged-commits';
@@ -150,8 +151,26 @@ export async function checkSessionWorktree(
 /**
  * 删 worktree 目录之前：先删掉里面所有符号链接 / junction 本身，绝不进入或删除它们指向的目录。
  * 递归删除曾跟随 node_modules junction 删掉主仓库的文件。目录不存在时什么都不做。
+ * `keepInside`：只删最终目标不在它之内的链接（指向外面、指向它本身或悬空的），指向内部的保留。
  */
-export async function unlinkLinksIn(dir: string): Promise<void> {
+export async function unlinkLinksIn(
+  dir: string,
+  options: { keepInside?: string } = {}
+): Promise<void> {
+  const { keepInside } = options;
+  let root: string | undefined;
+  if (keepInside !== undefined) {
+    try {
+      root = await realpath(keepInside);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+  await unlinkLinksUnder(dir, root);
+}
+
+async function unlinkLinksUnder(dir: string, root: string | undefined): Promise<void> {
   let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -165,10 +184,19 @@ export async function unlinkLinksIn(dir: string): Promise<void> {
     const known = entry.isSymbolicLink() || entry.isDirectory() || entry.isFile();
     const info = known ? entry : await lstat(path);
     if (info.isSymbolicLink()) {
+      if (root !== undefined && (await linksStrictlyInside(path, root))) continue;
       // Windows 的目录链接有时 unlink 不了，换 rmdir；两者都只删链接本身
       await unlink(path).catch(() => rmdir(path));
     } else if (info.isDirectory()) {
-      await unlinkLinksIn(path);
+      await unlinkLinksUnder(path, root);
     }
   }
+}
+
+/** 链接的最终目标严格位于 `root` 之内；解析失败（悬空）算不在。 */
+async function linksStrictlyInside(link: string, root: string): Promise<boolean> {
+  const target = await realpath(link).catch(() => undefined);
+  return (
+    target !== undefined && isInsideDirectory(target, root) && !isInsideDirectory(root, target)
+  );
 }
