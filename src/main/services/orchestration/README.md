@@ -98,6 +98,8 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   停 worker 后不加 force 删除目录、用 `-d` 删分支。记录已清理时返回无资源可删，不按旧分支名删除可能被复用的分支。
   合并时在 Task 保存 `mergedDiff`（基准 / worker 提交），清理后 `review_diff` 与面板仍从主仓库读这对提交。
   旧记录没有固定范围时，使用尚存的 worktree 基准和 worker 分支，不在已注销的 worktree 目录里跑 diff。
+- **worktree 删除不跟随链接**：Windows 上每次 `git worktree remove` 之前，`GitWorktreeManager` 先经注入的
+  `detachLinks` 删掉 worktree 里指向它外面的符号链接 / junction（Git for Windows 会把 junction 当目录钻进去删）。
 - **`run_checks` 白名单**：每一段（`&&`、`;`、`|` 分隔）以 pnpm / npm / yarn / bun / node / npx / git / cargo / go /
   python / pytest / make 开头，其余 shell 元字符一律拒绝；默认另外只放行 git 只读子命令、拒绝 npm publish 之类的发布命令。
   这是护栏不是沙箱（node / npx / make 本身能执行任意代码），可通过 `checkPolicy` 替换。执行时关闭颜色、默认 20 分钟超时。

@@ -287,6 +287,10 @@ export function createOrchestrationService(
         throw error;
       }
     },
+    // Git for Windows 把 junction 当目录递归删除；macOS / Linux 的 git 不跟随符号链接，不注入以免碰被跟踪的链接
+    ...(process.platform === 'win32'
+      ? { detachLinks: (path: string) => unlinkLinksIn(path, { keepInside: path }) }
+      : {}),
   });
   const workflowEngine = createWorkflowEngine({
     workspace,
