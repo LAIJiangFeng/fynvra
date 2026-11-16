@@ -90,6 +90,12 @@ describe('WORKER_CONTRACT_PROMPT', () => {
     expect(WORKER_CONTRACT_PROMPT).toContain('Do not write report, summary or notes .md files');
   });
 
+  it('keeps dependencies inside the worktree and forbids links out of it', () => {
+    expect(WORKER_CONTRACT_PROMPT).toContain('Never link, junction or symlink');
+    expect(WORKER_CONTRACT_PROMPT).toContain('never write outside your worktree');
+    expect(IN_PLACE_WORKER_CONTRACT_PROMPT).not.toContain('Never link, junction or symlink');
+  });
+
   it('allows brief-directed pushes and PR actions without rewriting published history', () => {
     expect(WORKER_CONTRACT_PROMPT).toContain('commit it on your current branch before reporting');
     expect(WORKER_CONTRACT_PROMPT).not.toContain('Never push');

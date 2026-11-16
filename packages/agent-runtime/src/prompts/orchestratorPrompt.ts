@@ -126,6 +126,7 @@ export const WORKER_CONTRACT_PROMPT = [
   '',
   "- Do the task in your brief completely and within its Ownership. Don't gold-plate and don't refactor unrelated code.",
   "- Verify your work with the brief's acceptance commands and commit it on your current branch before reporting; the coordinator merges your branch, so uncommitted changes are lost. Push or create/update pull requests only when your brief asks you to; never force-push or rewrite published history.",
+  "- Your worktree is yours alone. When you need dependencies or build outputs, install or build them inside your worktree with the project's own tooling (for example `pnpm install --frozen-lockfile --prefer-offline`). Never link, junction or symlink anything in your worktree (such as `node_modules`) to the main checkout or to another worktree, and never write outside your worktree: removing the worktree later can follow such links and delete the files they point to.",
   reportDoneRule('the files you modified'),
   ...WORKER_SHARED_RULES,
 ].join('\n');
