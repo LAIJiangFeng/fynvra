@@ -22,6 +22,7 @@ import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/setti
 import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
+import type { WorkerResolvedModel } from './models';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import { createSnapcompactExtension } from './snapcompact/snapcompact';
 import type { OpenSession } from './supervisor';
@@ -62,7 +63,7 @@ export interface PiSessionFactoryOptions {
   /** fynvra 的 pi agentDir（userData/agent），与 PI_CODING_AGENT_DIR 相同 */
   agentDir: string;
   /** 注册 provider 并取 pi 的模型；思考档位按模型的可选集合落定（见 models.ts） */
-  resolveModel(spec: ResolvedModelSpec): Promise<ResolvedModel>;
+  resolveModel(spec: ResolvedModelSpec): Promise<WorkerResolvedModel>;
   /** 把 spec.pluginProviders 按服务 id 注册给插件查找（见 models.ts 的 exposeProviders）；只在 spec 带了时调用 */
   exposePluginProviders?(providers: readonly PluginProviderSpec[]): Promise<void>;
   /** 登记 spec.pluginRefs（插件 id 与根路径），用于识别插件按名字找了哪些模型服务；只在 spec 带了时调用 */
@@ -194,6 +195,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       ...(magic ? { magicReady: () => magic.assertReady() } : {}),
       timeoutMs,
       contextWindow: () => activeModel.model?.contextWindow ?? 0,
+      windowSource: () => activeModel.windowSource,
       log: logContext,
       mcpServers: spec.mcpServers.map((server) => server.name),
     });

@@ -58,6 +58,9 @@ export interface ResolvedModelSpec {
    * 目录里有的、按目录推断出来的，以目录为准
    */
   reasoning?: boolean;
+  /** 设置里模型条目的上下文窗口 / 最大输出（token，正整数）：优先于 pi 目录、推断与兜底 */
+  contextWindow?: number;
+  maxOutput?: number;
 }
 
 /**
@@ -657,6 +660,7 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
   const { providerId, api, baseUrl, apiKey, modelId, thinking, fastMode, reasoning } = record;
+  const { contextWindow, maxOutput } = record;
   if (!isNonEmptyString(providerId) || !isNonEmptyString(api) || !isNonEmptyString(modelId)) {
     return null;
   }
@@ -678,6 +682,9 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(level ? { thinking: level } : {}),
     ...(fastMode === true ? { fastMode: true } : {}),
     ...(reasoning !== undefined ? { reasoning: reasoning as boolean } : {}),
+    // 非法的窗口值只丢弃这一项，不作废整个 spec
+    ...(isPositiveInteger(contextWindow) ? { contextWindow } : {}),
+    ...(isPositiveInteger(maxOutput) ? { maxOutput } : {}),
   };
 }
 

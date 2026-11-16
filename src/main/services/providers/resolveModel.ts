@@ -82,6 +82,8 @@ function toSpec(
   if (!apiKey)
     return { ok: false, error: translate('providers.noApiKeyFor', { name: provider.name }) };
   const baseUrl = resolveBaseUrl(provider.api, provider.baseUrl);
+  // 设置里的真实窗口（用户填写或服务端、导入带来的），worker 优先于 pi 目录使用
+  const entry = provider.models.find((model) => model.id === modelId);
   return {
     ok: true,
     model: {
@@ -90,6 +92,8 @@ function toSpec(
       baseUrl,
       apiKey,
       modelId,
+      ...(entry?.contextWindow ? { contextWindow: entry.contextWindow } : {}),
+      ...(entry?.maxOutput ? { maxOutput: entry.maxOutput } : {}),
       ...(isThinkingLevel(thinking) ? { thinking } : {}),
       // Main 也在这里校验协议：切到不支持 Fast 的服务时清掉，不把旧开关带进请求
       ...(fastMode === true && supportsFastMode(provider.api) ? { fastMode: true } : {}),

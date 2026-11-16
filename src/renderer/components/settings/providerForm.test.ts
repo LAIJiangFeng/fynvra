@@ -87,6 +87,16 @@ describe('providerForm', () => {
     });
   });
 
+  it('保存时原样保留模型条目已有的上下文窗口与最大输出', () => {
+    const models = [
+      { id: 'claude-opus-5-5', name: 'Opus', contextWindow: 1_000_000, maxOutput: 128_000 },
+    ];
+    expect(draftToUpsertInput(draftFromProvider({ ...saved, models }))).toMatchObject({
+      ok: true,
+      input: { models },
+    });
+  });
+
   it('addModel：去空白、拒绝空 id 与重复 id，名称缺省用 id', () => {
     const models = [{ id: 'a', name: 'A' }];
     expect(addModel(models, ' deepseek-chat ')).toEqual({

@@ -66,6 +66,24 @@ describe('createModelResolver', () => {
     });
   });
 
+  it('带上设置里模型条目的上下文窗口与最大输出，没填的不带', async () => {
+    const provider: StoredProvider = {
+      ...anthropic,
+      models: [
+        { id: 'claude-opus-5-5', name: 'Opus', contextWindow: 1_000_000, maxOutput: 128_000 },
+        { id: 'claude-haiku-5-5', name: 'Haiku' },
+      ],
+    };
+    const resolver = createModelResolver(source([provider]));
+    expect(await resolver.resolve(undefined)).toMatchObject({
+      ok: true,
+      model: { modelId: 'claude-opus-5-5', contextWindow: 1_000_000, maxOutput: 128_000 },
+    });
+    const haiku = await resolver.resolve({ providerId: 'anthropic', modelId: 'claude-haiku-5-5' });
+    expect(haiku.ok && 'contextWindow' in haiku.model).toBe(false);
+    expect(haiku.ok && 'maxOutput' in haiku.model).toBe(false);
+  });
+
   it('非法的 thinking 丢弃；Google 地址补 /v1beta', async () => {
     const google: StoredProvider = {
       ...anthropic,

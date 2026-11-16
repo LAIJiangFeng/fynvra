@@ -373,6 +373,10 @@ export const en: MessagesShape<typeof zhCN> = {
     contextUnknown: 'Current context: not yet estimated',
     contextReestimating: 'Current context: awaiting estimate / {window}',
     contextUsage: 'Current context ≈ {tokens} / {window}',
+    contextReestimatingUnknownWindow: 'Current context: awaiting estimate · window unknown',
+    contextUsageUnknownWindow: 'Current context ≈ {tokens} · window unknown',
+    contextWindowEstimatedHint:
+      "The model's context window is not known yet; auto-compaction uses an estimate of {window}",
     contextNearThreshold: 'Compaction threshold reached',
     startHint: 'Send a message to start',
     scrollToBottom: 'Scroll to bottom',

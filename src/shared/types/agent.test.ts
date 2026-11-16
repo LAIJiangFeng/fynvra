@@ -148,6 +148,11 @@ describe('parseAgentCommand', () => {
     {
       type: 'set-model',
       identity,
+      model: { ...spec.model, contextWindow: 1_000_000, maxOutput: 128_000 },
+    },
+    {
+      type: 'set-model',
+      identity,
       model: {
         providerId: 'fynvra-1',
         api: 'openai-completions',
@@ -224,6 +229,18 @@ describe('parseAgentCommand', () => {
   it('keeps inPlace only when it is true (false is the default)', () => {
     const parsed = parseAgentCommand(withSpec({ inPlace: false }));
     expect(parsed?.type === 'spawn-session' && parsed.spec).not.toHaveProperty('inPlace');
+  });
+
+  it('keeps valid model window limits and drops invalid ones without rejecting the spec', () => {
+    for (const bad of [0, -1, 1.5, '1000', Number.NaN, null]) {
+      expect(
+        parseAgentCommand({
+          type: 'set-model',
+          identity,
+          model: { ...spec.model, contextWindow: bad, maxOutput: bad },
+        })
+      ).toEqual({ type: 'set-model', identity, model: spec.model });
+    }
   });
 
   it('normalizes the none alias of off in a model spec', () => {
