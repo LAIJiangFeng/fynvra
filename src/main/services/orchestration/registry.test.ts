@@ -258,6 +258,21 @@ describe('createOrchestrationRegistry', () => {
     expect(activeWorkChanged.mock.calls).toEqual([['ws_2'], ['ws_2']]);
   });
 
+  it('retryRequired 跨工作区查找失败任务的 worker 会话', async () => {
+    const registry = make({ launcher: createFakeLauncher() });
+    const result = await registry.hostFor('session_coord', 'ws_2')?.dispatchTask(TASK);
+    if (!result?.ok || result.dispatch === undefined) throw new Error('dispatch failed');
+    const session = result.dispatch.workerSessionId;
+    expect(registry.retryRequired(session)).toBeUndefined();
+    await registry.workerHostFor(session)?.reportDone('failed', 'Cannot compile.');
+    expect(registry.retryRequired(session)).toEqual({
+      taskId: result.dispatch.taskId,
+      title: TASK.title,
+    });
+    expect(registry.retryRequired('session_coord')).toBeUndefined();
+    await registry.flushAll();
+  });
+
   it('openAll 之后 workerHostFor 能找到磁盘快照里的 worker 会话', async () => {
     const first = make({ launcher: createFakeLauncher() });
     await first.hostFor('session_coord', 'ws_1')?.dispatchTask(TASK);

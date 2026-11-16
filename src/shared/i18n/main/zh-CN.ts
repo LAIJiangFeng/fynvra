@@ -86,6 +86,8 @@ export const mainZhCN = {
   sessions: {
     invalidCreate: '无效的会话参数',
     invalidPrompt: '无效的消息',
+    workerRetryRequired:
+      '任务「{title}」已失败，这次尝试已结束，worker 继续工作也无法提交结果。请到主 agent 会话，让它用 reject_work 重试这个任务。',
     invalidApproval: '无效的审批结果',
     invalidModel: '无效的模型参数',
     invalidApprovalMode: '无效的审批档位',

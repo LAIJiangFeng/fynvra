@@ -73,6 +73,9 @@ worktree 建在 `<根>/<workspaceId>/<slug>`，分支 `fynvra/<slug>`；角色�
   立即返回；返回时 ack 期间收到的消息；超时 `timedOut: true`；中止时返回错误且不 ack。
 - **`send_to_worker`**：worker 正阻塞在 `ask_coordinator` → `reply`（并 ack 那条 question）；否则记 `instruction`
   并以默认模式 `promptSession` 及时投递并返回，不等待 worker idle；投递失败则撤回消息。已 completed / abandoned 的任务拒绝；failed 的任务也拒绝（attempt 已结算，worker 无法再汇报），错误引导用 `reject_work` 重试。
+- **用户直接给失败任务的 worker 发消息**：worker 会话当前 attempt 已结算且任务 `failed` 时（`service.retryRequired`），
+  `sessions:prompt` / `sessions:steer` 直接拒绝并提示到主 agent 会话用 `reject_work` 重试；不自动开新 attempt、不给主 agent 投消息。
+  只拦用户经 IPC 发的消息，`send_to_worker` / `reject_work` 走 launcher 不受影响；in-review / completed 的 worker 会话照常可聊。
 - **worker 未汇报即停**：worker 会话一轮正常结束（未 abort）约 2 秒后仍空闲、当前 attempt 未结算且任务 in-progress
   （工作流须是运行中节点；`reject_work` 投递中不算）时，给主 agent 投一条 `from: fynvra` 的 `escalation`（同 dispatch 未确认的不重复投），
   由唤醒器叫醒主 agent。不改任何状态，空闲仍不算失败。触发在 `coordinatorWake.ts`，判断在 `service.workerRunEnded`。

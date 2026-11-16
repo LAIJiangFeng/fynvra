@@ -8,6 +8,9 @@ import type { ArchiveSweeper } from '../services/sessions/archiveSweeper';
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   appListeners: new Map<string, (...args: unknown[]) => unknown>(),
+  retryRequired: vi.fn(
+    (_sessionId: string): { taskId: string; title: string } | undefined => undefined
+  ),
 }));
 
 vi.mock('electron', () => ({
@@ -26,6 +29,16 @@ vi.mock('electron', () => ({
 }));
 // `?modulePath` 只有 electron-vite 构建认得；这里不会真的 fork
 vi.mock('../services/agentHost/electronWorker', () => ({ forkAgentWorker: vi.fn() }));
+vi.mock('./orchestration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./orchestration')>();
+  return {
+    ...actual,
+    getOrchestrationRegistry: () => ({
+      ...actual.getOrchestrationRegistry(),
+      retryRequired: mocks.retryRequired,
+    }),
+  };
+});
 
 const host = {
   list: vi.fn((_workspaceId: string): SessionSummary[] => []),
@@ -74,6 +87,7 @@ beforeEach(() => {
   for (const fn of [...Object.values(host), ...Object.values(archive), sweeper.sweep]) {
     fn.mockClear();
   }
+  mocks.retryRequired.mockClear();
 });
 
 function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummary {
@@ -324,6 +338,29 @@ describe('sessions IPC', () => {
       requestId: 'req-1',
       decision: 'deny',
     });
+  });
+
+  it('refuses prompt and steer for a worker whose task failed, pointing to reject_work', async () => {
+    mocks.retryRequired.mockImplementation((sessionId) =>
+      sessionId === 'worker-1' ? { taskId: 'task_1', title: 'Add toggle' } : undefined
+    );
+    try {
+      for (const channel of [IPC_CHANNELS.SESSIONS_PROMPT, IPC_CHANNELS.SESSIONS_STEER]) {
+        const result = await invoke(channel, { sessionId: 'worker-1', text: '继续' });
+        expect(result).toMatchObject({ ok: false });
+        expect((result as { error: string }).error).toContain('Add toggle');
+        expect((result as { error: string }).error).toContain('reject_work');
+      }
+      expect(host.prompt).not.toHaveBeenCalled();
+      expect(host.steer).not.toHaveBeenCalled();
+      await invoke(IPC_CHANNELS.SESSIONS_PROMPT, { sessionId: 's-1', text: 'hi' });
+      await invoke(IPC_CHANNELS.SESSIONS_STEER, { sessionId: 's-1', text: 'hi' });
+      expect(host.prompt).toHaveBeenCalledWith('s-1', 'hi', undefined);
+      expect(host.steer).toHaveBeenCalledWith('s-1', 'hi', undefined);
+    } finally {
+      mocks.retryRequired.mockReset();
+      mocks.retryRequired.mockReturnValue(undefined);
+    }
   });
 
   it('forwards model choices: create with a thinking level, set-model and model-options', async () => {

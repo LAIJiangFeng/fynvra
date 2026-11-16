@@ -95,6 +95,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   sessions: {
     invalidCreate: 'Invalid session arguments',
     invalidPrompt: 'Invalid message',
+    workerRetryRequired:
+      'Task "{title}" has failed and this attempt is over, so the worker cannot submit results even if it keeps working. Go to the coordinator session and have it retry the task with reject_work.',
     invalidApproval: 'Invalid approval decision',
     invalidModel: 'Invalid model arguments',
     invalidApprovalMode: 'Invalid approval mode',

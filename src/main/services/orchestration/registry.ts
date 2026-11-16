@@ -75,6 +75,8 @@ export interface OrchestrationRegistry {
   coordinatorWork(sessionId: string): CoordinatorWork;
   /** 主 agent 会话在任一已打开的工作区里有未完成的编排任务 */
   hasActiveWork(sessionId: string): boolean;
+  /** worker 会话的任务已失败、当前尝试已结算（跨工作区查找）：用户消息应拒绝，提示由主 agent reject_work 重试 */
+  retryRequired(sessionId: string): { taskId: string; title: string } | undefined;
   /** 确认已投递的消息（各服务尽力而为）。 */
   ackMessages(ids: readonly string[]): void;
   flushAll(): Promise<void>;
@@ -277,6 +279,13 @@ export function createOrchestrationRegistry(
     },
     hasActiveWork: (sessionId) =>
       [...services.values()].some((service) => service.hasActiveWork(sessionId)),
+    retryRequired(sessionId) {
+      for (const service of services.values()) {
+        const found = service.retryRequired(sessionId);
+        if (found) return found;
+      }
+      return undefined;
+    },
     ackMessages(ids: readonly string[]): void {
       for (const service of services.values()) service.ackMessages(ids);
     },

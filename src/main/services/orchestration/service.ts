@@ -139,6 +139,11 @@ export interface OrchestrationService {
   coordinatorWork(sessionId: string): CoordinatorWork;
   /** 该主 agent 会话的 Run 里有未完成的任务（口径同 {@link isIdle}）；状态未加载时 false。 */
   hasActiveWork(sessionId: string): boolean;
+  /**
+   * worker 会话的当前尝试已结算且任务 failed：用户直接发消息也交不上结果，须由主 agent reject_work 重试。
+   * 其他情况（非 worker、未结算、其他状态、未加载）为 undefined。
+   */
+  retryRequired(sessionId: string): { taskId: string; title: string } | undefined;
   /** 有未完成任务的主 agent 会话（口径同 {@link hasActiveWork}），注册表做翻转检测用。 */
   activeCoordinators(): Set<string>;
   /** 确认已投递的消息（尽力而为，幂等）。 */
@@ -678,6 +683,13 @@ export function createOrchestrationService(
     },
 
     hasActiveWork: (sessionId) => activeCoordinators().has(sessionId),
+    retryRequired(sessionId) {
+      if (!loaded) return undefined;
+      const dispatch = dispatchOfSession(sessionId);
+      if (dispatch === undefined || !isDispatchSettled(dispatch)) return undefined;
+      const task = store.tasks.get(dispatch.taskId);
+      return task?.status === 'failed' ? { taskId: task.id, title: task.title } : undefined;
+    },
     activeCoordinators,
 
     ackMessages: (ids) => {
