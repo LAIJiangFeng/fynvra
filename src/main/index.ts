@@ -11,6 +11,7 @@ import { getSettingsFile } from './ipc/settings';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
+import { loadLoginShellPath } from './services/shellEnv';
 import { getUpdateService } from './services/updates';
 import { registerCloseBehavior } from './windows/closeBehavior';
 import { createAppWindow } from './windows/createAppWindow';
@@ -100,6 +101,8 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      // 先开始读登录 shell 的 PATH，fork worker 之前再等它（失败不抛错）
+      const shellPathReady = loadLoginShellPath();
       // toolkit 在 dev 下会改用 electron.exe 的身份；开发版也使用独立的 Fynvra 分组。
       if (process.platform === 'win32')
         app.setAppUserModelId(app.isPackaged ? 'com.fynvra.app' : 'com.fynvra.app.dev');
@@ -113,6 +116,7 @@ if (!app.requestSingleInstanceLock()) {
       });
       registerIpcHandlers();
       const agentHost = getAgentHost();
+      await shellPathReady;
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
