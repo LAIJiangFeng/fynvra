@@ -347,6 +347,8 @@ export const en: MessagesShape<typeof zhCN> = {
     noCompactionRecovery: 'This session has no context recovery pending',
     compactionRetryFailed: 'Could not recover context: {error}',
     compactNow: 'Compact context now',
+    compactShort: 'Compact',
+    compactingShort: 'Compacting…',
     compactFailed: 'Could not compact context: {error}',
     compactBusy: 'Session is running; compact the context after this turn',
     compactionQueueHint: '{queue} to queue; immediate steering is paused during compaction',

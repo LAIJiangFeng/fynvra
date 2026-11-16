@@ -1,4 +1,4 @@
-import { GitBranch, Minimize2, Zap } from 'lucide-react';
+import { FoldVertical, GitBranch, Loader2, Zap } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
 import { isBusy, statusOf, useSessionsStore } from '@/stores/sessions';
@@ -33,6 +33,11 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
       state.stopping[sessionId] === true
     );
   });
+  const compacting = useSessionsStore(
+    (state) =>
+      compactionActive(state.runtimeBySession[sessionId]?.compaction) ||
+      state.compactRequests[sessionId] === true
+  );
   const t = useT();
   // 当前选的模型（切换后立刻变）；会话没记模型时退回用量事件里报的
   const { label, fastMode } = useSessionModel(sessionId);
@@ -73,10 +78,15 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
         aria-label={t('chat.compactNow')}
         title={t('chat.compactNow')}
         disabled={compactDisabled}
-        className="-ml-2 shrink-0 rounded-sm p-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        className="inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-muted-foreground text-xs outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
         onClick={() => void compactContext(sessionId)}
       >
-        <Minimize2 aria-hidden className="size-3" />
+        {compacting ? (
+          <Loader2 aria-hidden className="size-3 animate-spin" />
+        ) : (
+          <FoldVertical aria-hidden className="size-3" />
+        )}
+        {compacting ? t('chat.compactingShort') : t('chat.compactShort')}
       </button>
       <span className="min-w-0 max-w-full truncate" title={details}>
         {engine}
