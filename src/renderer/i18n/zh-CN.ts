@@ -331,6 +331,8 @@ export const zhCN = {
     noCompactionRecovery: '当前会话没有待恢复的上下文',
     compactionRetryFailed: '无法恢复上下文：{error}',
     compactNow: '立即压缩上下文',
+    compactShort: '压缩',
+    compactingShort: '压缩中…',
     compactFailed: '无法压缩上下文：{error}',
     compactBusy: '会话正在运行，等本轮结束再压缩上下文',
     compactionQueueHint: '{queue} 排队，压缩期间不立即插话',
