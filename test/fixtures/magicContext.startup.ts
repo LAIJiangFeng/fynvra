@@ -228,17 +228,24 @@ it('boots the generated host config and handles the first prompt through Magic',
     ]) {
       expect(runner.getCommand(hidden), hidden).toBeUndefined();
     }
-    const compactEvents = events.slice(before);
-    expect(compactEvents.map(({ type }) => type)).toEqual(['command', 'notice', 'command_end']);
+    // It runs as a manual compaction operation: no command echo, no plugin text in the chat.
+    const compactEvents = events.slice(before).filter((e) => e.type !== 'context_runtime');
+    expect(compactEvents.map(({ type }) => type)).toEqual(['compaction', 'compaction']);
     expect(compactEvents).toMatchObject([
-      { text: '/ctx-wrapup' },
-      { level: 'info', text: expect.stringContaining('Nothing to wrap up') },
-      { aborted: false },
+      { state: { reason: 'manual', phase: 'running' } },
+      // A short session: Nothing to wrap up.
+      {
+        state: {
+          reason: 'manual',
+          phase: 'succeeded',
+          outcome: { compactedMessages: 0, appliesOnNextMessage: false },
+        },
+      },
     ]);
-    expect(compactEvents.filter((e) => e.type === 'warning' || e.type === 'error')).toEqual([]);
     expect(snapshots().at(-1)).toMatchObject({ effectiveStrategy: 'magic-context' });
     expect(vendor.fynvraIsSessionReady(manager.getSessionId())).toBe(true);
     const after = SessionManager.open(sessionFile, join(sandbox, 'agent', 'sessions'), cwd);
+    expect(after.getEntries()).toHaveLength(manager.getEntries().length);
     expect(
       after.getEntries().filter((e) => e.type === 'custom' && e.customType === 'ctx-status')
     ).toEqual([]);

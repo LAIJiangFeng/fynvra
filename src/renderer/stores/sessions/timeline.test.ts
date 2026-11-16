@@ -121,6 +121,33 @@ describe('buildTimelineRows · 精简只读工具', () => {
       shape(buildTimelineRows([assistant('a1', { calls: [call('r1', 'read')] })], COMPACT))
     ).toEqual(['assistant:a1[reads(r1)]']);
   });
+
+  it('手动压缩的结果项没有正文也画出来，单独一行，不和前后的工具调用合并', () => {
+    const compaction = {
+      operationId: 'compaction-1',
+      reason: 'manual' as const,
+      phase: 'succeeded' as const,
+      startedAt: 1,
+      deadlineAt: 2,
+      attempt: 1,
+      maxAttempts: 1,
+    };
+    const rows = buildTimelineRows(
+      [
+        user('u1'),
+        assistant('a1', { text: '好', calls: [call('r1', 'read')] }),
+        assistant('c1', { compaction }),
+        assistant('a2', { calls: [call('r2', 'read')] }),
+      ],
+      COMPACT
+    );
+    expect(shape(rows)).toEqual([
+      'user:u1',
+      'assistant:a1[reads(r1)]',
+      'assistant:c1[]',
+      'assistant:a2[reads(r2)]',
+    ]);
+  });
 });
 
 describe('buildTimelineRows · 折叠历史轮次', () => {

@@ -350,6 +350,11 @@ export const en: MessagesShape<typeof zhCN> = {
     compactShort: 'Compact',
     compactingShort: 'Compacting…',
     compactFailed: 'Could not compact context: {error}',
+    compactDone: 'Context compacted',
+    compactDoneMagic:
+      'Context compacted: {count} earlier messages were summarized; takes effect from your next message',
+    compactNothing: 'Nothing to compact; earlier history is already summarized',
+    compactCancelled: 'Compaction cancelled; the conversation is unchanged',
     compactBusy: 'Session is running; compact the context after this turn',
     compactionQueueHint: '{queue} to queue; immediate steering is paused during compaction',
     queuedForCompaction: 'Queued; waiting for history compaction',

@@ -10,6 +10,13 @@ const member = <T extends string>(x: unknown, values: readonly T[]): x is T =>
 
 export function parseCompactionState(raw: unknown): CompactionState | null {
   const r = asRecord(raw);
+  const outcome = r?.outcome === undefined ? undefined : asRecord(r.outcome);
+  if (
+    outcome === null ||
+    (outcome &&
+      (!count(outcome.compactedMessages) || typeof outcome.appliesOnNextMessage !== 'boolean'))
+  )
+    return null;
   if (
     !r ||
     !isNonEmptyString(r.operationId) ||
@@ -45,6 +52,14 @@ export function parseCompactionState(raw: unknown): CompactionState | null {
       ? { cancelSource: r.cancelSource as CompactionState['cancelSource'] }
       : {}),
     ...(r.errorMessage !== undefined ? { errorMessage: r.errorMessage as string } : {}),
+    ...(outcome
+      ? {
+          outcome: {
+            compactedMessages: outcome.compactedMessages as number,
+            appliesOnNextMessage: outcome.appliesOnNextMessage as boolean,
+          },
+        }
+      : {}),
   };
 }
 export function parseRetryState(raw: unknown): RetryState | null {

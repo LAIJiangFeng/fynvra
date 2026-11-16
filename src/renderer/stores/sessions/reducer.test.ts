@@ -784,3 +784,69 @@ describe('syncSessionStatuses', () => {
     expect(syncSessionStatuses(next, [{ id: S, status: 'idle' }], new Set())).toBe(next);
   });
 });
+
+describe('manual compaction result line', () => {
+  const base = {
+    operationId: 'compaction-1',
+    reason: 'manual' as const,
+    startedAt: T0,
+    deadlineAt: T0 + 600_000,
+    attempt: 1,
+    maxAttempts: 1,
+  };
+  const running = { ...base, phase: 'running' as const };
+  const done = {
+    ...base,
+    phase: 'succeeded' as const,
+    endedAt: T0 + 5,
+    durationMs: 5,
+    outcome: { compactedMessages: 12, appliesOnNextMessage: true },
+  };
+  const snapshot = (compaction: typeof done, recoveryRequired = false) => ({
+    configuredStrategy: 'magic-context' as const,
+    effectiveStrategy: 'magic-context' as const,
+    compactionTimeoutMs: 600_000,
+    context: { tokens: null, contextWindow: 200_000, source: 'unknown' as const },
+    compaction,
+    recoveryRequired,
+    pendingPromptCount: 0,
+  });
+  const results = (state: ChatProjection) =>
+    messagesOf(state).filter((message) => message.compaction);
+
+  it('inserts one structured line per operation, from the event or the snapshot', () => {
+    const state = run([
+      { type: 'compaction', state: running },
+      { type: 'compaction', state: done },
+      { type: 'context_runtime', snapshot: snapshot(done) },
+    ]);
+    expect(results(state)).toEqual([expect.objectContaining({ text: '', compaction: done })]);
+    // A snapshot alone also ends the operation once.
+    const viaSnapshot = run([
+      { type: 'compaction', state: running },
+      { type: 'context_runtime', snapshot: snapshot(done) },
+      { type: 'compaction', state: done },
+    ]);
+    expect(results(viaSnapshot)).toHaveLength(1);
+  });
+
+  it('shows failed and cancelled manual compaction, but not automatic compaction', () => {
+    const failed = { ...done, phase: 'failed' as const, errorMessage: 'boom', outcome: undefined };
+    expect(results(run([{ type: 'compaction', state: failed }]))).toHaveLength(1);
+    const auto = run([
+      { type: 'compaction', state: { ...running, reason: 'threshold' } },
+      { type: 'compaction', state: { ...done, reason: 'threshold' } },
+      { type: 'compaction', state: { ...done, operationId: 'c-2', reason: 'overflow' } },
+    ]);
+    expect(results(auto)).toEqual([]);
+  });
+
+  it('leaves recovery (retry-compaction runs as manual) to its own display', () => {
+    const state = run([
+      { type: 'context_runtime', snapshot: { ...snapshot(running as never, true) } },
+      { type: 'compaction', state: { ...done, phase: 'failed', outcome: undefined } },
+      { type: 'context_runtime', snapshot: snapshot(done, true) },
+    ]);
+    expect(results(state)).toEqual([]);
+  });
+});
