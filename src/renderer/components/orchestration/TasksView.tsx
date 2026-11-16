@@ -20,8 +20,10 @@ import {
   latestMessageOfTask,
   tasksByStatus,
 } from '@/stores/orchestration';
+import { findSession, useSessionsStore } from '@/stores/sessions';
 import { RoleBadge, StatusDot, WorkflowNodeDots, WorkflowProgress } from './common';
 import {
+  attemptDisplay,
   formatDuration,
   formatRelative,
   messageSummary,
@@ -265,7 +267,15 @@ function TaskCard({
   const running = activeDispatchOf(view, task.id);
   const attempts = dispatchesOf(view, task.id).length;
   const message = latestMessageOfTask(view, task.id);
-  const tick = useNow(1_000, running !== undefined);
+  // statusOf 对未知会话返回 'idle'，这里要区分「未知」，故直接取。
+  const workerStatus = useSessionsStore((state) =>
+    running
+      ? (state.runtimeBySession[running.workerSessionId]?.status ??
+        findSession(state, running.workerSessionId)?.status)
+      : undefined
+  );
+  const display = attemptDisplay(running !== undefined, workerStatus);
+  const tick = useNow(1_000, display === 'running');
   const t = useT();
   const dependencies = task.dependsOn.map(
     (id) => view.tasks.find((candidate) => candidate.id === id) ?? { id, title: id, missing: true }
@@ -294,7 +304,15 @@ function TaskCard({
             <span className="truncate">{latest.branch}</span>
           </span>
         )}
-        {running && (
+        {display === 'stopped' && (
+          <span
+            className="rounded bg-amber-500/15 px-1 text-amber-700 dark:text-amber-300"
+            title={t('orchestration.stoppedNotReportedHint')}
+          >
+            {t('orchestration.stoppedNotReported')}
+          </span>
+        )}
+        {running && display === 'running' && (
           <span className="flex items-center gap-1 text-sky-700 tabular-nums dark:text-sky-300">
             <Loader2 className="size-3 animate-spin" />
             {formatDuration(tick - running.startedAt, t)}
