@@ -12,6 +12,7 @@ import {
   outputLineKind,
   progressCounts,
   reportOutcome,
+  splitSummary,
   TASK_STATUS_ORDER,
 } from './format';
 
@@ -214,5 +215,37 @@ describe('outputLineKind', () => {
     expect(outputLineKind('[aborted]')).toBe('notice');
     expect(outputLineKind('[settled]')).toBe('settled');
     expect(outputLineKind('[1/3] step')).toBe('text');
+  });
+});
+
+describe('splitSummary', () => {
+  it('splits the first paragraph from the rest', () => {
+    expect(splitSummary('Did X.\nAnd Y.\n\n- a\n- b\n\nMore.\n')).toEqual({
+      lead: 'Did X.\nAnd Y.',
+      rest: '- a\n- b\n\nMore.',
+    });
+  });
+
+  it('has an empty rest without a blank line', () => {
+    expect(splitSummary('one\ntwo')).toEqual({ lead: 'one\ntwo', rest: '' });
+  });
+
+  it('normalizes CRLF', () => {
+    expect(splitSummary('a\r\nb\r\n\r\nc')).toEqual({ lead: 'a\nb', rest: 'c' });
+  });
+
+  it('skips leading blank lines', () => {
+    expect(splitSummary('\n\n  \nlead\n\nrest')).toEqual({ lead: 'lead', rest: 'rest' });
+  });
+
+  it('merges a lone heading with the next paragraph', () => {
+    expect(splitSummary('## Done\n\nChanged X.\n\nDetails')).toEqual({
+      lead: '## Done\n\nChanged X.',
+      rest: 'Details',
+    });
+  });
+
+  it('handles an empty string', () => {
+    expect(splitSummary('')).toEqual({ lead: '', rest: '' });
   });
 });

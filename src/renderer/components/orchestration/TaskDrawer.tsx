@@ -1,13 +1,14 @@
 import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
 import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Markdown } from '@/components/chat/Markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useT } from '@/i18n/I18nProvider';
 import type { OrchestrationSnapshotView } from '@/lib/api/orchestration';
 import { cn } from '@/lib/utils';
-import { dispatchesOf, latestDispatchOf } from '@/stores/orchestration';
+import { dispatchesOf, latestDispatchOf, messagesOf } from '@/stores/orchestration';
 import {
   RoleBadge,
   SectionTitle,
@@ -16,7 +17,7 @@ import {
   WorkflowProgress,
   workflowNodeDispatchId,
 } from './common';
-import { formatClock, formatDuration } from './format';
+import { formatClock, formatDuration, splitSummary } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
 import { WorkerOutput } from './WorkerOutput';
@@ -55,6 +56,21 @@ export function TaskDrawer({
   const pickedValid = picked && dispatches.some((dispatch) => dispatch.id === picked.dispatchId);
   const outputId = pickedValid ? picked.dispatchId : latest?.id;
   const outputRef = useRef<HTMLDivElement>(null);
+  const outputSettled =
+    dispatches.find((dispatch) => dispatch.id === outputId)?.settledAt !== undefined;
+  // 已结算的输出默认收起（收起时不挂载、不加载）；定位到节点时自动展开
+  const [outputOpen, setOutputOpen] = useState(false);
+  const revealOutput = () => {
+    setOutputOpen(true);
+    window.requestAnimationFrame(() =>
+      outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    );
+  };
+  const settledTask = task.status === 'completed' || task.status === 'abandoned';
+  const messageCount = dispatches.reduce(
+    (sum, dispatch) => sum + messagesOf(view, dispatch.id).length,
+    0
+  );
   const pickedName =
     pickedValid && task.workflow && Array.isArray(task.workflow.steps)
       ? (task.workflow.steps.find((step) => step.id === picked.nodeId)?.name ?? picked.nodeId)
@@ -72,9 +88,7 @@ export function TaskDrawer({
     const dispatchId = workflowNodeDispatchId(task.workflow, dispatches, focusNode.nodeId);
     if (!dispatchId) return;
     setPicked({ nodeId: focusNode.nodeId, dispatchId });
-    window.requestAnimationFrame(() =>
-      outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    );
+    revealOutput();
   }, [focusSeq]);
 
   return (
@@ -131,6 +145,9 @@ export function TaskDrawer({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        {latest && latest.settledAt !== undefined && latest.summary?.trim() && (
+          <ResultCard dispatch={latest} attempt={dispatches.length} />
+        )}
         <BriefSection spec={task.spec} />
         {task.dependsOn.length > 0 && (
           <DependencySection view={view} task={task} onOpenTask={onOpenTask} />
@@ -142,9 +159,7 @@ export function TaskDrawer({
             selectedNodeId={pickedValid ? picked.nodeId : null}
             onOpenOutput={(nodeId, dispatchId) => {
               setPicked({ nodeId, dispatchId });
-              window.requestAnimationFrame(() =>
-                outputRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-              );
+              revealOutput();
             }}
           />
         )}
@@ -163,10 +178,16 @@ export function TaskDrawer({
             <DispatchTimeline dispatches={dispatches} latestId={latest?.id} />
           )}
         </section>
-        <section aria-label={t('orchestration.messages')}>
-          <SectionTitle>{t('orchestration.messages')}</SectionTitle>
-          <MessageStream view={view} dispatches={dispatches} />
-        </section>
+        {settledTask ? (
+          <Fold label={t('orchestration.messagesCount', { count: messageCount })}>
+            <MessageStream view={view} dispatches={dispatches} />
+          </Fold>
+        ) : (
+          <section aria-label={t('orchestration.messages')}>
+            <SectionTitle>{t('orchestration.messages')}</SectionTitle>
+            <MessageStream view={view} dispatches={dispatches} />
+          </section>
+        )}
         {outputId && (
           <div ref={outputRef} className="flex flex-col gap-1">
             {pickedName !== null && (
@@ -186,7 +207,17 @@ export function TaskDrawer({
                 )}
               </p>
             )}
-            <WorkerOutput key={outputId} dispatchId={outputId} />
+            {outputSettled ? (
+              <Fold
+                label={t('orchestration.output')}
+                open={outputOpen}
+                onOpenChange={setOutputOpen}
+              >
+                <WorkerOutput key={outputId} dispatchId={outputId} />
+              </Fold>
+            ) : (
+              <WorkerOutput key={outputId} dispatchId={outputId} />
+            )}
           </div>
         )}
       </div>
@@ -194,46 +225,91 @@ export function TaskDrawer({
   );
 }
 
-function BriefSection({ spec }: { spec: string }) {
-  const t = useT();
+/** 小节级折叠区（默认收起，收起时内容不挂载）。 */
+function Fold({
+  label,
+  open,
+  onOpenChange,
+  children,
+}: {
+  label: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children: ReactNode;
+}) {
   return (
-    <Collapsible>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
       <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded text-left font-medium text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
         <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]:rotate-90" />
-        {t('orchestration.brief')}
+        {label}
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5">
-        {spec.trim() === '' ? (
-          <p className="text-muted-foreground text-xs">{t('orchestration.emptyBrief')}</p>
-        ) : (
-          <div className="rounded-md border bg-card px-2.5 py-2 text-xs leading-relaxed">
-            <MarkdownLite text={spec} />
-          </div>
-        )}
-      </CollapsibleContent>
+      <CollapsibleContent className="mt-1.5">{children}</CollapsibleContent>
     </Collapsible>
   );
 }
 
-/** 任务书的轻量展示：标题行加粗，空行收成小间距，其余按原文换行（不引入 Markdown 渲染库）。 */
-function MarkdownLite({ text }: { text: string }) {
-  return text.split('\n').map((line, index) => {
-    const key = `${index}:${line}`;
-    if (line.trim() === '') return <div key={key} aria-hidden className="h-1.5" />;
-    const heading = /^#{1,6}\s+(.*)$/.exec(line);
-    if (heading) {
-      return (
-        <p key={key} className="font-semibold text-foreground">
-          {heading[1]}
-        </p>
-      );
-    }
-    return (
-      <p key={key} className="whitespace-pre-wrap break-words text-foreground/90">
-        {line}
-      </p>
+function BriefSection({ spec }: { spec: string }) {
+  const t = useT();
+  return (
+    <Fold label={t('orchestration.brief')}>
+      {spec.trim() === '' ? (
+        <p className="text-muted-foreground text-xs">{t('orchestration.emptyBrief')}</p>
+      ) : (
+        <div className="rounded-md border bg-card px-2.5 py-2">
+          <Markdown text={spec} className="text-xs leading-relaxed" />
+        </div>
+      )}
+    </Fold>
+  );
+}
+
+/** 顶部结果卡：最新一次已结算尝试的汇报首段、元信息、完整汇报与改动文件。 */
+function ResultCard({ dispatch, attempt }: { dispatch: Dispatch; attempt: number }) {
+  const t = useT();
+  const failed = dispatch.outcome === 'failed';
+  const { lead, rest } = splitSummary(dispatch.summary ?? '');
+  const files = dispatch.filesModified ?? [];
+  const meta = [t('orchestration.attemptNth', { count: attempt })];
+  if (dispatch.settledAt !== undefined) {
+    meta.push(
+      t('orchestration.took', {
+        duration: formatDuration(dispatch.settledAt - dispatch.startedAt, t),
+      })
     );
-  });
+  }
+  if (files.length > 0) meta.push(t('orchestration.filesCount', { count: files.length }));
+  return (
+    <section
+      aria-label={t(failed ? 'orchestration.whyFailed' : 'orchestration.whatWasDone')}
+      className={cn(
+        'rounded-md border border-l-2 bg-card px-3 py-2',
+        failed ? 'border-l-destructive' : 'border-l-emerald-500'
+      )}
+    >
+      <h3
+        className={cn(
+          'font-medium text-xs',
+          failed ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-300'
+        )}
+      >
+        {t(failed ? 'orchestration.whyFailed' : 'orchestration.whatWasDone')}
+      </h3>
+      <Markdown text={lead} className="mt-1 text-[13px] leading-relaxed" />
+      <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">{meta.join(' · ')}</p>
+      {rest && (
+        <Collapsible className="mt-1">
+          <CollapsibleTrigger className="group flex items-center gap-1 rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50">
+            <ChevronRight className="size-3 transition-transform group-data-[panel-open]:rotate-90" />
+            {t('orchestration.fullReport')}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Markdown text={rest} className="mt-1 pl-4 text-xs" />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+      {files.length > 0 && <FilesModified files={files} />}
+    </section>
+  );
 }
 
 /** 工作流各步的结算记录（最近 30 条），新的在下。 */
@@ -388,12 +464,17 @@ function DispatchTimeline({
                     duration: formatDuration(now - dispatch.startedAt, t),
                   })}
             </p>
-            {dispatch.summary && (
-              <p className="mt-1 whitespace-pre-wrap break-words text-xs">{dispatch.summary}</p>
+            {superseded && dispatch.summary && (
+              <p
+                className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-muted-foreground text-xs"
+                title={dispatch.summary}
+              >
+                {splitSummary(dispatch.summary).lead}
+              </p>
             )}
-            {dispatch.filesModified && dispatch.filesModified.length > 0 && (
-              <FilesModified files={dispatch.filesModified} />
-            )}
+            {(superseded || !dispatch.summary?.trim()) &&
+              dispatch.filesModified &&
+              dispatch.filesModified.length > 0 && <FilesModified files={dispatch.filesModified} />}
           </li>
         );
       })}

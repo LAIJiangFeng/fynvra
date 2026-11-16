@@ -134,6 +134,21 @@ export function oneLine(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}…` : flat;
 }
 
+/** worker 汇报拆成首段（`lead`）和其余部分（`rest`）；首段只有一行标题时并上下一段。 */
+export function splitSummary(text: string): { lead: string; rest: string } {
+  const paragraphs = text
+    .replace(/\r\n?/g, '\n')
+    .replace(/^\s*\n/, '')
+    .split(/\n[ \t]*\n/);
+  let take = 1;
+  if (/^#/.test(paragraphs[0] ?? '') && !paragraphs[0]?.includes('\n') && paragraphs.length > 1)
+    take = 2;
+  return {
+    lead: paragraphs.slice(0, take).join('\n\n').trim(),
+    rest: paragraphs.slice(take).join('\n\n').trim(),
+  };
+}
+
 const pad = (value: number) => String(value).padStart(2, '0');
 
 /** 本地时间 `HH:MM:SS`；不是今天时加上 `MM-DD`。 */
