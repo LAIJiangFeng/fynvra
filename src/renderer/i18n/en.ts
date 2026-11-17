@@ -148,6 +148,7 @@ export const en: MessagesShape<typeof zhCN> = {
     pickFileHint: 'Select a file in the right explorer to preview or edit it in a central tab',
     readonly: 'Read only',
     largeReadonly: 'Large file ({size}), opened read-only',
+    largeReadonlySource: 'Large file ({size}), opened read-only as source',
     closeFile: 'Close {name}',
     editor: 'Edit {name}',
     markdownPreview: 'Markdown preview',
