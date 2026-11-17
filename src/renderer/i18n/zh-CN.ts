@@ -144,6 +144,7 @@ export const zhCN = {
     pickFileHint: '点击右侧目录中的文件，在中央标签中预览或编辑',
     readonly: '只读',
     largeReadonly: '文件较大（{size}），以只读方式打开',
+    largeReadonlySource: '文件较大（{size}），以只读方式打开，只显示源码',
     closeFile: '关闭 {name}',
     editor: '编辑 {name}',
     markdownPreview: 'Markdown 预览',
