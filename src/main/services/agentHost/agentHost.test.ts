@@ -1087,6 +1087,64 @@ describe('automatic coordinator continuation delivery', () => {
   });
 });
 
+describe('会话守护的自动恢复 resumeAfterInterruption', () => {
+  it('接受 error 会话：发一条 prompt、置为 running 并通知 resume，不算用户 prompt', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    const activity = vi.fn();
+    env.host.observe({ activity });
+    env.store.update(session.id, { status: 'error' });
+    expect(await env.host.resumeAfterInterruption(session.id, 'Resume please')).toEqual({
+      ok: true,
+      delivered: true,
+    });
+    expect(env.sent('prompt')).toEqual([
+      expect.objectContaining({ type: 'prompt', text: 'Resume please' }),
+    ]);
+    expect(env.host.get(session.id)?.status).toBe('running');
+    expect(activity).toHaveBeenCalledWith(session.id, 'resume');
+    expect(activity).not.toHaveBeenCalledWith(session.id, 'prompt');
+    // 已在运行：拒绝
+    expect(await env.host.resumeAfterInterruption(session.id, 'Again')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    expect(env.sent('prompt')).toHaveLength(1);
+  });
+
+  it('拒绝已归档、普通 idle（用户点停止）的会话；fromIdle 时接受 idle', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    env.store.update(session.id, { status: 'error', archivedAt: 1 });
+    expect(await env.host.resumeAfterInterruption(session.id, 'Archived')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    env.store.update(session.id, { archivedAt: undefined, status: 'idle' });
+    expect(await env.host.resumeAfterInterruption(session.id, 'Idle')).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    expect(env.sent('prompt')).toEqual([]);
+    expect(
+      await env.host.resumeAfterInterruption(session.id, 'Stalled', { fromIdle: true })
+    ).toEqual({ ok: true, delivered: true });
+  });
+
+  it('spawn 期间用户发消息时让位', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    env.store.update(session.id, { status: 'error' });
+    const automatic = env.host.resumeAfterInterruption(session.id, 'Automatic resume');
+    const user = env.host.prompt(session.id, 'User turn');
+    expect(await automatic).toEqual({ ok: true, delivered: false });
+    expect(await user).toEqual({ ok: true });
+    expect(env.sent('prompt')).toEqual([
+      expect.objectContaining({ type: 'prompt', text: 'User turn' }),
+    ]);
+  });
+});
+
 describe('createAgentHost sessions', () => {
   it('creates a session from workspace, role and model without touching the worker', async () => {
     const env = setup();
