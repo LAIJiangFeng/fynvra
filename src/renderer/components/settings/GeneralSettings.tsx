@@ -18,6 +18,7 @@ import {
   type ShellPreference,
   type ShellTarget,
   type TimelinePreferences,
+  type WatchdogPreferences,
   type WorkspaceWorktreesInfo,
   type WorktreesRootInfo,
 } from '@shared/types/settings';
@@ -105,6 +106,7 @@ export function GeneralSettings() {
       <NetworkProxySettings />
       <DangerousActionsSection />
       <WebFetchSection />
+      <WatchdogSection />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>
@@ -588,6 +590,186 @@ function WebFetchSection() {
         </li>
       </ul>
     </section>
+  );
+}
+
+// --- watchdog ---
+/** 会话守护（preferences.watchdog）：整块写回，Main 下一次检查就按新设置 */
+function WatchdogSection() {
+  const watchdog = useGeneralPreferencesStore((state) => state.watchdog);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const error = useGeneralPreferencesStore((state) => state.error);
+  const t = useT();
+  const id = useId();
+  const save = (patch: Partial<WatchdogPreferences>) =>
+    update({ watchdog: { ...watchdog, ...patch } });
+  const scopeItems = [
+    { value: 'orchestrator', label: t('settings.watchdog.scopeOrchestrator') },
+    { value: 'all', label: t('settings.watchdog.scopeAll') },
+  ];
+  const triggers = [
+    {
+      key: 'onModelError',
+      label: 'settings.watchdog.onModelError',
+      hint: 'settings.watchdog.onModelErrorHint',
+    },
+    { key: 'onCrash', label: 'settings.watchdog.onCrash', hint: 'settings.watchdog.onCrashHint' },
+    { key: 'onStall', label: 'settings.watchdog.onStall', hint: 'settings.watchdog.onStallHint' },
+  ] as const;
+  return (
+    <section>
+      <SectionHeader title={t('settings.watchdog.title')} />
+      <ul className="divide-y rounded-lg border">
+        <li className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <label htmlFor={id} className="font-medium text-sm">
+              {t('settings.watchdog.enabled')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">{t('settings.watchdog.hint')}</p>
+          </div>
+          <Switch
+            id={id}
+            checked={watchdog.enabled}
+            onCheckedChange={(checked) => void save({ enabled: checked })}
+          />
+        </li>
+        {watchdog.enabled && (
+          <>
+            <PreferenceRow label={t('settings.watchdog.scope')} hint={t('settings.watchdog.scope')}>
+              {(rowId) => (
+                <Select
+                  items={scopeItems}
+                  value={watchdog.scope}
+                  onValueChange={(next) => {
+                    if (next === 'orchestrator' || next === 'all') void save({ scope: next });
+                  }}
+                >
+                  <SelectTrigger id={rowId} size="sm" className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scopeItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </PreferenceRow>
+            {triggers.map(({ key, label, hint }) => (
+              <PreferenceRow key={key} label={t(label)} hint={t(hint)}>
+                {(rowId) => (
+                  <Switch
+                    id={rowId}
+                    aria-label={t(label)}
+                    checked={watchdog[key]}
+                    onCheckedChange={(checked) => void save({ [key]: checked })}
+                  />
+                )}
+              </PreferenceRow>
+            ))}
+          </>
+        )}
+      </ul>
+      {watchdog.enabled && (
+        <>
+          <WatchdogNumberSetting
+            field="intervalSeconds"
+            label={t('settings.watchdog.interval')}
+            hint={t('settings.watchdog.intervalHint')}
+            min={15}
+            max={1800}
+          />
+          <WatchdogNumberSetting
+            field="maxAttempts"
+            label={t('settings.watchdog.maxAttempts')}
+            hint={t('settings.watchdog.maxAttemptsHint')}
+            min={1}
+            max={50}
+          />
+          <WatchdogNumberSetting
+            field="stallMinutes"
+            label={t('settings.watchdog.stallMinutes')}
+            hint={t('settings.watchdog.stallMinutesHint')}
+            min={10}
+            max={240}
+            disabled={!watchdog.onStall}
+          />
+        </>
+      )}
+      {error && (
+        <InlineMessage tone="error" className="mt-2">
+          {error}
+        </InlineMessage>
+      )}
+    </section>
+  );
+}
+
+/** 守护里的整数项：校验范围，点「保存」才整块提交 */
+function WatchdogNumberSetting({
+  field,
+  label,
+  hint,
+  min,
+  max,
+  disabled = false,
+}: {
+  field: 'intervalSeconds' | 'maxAttempts' | 'stallMinutes';
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  disabled?: boolean;
+}) {
+  const watchdog = useGeneralPreferencesStore((state) => state.watchdog);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const current = watchdog[field];
+  const [value, setValue] = useState(String(current));
+  const [saving, setSaving] = useState(false);
+  const t = useT();
+  const id = useId();
+  useEffect(() => setValue(String(current)), [current]);
+  const parsed = Number(value);
+  const valid = value.trim() !== '' && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+  return (
+    <form
+      className="mt-3 grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || saving || disabled) return;
+        setSaving(true);
+        void update({ watchdog: { ...watchdog, [field]: parsed } }).finally(() => setSaving(false));
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="mr-auto text-sm">
+          {label}
+        </label>
+        <Input
+          id={id}
+          className="w-28"
+          type="number"
+          min={min}
+          max={max}
+          step="1"
+          required
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={saving || disabled}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={!valid || saving || disabled || parsed === current}
+        >
+          {t('common.save')}
+        </Button>
+      </div>
+      <p className="text-muted-foreground text-xs">{hint}</p>
+    </form>
   );
 }
 

@@ -12,8 +12,10 @@ import {
   sessionPreferencesOf,
   type TimelinePreferences,
   timelinePreferencesOf,
+  type WatchdogPreferences,
   type WorktreesRootInfo,
   type WorktreesUsage,
+  watchdogPreferencesOf,
 } from '@shared/types/settings';
 import { create } from 'zustand';
 import { translate } from '../i18n';
@@ -159,6 +161,7 @@ type GeneralPatch = Partial<
       | 'compactionThresholdTokens'
       | 'webFetchAllowLoopback'
       | 'confirmDangerousActions'
+      | 'watchdog'
     >
 >;
 
@@ -174,6 +177,8 @@ export interface GeneralPreferencesState {
   webFetchAllowLoopback: boolean;
   /** 完全放行档下危险操作是否仍要确认；缺省关闭 */
   confirmDangerousActions: boolean;
+  /** 会话守护；整块写回 */
+  watchdog: WatchdogPreferences;
   /** 最近一次保存失败的原因 */
   error: string | null;
   load(): Promise<void>;
@@ -190,6 +195,7 @@ function resolveGeneral(preferences: GeneralPatch) {
     compactionThresholdTokens: compactionThresholdTokensOf(preferences),
     webFetchAllowLoopback: preferences.webFetchAllowLoopback === true,
     confirmDangerousActions: preferences.confirmDangerousActions === true,
+    watchdog: watchdogPreferencesOf(preferences),
   };
 }
 
@@ -223,6 +229,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
           compactionThresholdTokens: state.compactionThresholdTokens,
           webFetchAllowLoopback: state.webFetchAllowLoopback,
           confirmDangerousActions: state.confirmDangerousActions,
+          watchdog: state.watchdog,
           ...patch,
         })
       );
