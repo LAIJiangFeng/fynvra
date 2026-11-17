@@ -96,10 +96,11 @@ export interface SessionsState extends ChatProjection {
   modelOptionsError: string | null;
   /** 各工作区上一次用过的模型（新建会话弹层的默认值之一） */
   lastModelByWorkspace: Record<string, SessionModelRef>;
-  /** 正在批量归档 / 删除的工作区：期间不响应它的 sessions:changed，结束时只重拉一次 */
-  bulkWorkspaceId: string | null;
-  /** 批量操作的进度（已处理 / 总数），只在 bulkWorkspaceId 有值时不为 null */
-  bulkProgress: { kind: 'archive' | 'remove'; done: number; total: number } | null;
+  /**
+   * 正在批量归档 / 删除的工作区及其进度（已处理 / 总数），只有正在跑批量的工作区才有键。
+   * 不同工作区可同时进行；期间不响应该工作区的 sessions:changed，结束时只重拉一次
+   */
+  bulkByWorkspace: Record<string, { kind: 'archive' | 'remove'; done: number; total: number }>;
   /** 等用户确认的批量删除；确认前不会删任何会话 */
   pendingRemoval: {
     workspaceId: string;
@@ -704,7 +705,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       run: (sessionId: string) => Promise<IpcResult>,
       skipped = 0
     ): Promise<BulkResult> {
-      if (get().bulkWorkspaceId !== null) return { done: 0, failed: 0 };
+      // 同一工作区不重入；别的工作区的批量操作不受影响
+      if (Object.hasOwn(get().bulkByWorkspace, workspaceId)) return { done: 0, failed: 0 };
       const skippedNotice =
         skipped > 0 ? translate('sessions.bulk.awaitingWorkersSkipped', { count: skipped }) : null;
       const withSkipped = (result: BulkResult): BulkResult =>
@@ -718,7 +720,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const active = get().activeSessionId;
       ids.sort((a, b) => Number(a === active) - Number(b === active));
       const total = ids.length;
-      set({ bulkWorkspaceId: workspaceId, bulkProgress: { kind, done: 0, total } });
+      // 多个工作区的循环会交错执行：只改本工作区的键，不覆盖别的工作区的进度
+      const setProgress = (done: number) =>
+        set((state) => ({
+          bulkByWorkspace: { ...state.bulkByWorkspace, [workspaceId]: { kind, done, total } },
+        }));
+      setProgress(0);
       let done = 0;
       const reasons = new Set<string>();
       try {
@@ -726,10 +733,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           const result = await run(sessionId);
           if (result.ok) done++;
           else reasons.add(result.error);
-          set({ bulkProgress: { kind, done: index + 1, total } });
+          setProgress(index + 1);
         }
       } finally {
-        set({ bulkWorkspaceId: null, bulkProgress: null });
+        set((state) => ({ bulkByWorkspace: omitKey(state.bulkByWorkspace, workspaceId) }));
       }
       const failed = ids.length - done;
       const partial =
@@ -762,8 +769,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       listErrors: {},
       approvalSubmissions: {},
       notice: null,
-      bulkWorkspaceId: null,
-      bulkProgress: null,
+      bulkByWorkspace: {},
       pendingRemoval: null,
       modelProviders: null,
       modelOptionsError: null,
@@ -1640,7 +1646,7 @@ export function connectSessionsStore(
       const state = store.getState();
       // 只刷新看过的工作区；其余的等切过去时再拉。批量操作中的工作区由它结束时重拉一次
       if (
-        workspaceId !== state.bulkWorkspaceId &&
+        !Object.hasOwn(state.bulkByWorkspace, workspaceId) &&
         (workspaceId === state.workspaceId || Object.hasOwn(state.sessionsByWorkspace, workspaceId))
       ) {
         void state.loadSessions(workspaceId);

@@ -53,10 +53,9 @@ export function SessionList({ workspaceId }: { workspaceId: string }) {
   const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const bulkBusy = useSessionsStore((state) => state.bulkWorkspaceId !== null);
-  const bulkProgress = useSessionsStore((state) =>
-    state.bulkWorkspaceId === workspaceId ? state.bulkProgress : null
-  );
+  // 只看本工作区：别的工作区在跑批量操作时这里照常可用
+  const bulkProgress = useSessionsStore((state) => state.bulkByWorkspace[workspaceId] ?? null);
+  const bulkBusy = bulkProgress !== null;
   const archiveIdle = useSessionsStore((state) => state.archiveIdleSessions);
   const archiveMany = useSessionsStore((state) => state.archiveSessions);
   const requestRemove = useSessionsStore((state) => state.requestRemoveSessions);
