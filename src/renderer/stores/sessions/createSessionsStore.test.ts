@@ -1,6 +1,7 @@
 import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
+  ChatFile,
   ChatImage,
   ChatMessage,
   ModelOptions,
@@ -16,6 +17,7 @@ import { connectSessionsStore, createSessionsStore } from './createSessionsStore
 import {
   findSession,
   selectArchivedSessionsOf,
+  selectDraftFilesOf,
   selectDraftImagesOf,
   selectMessagesOf,
   selectQueueOf,
@@ -576,7 +578,8 @@ describe('createSessionsStore · 批量归档与删除', () => {
     api.list.mockClear();
     const progress: unknown[] = [];
     const unsubscribe = store.subscribe((state, prev) => {
-      if (state.bulkProgress !== prev.bulkProgress) progress.push(state.bulkProgress);
+      const next = state.bulkByWorkspace[WS] ?? null;
+      if (next !== (prev.bulkByWorkspace[WS] ?? null)) progress.push(next);
     });
     expect(await store.getState().archiveIdleSessions(WS)).toEqual({ done: 2, failed: 0 });
     unsubscribe();
@@ -589,7 +592,53 @@ describe('createSessionsStore · 批量归档与删除', () => {
     expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['idle1', 'idle2']);
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(store.getState().notice).toBeNull();
-    expect(store.getState().bulkWorkspaceId).toBeNull();
+    expect(store.getState().bulkByWorkspace).toEqual({});
+  });
+
+  it('不同工作区的批量操作可同时进行，同一工作区不重入', async () => {
+    const { store, api } = await bulkSetup([
+      summary('a1'),
+      summary('a2'),
+      summary('b1', { workspaceId: 'ws-2' }),
+      summary('b2', { workspaceId: 'ws-2' }),
+    ]);
+    await store.getState().loadSessions('ws-2');
+    const archiveImpl = api.archive.getMockImplementation();
+    if (!archiveImpl) throw new Error('fakeApi 缺少实现');
+    const gate = deferred<void>();
+    // 工作区 A 的会话归档挂起，直到放行
+    api.archive.mockImplementation(async (sessionId) => {
+      if (sessionId.startsWith('a')) await gate.promise;
+      return archiveImpl(sessionId);
+    });
+
+    const runA = store.getState().archiveSessions(WS, ['a1', 'a2']);
+    await settle();
+    expect(store.getState().bulkByWorkspace[WS]).toEqual({ kind: 'archive', done: 0, total: 2 });
+
+    // A 还在跑时再发起一次：直接拒绝，不调 api
+    api.archive.mockClear();
+    expect(await store.getState().archiveSessions(WS, ['a2'])).toEqual({ done: 0, failed: 0 });
+    expect(api.archive).not.toHaveBeenCalled();
+
+    // B 不受 A 影响，正常完成；A 的进度项一直在
+    const seenA: unknown[] = [];
+    const unsubscribe = store.subscribe((state) => seenA.push(state.bulkByWorkspace[WS]));
+    expect(await store.getState().archiveSessions('ws-2', ['b1', 'b2'])).toEqual({
+      done: 2,
+      failed: 0,
+    });
+    unsubscribe();
+    expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['b1', 'b2']);
+    expect(seenA.length).toBeGreaterThan(0);
+    expect(seenA.every((item) => item !== undefined)).toBe(true);
+    expect(store.getState().bulkByWorkspace).toEqual({
+      [WS]: { kind: 'archive', done: 0, total: 2 },
+    });
+
+    gate.resolve();
+    expect(await runA).toEqual({ done: 2, failed: 0 });
+    expect(store.getState().bulkByWorkspace).toEqual({});
   });
 
   it('批量归档跳过还有 worker 在跑的主 agent 并提示', async () => {
@@ -709,7 +758,7 @@ describe('createSessionsStore · removeSession', () => {
     store.getState().setDraft('s1', 'unfinished');
     store.getState().attachImages('s1', [SHOT]);
     store.setState({
-      queuedBySession: { s1: [{ id: 'queued-1', text: 'later', images: [SHOT] }] },
+      queuedBySession: { s1: [{ id: 'queued-1', text: 'later', images: [SHOT], files: [] }] },
       pendingApprovals: { s1: [] },
     });
     return env;
@@ -729,6 +778,7 @@ describe('createSessionsStore · removeSession', () => {
       expect(store.getState()).toMatchObject({
         drafts: { s2: 'keep this' },
         draftImages: {},
+        draftFiles: {},
         queuedBySession: {},
         pendingApprovals: {},
         modelPickerFor: null,
@@ -1198,6 +1248,86 @@ describe('createSessionsStore · 粘贴的图片', () => {
 
     expect(state().drafts.s1).toBe('新写的');
     expect(selectDraftImagesOf('s1')(state())).toEqual([PHOTO]);
+  });
+});
+
+describe('createSessionsStore · 文档附件', () => {
+  const DOC: ChatFile = { name: 'a.md', text: '# 标题' };
+  const CSV: ChatFile = { name: 'b.csv', text: 'x,y' };
+
+  it('带附件发送：prompt 与乐观回显都是拼好的正文，草稿附件清空', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    expect(state().attachFiles('s1', [DOC, CSV])).toBeUndefined();
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC, CSV]);
+
+    expect(await state().send('总结')).toBe(true);
+    const text = '<file name="a.md">\n# 标题\n</file>\n<file name="b.csv">\nx,y\n</file>\n总结';
+    expect(api.prompt).toHaveBeenCalledWith({ sessionId: 's1', text });
+    expect(selectMessagesOf('s1')(state())).toEqual([
+      expect.objectContaining({ role: 'user', text, optimistic: true }),
+    ]);
+    expect(state().draftFiles).toEqual({});
+  });
+
+  it('只有附件也能发；发送失败时附件放回草稿', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().attachFiles('s1', [DOC]);
+    api.prompt.mockResolvedValueOnce({ ok: false, error: '没有可用的模型' });
+    expect(await state().send('')).toBe(false);
+    expect(api.prompt).toHaveBeenCalledWith({
+      sessionId: 's1',
+      text: '<file name="a.md">\n# 标题\n</file>',
+    });
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
+  });
+
+  it('排队消息带着附件：发出时是拼好的正文，撤回编辑时附件回到草稿', async () => {
+    const { store, api, emitEvent } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    await state().send('first');
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
+
+    state().attachFiles('s1', [DOC]);
+    await state().send('second');
+    const [queued] = selectQueueOf('s1')(state());
+    expect(queued).toEqual(expect.objectContaining({ text: 'second', files: [DOC] }));
+    expect(state().draftFiles).toEqual({});
+
+    // 草稿里还有附件时不撤回
+    state().attachFiles('s1', [CSV]);
+    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('draft-exists');
+    state().removeDraftFile('s1', 0);
+    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('recalled');
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
+    expect(state().drafts.s1).toBe('second');
+
+    await state().send('second');
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    expect(api.prompt).toHaveBeenLastCalledWith({
+      sessionId: 's1',
+      text: '<file name="a.md">\n# 标题\n</file>\nsecond',
+    });
+  });
+
+  it('超过个数或合计字数上限的不加并给出原因，放得下的照加', async () => {
+    const { store } = await setup();
+    const state = () => store.getState();
+    const many = Array.from({ length: 12 }, (_, at) => ({ name: `${at}.txt`, text: 'x' }));
+    expect(state().attachFiles('s1', many)).toBe('count');
+    expect(selectDraftFilesOf('s1')(state())).toHaveLength(10);
+
+    const half = { name: 'half.txt', text: 'x'.repeat(100_000) };
+    expect(state().attachFiles('s2', [half, half, DOC])).toBe('size');
+    expect(selectDraftFilesOf('s2')(state())).toEqual([half, half]);
+    expect(state().attachFiles('s3', [half, { name: 'big', text: 'x'.repeat(100_001) }, DOC])).toBe(
+      'size'
+    );
+    expect(selectDraftFilesOf('s3')(state())).toEqual([half, DOC]);
   });
 });
 

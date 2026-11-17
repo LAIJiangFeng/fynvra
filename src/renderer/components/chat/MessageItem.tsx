@@ -1,6 +1,7 @@
 import type { CompactionState } from '@fynvra/core';
+import { splitChatFiles } from '@shared/types/chat';
 import { Archive, CircleAlert } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import {
@@ -10,6 +11,7 @@ import {
   useSessionsStore,
 } from '@/stores/sessions';
 import type { ToolItem } from '@/stores/sessions/timeline';
+import { ChatFileCard } from './ChatFileCard';
 import { ChatMarkdown } from './ChatMarkdown';
 import { CopyButton } from './CopyButton';
 import { ImagePreview } from './ImagePreview';
@@ -52,8 +54,22 @@ function UserMessage({ message }: { message: TimelineMessage }) {
   const { options: mentionTargets } = useMentionOptions(
     roleId !== undefined && isOrchestratorRole(roleId, roles)
   );
+  // 正文开头的附件块显示成文件标签，气泡里只放用户写的话
+  const { text, files } = useMemo(() => splitChatFiles(message.text), [message.text]);
   return (
     <div className="flex flex-col items-end gap-1">
+      {files.length > 0 && (
+        <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
+          {files.map((file, index) => (
+            <ChatFileCard
+              // biome-ignore lint/suspicious/noArrayIndexKey: 消息里的附件没有 id，也不会重排
+              key={index}
+              name={file.name}
+              className={cn(sending && 'opacity-70', message.failed && 'border-destructive/50')}
+            />
+          ))}
+        </div>
+      )}
       {message.images?.map((image, index) => (
         <button
           // biome-ignore lint/suspicious/noArrayIndexKey: 消息里的图片没有 id，也不会重排
@@ -81,7 +97,7 @@ function UserMessage({ message }: { message: TimelineMessage }) {
           onIndexChange={setPreviewIndex}
         />
       )}
-      {message.text.trim() && (
+      {text.trim() && (
         <div
           className={cn(
             'max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-secondary px-4 py-2 text-secondary-foreground text-sm',
@@ -89,7 +105,7 @@ function UserMessage({ message }: { message: TimelineMessage }) {
             message.failed && 'border border-destructive/50'
           )}
         >
-          <MentionText text={message.text} targets={mentionTargets} />
+          <MentionText text={text} targets={mentionTargets} />
         </div>
       )}
       {message.optimistic && <PendingDelivery message={message} />}

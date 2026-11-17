@@ -18,6 +18,7 @@ import {
   type ShellPreference,
   type ShellTarget,
   type TimelinePreferences,
+  type WatchdogPreferences,
   type WorkspaceWorktreesInfo,
   type WorktreesRootInfo,
 } from '@shared/types/settings';
@@ -105,6 +106,7 @@ export function GeneralSettings() {
       <NetworkProxySettings />
       <DangerousActionsSection />
       <WebFetchSection />
+      <WatchdogSection />
 
       <section>
         <SectionHeader title={t('settings.general.worktreeLocation')}>
@@ -588,6 +590,182 @@ function WebFetchSection() {
         </li>
       </ul>
     </section>
+  );
+}
+
+// --- watchdog ---
+/** 会话守护（preferences.watchdog）：整块写回，Main 下一次检查就按新设置 */
+function WatchdogSection() {
+  const watchdog = useGeneralPreferencesStore((state) => state.watchdog);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const error = useGeneralPreferencesStore((state) => state.error);
+  const t = useT();
+  const id = useId();
+  const save = (patch: Partial<WatchdogPreferences>) =>
+    update({ watchdog: { ...watchdog, ...patch } });
+  const scopeItems = [
+    { value: 'orchestrator', label: t('settings.watchdog.scopeOrchestrator') },
+    { value: 'all', label: t('settings.watchdog.scopeAll') },
+  ];
+  const triggers = [
+    {
+      key: 'onModelError',
+      label: 'settings.watchdog.onModelError',
+      hint: 'settings.watchdog.onModelErrorHint',
+    },
+    { key: 'onCrash', label: 'settings.watchdog.onCrash', hint: 'settings.watchdog.onCrashHint' },
+    { key: 'onStall', label: 'settings.watchdog.onStall', hint: 'settings.watchdog.onStallHint' },
+  ] as const;
+  // 数字项：前两项排在触发开关前，「卡住分钟数」排在最后且随「长时间无输出」开关禁用
+  const numbers = [
+    {
+      field: 'intervalSeconds',
+      label: 'settings.watchdog.interval',
+      hint: 'settings.watchdog.intervalHint',
+      min: 15,
+      max: 1800,
+    },
+    {
+      field: 'maxAttempts',
+      label: 'settings.watchdog.maxAttempts',
+      hint: 'settings.watchdog.maxAttemptsHint',
+      min: 1,
+      max: 50,
+    },
+    {
+      field: 'stallMinutes',
+      label: 'settings.watchdog.stallMinutes',
+      hint: 'settings.watchdog.stallMinutesHint',
+      min: 10,
+      max: 240,
+    },
+  ] as const;
+  const renderNumber = ({ field, label, hint, min, max }: (typeof numbers)[number]) => (
+    <PreferenceRow key={field} label={t(label)} hint={t(hint)}>
+      {(rowId) => (
+        <WatchdogNumberInput
+          id={rowId}
+          field={field}
+          label={t(label)}
+          min={min}
+          max={max}
+          disabled={field === 'stallMinutes' && !watchdog.onStall}
+        />
+      )}
+    </PreferenceRow>
+  );
+  return (
+    <section>
+      <SectionHeader title={t('settings.watchdog.title')} />
+      <ul className="divide-y rounded-lg border">
+        <li className="flex items-center justify-between gap-4 px-4 py-3">
+          <div className="min-w-0">
+            <label htmlFor={id} className="font-medium text-sm">
+              {t('settings.watchdog.enabled')}
+            </label>
+            <p className="mt-1 text-muted-foreground text-xs">{t('settings.watchdog.hint')}</p>
+          </div>
+          <Switch
+            id={id}
+            checked={watchdog.enabled}
+            onCheckedChange={(checked) => void save({ enabled: checked })}
+          />
+        </li>
+        {watchdog.enabled && (
+          <>
+            <PreferenceRow label={t('settings.watchdog.scope')} hint={t('settings.watchdog.scope')}>
+              {(rowId) => (
+                <Select
+                  items={scopeItems}
+                  value={watchdog.scope}
+                  onValueChange={(next) => {
+                    if (next === 'orchestrator' || next === 'all') void save({ scope: next });
+                  }}
+                >
+                  <SelectTrigger id={rowId} size="sm" className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scopeItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </PreferenceRow>
+            {numbers.slice(0, 2).map(renderNumber)}
+            {triggers.map(({ key, label, hint }) => (
+              <PreferenceRow key={key} label={t(label)} hint={t(hint)}>
+                {(rowId) => (
+                  <Switch
+                    id={rowId}
+                    aria-label={t(label)}
+                    checked={watchdog[key]}
+                    onCheckedChange={(checked) => void save({ [key]: checked })}
+                  />
+                )}
+              </PreferenceRow>
+            ))}
+            {numbers.slice(2).map(renderNumber)}
+          </>
+        )}
+      </ul>
+      {error && (
+        <InlineMessage tone="error" className="mt-2">
+          {error}
+        </InlineMessage>
+      )}
+    </section>
+  );
+}
+
+/** 守护里的整数项：失焦或回车时，值合法且有变化才整块提交；不合法则失焦后恢复已保存的值 */
+function WatchdogNumberInput({
+  id,
+  field,
+  label,
+  min,
+  max,
+  disabled = false,
+}: {
+  id: string;
+  field: 'intervalSeconds' | 'maxAttempts' | 'stallMinutes';
+  label: string;
+  min: number;
+  max: number;
+  disabled?: boolean;
+}) {
+  const watchdog = useGeneralPreferencesStore((state) => state.watchdog);
+  const update = useGeneralPreferencesStore((state) => state.update);
+  const current = watchdog[field];
+  const [value, setValue] = useState(String(current));
+  useEffect(() => setValue(String(current)), [current]);
+  const parsed = Number(value);
+  const valid = value.trim() !== '' && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+  const commit = () => {
+    if (!valid) setValue(String(current));
+    else if (parsed !== current) void update({ watchdog: { ...watchdog, [field]: parsed } });
+  };
+  return (
+    <Input
+      id={id}
+      aria-label={label}
+      aria-invalid={!valid}
+      className="w-24"
+      type="number"
+      min={min}
+      max={max}
+      step="1"
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && valid) commit();
+      }}
+      disabled={disabled}
+    />
   );
 }
 

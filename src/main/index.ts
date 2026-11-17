@@ -1,16 +1,20 @@
 import { join, resolve } from 'node:path';
 import { optimizer } from '@electron-toolkit/utils';
+import { ORCHESTRATOR_ROLE_ID } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
+import { watchdogPreferencesOf } from '@shared/types/settings';
 import { app, BrowserWindow, dialog } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getOrchestrationRegistry } from './ipc/orchestration';
+import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
+import { installSessionWatchdog } from './services/agentHost/watchdog';
 import { loadLoginShellPath } from './services/shellEnv';
 import { getUpdateService } from './services/updates';
 import { registerCloseBehavior } from './windows/closeBehavior';
@@ -122,6 +126,14 @@ if (!app.requestSingleInstanceLock()) {
       await connectOrchestration(agentHost, getOrchestrationRegistry());
       // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
       installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
+      // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复
+      installSessionWatchdog({
+        agentHost,
+        preferences: () => watchdogPreferencesOf(getSettingsFile().read().preferences),
+        isOrchestrator: async (session) =>
+          session.roleId === ORCHESTRATOR_ROLE_ID ||
+          (await getRoleStore().get(session.roleId))?.tools === 'orchestrator',
+      });
       agentHost.start();
       showMainWindow();
       getUpdateService().start();

@@ -3,9 +3,13 @@ import { errorMessage } from '@shared/guards';
 import {
   type ApprovalDecision,
   type ApprovalRequest,
+  appendChatFiles,
   base64ByteLength,
+  type ChatFile,
   type ChatImage,
   isChatImageMimeType,
+  MAX_CHAT_FILES,
+  MAX_CHAT_FILES_TOTAL_CHARS,
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGES_TOTAL_BYTES,
@@ -41,6 +45,8 @@ import { findSession, isBusy, statusOf } from './selectors';
  * `invalid` 不是可用的图片（空的、不是 base64、格式不在白名单里）
  */
 export type ImageRejection = 'count' | 'size' | 'invalid';
+/** 文档附件没加进草稿的原因：`count` 超过个数上限，`size` 附件文字合计超限 */
+export type FileRejection = 'count' | 'size';
 
 /**
  * A message typed while the session was running. Kept in memory only (not in the transcript, which is a
@@ -50,6 +56,7 @@ export interface QueuedMessage {
   id: string;
   text: string;
   images: ChatImage[];
+  files: ChatFile[];
 }
 
 type RecallQueuedResult = 'recalled' | 'draft-exists' | 'missing';
@@ -66,6 +73,8 @@ export interface SessionsState extends ChatProjection {
   drafts: Record<string, string>;
   /** 输入框里粘贴的图片，按会话保存（与 drafts 并列，切换会话不丢） */
   draftImages: Record<string, ChatImage[]>;
+  /** 输入框里的文档附件，按会话保存（与 draftImages 并列） */
+  draftFiles: Record<string, ChatFile[]>;
   /** 刚结束一轮生成的灰字建议；只在内存，与草稿分开，切换会话 / 新轮 / 换模型时清掉 */
   replySuggestions: Record<string, ReplySuggestion>;
   /**
@@ -96,10 +105,11 @@ export interface SessionsState extends ChatProjection {
   modelOptionsError: string | null;
   /** 各工作区上一次用过的模型（新建会话弹层的默认值之一） */
   lastModelByWorkspace: Record<string, SessionModelRef>;
-  /** 正在批量归档 / 删除的工作区：期间不响应它的 sessions:changed，结束时只重拉一次 */
-  bulkWorkspaceId: string | null;
-  /** 批量操作的进度（已处理 / 总数），只在 bulkWorkspaceId 有值时不为 null */
-  bulkProgress: { kind: 'archive' | 'remove'; done: number; total: number } | null;
+  /**
+   * 正在批量归档 / 删除的工作区及其进度（已处理 / 总数），只有正在跑批量的工作区才有键。
+   * 不同工作区可同时进行；期间不响应该工作区的 sessions:changed，结束时只重拉一次
+   */
+  bulkByWorkspace: Record<string, { kind: 'archive' | 'remove'; done: number; total: number }>;
   /** 等用户确认的批量删除；确认前不会删任何会话 */
   pendingRemoval: {
     workspaceId: string;
@@ -122,7 +132,7 @@ export interface SessionsState extends ChatProjection {
   /** 同步选中会话及所属工作区，再拉 history；未缓存的会话可显式指定工作区 */
   selectSession(sessionId: string | null, workspaceId?: string): Promise<void>;
   /**
-   * 向选中的会话发送文本与它的草稿图片；只有图片也能发。没有文字也没有图片时返回 false。
+   * 向选中的会话发送文本与它的草稿图片、附件；只有图片或附件也能发。什么都没有时返回 false。
    * 会话运行中、上一条还在途或队列里还有消息时排到队尾，按先进先出发出，不插队
    */
   send(text: string): Promise<boolean>;
@@ -153,6 +163,15 @@ export interface SessionsState extends ChatProjection {
   attachImages(sessionId: string, images: readonly ChatImage[]): ImageRejection | undefined;
   /** 从会话的草稿里移除第 index 张图片 */
   removeDraftImage(sessionId: string, index: number): void;
+  /** 恢复已发送或保存的草稿附件：原样替换，不重新检查上限 */
+  setDraftFiles(sessionId: string, files: ChatFile[]): void;
+  /**
+   * 往会话的草稿里加文档附件：按顺序收下放得下的（个数、合计字数在上限内），其余不加。
+   * 返回第一个没加进去的原因；都加进去时为 undefined
+   */
+  attachFiles(sessionId: string, files: readonly ChatFile[]): FileRejection | undefined;
+  /** 从会话的草稿里移除第 index 个附件 */
+  removeDraftFile(sessionId: string, index: number): void;
   dismissNotice(): void;
   dismissWarning(sessionId: string): void;
   /** 读可选模型；传工作区时一并读它上一次用过的模型（缺省为当前工作区） */
@@ -434,6 +453,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       if ((fresh.pendingApprovals[sessionId]?.length ?? 0) > 0) return;
       if ((fresh.drafts[sessionId] ?? '') !== '') return;
       if ((fresh.draftImages[sessionId]?.length ?? 0) > 0) return;
+      if ((fresh.draftFiles[sessionId]?.length ?? 0) > 0) return;
       const session = findSession(fresh, sessionId);
       if (!session || session.archivedAt !== undefined) return;
       suggestionPending.set(sessionId, version);
@@ -581,19 +601,22 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       sessionId: string,
       body: string,
       images: ChatImage[],
+      files: ChatFile[],
       restore: (state: SessionsState) => Partial<SessionsState>
     ): Promise<boolean> {
       const previous = statusOf(get(), sessionId);
+      // 附件块拼进正文：乐观回显与 pi jsonl 里的 user 正文一致，reducer 按正文匹配回显
+      const text = appendChatFiles(body, files);
       clearSuggestion(sessionId);
       sending.add(sessionId);
       const id = `local-${++localSeq}`;
       set((state) =>
-        addOptimisticMessage(state, sessionId, { id, text: body, images, createdAt: now() })
+        addOptimisticMessage(state, sessionId, { id, text, images, createdAt: now() })
       );
       let rejected = false;
       try {
         const result = await safely(() =>
-          api.prompt({ sessionId, text: body, ...(images.length > 0 ? { images } : {}) })
+          api.prompt({ sessionId, text, ...(images.length > 0 ? { images } : {}) })
         );
         flushEvents();
         if (result.ok) return true;
@@ -636,7 +659,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const [next] = queueOf(sessionId);
       if (!next) return;
       setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
-      void deliver(sessionId, next.text, next.images, (state) => {
+      void deliver(sessionId, next.text, next.images, next.files, (state) => {
         // Put it back in front; deliver does not retry it right away so a broken session does not loop
         const queue = state.queuedBySession[sessionId] ?? [];
         return { queuedBySession: { ...state.queuedBySession, [sessionId]: [next, ...queue] } };
@@ -704,7 +727,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       run: (sessionId: string) => Promise<IpcResult>,
       skipped = 0
     ): Promise<BulkResult> {
-      if (get().bulkWorkspaceId !== null) return { done: 0, failed: 0 };
+      // 同一工作区不重入；别的工作区的批量操作不受影响
+      if (Object.hasOwn(get().bulkByWorkspace, workspaceId)) return { done: 0, failed: 0 };
       const skippedNotice =
         skipped > 0 ? translate('sessions.bulk.awaitingWorkersSkipped', { count: skipped }) : null;
       const withSkipped = (result: BulkResult): BulkResult =>
@@ -718,7 +742,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       const active = get().activeSessionId;
       ids.sort((a, b) => Number(a === active) - Number(b === active));
       const total = ids.length;
-      set({ bulkWorkspaceId: workspaceId, bulkProgress: { kind, done: 0, total } });
+      // 多个工作区的循环会交错执行：只改本工作区的键，不覆盖别的工作区的进度
+      const setProgress = (done: number) =>
+        set((state) => ({
+          bulkByWorkspace: { ...state.bulkByWorkspace, [workspaceId]: { kind, done, total } },
+        }));
+      setProgress(0);
       let done = 0;
       const reasons = new Set<string>();
       try {
@@ -726,10 +755,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           const result = await run(sessionId);
           if (result.ok) done++;
           else reasons.add(result.error);
-          set({ bulkProgress: { kind, done: index + 1, total } });
+          setProgress(index + 1);
         }
       } finally {
-        set({ bulkWorkspaceId: null, bulkProgress: null });
+        set((state) => ({ bulkByWorkspace: omitKey(state.bulkByWorkspace, workspaceId) }));
       }
       const failed = ids.length - done;
       const partial =
@@ -753,6 +782,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       activeSessionId: null,
       drafts: {},
       draftImages: {},
+      draftFiles: {},
       replySuggestions: {},
       queuedBySession: {},
       recoveringCompaction: {},
@@ -762,8 +792,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       listErrors: {},
       approvalSubmissions: {},
       notice: null,
-      bulkWorkspaceId: null,
-      bulkProgress: null,
+      bulkByWorkspace: {},
       pendingRemoval: null,
       modelProviders: null,
       modelOptionsError: null,
@@ -968,10 +997,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!sessionId) return false;
         const body = normalizePrompt(text);
         const images = get().draftImages[sessionId] ?? [];
-        if (!body.trim() && images.length === 0) return false;
+        const files = get().draftFiles[sessionId] ?? [];
+        if (!body.trim() && images.length === 0 && files.length === 0) return false;
         const clearDraft = (state: SessionsState) => ({
           drafts: omitKey(state.drafts, sessionId),
           draftImages: omitKey(state.draftImages, sessionId),
+          draftFiles: omitKey(state.draftFiles, sessionId),
         });
         // Running, a prompt still in flight or older queued messages: queue it behind them (FIFO),
         // it is sent when the turn settles
@@ -983,7 +1014,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           recoveryBlocked(sessionId) ||
           queueOf(sessionId).length > 0
         ) {
-          const item: QueuedMessage = { id: `queued-${++queueSeq}`, text: body, images };
+          const item: QueuedMessage = { id: `queued-${++queueSeq}`, text: body, images, files };
           set((state) => ({
             ...clearDraft(state),
             queuedBySession: {
@@ -996,9 +1027,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           return true;
         }
         set(clearDraft);
-        return deliver(sessionId, body, images, (state) => ({
+        return deliver(sessionId, body, images, files, (state) => ({
           // Put what was not sent back in the input (unless the user already started a new draft;
-          // text and images are checked separately)
+          // text, images and files are checked separately)
           drafts:
             !text || state.drafts[sessionId]
               ? state.drafts
@@ -1007,6 +1038,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
             images.length === 0 || state.draftImages[sessionId]
               ? state.draftImages
               : { ...state.draftImages, [sessionId]: images },
+          draftFiles:
+            files.length === 0 || state.draftFiles[sessionId]
+              ? state.draftFiles
+              : { ...state.draftFiles, [sessionId]: files },
         }));
       },
 
@@ -1031,7 +1066,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           (() => {
             const text = normalizePrompt(draftText);
             const images = get().draftImages[sessionId] ?? [];
-            return text.trim() || images.length > 0 ? { id: '', text, images } : undefined;
+            const files = get().draftFiles[sessionId] ?? [];
+            return text.trim() || images.length > 0 || files.length > 0
+              ? { id: '', text, images, files }
+              : undefined;
           })();
         if (!message) return false;
         const fromQueue = item !== undefined;
@@ -1050,6 +1088,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
             : {
                 drafts: omitKey(state.drafts, sessionId),
                 draftImages: omitKey(state.draftImages, sessionId),
+                draftFiles: omitKey(state.draftFiles, sessionId),
               };
         const index = queue.indexOf(message);
         const putBack = (state: SessionsState): Partial<SessionsState> => {
@@ -1066,18 +1105,22 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               message.images.length === 0 || state.draftImages[sessionId]
                 ? state.draftImages
                 : { ...state.draftImages, [sessionId]: message.images },
+            draftFiles:
+              message.files.length === 0 || state.draftFiles[sessionId]
+                ? state.draftFiles
+                : { ...state.draftFiles, [sessionId]: message.files },
           };
         };
         set(take);
         // Idle: nothing to steer, send it as a normal prompt
         if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
-          return deliver(sessionId, message.text, message.images, putBack);
+          return deliver(sessionId, message.text, message.images, message.files, putBack);
         }
         // No echo: pi injects it into the run and the transcript shows it once it is delivered
         const result = await safely(() =>
           api.steer({
             sessionId,
-            text: message.text,
+            text: appendChatFiles(message.text, message.files),
             ...(message.images.length > 0 ? { images: message.images } : {}),
           })
         );
@@ -1168,7 +1211,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           }
           if (
             (state.drafts[sessionId] ?? '') !== '' ||
-            (state.draftImages[sessionId]?.length ?? 0) > 0
+            (state.draftImages[sessionId]?.length ?? 0) > 0 ||
+            (state.draftFiles[sessionId]?.length ?? 0) > 0
           ) {
             result = 'draft-exists';
             return state;
@@ -1191,6 +1235,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               item.images.length > 0
                 ? { ...state.draftImages, [sessionId]: item.images }
                 : omitKey(state.draftImages, sessionId),
+            draftFiles:
+              item.files.length > 0
+                ? { ...state.draftFiles, [sessionId]: item.files }
+                : omitKey(state.draftFiles, sessionId),
             replySuggestions: omitKey(state.replySuggestions, sessionId),
           };
         });
@@ -1306,6 +1354,52 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               rest.length > 0
                 ? { ...state.draftImages, [sessionId]: rest }
                 : omitKey(state.draftImages, sessionId),
+          };
+        });
+      },
+
+      setDraftFiles(sessionId, files) {
+        set((state) => ({
+          draftFiles:
+            files.length > 0
+              ? { ...state.draftFiles, [sessionId]: files }
+              : omitKey(state.draftFiles, sessionId),
+        }));
+      },
+
+      attachFiles(sessionId, files) {
+        const current = get().draftFiles[sessionId] ?? [];
+        let total = current.reduce((sum, file) => sum + file.text.length, 0);
+        const added: ChatFile[] = [];
+        let rejected: FileRejection | undefined;
+        for (const file of files) {
+          if (current.length + added.length >= MAX_CHAT_FILES) {
+            rejected ??= 'count';
+          } else if (total + file.text.length > MAX_CHAT_FILES_TOTAL_CHARS) {
+            rejected ??= 'size';
+          } else {
+            added.push(file);
+            total += file.text.length;
+          }
+        }
+        if (added.length > 0) {
+          set((state) => ({
+            draftFiles: { ...state.draftFiles, [sessionId]: [...current, ...added] },
+          }));
+        }
+        return rejected;
+      },
+
+      removeDraftFile(sessionId, index) {
+        set((state) => {
+          const files = state.draftFiles[sessionId];
+          if (!files || index < 0 || index >= files.length) return {};
+          const rest = files.filter((_file, at) => at !== index);
+          return {
+            draftFiles:
+              rest.length > 0
+                ? { ...state.draftFiles, [sessionId]: rest }
+                : omitKey(state.draftFiles, sessionId),
           };
         });
       },
@@ -1553,6 +1647,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           stopping: omitKey(before.stopping, sessionId),
           drafts: omitKey(before.drafts, sessionId),
           draftImages: omitKey(before.draftImages, sessionId),
+          draftFiles: omitKey(before.draftFiles, sessionId),
           queuedBySession: omitKey(before.queuedBySession, sessionId),
           messagesBySession: omitKey(before.messagesBySession, sessionId),
           runtimeBySession: omitKey(before.runtimeBySession, sessionId),
@@ -1588,6 +1683,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ]),
           drafts: restore(state.drafts, before.drafts),
           draftImages: restore(state.draftImages, before.draftImages),
+          draftFiles: restore(state.draftFiles, before.draftFiles),
           queuedBySession: restore(state.queuedBySession, before.queuedBySession),
           recoveringCompaction: restore(state.recoveringCompaction, before.recoveringCompaction),
           stopping: restore(state.stopping, before.stopping),
@@ -1640,7 +1736,7 @@ export function connectSessionsStore(
       const state = store.getState();
       // 只刷新看过的工作区；其余的等切过去时再拉。批量操作中的工作区由它结束时重拉一次
       if (
-        workspaceId !== state.bulkWorkspaceId &&
+        !Object.hasOwn(state.bulkByWorkspace, workspaceId) &&
         (workspaceId === state.workspaceId || Object.hasOwn(state.sessionsByWorkspace, workspaceId))
       ) {
         void state.loadSessions(workspaceId);

@@ -17,7 +17,7 @@ import type {
   PluginRefSpec,
   ResolvedModelSpec,
 } from '@shared/types/agent';
-import { normalizeReplySuggestion } from '@shared/types/chat';
+import { normalizeReplySuggestion, splitChatFiles } from '@shared/types/chat';
 import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/settings';
 import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
@@ -378,7 +378,8 @@ type PlainConversationMessage = { role: string; content?: unknown };
 
 /**
  * 最近几条 user / assistant 纯文本，按新到旧取到固定预算后再恢复顺序：
- * 最新消息先占预算；assistant 超长保留结论（尾部），user 超长保留开头。工具调用、thinking、图片不进建议上下文。
+ * 最新消息先占预算；assistant 超长保留结论（尾部），user 超长保留开头。工具调用、thinking、图片、
+ * user 消息里的文档附件块不进建议上下文（建议看用户说的话，不看文件内容）。
  */
 function recentConversation(
   messages: readonly PlainConversationMessage[]
@@ -395,7 +396,8 @@ function recentConversation(
     const role =
       message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : null;
     if (!role) continue;
-    const text = messageText(message.content).trim();
+    const raw = messageText(message.content);
+    const text = (role === 'user' ? splitChatFiles(raw).text : raw).trim();
     if (!text) continue;
     const clipped = clipMessage(text, role === 'assistant');
     const cost = clipped.length + 8;

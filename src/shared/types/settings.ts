@@ -184,6 +184,9 @@ export interface Preferences {
   // --- notifications ---
   /** 桌面通知开关；没配置过时按 {@link DEFAULT_NOTIFICATION_PREFERENCES}（读取用 notificationPreferencesOf） */
   notifications?: NotificationPreferences;
+  // --- watchdog ---
+  /** 会话守护；没配置过时按 {@link DEFAULT_WATCHDOG_PREFERENCES}（读取用 watchdogPreferencesOf） */
+  watchdog?: WatchdogPreferences;
   // --- keybindings ---
   /** 快捷键覆盖表：只存改过的动作，值是规整过的按键串（`mod` 原样保留，Renderer 按平台展开） */
   keybindings?: KeybindingOverrides;
@@ -585,6 +588,7 @@ export function parsePreferences(raw: unknown): Preferences {
     typeof record?.worktreesRoot === 'string' ? record.worktreesRoot.trim() : '';
   const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
   const notifications = parseNotificationPreferences(record?.notifications);
+  const watchdog = parseWatchdogPreferences(record?.watchdog);
   // --- keybindings ---
   const keybindings = parseKeybindingOverrides(record?.keybindings);
   // --- language ---
@@ -614,6 +618,7 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(looksAbsolute(worktreesRoot) ? { worktreesRoot } : {}),
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
     ...(notifications ? { notifications } : {}),
+    ...(watchdog ? { watchdog } : {}),
     // --- keybindings ---
     ...(keybindings ? { keybindings } : {}),
     // --- language ---
@@ -720,6 +725,12 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         const notifications = parseNotificationPreferencesPatch(value);
         if (!notifications) return null;
         patch.notifications = notifications;
+        break;
+      }
+      case 'watchdog': {
+        const watchdog = parseWatchdogPreferencesPatch(value);
+        if (!watchdog) return null;
+        patch.watchdog = watchdog;
         break;
       }
       // --- keybindings ---：整张覆盖表一起换，空表是全部重置
@@ -857,4 +868,94 @@ function parseNotificationPreferencesPatch(raw: unknown): NotificationPreference
   if (!keys.every((key) => (NOTIFICATION_KEYS as string[]).includes(key))) return null;
   if (!NOTIFICATION_KEYS.every((key) => typeof record[key] === 'boolean')) return null;
   return parseNotificationPreferences(record);
+}
+
+// --- watchdog ---
+
+export type WatchdogScope = 'orchestrator' | 'all';
+
+/** 会话守护：主 agent 出错或卡住时自动恢复。 */
+export interface WatchdogPreferences {
+  /** 总开关 */
+  enabled: boolean;
+  /** 检测间隔（秒），整数 15–1800 */
+  intervalSeconds: number;
+  /** 每个会话连续自动恢复的上限，整数 1–50 */
+  maxAttempts: number;
+  /** 监控范围：主 agent 会话 / 全部直接对话的会话（永远不含派发的 worker） */
+  scope: WatchdogScope;
+  /** 触发：模型请求失败 */
+  onModelError: boolean;
+  /** 触发：agent 进程崩溃 / 宿主错误 */
+  onCrash: boolean;
+  /** 触发：长时间无输出 */
+  onStall: boolean;
+  /** 无输出多少分钟算卡住，整数 10–240 */
+  stallMinutes: number;
+}
+
+export const DEFAULT_WATCHDOG_PREFERENCES: Readonly<WatchdogPreferences> = Object.freeze({
+  enabled: false,
+  intervalSeconds: 60,
+  maxAttempts: 10,
+  scope: 'orchestrator',
+  onModelError: true,
+  onCrash: true,
+  onStall: false,
+  stallMinutes: 30,
+});
+
+const WATCHDOG_INT_RANGES = {
+  intervalSeconds: [15, 1800],
+  maxAttempts: [1, 50],
+  stallMinutes: [10, 240],
+} as const;
+const WATCHDOG_BOOL_KEYS = ['enabled', 'onModelError', 'onCrash', 'onStall'] as const;
+const WATCHDOG_KEYS = Object.keys(DEFAULT_WATCHDOG_PREFERENCES);
+
+function isWatchdogInt(key: keyof typeof WATCHDOG_INT_RANGES, value: unknown): value is number {
+  const [min, max] = WATCHDOG_INT_RANGES[key];
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+}
+
+function isWatchdogScope(value: unknown): value is WatchdogScope {
+  return value === 'orchestrator' || value === 'all';
+}
+
+/** 生效的守护设置（副本）：settings.json 里没有这一块时为默认值。 */
+export function watchdogPreferencesOf(
+  preferences: Pick<Preferences, 'watchdog'>
+): WatchdogPreferences {
+  return { ...(preferences.watchdog ?? DEFAULT_WATCHDOG_PREFERENCES) };
+}
+
+/** 宽松收窄：不是对象时 null；逐项取合法值，缺失或非法的项用默认值，未知键丢弃。 */
+function parseWatchdogPreferences(raw: unknown): WatchdogPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const parsed: WatchdogPreferences = { ...DEFAULT_WATCHDOG_PREFERENCES };
+  for (const key of WATCHDOG_BOOL_KEYS) {
+    const value = record[key];
+    if (typeof value === 'boolean') parsed[key] = value;
+  }
+  for (const key of Object.keys(WATCHDOG_INT_RANGES) as (keyof typeof WATCHDOG_INT_RANGES)[]) {
+    const value = record[key];
+    if (isWatchdogInt(key, value)) parsed[key] = value;
+  }
+  if (isWatchdogScope(record.scope)) parsed.scope = record.scope;
+  return parsed;
+}
+
+/** `settings:update` 里的 watchdog：整块替换，每项都得合法，缺字段或有未知键就作废。 */
+function parseWatchdogPreferencesPatch(raw: unknown): WatchdogPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const keys = Object.keys(record);
+  if (keys.length !== WATCHDOG_KEYS.length) return null;
+  if (!keys.every((key) => WATCHDOG_KEYS.includes(key))) return null;
+  if (!WATCHDOG_BOOL_KEYS.every((key) => typeof record[key] === 'boolean')) return null;
+  const intKeys = Object.keys(WATCHDOG_INT_RANGES) as (keyof typeof WATCHDOG_INT_RANGES)[];
+  if (!intKeys.every((key) => isWatchdogInt(key, record[key]))) return null;
+  if (!isWatchdogScope(record.scope)) return null;
+  return parseWatchdogPreferences(record);
 }

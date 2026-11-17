@@ -239,6 +239,14 @@ export interface Message {
    `worker_done` / `question` / `escalation` 且主 agent 会话空闲时，把消息合成一条注入 prompt 唤醒它
    （与 `wait_for_workers` 的交付一样确认消息）；主 agent 忙碌时消息留在收件箱，回合结束后再投。
    `wait_for_workers` 仍可用，但只在需要显式阻塞等待时调用。期间 `question` 到达时用 `send_to_worker` 回答。
+   会话守护（`src/main/services/agentHost/watchdog.ts`，`preferences.watchdog`，默认关闭）在唤醒器之后安装：经
+   `observe` 只在开启期间记录 `error` 事件为候选（状态只在 Main 内存，不落盘，启动前 / 开启前的失败不复活）；
+   无错的 `agent_settled{aborted:false}` 清候选与计数，用户 `prompt` / `abort` 活动清候选。`setTimeout` 链按当前间隔检查，
+   满足范围（非派发 worker；`orchestrator` 时须是主 agent）、触发开关（`model`→onModelError，`host`→onCrash；
+   `compaction` 与需要上下文恢复的只记日志）、上限与退避 `min(间隔×2^次数, 30min)` 后调
+   `agentHost.resumeAfterInterruption`：只接受 `error`（守护自己因卡住中止的可为 `idle`），拒绝归档 / 运行 / 等审批 /
+   需恢复的会话，await 后重查竞争、用户优先，发出后发 `resume` 活动；唤醒器收到 `resume` 解除暂停并清零投递失败。
+   卡住检测按最后事件时间与 `tool_start` / `tool_end` 的在途工具判断，从检查时首次看到运行开始计时，调 `abort` 中止。
 4. `worker_done` → 主 agent `review_diff` + `run_checks`（如 `pnpm typecheck && pnpm lint && pnpm test`）→ 判定：
    - 通过：`merge_worktree`（no-ff 合并到主 agent 所在分支）→ `cleanup_worktree` → 向用户汇报。
    - 不通过：`reject_work` 把意见发回 worker，回到 3。
@@ -580,6 +588,14 @@ export interface ChatToolCall {
 }
 /** 输入框粘贴的图片：base64（不含 data: 前缀）。缩放、转 PNG 由 pi 在 worker 里做 */
 export interface ChatImage { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; }
+/**
+ * 输入框的文档附件（UTF-8 文本 / PDF / .docx / .xlsx）：Renderer 抽出纯文本，文件名只用 File.name（不含路径）。`.xlsx` 用 read-excel-file 按工作表转 TSV。
+ * 不单独过 IPC：发送时 appendChatFiles 按 pi CLI `@file` 格式拼进正文，文件块在前、用户正文在后：
+ * `<file name="a.md">\n内容\n</file>\n正文`（内容里的 </file> 转义为 <\/file>）。jsonl 里的 user 正文因此带着附件块，
+ * Renderer 显示时用 splitChatFiles 从开头拆出来显示成文件标签；自动标题与回复建议也只看拆出的正文。
+ * 上限（Renderer）：每条 ≤ 10 个，单个原始文件 ≤ 32 MiB，附件文字合计 ≤ 200,000 字符；Main 只有 prompt 的 MAX_PROMPT_CHARS 兜底。
+ */
+export interface ChatFile { name: string; text: string; }
 export interface ChatMessage {
   id: string; sessionId: string; role: ChatRole; text: string; thinking?: string;
   images?: ChatImage[];  // 只用于 user 消息；带图片的正文不含 pi 接在末尾的 [Image …] 提示行
