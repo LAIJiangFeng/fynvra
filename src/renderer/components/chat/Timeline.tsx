@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@shared/types/chat';
+import { type SessionStatus, splitChatFiles } from '@shared/types/chat';
 import { ArrowDown, ChevronRight, LoaderCircle, MessagesSquare } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Components, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
@@ -241,7 +241,7 @@ const TimelineRowView = memo(function TimelineRowView({
   );
 });
 
-/** 折起来的历史轮次：一行提问 + 时间，点开接着显示整轮；只有图片的提问显示占位 */
+/** 折起来的历史轮次：一行提问 + 时间，点开接着显示整轮；只有图片或附件的提问显示占位 */
 function TurnHeader({
   message,
   open,
@@ -252,8 +252,14 @@ function TurnHeader({
   onToggle: (questionId: string, opening: boolean) => void;
 }) {
   const t = useT();
+  const { text, files } = splitChatFiles(message.text);
   const question =
-    message.text.replace(/\s+/g, ' ').trim() || (message.images ? t('chat.imageOnly') : '');
+    text.replace(/\s+/g, ' ').trim() ||
+    (message.images
+      ? t('chat.imageOnly')
+      : files.length > 0
+        ? t('chat.fileOnly', { names: files.map((file) => file.name).join(', ') })
+        : '');
   return (
     <button
       type="button"

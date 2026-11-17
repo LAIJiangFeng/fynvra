@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendChatFiles,
   describeThinkingSource,
   isThinkingSource,
   MAX_CHAT_IMAGE_BYTES,
@@ -9,6 +10,7 @@ import {
   nextApprovalMode,
   parseChatImages,
   pickThinkingLevel,
+  splitChatFiles,
   stripImageHints,
 } from './chat';
 
@@ -239,5 +241,82 @@ describe('stripImageHints', () => {
     ]) {
       expect(stripImageHints(text)).toBe(text);
     }
+  });
+});
+
+describe('appendChatFiles / splitChatFiles', () => {
+  const roundTrip = (text: string) => {
+    const split = splitChatFiles(text);
+    expect(appendChatFiles(split.text, split.files)).toBe(text);
+    return split;
+  };
+
+  it('单个文件：文件块在前，正文在后', () => {
+    const text = appendChatFiles('总结一下', [{ name: 'a.md', text: '# 标题' }]);
+    expect(text).toBe('<file name="a.md">\n# 标题\n</file>\n总结一下');
+    expect(roundTrip(text)).toEqual({
+      text: '总结一下',
+      files: [{ name: 'a.md', text: '# 标题' }],
+    });
+  });
+
+  it('多个文件，块之间用 \\n 连接', () => {
+    const files = [
+      { name: 'a.txt', text: 'A' },
+      { name: 'b.csv', text: 'x,y\n1,2\n' },
+    ];
+    const text = appendChatFiles('看看', files);
+    expect(text).toBe(
+      '<file name="a.txt">\nA\n</file>\n<file name="b.csv">\nx,y\n1,2\n\n</file>\n看看'
+    );
+    expect(roundTrip(text)).toEqual({ text: '看看', files });
+  });
+
+  it('正文为空时只有文件块；没有文件时原样返回', () => {
+    const text = appendChatFiles('', [{ name: 'a.txt', text: '' }]);
+    expect(text).toBe('<file name="a.txt">\n\n</file>');
+    expect(roundTrip(text)).toEqual({ text: '', files: [{ name: 'a.txt', text: '' }] });
+    expect(appendChatFiles('hi', [])).toBe('hi');
+  });
+
+  it('内容里的 </file> 转义成 <\\/file>，拆分时不反转义', () => {
+    const text = appendChatFiles('q', [{ name: 'x.html', text: 'a</file>\n</file>b' }]);
+    expect(text).toBe('<file name="x.html">\na<\\/file>\n<\\/file>b\n</file>\nq');
+    expect(roundTrip(text)).toEqual({
+      text: 'q',
+      files: [{ name: 'x.html', text: 'a<\\/file>\n<\\/file>b' }],
+    });
+  });
+
+  it('中文文件名原样保留，引号与换行换成 _', () => {
+    expect(roundTrip(appendChatFiles('', [{ name: '报告.pdf', text: 't' }])).files[0]?.name).toBe(
+      '报告.pdf'
+    );
+    const text = appendChatFiles('', [{ name: 'a"b\r\nc.txt', text: 't' }]);
+    expect(text).toBe('<file name="a_b__c.txt">\nt\n</file>');
+    expect(roundTrip(text).files[0]?.name).toBe('a_b__c.txt');
+  });
+
+  it('普通文本与不完整的块原样不变', () => {
+    for (const text of [
+      '',
+      'hello',
+      ' <file name="a">\nx\n</file>',
+      '<file name="a">\nx',
+      '<file name="a"\nx\n</file>',
+      '<file name="a">\n</file>',
+      '<file name="a">\nx\n</file>tail',
+      '<file name="a">\nx\n</file>\n',
+    ]) {
+      expect(roundTrip(text)).toEqual({ text, files: [] });
+    }
+  });
+
+  it('第一个不是块的位置就停，剩下的都是正文', () => {
+    const text = '<file name="a">\nA\n</file>\n<file name="b">\nB';
+    expect(roundTrip(text)).toEqual({
+      text: '<file name="b">\nB',
+      files: [{ name: 'a', text: 'A' }],
+    });
   });
 });

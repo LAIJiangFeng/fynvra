@@ -1,6 +1,7 @@
 import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
+  ChatFile,
   ChatImage,
   ChatMessage,
   ModelOptions,
@@ -16,6 +17,7 @@ import { connectSessionsStore, createSessionsStore } from './createSessionsStore
 import {
   findSession,
   selectArchivedSessionsOf,
+  selectDraftFilesOf,
   selectDraftImagesOf,
   selectMessagesOf,
   selectQueueOf,
@@ -709,7 +711,7 @@ describe('createSessionsStore · removeSession', () => {
     store.getState().setDraft('s1', 'unfinished');
     store.getState().attachImages('s1', [SHOT]);
     store.setState({
-      queuedBySession: { s1: [{ id: 'queued-1', text: 'later', images: [SHOT] }] },
+      queuedBySession: { s1: [{ id: 'queued-1', text: 'later', images: [SHOT], files: [] }] },
       pendingApprovals: { s1: [] },
     });
     return env;
@@ -729,6 +731,7 @@ describe('createSessionsStore · removeSession', () => {
       expect(store.getState()).toMatchObject({
         drafts: { s2: 'keep this' },
         draftImages: {},
+        draftFiles: {},
         queuedBySession: {},
         pendingApprovals: {},
         modelPickerFor: null,
@@ -1198,6 +1201,86 @@ describe('createSessionsStore · 粘贴的图片', () => {
 
     expect(state().drafts.s1).toBe('新写的');
     expect(selectDraftImagesOf('s1')(state())).toEqual([PHOTO]);
+  });
+});
+
+describe('createSessionsStore · 文档附件', () => {
+  const DOC: ChatFile = { name: 'a.md', text: '# 标题' };
+  const CSV: ChatFile = { name: 'b.csv', text: 'x,y' };
+
+  it('带附件发送：prompt 与乐观回显都是拼好的正文，草稿附件清空', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    expect(state().attachFiles('s1', [DOC, CSV])).toBeUndefined();
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC, CSV]);
+
+    expect(await state().send('总结')).toBe(true);
+    const text = '<file name="a.md">\n# 标题\n</file>\n<file name="b.csv">\nx,y\n</file>\n总结';
+    expect(api.prompt).toHaveBeenCalledWith({ sessionId: 's1', text });
+    expect(selectMessagesOf('s1')(state())).toEqual([
+      expect.objectContaining({ role: 'user', text, optimistic: true }),
+    ]);
+    expect(state().draftFiles).toEqual({});
+  });
+
+  it('只有附件也能发；发送失败时附件放回草稿', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    state().attachFiles('s1', [DOC]);
+    api.prompt.mockResolvedValueOnce({ ok: false, error: '没有可用的模型' });
+    expect(await state().send('')).toBe(false);
+    expect(api.prompt).toHaveBeenCalledWith({
+      sessionId: 's1',
+      text: '<file name="a.md">\n# 标题\n</file>',
+    });
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
+  });
+
+  it('排队消息带着附件：发出时是拼好的正文，撤回编辑时附件回到草稿', async () => {
+    const { store, api, emitEvent } = await setup();
+    const state = () => store.getState();
+    await state().selectSession('s1');
+    await state().send('first');
+    emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
+
+    state().attachFiles('s1', [DOC]);
+    await state().send('second');
+    const [queued] = selectQueueOf('s1')(state());
+    expect(queued).toEqual(expect.objectContaining({ text: 'second', files: [DOC] }));
+    expect(state().draftFiles).toEqual({});
+
+    // 草稿里还有附件时不撤回
+    state().attachFiles('s1', [CSV]);
+    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('draft-exists');
+    state().removeDraftFile('s1', 0);
+    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('recalled');
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
+    expect(state().drafts.s1).toBe('second');
+
+    await state().send('second');
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    expect(api.prompt).toHaveBeenLastCalledWith({
+      sessionId: 's1',
+      text: '<file name="a.md">\n# 标题\n</file>\nsecond',
+    });
+  });
+
+  it('超过个数或合计字数上限的不加并给出原因，放得下的照加', async () => {
+    const { store } = await setup();
+    const state = () => store.getState();
+    const many = Array.from({ length: 12 }, (_, at) => ({ name: `${at}.txt`, text: 'x' }));
+    expect(state().attachFiles('s1', many)).toBe('count');
+    expect(selectDraftFilesOf('s1')(state())).toHaveLength(10);
+
+    const half = { name: 'half.txt', text: 'x'.repeat(100_000) };
+    expect(state().attachFiles('s2', [half, half, DOC])).toBe('size');
+    expect(selectDraftFilesOf('s2')(state())).toEqual([half, half]);
+    expect(state().attachFiles('s3', [half, { name: 'big', text: 'x'.repeat(100_001) }, DOC])).toBe(
+      'size'
+    );
+    expect(selectDraftFilesOf('s3')(state())).toEqual([half, DOC]);
   });
 });
 

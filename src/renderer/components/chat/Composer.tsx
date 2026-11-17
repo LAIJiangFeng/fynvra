@@ -1,15 +1,21 @@
 import {
+  type ChatFile,
   type ChatImage,
   type ChatImageMimeType,
   isChatImageMimeType,
+  MAX_CHAT_FILE_BYTES,
+  MAX_CHAT_FILES,
+  MAX_CHAT_FILES_TOTAL_CHARS,
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGES_TOTAL_BYTES,
   nextApprovalMode,
+  splitChatFiles,
 } from '@shared/types/chat';
-import { CircleStop, ImagePlus, ListPlus, SendHorizontal, Undo2, X } from 'lucide-react';
+import { CircleStop, FileText, ListPlus, Paperclip, SendHorizontal, Undo2, X } from 'lucide-react';
 import {
   type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   memo,
   useCallback,
@@ -33,11 +39,13 @@ import {
   useComposerHints,
 } from '@/lib/keybindings';
 import {
+  type FileRejection,
   type ImageRejection,
   isBusy,
   type QueuedMessage,
   selectApprovalsOf,
   selectCompactingOf,
+  selectDraftFilesOf,
   selectDraftImagesOf,
   selectDraftOf,
   selectMessagesOf,
@@ -51,6 +59,7 @@ import {
 import { useWorkflowsStore } from '@/stores/workflows';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { caretOnLineEdge } from './caretLine';
+import { type ChatFileRejection, readChatFile } from './chatFiles';
 import { ImagePreview } from './ImagePreview';
 import {
   currentEntry,
@@ -182,20 +191,42 @@ function imageProblem(problem: ImageRejection | 'unsupported', t: T): string {
   }
 }
 
+/** 文档附件没加进去时的提示 */
+function fileProblem(problem: ChatFileRejection | FileRejection, name: string, t: T): string {
+  switch (problem) {
+    case 'count':
+      return t('chat.filesTooMany', { max: MAX_CHAT_FILES });
+    case 'size':
+      return t('chat.fileTooLarge', {
+        name,
+        single: MAX_CHAT_FILE_BYTES / MiB,
+        total: MAX_CHAT_FILES_TOTAL_CHARS.toLocaleString('en-US'),
+      });
+    case 'unsupported':
+      return t('chat.fileUnsupported', { name });
+    case 'empty':
+      return t('chat.fileEmpty', { name });
+    case 'unreadable':
+      return t('chat.fileUnreadable', { name });
+  }
+}
+
 /**
  * 输入框：多行，Enter 发送、Shift+Enter 换行；运行中显示「停止」。草稿按会话存在 store。
- * 左下角是图片按钮、模型胶囊与审批胶囊；Shift+Tab 循环切换审批档位。
+ * 左下角是附件按钮、模型胶囊与审批胶囊；Shift+Tab 循环切换审批档位。
  * ↑ / ↓ 像终端一样翻这个会话发过的消息：输入框为空或光标在视觉第一行时 ↑ 取上一条，
  * 在视觉最后一行时 ↓ 取下一条，翻过最新一条回到草稿；Esc 直接回到草稿；翻到的内容一经编辑就成为新的草稿。
  * 这些都是默认键：按键经动作表（设置 → 快捷键）判断，另有运行中 Esc 停止、Ctrl+M（macOS ⌘M）打开模型选择器。
  * Ctrl/⌘+V 粘贴图片：剪贴板里有 PNG / JPEG / GIF / WebP 文件时以图片为准，缩略图挂在输入框顶部
  * （草稿，按会话存在 store），只有图片也能发；没有图片文件时照常粘贴文字。
+ * 选择、粘贴或拖进来的非图片文件（UTF-8 文本、PDF、.docx）在 Renderer 抽出纯文本作为附件，发送时拼在正文前面。
  * 一轮正常结束后 store 可能带一条灰字建议：它不进入草稿、不占发送按钮；光标在末尾且没有修饰键时按 → 采纳为草稿，
  * Esc 忽略本轮。普通输入不匹配建议时立即隐藏；运行中、有队列 / 审批 / 图片 / 历史浏览时不显示。
  */
 export function Composer({ sessionId }: { sessionId: string }) {
   const draft = useSessionsStore(selectDraftOf(sessionId));
   const images = useSessionsStore(selectDraftImagesOf(sessionId));
+  const files = useSessionsStore(selectDraftFilesOf(sessionId));
   const status = useSessionsStore(selectStatusOf(sessionId));
   const suggestion = useSessionsStore(selectReplySuggestionOf(sessionId));
   const approvals = useSessionsStore(selectApprovalsOf(sessionId));
@@ -208,6 +239,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const messages = useSessionsStore(selectMessagesOf(sessionId));
   const setDraft = useSessionsStore((state) => state.setDraft);
   const setDraftImages = useSessionsStore((state) => state.setDraftImages);
+  const setDraftFiles = useSessionsStore((state) => state.setDraftFiles);
   const send = useSessionsStore((state) => state.send);
   const steer = useSessionsStore((state) => state.steer);
   const removeQueued = useSessionsStore((state) => state.removeQueued);
@@ -222,13 +254,18 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const openModelPicker = useSessionsStore((state) => state.openModelPicker);
   const attachImages = useSessionsStore((state) => state.attachImages);
   const removeDraftImage = useSessionsStore((state) => state.removeDraftImage);
+  const attachFiles = useSessionsStore((state) => state.attachFiles);
+  const removeDraftFile = useSessionsStore((state) => state.removeDraftFile);
   const ignoreSuggestion = useSessionsStore((state) => state.ignoreSuggestion);
   const hints = useComposerHints();
   const sendLabel = useChordLabel('send');
   const steerLabel = useChordLabel('steer-now');
   const t = useT();
   const input = useRef<HTMLTextAreaElement>(null);
-  const imagePicker = useRef<HTMLInputElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
+  /** 正在读取的文档批次数：大于 0 时显示「正在读取文件…」 */
+  // 按会话记：切换会话时组件实例会复用，不能显示到别的会话里
+  const [readingFiles, setReadingFiles] = useState<Record<string, number>>({});
   /** 输入法组字中：keydown 的 isComposing / keyCode 229 之外再兜一层 composition 状态 */
   const composing = useRef(false);
   /** 正在翻历史：与 history ref 同步，供灰字显隐/光标逻辑读 */
@@ -254,7 +291,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     () =>
       messages
         .filter((message) => message.role === 'user')
-        .map((message) => ({ text: message.text, images: message.images ?? [] })),
+        .map((message) => ({ ...splitChatFiles(message.text), images: message.images ?? [] })),
     [messages]
   );
 
@@ -294,7 +331,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   }, [mentionKindOpen, refreshWorkflows]);
 
   const busy = isBusy(status) || compacting || recovering;
-  // 灰字只在空闲、没队列 / 审批 / 图片、没翻历史且草稿恰好是建议前缀时显示；它不进 draft，也不影响 canSend
+  // 灰字只在空闲、没队列 / 审批 / 图片 / 附件、没翻历史且草稿恰好是建议前缀时显示；它不进 draft，也不影响 canSend
   const ghostVisible =
     suggestion !== undefined &&
     !busy &&
@@ -302,6 +339,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     approvals.length === 0 &&
     queue.length === 0 &&
     images.length === 0 &&
+    files.length === 0 &&
     !browsing &&
     draft.length < suggestion.text.length &&
     suggestion.text.startsWith(draft);
@@ -315,7 +353,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
         ? t(planMode ? 'chat.placeholderOrchestratorPlan' : 'chat.placeholderOrchestrator')
         : t(planMode ? 'chat.placeholderOtherRolePlan' : 'chat.placeholderOtherRole');
   // While running the message is queued (sent when the turn settles) instead of being refused
-  const canSend = draft.trim().length > 0 || images.length > 0;
+  const canSend = draft.trim().length > 0 || images.length > 0 || files.length > 0;
   const submit = () => {
     if (!canSend) return;
     history.current = null;
@@ -369,6 +407,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     setBrowsing(history.current !== null);
     const entry = currentEntry(next);
     setDraftImages(sessionId, entry.images);
+    setDraftFiles(sessionId, entry.files);
     if (entry.text === draft) {
       placeCaret(caret);
       return;
@@ -381,7 +420,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const ingestImages = async (
     files: { file: File; mimeType: ChatImageMimeType }[],
     unsupported: boolean
-  ) => {
+  ): Promise<string | undefined> => {
     let problem: ImageRejection | 'unsupported' | undefined = unsupported
       ? 'unsupported'
       : undefined;
@@ -404,7 +443,62 @@ export function Composer({ sessionId }: { sessionId: string }) {
       history.current = null;
       setBrowsing(false);
     }
-    setComposerHint(problem ? { text: imageProblem(problem, t) } : null);
+    return problem ? imageProblem(problem, t) : undefined;
+  };
+
+  /** 读出文档的纯文本加进草稿；读不出、太大、超过个数的不加，带文件名给出第一个问题 */
+  const ingestFiles = async (picked: File[]): Promise<string | undefined> => {
+    const reading = (delta: number) =>
+      setReadingFiles((counts) => ({ ...counts, [sessionId]: (counts[sessionId] ?? 0) + delta }));
+    reading(1);
+    let read: Awaited<ReturnType<typeof readChatFile>>[];
+    try {
+      read = await Promise.all(picked.map((file) => readChatFile(file)));
+    } finally {
+      reading(-1);
+    }
+    const previousFiles = useSessionsStore.getState().draftFiles[sessionId];
+    let hint: string | undefined;
+    read.forEach((result, index) => {
+      // 逐个加，提示里才知道是哪个文件没放下
+      const problem = result.ok ? attachFiles(sessionId, [result.file]) : result.reason;
+      if (problem && hint === undefined) hint = fileProblem(problem, picked[index]?.name ?? '', t);
+    });
+    const state = useSessionsStore.getState();
+    if (state.activeSessionId === sessionId && state.draftFiles[sessionId] !== previousFiles) {
+      history.current = null;
+      setBrowsing(false);
+    }
+    return hint;
+  };
+
+  /** 选择、粘贴、拖放共用：支持的图片走图片流程，不支持的图片给格式提示，其他文件走文档流程 */
+  const ingest = (picked: File[]) => {
+    const supported = supportedImages(picked);
+    const isImage = (file: File) => file.type.startsWith('image/');
+    const badImages = picked.some((file) => isImage(file) && !isChatImageMimeType(file.type));
+    const documents = picked.filter((file) => !isImage(file));
+    // 两边都结束后只设一次提示，图片的优先；先结束的一边不会覆盖另一边
+    void Promise.all([
+      supported.length > 0 || badImages ? ingestImages(supported, badImages) : undefined,
+      documents.length > 0 ? ingestFiles(documents) : undefined,
+    ]).then(([imageHint, fileHint]) => {
+      const hint = imageHint ?? fileHint;
+      setComposerHint(hint ? { text: hint } : null);
+    });
+  };
+
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    // 只拦拖进来的文件；在文本框里拖文字照常
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    ingest(Array.from(event.dataTransfer.files));
+    input.current?.focus();
   };
 
   // × 按钮随图片一起消失：焦点放回输入框，不掉到 body 上
@@ -416,6 +510,15 @@ export function Composer({ sessionId }: { sessionId: string }) {
       input.current?.focus();
     },
     [sessionId, removeDraftImage]
+  );
+  const removeFile = useCallback(
+    (index: number) => {
+      history.current = null;
+      setBrowsing(false);
+      removeDraftFile(sessionId, index);
+      input.current?.focus();
+    },
+    [sessionId, removeDraftFile]
   );
 
   // The row buttons disappear with the row: keep the focus in the input
@@ -452,18 +555,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
   );
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files);
-    const pasted = supportedImages(files);
-    if (pasted.length === 0) {
+    const pastedFiles = Array.from(event.clipboardData.files);
+    const pasted = supportedImages(pastedFiles);
+    const documents = pastedFiles.some((file) => !file.type.startsWith('image/'));
+    if (pasted.length === 0 && !documents) {
       // 剪贴板里的图片格式不支持（BMP、SVG 等）：文字照常粘贴，提示一下
-      if (files.some((file) => file.type.startsWith('image/'))) {
-        setComposerHint({ text: imageProblem('unsupported', t) });
-      }
+      if (pastedFiles.length > 0) setComposerHint({ text: imageProblem('unsupported', t) });
       return;
     }
-    // 有图片文件时以图片为准（与 EnsoCode 一致），不再粘贴剪贴板里的文字
+    // 有图片或其他文件时以文件为准（与 EnsoCode 一致），不再粘贴剪贴板里的文字
     event.preventDefault();
-    void ingestImages(pasted, pasted.length < files.length);
+    ingest(pastedFiles);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -525,7 +627,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     if (matchAction(event, 'history-prev') && caretOnVisualLineEdge(textarea, 'first')) {
-      const state = history.current ?? startHistory(sent, { text: draft, images });
+      const state = history.current ?? startHistory(sent, { text: draft, images, files });
       const next = up(state);
       if (next === state) return;
       event.preventDefault();
@@ -610,14 +712,20 @@ export function Composer({ sessionId }: { sessionId: string }) {
       if (browsing) {
         setDraft(sessionId, browsing.draft.text);
         setDraftImages(sessionId, browsing.draft.images);
+        setDraftFiles(sessionId, browsing.draft.files);
       }
     },
-    [sessionId, setDraft, setDraftImages]
+    [sessionId, setDraft, setDraftImages, setDraftFiles]
   );
 
   return (
     <div className="shrink-0 px-4 pb-3">
-      <div className="mx-auto max-w-3xl rounded-xl border bg-background shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: 拖放只是鼠标快捷方式，键盘用附件按钮 */}
+      <div
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        className="mx-auto max-w-3xl rounded-xl border bg-background shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30"
+      >
         <QueuedMessages
           queue={queue}
           steerLabel={steerLabel}
@@ -627,7 +735,17 @@ export function Composer({ sessionId }: { sessionId: string }) {
           onRecall={recallForEditing}
           onRemove={dropQueued}
         />
-        <DraftImages images={images} onRemove={removeImage} />
+        <DraftAttachments
+          images={images}
+          files={files}
+          onRemoveImage={removeImage}
+          onRemoveFile={removeFile}
+        />
+        {(readingFiles[sessionId] ?? 0) > 0 && (
+          <p role="status" className="px-4 pt-2 text-muted-foreground text-xs">
+            {t('chat.readingFiles')}
+          </p>
+        )}
         {composerHint && (
           <p role="status" className="px-4 pt-2 text-destructive text-xs">
             {composerHint.text}
@@ -703,29 +821,27 @@ export function Composer({ sessionId }: { sessionId: string }) {
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <div className="flex min-w-0 items-center gap-2">
             <input
-              ref={imagePicker}
+              ref={filePicker}
               type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp"
               multiple
               hidden
               onChange={(event) => {
-                const files = Array.from(event.currentTarget.files ?? []);
+                const picked = Array.from(event.currentTarget.files ?? []);
                 event.currentTarget.value = '';
-                if (files.length === 0) return;
-                const supported = supportedImages(files);
-                void ingestImages(supported, supported.length < files.length);
+                if (picked.length === 0) return;
+                ingest(picked);
                 input.current?.focus();
               }}
             />
             <Tooltip>
               <TooltipTrigger
                 render={<Button variant="ghost" size="icon-sm" />}
-                aria-label={t('chat.addImages')}
-                onClick={() => imagePicker.current?.click()}
+                aria-label={t('chat.attachFiles')}
+                onClick={() => filePicker.current?.click()}
               >
-                <ImagePlus />
+                <Paperclip />
               </TooltipTrigger>
-              <TooltipContent>{t('chat.addImages')}</TooltipContent>
+              <TooltipContent>{t('chat.attachFiles')}</TooltipContent>
             </Tooltip>
             <ModelPicker sessionId={sessionId} />
             <ApprovalModePicker sessionId={sessionId} />
@@ -780,17 +896,24 @@ export function Composer({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** 输入框顶部的缩略图条：64×64，右上角 × 移除。单独 memo：打字时不重画（data URL 可能很长） */
-const DraftImages = memo(function DraftImages({
+/**
+ * 输入框顶部的附件条：图片缩略图 64×64，右上角 × 移除；文档是同一行里的文件名标签。
+ * 单独 memo：打字时不重画（data URL 可能很长）
+ */
+const DraftAttachments = memo(function DraftAttachments({
   images,
-  onRemove,
+  files,
+  onRemoveImage: onRemove,
+  onRemoveFile,
 }: {
   images: ChatImage[];
-  onRemove: (index: number) => void;
+  files: ChatFile[];
+  onRemoveImage: (index: number) => void;
+  onRemoveFile: (index: number) => void;
 }) {
   const t = useT();
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  if (images.length === 0) return null;
+  if (images.length === 0 && files.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2 px-3 pt-3">
       {images.map((image, index) => (
@@ -819,13 +942,33 @@ const DraftImages = memo(function DraftImages({
           </button>
         </div>
       ))}
+      {files.map((file, index) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: 草稿附件没有 id，同名文件也可能加两次；移除按位置
+          key={index}
+          title={file.name}
+          className="flex h-8 max-w-56 items-center gap-1.5 self-center rounded-md border bg-muted/40 pr-1 pl-2 text-xs"
+        >
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 truncate">{file.name}</span>
+          <button
+            type="button"
+            aria-label={t('chat.removeFile', { name: file.name })}
+            title={t('chat.removeFile', { name: file.name })}
+            onClick={() => onRemoveFile(index)}
+            className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      ))}
       <ImagePreview images={images} index={previewIndex} onIndexChange={setPreviewIndex} />
     </div>
   );
 });
 
 /**
- * Messages queued while the session runs, oldest first: text preview, image count, send now (steer),
+ * Messages queued while the session runs, oldest first: text preview, image / file count, send now (steer),
  * recall to edit and remove. They are not in the timeline until they are actually sent
  */
 const QueuedMessages = memo(function QueuedMessages({
@@ -865,12 +1008,17 @@ const QueuedMessages = memo(function QueuedMessages({
           >
             <span className="min-w-0 flex-1 truncate">
               {preview || (
-                <span className="text-muted-foreground">{t('chat.queuedImageOnly')}</span>
+                <span className="text-muted-foreground">{t('chat.queuedAttachmentsOnly')}</span>
               )}
             </span>
             {item.images.length > 0 && (
               <span className="shrink-0 text-muted-foreground">
                 {t('chat.queuedImages', { count: item.images.length })}
+              </span>
+            )}
+            {item.files.length > 0 && (
+              <span className="shrink-0 text-muted-foreground">
+                {t('chat.queuedFiles', { count: item.files.length })}
               </span>
             )}
             <button

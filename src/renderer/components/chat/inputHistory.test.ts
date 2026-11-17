@@ -1,4 +1,4 @@
-import type { ChatImage } from '@shared/types/chat';
+import type { ChatFile, ChatImage } from '@shared/types/chat';
 import { describe, expect, it } from 'vitest';
 import {
   currentEntry,
@@ -16,7 +16,11 @@ import {
 
 const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
 const PHOTO: ChatImage = { data: '/9j/4AAQ', mimeType: 'image/jpeg' };
-const entry = (text: string, images: ChatImage[] = []): InputHistoryEntry => ({ text, images });
+const entry = (
+  text: string,
+  images: ChatImage[] = [],
+  files: ChatFile[] = []
+): InputHistoryEntry => ({ text, images, files });
 const textEntries = (texts: string[]) => texts.map((text) => entry(text));
 
 describe('historyEntries', () => {
@@ -54,6 +58,18 @@ describe('historyEntries', () => {
     expect(historyEntries([entry(''), imageOnly, entry('   '), whitespaceWithImage])).toEqual([
       imageOnly,
       whitespaceWithImage,
+    ]);
+  });
+
+  it('keeps file-only entries and merges adjacent ones only when the files match', () => {
+    const doc: ChatFile = { name: 'a.md', text: 'A' };
+    const fileOnly = entry('', [], [doc]);
+    const renamed = entry('', [], [{ name: 'b.md', text: 'A' }]);
+    const edited = entry('', [], [{ name: 'b.md', text: 'B' }]);
+    expect(historyEntries([fileOnly, entry('', [], [doc]), renamed, edited, edited])).toEqual([
+      fileOnly,
+      renamed,
+      edited,
     ]);
   });
 
