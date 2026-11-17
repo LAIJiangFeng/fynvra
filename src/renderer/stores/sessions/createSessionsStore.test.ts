@@ -578,7 +578,8 @@ describe('createSessionsStore · 批量归档与删除', () => {
     api.list.mockClear();
     const progress: unknown[] = [];
     const unsubscribe = store.subscribe((state, prev) => {
-      if (state.bulkProgress !== prev.bulkProgress) progress.push(state.bulkProgress);
+      const next = state.bulkByWorkspace[WS] ?? null;
+      if (next !== (prev.bulkByWorkspace[WS] ?? null)) progress.push(next);
     });
     expect(await store.getState().archiveIdleSessions(WS)).toEqual({ done: 2, failed: 0 });
     unsubscribe();
@@ -591,7 +592,53 @@ describe('createSessionsStore · 批量归档与删除', () => {
     expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['idle1', 'idle2']);
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(store.getState().notice).toBeNull();
-    expect(store.getState().bulkWorkspaceId).toBeNull();
+    expect(store.getState().bulkByWorkspace).toEqual({});
+  });
+
+  it('不同工作区的批量操作可同时进行，同一工作区不重入', async () => {
+    const { store, api } = await bulkSetup([
+      summary('a1'),
+      summary('a2'),
+      summary('b1', { workspaceId: 'ws-2' }),
+      summary('b2', { workspaceId: 'ws-2' }),
+    ]);
+    await store.getState().loadSessions('ws-2');
+    const archiveImpl = api.archive.getMockImplementation();
+    if (!archiveImpl) throw new Error('fakeApi 缺少实现');
+    const gate = deferred<void>();
+    // 工作区 A 的会话归档挂起，直到放行
+    api.archive.mockImplementation(async (sessionId) => {
+      if (sessionId.startsWith('a')) await gate.promise;
+      return archiveImpl(sessionId);
+    });
+
+    const runA = store.getState().archiveSessions(WS, ['a1', 'a2']);
+    await settle();
+    expect(store.getState().bulkByWorkspace[WS]).toEqual({ kind: 'archive', done: 0, total: 2 });
+
+    // A 还在跑时再发起一次：直接拒绝，不调 api
+    api.archive.mockClear();
+    expect(await store.getState().archiveSessions(WS, ['a2'])).toEqual({ done: 0, failed: 0 });
+    expect(api.archive).not.toHaveBeenCalled();
+
+    // B 不受 A 影响，正常完成；A 的进度项一直在
+    const seenA: unknown[] = [];
+    const unsubscribe = store.subscribe((state) => seenA.push(state.bulkByWorkspace[WS]));
+    expect(await store.getState().archiveSessions('ws-2', ['b1', 'b2'])).toEqual({
+      done: 2,
+      failed: 0,
+    });
+    unsubscribe();
+    expect(api.archive.mock.calls.map(([id]) => id).sort()).toEqual(['b1', 'b2']);
+    expect(seenA.length).toBeGreaterThan(0);
+    expect(seenA.every((item) => item !== undefined)).toBe(true);
+    expect(store.getState().bulkByWorkspace).toEqual({
+      [WS]: { kind: 'archive', done: 0, total: 2 },
+    });
+
+    gate.resolve();
+    expect(await runA).toEqual({ done: 2, failed: 0 });
+    expect(store.getState().bulkByWorkspace).toEqual({});
   });
 
   it('批量归档跳过还有 worker 在跑的主 agent 并提示', async () => {
