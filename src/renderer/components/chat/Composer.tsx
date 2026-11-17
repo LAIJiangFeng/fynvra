@@ -12,7 +12,7 @@ import {
   nextApprovalMode,
   splitChatFiles,
 } from '@shared/types/chat';
-import { CircleStop, FileText, ListPlus, Paperclip, SendHorizontal, Undo2, X } from 'lucide-react';
+import { CircleStop, ListPlus, Paperclip, SendHorizontal, Undo2, X } from 'lucide-react';
 import {
   type ClipboardEvent,
   type DragEvent,
@@ -58,6 +58,7 @@ import {
 } from '@/stores/sessions';
 import { useWorkflowsStore } from '@/stores/workflows';
 import { ApprovalModePicker } from './ApprovalModePicker';
+import { ChatFileCard } from './ChatFileCard';
 import { caretOnLineEdge } from './caretLine';
 import { type ChatFileRejection, readChatFile } from './chatFiles';
 import { ImagePreview } from './ImagePreview';
@@ -897,7 +898,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
 }
 
 /**
- * 输入框顶部的附件条：图片缩略图 64×64，右上角 × 移除；文档是同一行里的文件名标签。
+ * 输入框顶部的附件条：图片缩略图 64×64，文档卡片同高，右上角 × 移除。
  * 单独 memo：打字时不重画（data URL 可能很长）
  */
 const DraftAttachments = memo(function DraftAttachments({
@@ -943,20 +944,15 @@ const DraftAttachments = memo(function DraftAttachments({
         </div>
       ))}
       {files.map((file, index) => (
-        <div
-          // biome-ignore lint/suspicious/noArrayIndexKey: 草稿附件没有 id，同名文件也可能加两次；移除按位置
-          key={index}
-          title={file.name}
-          className="flex h-8 max-w-56 items-center gap-1.5 self-center rounded-md border bg-muted/40 pr-1 pl-2 text-xs"
-        >
-          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate">{file.name}</span>
+        // biome-ignore lint/suspicious/noArrayIndexKey: 草稿附件没有 id，同名文件也可能加两次；移除按位置
+        <div key={index} className="relative shrink-0">
+          <ChatFileCard name={file.name} />
           <button
             type="button"
             aria-label={t('chat.removeFile', { name: file.name })}
             title={t('chat.removeFile', { name: file.name })}
             onClick={() => onRemoveFile(index)}
-            className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-xs outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <X className="size-3" />
           </button>
