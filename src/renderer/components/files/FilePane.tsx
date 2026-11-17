@@ -22,6 +22,8 @@ const FileEditor = lazy(() => import('./FileEditor'));
 const PdfPreview = lazy(() => import('./PdfPreview'));
 const DocxPreview = lazy(() => import('./DocxPreview'));
 const MODES: FileMode[] = ['preview', 'edit', 'split'];
+// 更大的 Markdown 解析和渲染会卡住界面好几秒，只读打开时只显示源码。
+const MAX_MARKDOWN_PREVIEW_BYTES = 1024 * 1024;
 
 export function FilePane({
   file,
@@ -39,8 +41,10 @@ export function FilePane({
   const draft = useDeferredValue(current?.draft ?? '');
   const preview = current?.preview;
   const readOnly = preview?.kind === 'text' && preview.readOnly === true;
-  // 只读大文件只看源码：渲染数 MB 的 Markdown 会卡住界面。
-  const markdown = isMarkdown(file.name) && !readOnly;
+  // 只读大文件不超过 1 MiB 的 Markdown 仍可预览，更大的只看源码。
+  const markdown =
+    isMarkdown(file.name) &&
+    (!readOnly || (preview?.kind === 'text' && preview.size <= MAX_MARKDOWN_PREVIEW_BYTES));
   const dirty = isFileDirty(current);
   const mode = current?.mode;
   const findable =
@@ -224,7 +228,12 @@ export function FilePane({
         <div className="flex min-h-0 flex-1 flex-col">
           {readOnly && (
             <p className="shrink-0 truncate border-b bg-muted/40 px-4 py-1.5 text-muted-foreground text-xs">
-              {t('files.largeReadonly', { size: formatSize(preview.size) })}
+              {t(
+                isMarkdown(file.name) && !markdown
+                  ? 'files.largeReadonlySource'
+                  : 'files.largeReadonly',
+                { size: formatSize(preview.size) }
+              )}
             </p>
           )}
           <div
@@ -266,12 +275,17 @@ export function FilePane({
                   aria-label={t('files.markdownPreview')}
                   className="h-full overflow-auto bg-background px-6 py-4 outline-none"
                 >
-                  <FileMarkdownPreview
-                    key={preview.version}
-                    file={file}
-                    store={store}
-                    text={draft}
-                  />
+                  {/* 只读大文件的延迟值尚未追上原文时先显示加载，避免空白 */}
+                  {readOnly && draft !== (current?.draft ?? '') ? (
+                    <FileMessage loading title={t('common.loading')} />
+                  ) : (
+                    <FileMarkdownPreview
+                      key={preview.version}
+                      file={file}
+                      store={store}
+                      text={draft}
+                    />
+                  )}
                 </article>
                 <PreviewFindBar
                   containerRef={previewRef}
