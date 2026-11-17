@@ -220,7 +220,7 @@ function fileProblem(problem: ChatFileRejection | FileRejection, name: string, t
  * 这些都是默认键：按键经动作表（设置 → 快捷键）判断，另有运行中 Esc 停止、Ctrl+M（macOS ⌘M）打开模型选择器。
  * Ctrl/⌘+V 粘贴图片：剪贴板里有 PNG / JPEG / GIF / WebP 文件时以图片为准，缩略图挂在输入框顶部
  * （草稿，按会话存在 store），只有图片也能发；没有图片文件时照常粘贴文字。
- * 选择、粘贴或拖进来的非图片文件（UTF-8 文本、PDF、.docx）在 Renderer 抽出纯文本作为附件，发送时拼在正文前面。
+ * 选择、粘贴或拖进来的非图片文件（UTF-8 文本、PDF、.docx、.xlsx）在 Renderer 抽出纯文本作为附件，发送时拼在正文前面。
  * 一轮正常结束后 store 可能带一条灰字建议：它不进入草稿、不占发送按钮；光标在末尾且没有修饰键时按 → 采纳为草稿，
  * Esc 忽略本轮。普通输入不匹配建议时立即隐藏；运行中、有队列 / 审批 / 图片 / 历史浏览时不显示。
  */

@@ -59,7 +59,73 @@ async function extractDocxText(data: Uint8Array): Promise<string> {
   return value;
 }
 
-/** 读一个附件并抽出纯文本：PDF、Word .docx、UTF-8 文本；其他格式（旧版 .doc、xlsx、二进制等）不支持 */
+export type XlsxCell = string | number | boolean | Date | null;
+export interface XlsxSheet {
+  sheet: string;
+  data: XlsxCell[][];
+}
+
+function cellToText(cell: XlsxCell): string {
+  if (cell === null) return '';
+  if (cell instanceof Date) {
+    if (Number.isNaN(cell.getTime())) return '';
+    const iso = cell.toISOString();
+    return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso;
+  }
+  if (typeof cell === 'string') return cell.replace(/[\t\r\n]/g, ' ');
+  return String(cell);
+}
+
+/** 工作表转文本：每表一段 `## Sheet: 名称` + TSV 行，表间空一行；跳过空行与空表；超过字数上限提前停 */
+export function sheetsToText(sheets: readonly XlsxSheet[]): string {
+  const blocks: string[] = [];
+  let total = 0;
+  for (const { sheet, data } of sheets) {
+    const lines: string[] = [];
+    for (const row of data) {
+      const cells = row.map(cellToText);
+      while (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+      if (cells.length === 0) continue;
+      const line = cells.join('\t');
+      lines.push(line);
+      total += line.length + 1;
+      if (total > MAX_CHAT_FILES_TOTAL_CHARS) break;
+    }
+    if (lines.length > 0) blocks.push(`## Sheet: ${sheet}\n${lines.join('\n')}`);
+    if (total > MAX_CHAT_FILES_TOTAL_CHARS) break;
+  }
+  return blocks.join('\n\n');
+}
+
+/** xlsx 解压后 XML 部件的总大小上限，防压缩炸弹撑爆渲染进程内存 */
+const MAX_XLSX_UNPACKED_BYTES = 64 * 1024 * 1024;
+
+class XlsxTooLargeError extends Error {}
+
+async function extractXlsxText(data: Uint8Array): Promise<string> {
+  const [{ unzipSync, zipSync }, { default: readXlsxFile }] = await Promise.all([
+    import('fflate'),
+    import('read-excel-file/universal'),
+  ]);
+  // fflate 异步 unzip() 遇到解压后 ≥512KB 的 deflate 条目会起 blob worker，被 CSP `script-src 'self'` 拦下，
+  // 而它不监听 error，Promise 会一直挂起；stored（不压缩）条目则被同步 slice。所以先同步解压，再按 stored 重新打包。
+  // shortcut: 解压和重新打包在渲染主线程同步执行，超大表会让界面短暂卡住；需要时改用 Vite 打包的同源 worker。
+  let unpacked = 0;
+  const entries = unzipSync(data, {
+    filter: (file) => {
+      if (!file.name.endsWith('.xml') && !file.name.endsWith('.rels')) return false;
+      unpacked += file.originalSize;
+      if (unpacked > MAX_XLSX_UNPACKED_BYTES) throw new XlsxTooLargeError();
+      return true;
+    },
+  });
+  const stored = zipSync(entries, { level: 0 });
+  const sheets = await readXlsxFile(stored.slice().buffer);
+  // 库的类型把日期写成了 typeof Date，实际返回 Date 实例
+  return sheetsToText(sheets as unknown as XlsxSheet[]);
+}
+
+/** 读一个附件并抽出纯文本：PDF、Word .docx、Excel .xlsx、UTF-8 文本；其他格式（旧版 .doc / .xls、二进制等）不支持 */
 export async function readChatFile(file: File): Promise<ReadChatFileResult> {
   if (file.size > MAX_CHAT_FILE_BYTES) return { ok: false, reason: 'size' };
   let bytes: Uint8Array;
@@ -81,6 +147,12 @@ export async function readChatFile(file: File): Promise<ReadChatFileResult> {
       text = await extractDocxText(bytes);
     } catch {
       return { ok: false, reason: 'unreadable' };
+    }
+  } else if (ext === 'xlsx' && startsWith(bytes, ZIP_MAGIC)) {
+    try {
+      text = await extractXlsxText(bytes);
+    } catch (error) {
+      return { ok: false, reason: error instanceof XlsxTooLargeError ? 'size' : 'unreadable' };
     }
   } else {
     text = decodeUtf8Text(bytes);
