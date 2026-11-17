@@ -422,7 +422,7 @@ export const en: MessagesShape<typeof zhCN> = {
     fileTooLarge:
       '{name} is too large: up to {single} MB per file and {total} characters of attached text per message',
     fileUnsupported:
-      '{name} is not supported: only UTF-8 text (code, Markdown, CSV, JSON…), PDF and Word .docx',
+      '{name} is not supported: only UTF-8 text (code, Markdown, CSV, JSON…), PDF, Word .docx and Excel .xlsx',
     fileEmpty: '{name} has no readable text (scanned PDF?)',
     fileUnreadable: 'Could not read {name} (encrypted or damaged?)',
     previewImage: 'Preview image {index}',

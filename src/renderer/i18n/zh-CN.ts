@@ -400,7 +400,7 @@ export const zhCN = {
     fileTooLarge:
       '{name} 太大：单个文件不超过 {single} MB，每条消息的附件文字合计不超过 {total} 字符',
     fileUnsupported:
-      '不支持 {name}：只支持 UTF-8 文本（代码、Markdown、CSV、JSON 等）、PDF 和 Word .docx',
+      '不支持 {name}：只支持 UTF-8 文本（代码、Markdown、CSV、JSON 等）、PDF、Word .docx 和 Excel .xlsx',
     fileEmpty: '{name} 没有可读的文字（可能是扫描版 PDF）',
     fileUnreadable: '读不出 {name}（可能已加密或损坏）',
     previewImage: '预览图片 {index}',
