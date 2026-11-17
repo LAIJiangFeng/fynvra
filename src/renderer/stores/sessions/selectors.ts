@@ -1,4 +1,5 @@
 import type {
+  ChatFile,
   ChatImage,
   ModelProviderOption,
   ReplySuggestion,
@@ -19,6 +20,7 @@ const EMPTY_MESSAGES: TimelineMessage[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const EMPTY_PROVIDERS: ModelProviderOption[] = [];
 const EMPTY_IMAGES: ChatImage[] = [];
+const EMPTY_FILES: ChatFile[] = [];
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
 type Lists = Pick<SessionsState, 'sessionsByWorkspace' | 'archivedByWorkspace'>;
@@ -99,6 +101,12 @@ export const selectDraftImagesOf =
   (sessionId: string) =>
   (state: SessionsState): ChatImage[] =>
     state.draftImages[sessionId] ?? EMPTY_IMAGES;
+
+/** 输入框里的文档附件（草稿） */
+export const selectDraftFilesOf =
+  (sessionId: string) =>
+  (state: SessionsState): ChatFile[] =>
+    state.draftFiles[sessionId] ?? EMPTY_FILES;
 
 /**
  * 当前会话的灰字回复建议。除了要有值，还必须仍属于最后的 settled 轮次：

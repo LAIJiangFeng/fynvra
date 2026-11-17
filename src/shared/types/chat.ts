@@ -88,6 +88,64 @@ export const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
 /** 一条消息里图片解码后的合计上限：单条 IPC 远低于 Chromium 约 128 MiB 的消息上限 */
 export const MAX_CHAT_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
 
+/** 随 user 消息发送的文档附件：文件名（不含路径）+ Renderer 抽出的纯文本 */
+export interface ChatFile {
+  name: string;
+  text: string;
+}
+/** 每条消息最多几个文件 */
+export const MAX_CHAT_FILES = 10;
+/** 读进内存前的原始大小上限（与文件预览一致） */
+export const MAX_CHAT_FILE_BYTES = 32 * 1024 * 1024;
+/** 一条消息附件文字合计上限 */
+export const MAX_CHAT_FILES_TOTAL_CHARS = 200_000;
+
+const FILE_OPEN = '<file name="';
+const FILE_CLOSE = '\n</file>';
+
+/**
+ * 按 pi CLI `@file` 的格式把附件拼进 prompt 正文：每块 `<file name="…">\n内容\n</file>`，块之间 `\n`，
+ * 附件在前、正文在后。内容里的 `</file>` 转成 `<\/file>`，块不会被提前截断。
+ * shortcut: 附件块在正文前面，带附件时以 `/` 开头的命令（如 `/skill:`）不会被 pi 识别，需要时改成 Main 侧展开命令后再拼
+ */
+export function appendChatFiles(text: string, files: readonly ChatFile[]): string {
+  if (files.length === 0) return text;
+  const blocks = files
+    .map(
+      (file) =>
+        `${FILE_OPEN}${file.name.replace(/["\r\n]/g, '_')}">\n${file.text.replaceAll('</file>', '<\\/file>')}${FILE_CLOSE}`
+    )
+    .join('\n');
+  return text ? `${blocks}\n${text}` : blocks;
+}
+
+/**
+ * 从正文开头拆出 {@link appendChatFiles} 拼进去的附件块（不反转义，拆了再拼结果不变）。
+ * 只从开头往后解析，遇到第一个不是完整块的位置就停，剩下的是正文。
+ */
+export function splitChatFiles(text: string): { text: string; files: ChatFile[] } {
+  const files: ChatFile[] = [];
+  let pos = 0;
+  while (text.startsWith(FILE_OPEN, pos)) {
+    const nameEnd = text.indexOf('"', pos + FILE_OPEN.length);
+    if (nameEnd < 0 || !text.startsWith('">\n', nameEnd)) break;
+    const name = text.slice(pos + FILE_OPEN.length, nameEnd);
+    if (/[\r\n]/.test(name)) break;
+    const contentStart = nameEnd + 3;
+    const closeAt = text.indexOf(FILE_CLOSE, contentStart);
+    if (closeAt < 0) break;
+    const content = text.slice(contentStart, closeAt);
+    // 拼接时内容里的 </file> 都转义了，还有就不是拼出来的块
+    if (content.includes('</file>')) break;
+    const end = closeAt + FILE_CLOSE.length;
+    // 块后面只能是结尾，或 `\n` 再接非空内容（拼接结果不会以 `</file>\n` 收尾）
+    if (end < text.length && (text[end] !== '\n' || end + 1 === text.length)) break;
+    files.push({ name, text: content });
+    pos = end === text.length ? end : end + 1;
+  }
+  return files.length === 0 ? { text, files } : { text: text.slice(pos), files };
+}
+
 export interface ChatMessage {
   id: string;
   sessionId: string;

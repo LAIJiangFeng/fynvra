@@ -12,7 +12,12 @@ import {
 } from '../workspaceTabs';
 import { connectSessionsStore, createSessionsStore } from './createSessionsStore';
 
-export type { ImageRejection, QueuedMessage, SessionsState } from './createSessionsStore';
+export type {
+  FileRejection,
+  ImageRejection,
+  QueuedMessage,
+  SessionsState,
+} from './createSessionsStore';
 export type { PendingApproval, SessionRuntime, TimelineMessage, UsageTotals } from './reducer';
 export * from './selectors';
 

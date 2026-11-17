@@ -42,7 +42,7 @@ import type {
   SessionStatus,
   SessionSummary,
 } from '@shared/types/chat';
-import { normalizeReplySuggestion } from '@shared/types/chat';
+import { normalizeReplySuggestion, splitChatFiles } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
 import {
@@ -1417,7 +1417,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       state.running = true;
       const current = deps.store.get(sessionId) ?? stored;
-      // 只有图片（文本取不出标题）的消息不占用自动标题，留给下一条有文字的
+      // 只有图片或附件（正文取不出标题）的消息不占用自动标题，留给下一条有文字的
       const title = current.autoTitle ? titleFrom(text) : '';
       deps.store.update(sessionId, {
         status: 'running',
@@ -2106,11 +2106,11 @@ function roleOptions(roles: readonly Role[]): AgentRoleOption[] {
   );
 }
 
-/** 会话标题：第一行非空文本去掉 Markdown 标记，压成一行 */
+/** 会话标题：去掉开头的文档附件块后，第一行非空文本去掉 Markdown 标记，压成一行 */
 export function titleFrom(text: string): string {
   const line =
-    text
-      .split('\n')
+    splitChatFiles(text)
+      .text.split('\n')
       .map((candidate) => candidate.replace(/^[\s#>*\-+]+/, '').trim())
       .find(Boolean) ?? '';
   const flat = line.replace(/\s+/g, ' ');

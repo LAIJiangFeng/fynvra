@@ -580,6 +580,14 @@ export interface ChatToolCall {
 }
 /** 输入框粘贴的图片：base64（不含 data: 前缀）。缩放、转 PNG 由 pi 在 worker 里做 */
 export interface ChatImage { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; }
+/**
+ * 输入框的文档附件（UTF-8 文本 / PDF / .docx）：Renderer 抽出纯文本，文件名只用 File.name（不含路径）。
+ * 不单独过 IPC：发送时 appendChatFiles 按 pi CLI `@file` 格式拼进正文，文件块在前、用户正文在后：
+ * `<file name="a.md">\n内容\n</file>\n正文`（内容里的 </file> 转义为 <\/file>）。jsonl 里的 user 正文因此带着附件块，
+ * Renderer 显示时用 splitChatFiles 从开头拆出来显示成文件标签；自动标题与回复建议也只看拆出的正文。
+ * 上限（Renderer）：每条 ≤ 10 个，单个原始文件 ≤ 32 MiB，附件文字合计 ≤ 200,000 字符；Main 只有 prompt 的 MAX_PROMPT_CHARS 兜底。
+ */
+export interface ChatFile { name: string; text: string; }
 export interface ChatMessage {
   id: string; sessionId: string; role: ChatRole; text: string; thinking?: string;
   images?: ChatImage[];  // 只用于 user 消息；带图片的正文不含 pi 接在末尾的 [Image …] 提示行

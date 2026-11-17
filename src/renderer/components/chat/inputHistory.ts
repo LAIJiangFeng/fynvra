@@ -1,4 +1,4 @@
-import type { ChatImage } from '@shared/types/chat';
+import type { ChatFile, ChatImage } from '@shared/types/chat';
 
 /** 历史条目的上限：只留最近这么多条 */
 export const INPUT_HISTORY_LIMIT = 200;
@@ -6,6 +6,7 @@ export const INPUT_HISTORY_LIMIT = 200;
 export interface InputHistoryEntry {
   text: string;
   images: ChatImage[];
+  files: ChatFile[];
 }
 
 /**
@@ -20,11 +21,11 @@ export interface InputHistory {
   cursor: number;
 }
 
-/** 发送过的消息 → 历史条目：去掉空的，文字与图片都相同的相邻条目合并，只留最近的 200 条 */
+/** 发送过的消息 → 历史条目：去掉空的，文字、图片、附件都相同的相邻条目合并，只留最近的 200 条 */
 export function historyEntries(sent: readonly InputHistoryEntry[]): InputHistoryEntry[] {
   const entries: InputHistoryEntry[] = [];
   for (const entry of sent) {
-    if (!entry.text.trim() && entry.images.length === 0) continue;
+    if (!entry.text.trim() && entry.images.length === 0 && entry.files.length === 0) continue;
     const previous = entries.at(-1);
     if (
       previous?.text === entry.text &&
@@ -33,6 +34,11 @@ export function historyEntries(sent: readonly InputHistoryEntry[]): InputHistory
         (image, index) =>
           image.mimeType === entry.images[index]?.mimeType &&
           image.data === entry.images[index]?.data
+      ) &&
+      previous.files.length === entry.files.length &&
+      previous.files.every(
+        (file, index) =>
+          file.name === entry.files[index]?.name && file.text === entry.files[index]?.text
       )
     ) {
       continue;
@@ -42,7 +48,7 @@ export function historyEntries(sent: readonly InputHistoryEntry[]): InputHistory
   return entries.slice(-INPUT_HISTORY_LIMIT);
 }
 
-/** 以输入框当前的文字与图片为草稿开始一次浏览：还停在底部 */
+/** 以输入框当前的文字、图片与附件为草稿开始一次浏览：还停在底部 */
 export function startHistory(
   sent: readonly InputHistoryEntry[],
   draft: InputHistoryEntry
@@ -79,7 +85,7 @@ export function isBrowsing(state: InputHistory): boolean {
   return cursorOf(state) < state.entries.length;
 }
 
-/** 输入框里该显示的文字与图片：正在看的条目，或底部的草稿 */
+/** 输入框里该显示的文字、图片与附件：正在看的条目，或底部的草稿 */
 export function currentEntry(state: InputHistory): InputHistoryEntry {
   return state.entries[cursorOf(state)] ?? state.draft;
 }
