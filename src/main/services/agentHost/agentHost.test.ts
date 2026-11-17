@@ -17,6 +17,7 @@ import type {
   SessionEventEnvelope,
   SessionModelRef,
 } from '@shared/types/chat';
+import { appendChatFiles } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOrchestrationRegistry } from '../orchestration/registry';
@@ -2953,6 +2954,8 @@ describe('titleFrom', () => {
     ['\n\n  - list   item  ', 'list item'],
     ['', ''],
     ['x'.repeat(80), `${'x'.repeat(59)}…`],
+    [appendChatFiles('', [{ name: 'a.md', text: '# A' }]), ''],
+    [appendChatFiles('## 修复构建\nmore', [{ name: 'a.md', text: '# A' }]), '修复构建'],
   ])('%j → %j', (text, title) => {
     expect(titleFrom(text)).toBe(title);
   });

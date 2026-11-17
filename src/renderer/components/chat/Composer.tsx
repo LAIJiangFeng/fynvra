@@ -264,7 +264,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const filePicker = useRef<HTMLInputElement>(null);
   /** 正在读取的文档批次数：大于 0 时显示「正在读取文件…」 */
-  const [readingFiles, setReadingFiles] = useState(0);
+  // 按会话记：切换会话时组件实例会复用，不能显示到别的会话里
+  const [readingFiles, setReadingFiles] = useState<Record<string, number>>({});
   /** 输入法组字中：keydown 的 isComposing / keyCode 229 之外再兜一层 composition 状态 */
   const composing = useRef(false);
   /** 正在翻历史：与 history ref 同步，供灰字显隐/光标逻辑读 */
@@ -419,7 +420,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const ingestImages = async (
     files: { file: File; mimeType: ChatImageMimeType }[],
     unsupported: boolean
-  ) => {
+  ): Promise<string | undefined> => {
     let problem: ImageRejection | 'unsupported' | undefined = unsupported
       ? 'unsupported'
       : undefined;
@@ -442,17 +443,19 @@ export function Composer({ sessionId }: { sessionId: string }) {
       history.current = null;
       setBrowsing(false);
     }
-    setComposerHint(problem ? { text: imageProblem(problem, t) } : null);
+    return problem ? imageProblem(problem, t) : undefined;
   };
 
   /** 读出文档的纯文本加进草稿；读不出、太大、超过个数的不加，带文件名给出第一个问题 */
-  const ingestFiles = async (picked: File[]) => {
-    setReadingFiles((count) => count + 1);
+  const ingestFiles = async (picked: File[]): Promise<string | undefined> => {
+    const reading = (delta: number) =>
+      setReadingFiles((counts) => ({ ...counts, [sessionId]: (counts[sessionId] ?? 0) + delta }));
+    reading(1);
     let read: Awaited<ReturnType<typeof readChatFile>>[];
     try {
       read = await Promise.all(picked.map((file) => readChatFile(file)));
     } finally {
-      setReadingFiles((count) => count - 1);
+      reading(-1);
     }
     const previousFiles = useSessionsStore.getState().draftFiles[sessionId];
     let hint: string | undefined;
@@ -466,7 +469,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       history.current = null;
       setBrowsing(false);
     }
-    setComposerHint(hint ? { text: hint } : null);
+    return hint;
   };
 
   /** 选择、粘贴、拖放共用：支持的图片走图片流程，不支持的图片给格式提示，其他文件走文档流程 */
@@ -475,8 +478,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
     const isImage = (file: File) => file.type.startsWith('image/');
     const badImages = picked.some((file) => isImage(file) && !isChatImageMimeType(file.type));
     const documents = picked.filter((file) => !isImage(file));
-    if (supported.length > 0 || badImages) void ingestImages(supported, badImages);
-    if (documents.length > 0) void ingestFiles(documents);
+    // 两边都结束后只设一次提示，图片的优先；先结束的一边不会覆盖另一边
+    void Promise.all([
+      supported.length > 0 || badImages ? ingestImages(supported, badImages) : undefined,
+      documents.length > 0 ? ingestFiles(documents) : undefined,
+    ]).then(([imageHint, fileHint]) => {
+      const hint = imageHint ?? fileHint;
+      setComposerHint(hint ? { text: hint } : null);
+    });
   };
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -732,7 +741,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
           onRemoveImage={removeImage}
           onRemoveFile={removeFile}
         />
-        {readingFiles > 0 && (
+        {(readingFiles[sessionId] ?? 0) > 0 && (
           <p role="status" className="px-4 pt-2 text-muted-foreground text-xs">
             {t('chat.readingFiles')}
           </p>

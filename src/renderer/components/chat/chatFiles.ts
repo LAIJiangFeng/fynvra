@@ -1,8 +1,4 @@
-import {
-  type ChatFile,
-  MAX_CHAT_FILE_BYTES,
-  MAX_CHAT_FILES_TOTAL_CHARS,
-} from '../../../shared/types/chat';
+import { type ChatFile, MAX_CHAT_FILE_BYTES, MAX_CHAT_FILES_TOTAL_CHARS } from '@shared/types/chat';
 
 export type ChatFileRejection = 'unsupported' | 'empty' | 'unreadable' | 'size';
 export type ReadChatFileResult =
