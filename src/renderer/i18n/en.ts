@@ -863,7 +863,7 @@ export const en: MessagesShape<typeof zhCN> = {
     },
     watchdog: {
       title: 'Session watchdog',
-      enabled: 'Resume automatically after errors or stalls',
+      enabled: 'Watchdog',
       hint: 'Sends the main agent a message to continue when it stops on a network drop, service error or crash. Works only while the app is running',
       interval: 'Check interval (seconds)',
       intervalHint: '15–1800 seconds',

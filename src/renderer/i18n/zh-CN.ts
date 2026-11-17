@@ -829,7 +829,7 @@ export const zhCN = {
     },
     watchdog: {
       title: '会话守护',
-      enabled: '出错或卡住时自动恢复',
+      enabled: '守护进程',
       hint: '主 agent 因断网、服务报错或进程崩溃中断时，自动发消息让它继续。仅在应用运行期间生效',
       interval: '检测间隔（秒）',
       intervalHint: '15–1800 秒',
