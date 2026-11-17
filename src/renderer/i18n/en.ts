@@ -861,6 +861,29 @@ export const en: MessagesShape<typeof zhCN> = {
       allowLoopback: 'Allow web_fetch to access local addresses',
       hint: 'Only localhost, 127.0.0.1 and ::1; still needs “Network access” approval. Applies to new sessions',
     },
+    watchdog: {
+      title: 'Session watchdog',
+      enabled: 'Resume automatically after errors or stalls',
+      hint: 'When on, if the main agent stops because of a network outage, a model service error or a process crash, Fynvra sends it a resume message to continue. Works only while the app is running (not when it is closed or the computer sleeps); dispatched workers are not resumed directly but handled by the main agent; every resume is a new model request and costs money; sessions you stopped are never resumed',
+      interval: 'Check interval (seconds)',
+      intervalHint:
+        '15–1800 seconds; after repeated failures the wait doubles each time, up to 30 minutes',
+      maxAttempts: 'Max consecutive resumes per session',
+      maxAttemptsHint: '1–50; the count resets after a turn ends normally',
+      scope: 'Watch',
+      scopeOrchestrator: 'Main agent',
+      scopeAll: 'All direct conversations',
+      onModelError: 'Model request failed',
+      onModelErrorHint:
+        'Network outage, service error, rate limit and so on (after retries are used up)',
+      onCrash: 'Agent process crashed',
+      onCrashHint: 'Agent process crash or host error',
+      onStall: 'No output for a long time',
+      onStallHint:
+        'A running turn with no tool in progress and no output for a long time is stopped, then resumed; dispatched workers are only stopped and left to the main agent',
+      stallMinutes: 'Minutes without output before a stall',
+      stallMinutesHint: '10–240 minutes',
+    },
     network: {
       title: 'Git and command proxy',
       environment: 'Use existing environment',

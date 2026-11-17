@@ -213,6 +213,12 @@ export function installCoordinatorWake(
         state.reviews.clear();
         state.warned.clear();
       }
+      // 会话守护自动恢复：解除暂停、清零投递失败，review 计数不变（仍受上限约束）
+      if (action === 'resume') {
+        const state = stateOf(sessionId);
+        state.paused = false;
+        state.failures = 0;
+      }
       schedule(sessionId);
     },
     event: ({ sessionId, event }) => {

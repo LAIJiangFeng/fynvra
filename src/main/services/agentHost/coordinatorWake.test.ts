@@ -75,7 +75,7 @@ function fakes(status: SessionStatus = 'idle') {
       }
     },
   };
-  const activity = (action: 'prompt' | 'abort' | 'idle') => {
+  const activity = (action: 'prompt' | 'abort' | 'idle' | 'resume') => {
     for (const observer of observers) observer.activity?.(COORD, action);
   };
   return {
@@ -369,6 +369,21 @@ describe('installCoordinatorWake', () => {
       expect(f.agentHost.promptWhenIdle).toHaveBeenCalledTimes(1);
     }
   );
+
+  it('会话守护自动恢复（resume）后解除暂停，之后的 worker 消息照常唤醒', async () => {
+    const f = fakes();
+    install(f);
+    f.activity('abort');
+    f.post(message({ id: 'm1' }));
+    await vi.advanceTimersByTimeAsync(DELAY * 100);
+    expect(f.agentHost.promptWhenIdle).not.toHaveBeenCalled();
+    f.session.status = 'running';
+    f.activity('resume');
+    f.settle();
+    await vi.advanceTimersByTimeAsync(DELAY);
+    expect(f.agentHost.promptWhenIdle).toHaveBeenCalledTimes(1);
+    expect(f.acked).toEqual(['m1']);
+  });
 
   it('does not retry an in-flight send cancelled by a user abort', async () => {
     const f = fakes();

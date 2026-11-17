@@ -239,6 +239,14 @@ export interface Message {
    `worker_done` / `question` / `escalation` 且主 agent 会话空闲时，把消息合成一条注入 prompt 唤醒它
    （与 `wait_for_workers` 的交付一样确认消息）；主 agent 忙碌时消息留在收件箱，回合结束后再投。
    `wait_for_workers` 仍可用，但只在需要显式阻塞等待时调用。期间 `question` 到达时用 `send_to_worker` 回答。
+   会话守护（`src/main/services/agentHost/watchdog.ts`，`preferences.watchdog`，默认关闭）在唤醒器之后安装：经
+   `observe` 只在开启期间记录 `error` 事件为候选（状态只在 Main 内存，不落盘，启动前 / 开启前的失败不复活）；
+   无错的 `agent_settled{aborted:false}` 清候选与计数，用户 `prompt` / `abort` 活动清候选。`setTimeout` 链按当前间隔检查，
+   满足范围（非派发 worker；`orchestrator` 时须是主 agent）、触发开关（`model`→onModelError，`host`→onCrash；
+   `compaction` 与需要上下文恢复的只记日志）、上限与退避 `min(间隔×2^次数, 30min)` 后调
+   `agentHost.resumeAfterInterruption`：只接受 `error`（守护自己因卡住中止的可为 `idle`），拒绝归档 / 运行 / 等审批 /
+   需恢复的会话，await 后重查竞争、用户优先，发出后发 `resume` 活动；唤醒器收到 `resume` 解除暂停并清零投递失败。
+   卡住检测按最后事件时间与 `tool_start` / `tool_end` 的在途工具判断，从检查时首次看到运行开始计时，调 `abort` 中止。
 4. `worker_done` → 主 agent `review_diff` + `run_checks`（如 `pnpm typecheck && pnpm lint && pnpm test`）→ 判定：
    - 通过：`merge_worktree`（no-ff 合并到主 agent 所在分支）→ `cleanup_worktree` → 向用户汇报。
    - 不通过：`reject_work` 把意见发回 worker，回到 3。

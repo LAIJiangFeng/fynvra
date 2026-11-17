@@ -180,7 +180,7 @@ export interface SessionObserver {
   event?(envelope: SessionEventEnvelope): void;
   approval?(request: ApprovalRequest): void;
   /** Main-only scheduling signals; automatic prompts do not emit `prompt`. */
-  activity?(sessionId: string, action: 'prompt' | 'abort' | 'idle'): void;
+  activity?(sessionId: string, action: 'prompt' | 'abort' | 'idle' | 'resume'): void;
 }
 
 /** AgentHost（§9.5）加上 sessions IPC 用到的会话操作 */
@@ -206,6 +206,15 @@ export interface AgentHostService extends AgentHost {
   prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   /** Automatic continuation: never queues behind a user turn or revives an archived session. */
   promptWhenIdle(sessionId: string, text: string): Promise<IpcResult<{ delivered: boolean }>>;
+  /**
+   * 会话守护的自动恢复：只接受 `error`（`fromIdle` 时也接受被守护自己中止的 `idle`）；
+   * 已归档、运行中、等审批、需要上下文恢复的一律不发，用户的操作优先。发出后通知 `resume` 活动
+   */
+  resumeAfterInterruption(
+    sessionId: string,
+    text: string,
+    options?: { fromIdle?: boolean }
+  ): Promise<IpcResult<{ delivered: boolean }>>;
   /** Same as prompt, but while running the message steers the current turn (only from sessions:steer) */
   steer(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
   retryCompaction(sessionId: string): Promise<IpcResult>;
@@ -1314,6 +1323,58 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     }
   }
 
+  async function resumeAfterInterruption(
+    sessionId: string,
+    text: string,
+    options: { fromIdle?: boolean } = {}
+  ): Promise<Result<{ delivered: boolean }>> {
+    const accepts = (status: SessionStatus | undefined) =>
+      status === 'error' || (options.fromIdle === true && status === 'idle');
+    const stored = deps.store.get(sessionId);
+    if (!stored) return fail(translate('common.sessionNotFound'));
+    if (
+      !accepts(stored.status) ||
+      stored.archivedAt !== undefined ||
+      isBusy(stored) ||
+      live.get(sessionId)?.contextRuntime?.recoveryRequired
+    ) {
+      return { ok: true, delivered: false };
+    }
+    const state = liveOf(sessionId);
+    const activity = state.activity;
+    invalidateSuggestion(sessionId, state);
+    state.prompting += 1;
+    try {
+      const spawned = await ensureSpawned(stored);
+      if (!spawned.ok) return spawned;
+      const current = deps.store.get(sessionId);
+      // spawn 期间可能有用户操作或状态变化：await 之后重查，用户优先
+      if (
+        !accepts(current?.status) ||
+        current?.archivedAt !== undefined ||
+        state.activity !== activity ||
+        state.running ||
+        state.prompting > 1 ||
+        state.recovery !== undefined ||
+        state.contextRuntime?.recoveryRequired
+      ) {
+        return { ok: true, delivered: false };
+      }
+      if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
+        return fail(translate('agent.workerUnavailable'));
+      }
+      state.workerHost = null;
+      state.interruption = undefined;
+      state.lastError = undefined;
+      state.running = true;
+      setStatus(sessionId, 'running');
+      tellObservers((observer) => observer.activity?.(sessionId, 'resume'));
+      return { ok: true, delivered: true };
+    } finally {
+      state.prompting -= 1;
+    }
+  }
+
   /**
    * 在 Renderer 已确认输入框空闲、没有队列 / 待审批 / 图片 / 草稿之后，为刚结束的一轮生成建议。
    * 这里再核对 Main 记录的会话状态与轮次；worker 还会在生成前后核对自己的空闲状态与 generation。
@@ -1864,6 +1925,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     remove,
     prompt,
     promptWhenIdle,
+    resumeAfterInterruption,
     steer,
     suggestReply,
     async retryCompaction(sessionId) {
