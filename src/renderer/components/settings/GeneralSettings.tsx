@@ -616,6 +616,44 @@ function WatchdogSection() {
     { key: 'onCrash', label: 'settings.watchdog.onCrash', hint: 'settings.watchdog.onCrashHint' },
     { key: 'onStall', label: 'settings.watchdog.onStall', hint: 'settings.watchdog.onStallHint' },
   ] as const;
+  // 数字项：前两项排在触发开关前，「卡住分钟数」排在最后且随「长时间无输出」开关禁用
+  const numbers = [
+    {
+      field: 'intervalSeconds',
+      label: 'settings.watchdog.interval',
+      hint: 'settings.watchdog.intervalHint',
+      min: 15,
+      max: 1800,
+    },
+    {
+      field: 'maxAttempts',
+      label: 'settings.watchdog.maxAttempts',
+      hint: 'settings.watchdog.maxAttemptsHint',
+      min: 1,
+      max: 50,
+    },
+    {
+      field: 'stallMinutes',
+      label: 'settings.watchdog.stallMinutes',
+      hint: 'settings.watchdog.stallMinutesHint',
+      min: 10,
+      max: 240,
+    },
+  ] as const;
+  const renderNumber = ({ field, label, hint, min, max }: (typeof numbers)[number]) => (
+    <PreferenceRow key={field} label={t(label)} hint={t(hint)}>
+      {(rowId) => (
+        <WatchdogNumberInput
+          id={rowId}
+          field={field}
+          label={t(label)}
+          min={min}
+          max={max}
+          disabled={field === 'stallMinutes' && !watchdog.onStall}
+        />
+      )}
+    </PreferenceRow>
+  );
   return (
     <section>
       <SectionHeader title={t('settings.watchdog.title')} />
@@ -657,6 +695,7 @@ function WatchdogSection() {
                 </Select>
               )}
             </PreferenceRow>
+            {numbers.slice(0, 2).map(renderNumber)}
             {triggers.map(({ key, label, hint }) => (
               <PreferenceRow key={key} label={t(label)} hint={t(hint)}>
                 {(rowId) => (
@@ -669,35 +708,10 @@ function WatchdogSection() {
                 )}
               </PreferenceRow>
             ))}
+            {numbers.slice(2).map(renderNumber)}
           </>
         )}
       </ul>
-      {watchdog.enabled && (
-        <>
-          <WatchdogNumberSetting
-            field="intervalSeconds"
-            label={t('settings.watchdog.interval')}
-            hint={t('settings.watchdog.intervalHint')}
-            min={15}
-            max={1800}
-          />
-          <WatchdogNumberSetting
-            field="maxAttempts"
-            label={t('settings.watchdog.maxAttempts')}
-            hint={t('settings.watchdog.maxAttemptsHint')}
-            min={1}
-            max={50}
-          />
-          <WatchdogNumberSetting
-            field="stallMinutes"
-            label={t('settings.watchdog.stallMinutes')}
-            hint={t('settings.watchdog.stallMinutesHint')}
-            min={10}
-            max={240}
-            disabled={!watchdog.onStall}
-          />
-        </>
-      )}
       {error && (
         <InlineMessage tone="error" className="mt-2">
           {error}
@@ -707,18 +721,18 @@ function WatchdogSection() {
   );
 }
 
-/** 守护里的整数项：校验范围，点「保存」才整块提交 */
-function WatchdogNumberSetting({
+/** 守护里的整数项：失焦或回车时，值合法且有变化才整块提交；不合法则失焦后恢复已保存的值 */
+function WatchdogNumberInput({
+  id,
   field,
   label,
-  hint,
   min,
   max,
   disabled = false,
 }: {
+  id: string;
   field: 'intervalSeconds' | 'maxAttempts' | 'stallMinutes';
   label: string;
-  hint: string;
   min: number;
   max: number;
   disabled?: boolean;
@@ -727,49 +741,31 @@ function WatchdogNumberSetting({
   const update = useGeneralPreferencesStore((state) => state.update);
   const current = watchdog[field];
   const [value, setValue] = useState(String(current));
-  const [saving, setSaving] = useState(false);
-  const t = useT();
-  const id = useId();
   useEffect(() => setValue(String(current)), [current]);
   const parsed = Number(value);
   const valid = value.trim() !== '' && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+  const commit = () => {
+    if (!valid) setValue(String(current));
+    else if (parsed !== current) void update({ watchdog: { ...watchdog, [field]: parsed } });
+  };
   return (
-    <form
-      className="mt-3 grid gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!valid || saving || disabled) return;
-        setSaving(true);
-        void update({ watchdog: { ...watchdog, [field]: parsed } }).finally(() => setSaving(false));
+    <Input
+      id={id}
+      aria-label={label}
+      aria-invalid={!valid}
+      className="w-24"
+      type="number"
+      min={min}
+      max={max}
+      step="1"
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && valid) commit();
       }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={id} className="mr-auto text-sm">
-          {label}
-        </label>
-        <Input
-          id={id}
-          className="w-28"
-          type="number"
-          min={min}
-          max={max}
-          step="1"
-          required
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          disabled={saving || disabled}
-        />
-        <Button
-          type="submit"
-          size="sm"
-          variant="outline"
-          disabled={!valid || saving || disabled || parsed === current}
-        >
-          {t('common.save')}
-        </Button>
-      </div>
-      <p className="text-muted-foreground text-xs">{hint}</p>
-    </form>
+      disabled={disabled}
+    />
   );
 }
 
