@@ -962,7 +962,7 @@ export const en: MessagesShape<typeof zhCN> = {
       compactionThreshold: 'Auto-compaction threshold (k tokens)',
       compactionThresholdAuto: 'Auto',
       compactionThresholdHint:
-        'Compacts automatically when the context reaches this size, 64–2000 (thousands of tokens; 200 = 200,000). Leave empty to decide from the model window. Values above the model’s usable window are capped at the model limit. Applies to sessions created or reloaded afterwards, no app restart needed; open sessions keep their current value',
+        '64–2000; leave empty to follow the model window. Applies to new sessions',
       compactionNative: 'pi native auto-compaction',
       compactionMagic: 'Magic Context (default)',
       compactionOff: 'Turn off auto-compaction',
