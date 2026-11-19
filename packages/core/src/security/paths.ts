@@ -15,6 +15,9 @@ export function normalizeRepoPath(raw: string): string | null {
     if (segment === '..') {
       if (out.length === 0) return null;
       out.pop();
+    } else if (/[:<>"|?*]/.test(segment) || /[. ]$/.test(segment)) {
+      // Windows 别名：ADS（x::$DATA）与末尾的 . 或空格都会落到另一个文件上
+      return null;
     } else {
       out.push(segment);
     }
@@ -31,11 +34,17 @@ const PROTECTED_NAMES = new Set([
   'bun.lockb',
   'bun.lock',
   'pnpm-workspace.yaml',
-  '.pnpmfile.cjs',
   '.npmrc',
   'biome.json',
   'biome.jsonc',
+  'node_modules',
+  '.gitattributes',
+  '.gitmodules',
+  'agents.md',
+  'claude.md',
 ]);
+// 8.3 短名（如 PACKAG~1.JSO、GITHUB~1）可能指向任意长名，按命中处理
+const SHORT_NAME = /~\d/;
 const PROTECTED_ROOT_DIRS = new Set(['.github', 'patches', 'scripts', '.husky']);
 
 /** 受限会话不可写的路径（不区分大小写；无法规范化的路径按受保护处理）。 */
@@ -44,13 +53,17 @@ export function isProtectedPath(rel: string): boolean {
   if (normalized === null) return true;
   const segments = normalized.toLowerCase().split('/');
   if (PROTECTED_ROOT_DIRS.has(segments[0] ?? '')) return true;
-  if (segments.includes('.git')) return true;
-  const name = segments[segments.length - 1] ?? '';
-  return (
-    PROTECTED_NAMES.has(name) ||
-    /^tsconfig.*\.json$/.test(name) ||
-    name.includes('.config.') ||
-    /^electron-builder.*\.ya?ml$/.test(name)
+  // 任意层级的名字命中即受保护（含 .git、node_modules 这类目录下的一切）
+  return segments.some(
+    (name) =>
+      name === '.git' ||
+      SHORT_NAME.test(name) ||
+      PROTECTED_NAMES.has(name) ||
+      name.startsWith('.pnpmfile.') ||
+      /^\.[^/]*rc(\.[^/]+)?$/.test(name) ||
+      /^tsconfig.*\.json$/.test(name) ||
+      name.includes('.config.') ||
+      /^electron-builder.*\.ya?ml$/.test(name)
   );
 }
 
@@ -63,8 +76,10 @@ export function isSensitivePath(rel: string): boolean {
     .replace(/\\/g, '/')
     .toLowerCase()
     .split('/')
+    .map((segment) => segment.replace(/[. ]+$/, ''))
     .some(
       (name) =>
+        SHORT_NAME.test(name) ||
         SENSITIVE_NAMES.has(name) ||
         name.startsWith('.env.') ||
         SENSITIVE_EXTENSIONS.some((ext) => name.endsWith(ext)) ||

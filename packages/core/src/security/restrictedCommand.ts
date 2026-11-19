@@ -1,4 +1,4 @@
-import { isProtectedPath, normalizeRepoPath } from './paths';
+import { isProtectedPath, isSensitivePath, normalizeRepoPath } from './paths';
 
 export type RestrictedCommandResult = { ok: true } | { ok: false; reason: string };
 export interface RestrictedCommandOptions {
@@ -10,15 +10,24 @@ type Tokenized = { ok: true; segments: string[][] } | { ok: false; reason: strin
 const BARE_START = /[A-Za-z0-9._-]/;
 // `~` 只允许出现在词中（如 HEAD~1），开头会被 shell 展开成家目录
 const BARE_CHAR = /[A-Za-z0-9_./:%+=~-]/;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: 正是要拦截控制字符
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+// 控制字符、零宽/双向控制字符，以及 PowerShell 视作引号的 Unicode 引号（U+2018–U+201F），引号内也不放行
+const FORBIDDEN_CHARS =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: 正是要拦截控制字符
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2018-\u201f\u2028-\u202e\u2066-\u2069\ufeff]/;
 
 const deny = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
 
 // 白名单很小，所以解析越严越好：任何拿不准的写法都拒绝
 function tokenize(command: string): Tokenized {
-  if (CONTROL_CHARS.test(command)) {
-    return deny('Newlines and control characters are not allowed; run a single-line command.');
+  if (/[\r\n]/.test(command)) {
+    return deny(
+      'Newlines are not allowed; run a single-line command (for a multi-line commit message use several -m options).'
+    );
+  }
+  if (FORBIDDEN_CHARS.test(command)) {
+    return deny(
+      'Control characters, invisible characters and Unicode quotes are not allowed; use ASCII quotes.'
+    );
   }
   const segments: string[][] = [[]];
   let i = 0;
@@ -54,7 +63,10 @@ function tokenize(command: string): Tokenized {
       if (next !== undefined && next !== ' ' && next !== '&') {
         return deny(`Character "${next}" is not allowed in a restricted command.`);
       }
-      current.push(command.slice(i, end));
+      const word = command.slice(i, end);
+      // PowerShell 的停止解析符，其后的 %VAR% 会被展开
+      if (word === '--%') return deny('The "--%" token is not allowed.');
+      current.push(word);
       i = end;
     } else {
       return deny(`Character "${ch}" is not allowed in a restricted command.`);
@@ -78,9 +90,15 @@ const GIT_FORBIDDEN_LONG = [
   '--work-tree',
   '--namespace',
   '--super-prefix',
+  '--no-index',
+  '--pathspec-from-file',
+  '--orderfile',
 ];
-// commit 中这些选项的下一个词是取值，不能当作 -n 之类的开关
-const COMMIT_VALUE_OPTIONS = new Set(['-m', '--message', '-F', '--file']);
+// 会把任意文件读进提交信息，或打开编辑器卡住命令
+const COMMIT_FORBIDDEN_SHORT = new Set(['-F', '-t', '-e']);
+const COMMIT_FORBIDDEN_LONG = ['--file', '--template', '--edit'];
+// commit 中这些选项的下一个词是提交信息，不能当作 -n 之类的开关或路径
+const COMMIT_MESSAGE_OPTIONS = new Set(['-m', '--message']);
 
 const CHECKS_HINT = 'Only "pnpm typecheck" and "pnpm lint" (no extra arguments) are allowed.';
 const WORKER_HINT =
@@ -106,12 +124,70 @@ function checkPnpm(
   );
 }
 
-function isForbiddenGitOption(arg: string): boolean {
-  if (GIT_FORBIDDEN_SHORT.has(arg)) return true;
+// git 接受长选项的无歧义前缀（如 --out=），所以前缀也要拦
+function matchesLongOption(arg: string, options: string[]): boolean {
   if (!arg.startsWith('--') || arg === '--') return false;
   const name = arg.split('=')[0] as string;
-  // git 接受长选项的无歧义前缀（如 --out=），所以前缀也要拦
-  return name.length > 2 && GIT_FORBIDDEN_LONG.some((option) => option.startsWith(name));
+  return name.length > 2 && options.some((option) => option.startsWith(name));
+}
+
+function isForbiddenGitOption(arg: string): boolean {
+  return (
+    GIT_FORBIDDEN_SHORT.has(arg) ||
+    arg.startsWith('-O') ||
+    matchesLongOption(arg, GIT_FORBIDDEN_LONG)
+  );
+}
+
+function checkCommitOptions(args: string[]): RestrictedCommandResult {
+  let noVerify = false;
+  let hasMessage = false;
+  let noEdit = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    if (arg === '--') break;
+    if (COMMIT_MESSAGE_OPTIONS.has(arg)) {
+      hasMessage = true;
+      i++;
+      continue;
+    }
+    if (arg.startsWith('--message=')) {
+      hasMessage = true;
+      continue;
+    }
+    // -am -n 里的 m 会把 -n 吃成提交信息，所以合并短选项一律拒绝
+    if (/^-[^-]./.test(arg)) {
+      return deny(
+        `Combined short options or attached values ("${arg}") are not allowed in git commit; write each short option separately, e.g. -a -m "..."`
+      );
+    }
+    if (COMMIT_FORBIDDEN_SHORT.has(arg) || matchesLongOption(arg, COMMIT_FORBIDDEN_LONG)) {
+      return deny(`git commit option "${arg}" is not allowed; pass the message with -m "...".`);
+    }
+    // 后出现的 --verify / --no-no-verify 会抵消 --no-verify
+    if (arg.startsWith('--no-n') || matchesLongOption(arg, ['--verify'])) {
+      return deny(`git commit option "${arg}" is not allowed; keep --no-verify in effect.`);
+    }
+    if (arg === '--no-verify' || arg === '-n') noVerify = true;
+    if (arg === '--no-edit') noEdit = true;
+  }
+  if (!noVerify) {
+    return deny('git commit must include --no-verify (e.g. git commit --no-verify -m "...").');
+  }
+  if (!hasMessage && !noEdit) {
+    return deny('git commit must include -m "..." (or --no-edit) so that no editor is opened.');
+  }
+  return { ok: true };
+}
+
+// 越出工作区的路径会让 git diff 自动进入 no-index 模式读外部文件；`:` 开头是 pathspec 魔法
+function isOutsideRepoArg(arg: string): boolean {
+  return (
+    /^[/\\~:]/.test(arg) ||
+    /^[A-Za-z]:/.test(arg) ||
+    arg.includes('\\') ||
+    arg.split(/[/:]/).includes('..')
+  );
 }
 
 function checkGit(args: string[]): RestrictedCommandResult {
@@ -128,35 +204,41 @@ function checkGit(args: string[]): RestrictedCommandResult {
   const rest = args.slice(1);
   const forbidden = rest.find(isForbiddenGitOption);
   if (forbidden !== undefined) return deny(`git option "${forbidden}" is not allowed.`);
-
   if (sub === 'commit') {
-    let noVerify = false;
-    for (let i = 0; i < rest.length; i++) {
-      const arg = rest[i] as string;
-      if (arg === '--') break;
-      if (COMMIT_VALUE_OPTIONS.has(arg)) i++;
-      else if (arg === '--no-verify' || arg === '-n') noVerify = true;
-    }
-    if (!noVerify)
-      return deny('git commit must include --no-verify (e.g. git commit --no-verify -m "...").');
-    return { ok: true };
+    const result = checkCommitOptions(rest);
+    if (!result.ok) return result;
   }
 
-  if (sub === 'add' || sub === 'rm' || sub === 'mv') {
-    let afterDashes = false;
-    for (const arg of rest) {
-      if (!afterDashes && arg === '--') {
-        afterDashes = true;
-        continue;
-      }
-      if (!afterDashes && arg.startsWith('-')) continue;
-      if (sub === 'add' && arg === '.') continue;
-      if (normalizeRepoPath(arg) === null) {
-        return deny(`Path "${arg}" must be a relative path inside the repository.`);
-      }
-      if (sub !== 'add' && isProtectedPath(arg)) {
-        return deny(`Path "${arg}" is protected and cannot be removed or moved.`);
-      }
+  // 非选项参数：`--` 之后全部算路径；commit 的 -m 取值跳过
+  const operands: string[] = [];
+  let afterDashes = false;
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i] as string;
+    if (afterDashes) operands.push(arg);
+    else if (arg === '--') afterDashes = true;
+    else if (sub === 'commit' && COMMIT_MESSAGE_OPTIONS.has(arg)) i++;
+    else if (!arg.startsWith('-')) operands.push(arg);
+  }
+
+  for (const arg of operands) {
+    if (isOutsideRepoArg(arg)) {
+      return deny(`Argument "${arg}" must be a relative path inside the repository.`);
+    }
+    if (sub !== 'add' && sub !== 'rm' && sub !== 'mv') continue;
+    if (sub === 'add' && arg === '.') continue;
+    if (normalizeRepoPath(arg) === null) {
+      return deny(`Path "${arg}" must be a relative path inside the repository.`);
+    }
+    if (sub === 'add' && isSensitivePath(arg)) {
+      return deny(`Path "${arg}" is a sensitive file and must not be staged.`);
+    }
+    if (sub !== 'add' && /[[\]]/.test(arg)) {
+      return deny(
+        `Glob characters are not allowed in git ${sub} paths ("${arg}"); list files explicitly.`
+      );
+    }
+    if (sub !== 'add' && isProtectedPath(arg)) {
+      return deny(`Path "${arg}" is protected and cannot be removed or moved.`);
     }
   }
   return { ok: true };
