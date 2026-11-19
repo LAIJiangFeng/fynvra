@@ -1023,7 +1023,12 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
           error:
             kind === 'unauthorized'
               ? 'Telegram 拒绝了这个 token'
-              : redactToken(`验证 token 失败：${errorMessage(error)}`, token),
+              : kind === 'network'
+                ? redactToken(
+                    `连不上 api.telegram.org（${errorMessage(error).replace(/^getMe:\s*/, '')}）：请确认 VPN 或代理已开启；网络代理默认跟随系统代理，也可以在「设置 → 通用 → 网络代理」改用手动代理`,
+                    token
+                  )
+                : redactToken(`验证 token 失败：${errorMessage(error)}`, token),
         };
       }
       await stopPolling();

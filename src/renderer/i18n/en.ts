@@ -800,11 +800,13 @@ export const en: MessagesShape<typeof zhCN> = {
         'no-token': 'No token yet',
         connecting: 'Connecting…',
         connected: 'Connected',
-        'network-error': 'Network error, retrying (set a proxy if Telegram is blocked)',
+        'network-error': 'Network error, retrying',
         unauthorized: 'Invalid token, please enter it again',
         conflict: 'Another program is polling with this token; stop it first',
         'api-error': 'Telegram API error, retrying',
       },
+      networkHint:
+        'Cannot reach api.telegram.org. Make sure your VPN or proxy is on. The network proxy follows the system proxy by default; you can also switch to a manual proxy in Settings → General → Network proxy',
       groups: 'Groups',
       candidates: 'Candidate groups',
       candidatesEmpty: 'No candidates yet: add the bot to a group and it will show up here',
@@ -849,7 +851,7 @@ export const en: MessagesShape<typeof zhCN> = {
           'Group members send "/bug@yourbot description" or reply to the bot to give feedback',
         gh: 'Run gh auth login on this computer first so PRs can be opened',
         proxy:
-          'If Telegram is blocked on your network, set a proxy in General → Network proxy first',
+          'Follows the system proxy by default (same as your browser). If it cannot connect, check your VPN or switch to a manual proxy in General → Network proxy',
         offline: 'Messages are not handled while Fynvra is closed',
       },
     },
@@ -953,12 +955,20 @@ export const en: MessagesShape<typeof zhCN> = {
       stallMinutesHint: '10–240 minutes',
     },
     network: {
-      title: 'Git and command proxy',
+      title: 'Network proxy',
+      system: 'Follow system proxy (recommended)',
+      systemStatus: {
+        proxy: 'System proxy detected: {url}',
+        direct: 'No system proxy set, connecting directly',
+        unsupported:
+          'The system proxy is SOCKS, which is not supported yet. Use a manual proxy with its HTTP port',
+        unknown: 'No system proxy detected yet; using the existing environment',
+      },
       environment: 'Use existing environment',
       manual: 'Manual proxy',
       address: 'HTTP / HTTPS proxy address',
       scope:
-        'Used by Git, agent commands, new terminals and web_fetch. Model API, MCP and app updates are not affected',
+        'Used by Git, gh, agent commands, new terminals, web_fetch and Telegram. Model API, MCP and app updates are not affected',
       environmentHint: 'Uses inherited proxy environment variables, not the Windows system proxy',
       manualHint:
         'HTTP/HTTPS proxies without credentials only. Inherited ALL_PROXY and NO_PROXY are ignored',

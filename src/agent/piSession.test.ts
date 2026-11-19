@@ -133,6 +133,24 @@ describe('createPiSessionFactory', () => {
     );
     expect(powershell.settingsManager.getShellPath()).toBe('C:\\PowerShell\\pwsh.exe');
     expect(spec.role.systemPrompt).toBeUndefined();
+
+    // 跟随系统代理：Main 下发解析出的地址，worker 算出的环境里有它，本机直连
+    await open({
+      identity: { sessionId: 'session-4', generation: 1 },
+      spec: {
+        ...spec,
+        networkProxy: { mode: 'system', url: 'http://127.0.0.1:7890', gitCompatibility: false },
+      },
+      host: null,
+      workerHost: null,
+    });
+    const system = mocks.createRoleSession.mock.calls[3]?.[0].commandEnv({ https_proxy: 'old' });
+    const keys = ['HTTPS_PROXY', 'NO_PROXY', 'GIT_CONFIG_VALUE_0'];
+    expect(Object.fromEntries(keys.map((key) => [key, system[key]]))).toEqual({
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+      GIT_CONFIG_VALUE_0: 'http://127.0.0.1:7890',
+    });
   });
 });
 

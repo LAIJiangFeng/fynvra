@@ -10,7 +10,7 @@ import {
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
-import { type NetworkProxy, parseNetworkProxy } from '../networkProxy';
+import { parseResolvedNetworkProxy, type ResolvedNetworkProxy } from '../networkProxy';
 import {
   type ApprovalDecision,
   type ApprovalKind,
@@ -140,7 +140,8 @@ const MAX_PLUGIN_PROVIDER_MODELS = 512;
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
 export interface SpawnSessionSpec {
   /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
-  networkProxy?: NetworkProxy;
+  /** system 模式下 Main 解析出的系统代理地址随 url 下发（不落盘） */
+  networkProxy?: ResolvedNetworkProxy;
   /** web_fetch 允许访问本机回环地址；只有开启时才带 */
   webFetchAllowLoopback?: true;
   /** full 档命中保护底线（rm -rf、git push 等）仍要人确认；只有开启时才带，运行中由 set-confirm-dangerous-actions 切换 */
@@ -857,7 +858,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
   const networkProxy =
-    record.networkProxy === undefined ? undefined : parseNetworkProxy(record.networkProxy);
+    record.networkProxy === undefined ? undefined : parseResolvedNetworkProxy(record.networkProxy);
   if (networkProxy === null) return null;
   if (record.webFetchAllowLoopback !== undefined && record.webFetchAllowLoopback !== true) {
     return null;

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import {
   commandEnvironment,
   type NetworkProbeResult,
-  type NetworkProxy,
   type NetworkTestResult,
+  type ResolvedNetworkProxy,
 } from '@shared/networkProxy';
 import { killTree } from './orchestration/shellRunner';
 
@@ -154,7 +154,7 @@ const probeGit: Probe = (env, signal) =>
 
 /** Never return stderr/exception messages: inherited configuration may contain credentials. */
 export async function testCommandNetwork(
-  config: NetworkProxy,
+  config: ResolvedNetworkProxy,
   cancel: AbortSignal,
   overrides: Partial<NetworkTestDeps> = {}
 ): Promise<NetworkTestResult> {

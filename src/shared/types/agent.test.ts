@@ -67,7 +67,17 @@ describe('parseAgentCommand', () => {
   it('accepts only a restricted command network snapshot', () => {
     const networkProxy = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
     expect(parseAgentCommand(withSpec({ networkProxy }))).toEqual(withSpec({ networkProxy }));
+    // system 模式可带 Main 解析出的地址
+    for (const system of [
+      { ...networkProxy, mode: 'system' },
+      { mode: 'system', gitCompatibility: false },
+    ]) {
+      expect(parseAgentCommand(withSpec({ networkProxy: system }))).toEqual(
+        withSpec({ networkProxy: system })
+      );
+    }
     for (const invalid of [
+      { mode: 'system', url: 'http://u:p@h:1', gitCompatibility: false },
       null,
       { ...networkProxy, env: { SECRET: 'x' } },
       { ...networkProxy, url: 'http://user:secret@proxy' },

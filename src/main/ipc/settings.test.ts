@@ -270,6 +270,42 @@ describe('network settings IPC', () => {
     expect(preferences()).not.toHaveProperty('networkProxy');
   });
 
+  it('settings:system-proxy 无参数并返回刷新后的状态；system 模式测试用解析出的地址', async () => {
+    expect(await call(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY)).toEqual({
+      ok: true,
+      status: { kind: 'unknown' },
+    });
+    const { createSystemProxyResolver, setSystemProxy } = await import('../services/systemProxy');
+    let raw = 'PROXY 127.0.0.1:7890; DIRECT';
+    setSystemProxy(createSystemProxyResolver({ resolve: async () => raw }));
+    expect(await call(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY, { url: 'https://evil' })).toMatchObject({
+      ok: false,
+    });
+    expect(await call(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY)).toEqual({
+      ok: true,
+      status: { kind: 'proxy', url: 'http://127.0.0.1:7890' },
+    });
+    mocks.testNetwork.mockResolvedValueOnce({ api: { status: 'ok' }, git: { status: 'ok' } });
+    await test({ mode: 'system', gitCompatibility: false });
+    expect(mocks.testNetwork.mock.calls.at(-1)?.[0]).toEqual({
+      mode: 'system',
+      url: 'http://127.0.0.1:7890',
+      gitCompatibility: false,
+    });
+    raw = 'SOCKS5 127.0.0.1:7891';
+    setSystemProxy(createSystemProxyResolver({ resolve: async () => raw }));
+    expect(await call(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY)).toEqual({
+      ok: true,
+      status: { kind: 'unsupported' },
+    });
+    // 设置里不能存解析出的地址
+    expect(
+      invoke(IPC_CHANNELS.SETTINGS_UPDATE, {
+        networkProxy: { mode: 'system', url: 'http://127.0.0.1:7890', gitCompatibility: false },
+      })
+    ).toMatchObject({ ok: false });
+  });
+
   it('pushes confirmDangerousActions changes to live sessions', () => {
     mocks.setConfirmDangerousActions.mockClear();
     invoke(IPC_CHANNELS.SETTINGS_UPDATE, { confirmDangerousActions: true });

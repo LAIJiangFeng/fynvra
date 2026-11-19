@@ -1,4 +1,4 @@
-import type { NetworkProxy, NetworkTestResult } from '@shared/networkProxy';
+import type { NetworkProxy, NetworkTestResult, SystemProxyStatus } from '@shared/networkProxy';
 import type { IpcResult, WindowCloseAction } from '@shared/types/ipc';
 import type {
   AvailableShellsResult,
@@ -29,6 +29,8 @@ export interface SettingsApi {
   /** Test this draft, without saving it; destinations are fixed by Main. */
   testNetwork(draft: NetworkProxy): Promise<IpcResult<NetworkTestResult>>;
   cancelNetworkTest(): Promise<IpcResult>;
+  /** 当前检测到的系统代理（「跟随系统代理」模式下展示） */
+  systemProxy(): Promise<IpcResult<{ status: SystemProxyStatus }>>;
   availableShells(): Promise<AvailableShellsResult>;
   pickShell(target: ShellTarget): Promise<PickShellResult>;
   /** 无参：Main 弹目录选择框、校验后写入 worktree 根目录；`{ reset: true }`：恢复默认。不传路径 */

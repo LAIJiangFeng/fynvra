@@ -36,6 +36,7 @@ import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { writeMagicContextConfig } from '../services/agentHost/magicContextHost';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
+import { savedNetworkProxy } from '../services/commandNetwork';
 import { createConfigHost } from '../services/configHost/configHost';
 import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
@@ -159,7 +160,8 @@ function createAppAgentHost(): AgentHostService {
       return tokens;
     },
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
-    resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
+    // 跟随系统代理时带上缓存里解析出的地址（会话加载时取一次快照）
+    resolveNetworkProxy: savedNetworkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
     resolveConfirmDangerousActions: () =>
