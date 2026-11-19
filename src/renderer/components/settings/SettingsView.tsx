@@ -8,6 +8,7 @@ import {
   Palette,
   Plug,
   Puzzle,
+  Send,
   SlidersHorizontal,
   Sparkles,
   UserCog,
@@ -31,6 +32,7 @@ import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
+import { TelegramSettings } from './TelegramSettings';
 import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
@@ -53,6 +55,7 @@ const SECTIONS: SectionSpec[] = [
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
   { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
+  { value: 'telegram', icon: Send, Component: TelegramSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
   { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },

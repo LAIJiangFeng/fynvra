@@ -11,6 +11,7 @@ import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
+import { connectTelegramChanged } from './ipc/telegram';
 import { getWorkspaceService } from './ipc/workspaces';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
@@ -182,6 +183,7 @@ if (!app.requestSingleInstanceLock()) {
         },
       });
       setTelegramService(telegram);
+      connectTelegramChanged(telegram);
       setPullRequestBodyExtension((taskId) => telegram.pullRequestBodyExtension(taskId));
 
       // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复

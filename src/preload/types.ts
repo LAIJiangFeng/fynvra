@@ -72,6 +72,7 @@ export interface FynvraApi {
   plugins: import('./domains/plugins').PluginsApi;
   notifications: import('./domains/notifications').NotificationsApi;
   usage: import('./domains/usage').UsageApi;
+  telegram: import('./domains/telegram').TelegramApi;
 }
 
 declare global {

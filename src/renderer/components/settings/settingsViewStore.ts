@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = [
   'skills',
   'mcp',
   'plugins',
+  'telegram',
   'appearance',
   'keybindings',
   'usage',
