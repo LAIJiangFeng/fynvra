@@ -970,11 +970,15 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
 
     // 闸门：整段改动文件（不认重命名，源路径也要查）、diff 正文、提交元数据、标题与正文
     const restricted = isRestrictedPushTask(task.id);
-    const files = (await gitText(['diff', '--name-only', '--no-renames', '-z', range]))
+    const files = (
+      await gitText(['diff', '--name-only', '--no-renames', '-z', mergeBase, headCommit])
+    )
       .split('\0')
       .filter((file) => file !== '');
     const links = restricted
-      ? linkOrSubmodulePaths(await gitText(['diff', '--raw', '--no-renames', '-z', range]))
+      ? linkOrSubmodulePaths(
+          await gitText(['diff', '--raw', '--no-renames', '-z', mergeBase, headCommit])
+        )
       : [];
     // --text / --no-textconv：.gitattributes 不能把真实内容藏成 binary 或交给 textconv
     const diff = await gitText([
@@ -984,7 +988,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       '--no-textconv',
       '--text',
       '--no-renames',
-      range,
+      mergeBase,
+      headCommit,
     ]);
     const messages = await gitText(['log', '--format=%an%n%ae%n%cn%n%ce%n%B', range]);
     const body = buildPullRequestBody({

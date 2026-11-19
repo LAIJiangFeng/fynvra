@@ -232,7 +232,11 @@ describe('openPullRequest', () => {
     changedFiles('package.json\0.github/workflows/ci.yml\0');
     expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
     expect(fake.commands()).toContain(`git push -u origin ${BRANCH}`);
+    expect(fake.commands().some((line) => /hooksPath|--no-verify/.test(line))).toBe(false);
     expect(fake.commands().some((line) => line.startsWith('git diff --raw'))).toBe(false);
+    expect(fake.commands()).toContain(
+      `git diff --no-color --no-ext-diff --no-textconv --text --no-renames ${MB} ${HEAD}`
+    );
   });
 
   it('受限任务把保护文件改名移走：不认重命名，旧名字也在列表里，拒绝', async () => {
@@ -242,7 +246,7 @@ describe('openPullRequest', () => {
     changedFiles('AGENTS.md\0docs/agents.txt\0');
     const result = await host.openPullRequest(input(first.dispatch.id));
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('AGENTS.md') });
-    expect(fake.commands()).toContain(`git diff --name-only --no-renames -z ${MB}..${HEAD}`);
+    expect(fake.commands()).toContain(`git diff --name-only --no-renames -z ${MB} ${HEAD}`);
     expect(pushedOrGh(0)).toEqual([]);
   });
 
@@ -262,7 +266,7 @@ describe('openPullRequest', () => {
       ok: false,
       error: expect.stringContaining('symlinks or submodules (src/link)'),
     });
-    expect(fake.commands()).toContain(`git diff --raw --no-renames -z ${MB}..${HEAD}`);
+    expect(fake.commands()).toContain(`git diff --raw --no-renames -z ${MB} ${HEAD}`);
     expect(pushedOrGh(0)).toEqual([]);
   });
 
@@ -282,7 +286,7 @@ describe('openPullRequest', () => {
       BRANCH,
     ]);
     expect(fake.commands()).toContain(
-      `git diff --no-color --no-ext-diff --no-textconv --text --no-renames ${MB}..${HEAD}`
+      `git diff --no-color --no-ext-diff --no-textconv --text --no-renames ${MB} ${HEAD}`
     );
     expect(fake.commands()).toContain(`git log --format=%an%n%ae%n%cn%n%ce%n%B ${MB}..${HEAD}`);
   });
@@ -293,10 +297,23 @@ describe('openPullRequest', () => {
     expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
   });
 
+  it('diff 里出现主目录绝对路径：拒绝，错误里不含该路径', async () => {
+    const first = await reported();
+    scriptRepo('+const log = "/home/alice/app.log";\n');
+    const result = await host.openPullRequest(input(first.dispatch.id));
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('local machine info (path)'),
+    });
+    expect(JSON.stringify(result)).not.toContain('/home/alice');
+    expect(pushedOrGh(0)).toEqual([]);
+  });
+
   it.each([
     ['diff 含已知 key', `+const key = "${KNOWN}";\n`, 'Add toggle\n', KNOWN],
     ['提交信息含私钥块', '+x\n', `Add key\n-----BEGIN ${'PRIVATE'} KEY-----\nMIIE\n`, 'MIIE'],
-    ['提交作者含已知 key', '+x\n', `${KNOWN}\na@b.c\nme\na@b.c\nAdd\n`, KNOWN],
+    ['提交作者名含已知 key', '+x\n', `${KNOWN}\na@b.c\nme\na@b.c\nAdd\n`, KNOWN],
+    ['作者邮箱含已知 key', '+x\n', `me\n${KNOWN}@b.c\nme\na@b.c\nAdd\n`, KNOWN],
   ])('%s：拒绝，错误里不含该值', async (_label, diff, log, value) => {
     const first = await reported();
     scriptRepo(diff, log);
