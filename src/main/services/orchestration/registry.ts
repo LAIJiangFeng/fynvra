@@ -52,12 +52,16 @@ export interface OrchestrationRegistryOptions {
   log?: (message: string) => void;
   /** open_pull_request 推送闸门的数据；缺省读 providers.json / mcp.json / 环境变量与本机路径 */
   pullRequestGate?: PullRequestGateDeps;
+  /** 主 agent 会话是否受限，原样传给各服务；缺省都不受限，直到 {@link OrchestrationRegistry.setRestrictedCoordinatorLookup} */
+  isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
 }
 
 /** Main 内所有工作区的 OrchestrationService；agent-host 的两个工厂与 orchestration IPC 都经它查找。 */
 export interface OrchestrationRegistry {
   /** 接上 agent-host 的 `implementsLauncher()`；已打开的服务随即改用它。 */
   setLauncher(launcher: WorkerSessionLauncher): void;
+  /** 接上 agent-host 的「主 agent 会话是否受限」查询；已打开的服务随即改用它。 */
+  setRestrictedCoordinatorLookup(lookup: (coordinatorSessionId: string) => boolean): void;
   /** 工作区的服务，首次访问时创建并开始加载快照；工作区不存在时 `undefined`。 */
   serviceFor(workspaceId: string): OrchestrationService | undefined;
   /** Read current/persisted state without opening a service or repairing files. */
@@ -114,6 +118,7 @@ export function createOrchestrationRegistry(
     sessionFailure: (sessionId) => launcher.sessionFailure?.(sessionId),
     disposeSession: (sessionId, options) => launcher.disposeSession(sessionId, options),
   };
+  let isRestrictedCoordinator = options.isRestrictedCoordinator ?? (() => false);
   const exec = options.exec ?? nodeExec;
   const runChecks = options.runChecks ?? createShellRunner();
   const fs = options.fs ?? nodeFs;
@@ -203,6 +208,7 @@ export function createOrchestrationRegistry(
       canLaunch: () => launcher !== unwiredLauncher,
       log: options.log,
       pullRequestGate,
+      isRestrictedCoordinator: (sessionId) => isRestrictedCoordinator(sessionId),
     });
     services.set(workspace.id, service);
     return service;
@@ -256,6 +262,9 @@ export function createOrchestrationRegistry(
       launcher = next;
       unsubscribeFailures = launcher.onSessionFailure?.(reconcileWorkers);
       reconcileWorkers();
+    },
+    setRestrictedCoordinatorLookup(lookup) {
+      isRestrictedCoordinator = lookup;
     },
     serviceFor,
     async readSnapshot(workspaceId) {
