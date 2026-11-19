@@ -74,7 +74,12 @@ export interface SessionRef {
   worktreeId?: string;
   /** 派发它的 orchestrator 会话。 */
   parentSessionId?: string;
+  /** 会话档位：只由 Main 写入，缺省为普通会话。 */
+  profile?: SessionProfile;
 }
+
+/** 会话档位（Telegram 群反馈值班）：triage 分诊、restricted 受限值班与其 worker。 */
+export type SessionProfile = 'triage' | 'restricted';
 
 /** 任务状态。合法迁移见 `canTransitionTask`。 */
 export type TaskStatus =

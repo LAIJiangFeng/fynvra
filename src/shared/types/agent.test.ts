@@ -89,6 +89,14 @@ describe('parseAgentCommand', () => {
       expect(parseAgentCommand(withSpec({ instructionFile: invalid }))).toBeNull();
     }
   });
+  it('accepts only the known session profiles', () => {
+    for (const profile of ['triage', 'restricted']) {
+      expect(parseAgentCommand(withSpec({ profile }))).toEqual(withSpec({ profile }));
+    }
+    for (const invalid of ['admin', '', null, true]) {
+      expect(parseAgentCommand(withSpec({ profile: invalid }))).toBeNull();
+    }
+  });
   it('accepts an optional compaction threshold within range', () => {
     for (const tokens of [64_000, 200_000, 2_000_000]) {
       expect(parseAgentCommand(withSpec({ compactionThresholdTokens: tokens }))).toEqual(
@@ -471,6 +479,14 @@ describe('parseAgentWorkerEvent', () => {
       kind: 'config',
       method: 'configure',
       input: { action: 'list' },
+    },
+    {
+      type: 'host-invoke',
+      identity,
+      callId: '6',
+      kind: 'telegram',
+      method: 'triageReport',
+      input: { kind: 'question', title: 't', summary: 's', reply: 'r' },
     },
     {
       type: 'host-invoke',

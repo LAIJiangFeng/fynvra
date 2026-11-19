@@ -265,6 +265,18 @@ describe('sessions IPC', () => {
     ]);
   });
 
+  it('refuses a session profile in the create input: only Main assigns it', async () => {
+    for (const profile of ['restricted', 'triage', undefined]) {
+      const result = await invoke(IPC_CHANNELS.SESSIONS_CREATE, {
+        workspaceId: 'ws-1',
+        roleId: 'worker',
+        profile,
+      });
+      expect(result).toMatchObject({ ok: false });
+    }
+    expect(host.create).not.toHaveBeenCalled();
+  });
+
   it('forwards narrowed inputs to the agent host', async () => {
     expect(await invoke(IPC_CHANNELS.SESSIONS_LIST, 'ws-1')).toEqual({ ok: true, sessions: [] });
     expect(host.list).toHaveBeenCalledWith('ws-1');

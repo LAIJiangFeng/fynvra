@@ -6,6 +6,7 @@ import {
   normalizeThinkingLevel,
   parseRole,
   type Role,
+  type SessionProfile,
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
@@ -193,13 +194,15 @@ export interface SpawnSessionSpec {
    * 其他角色只能写/改 Markdown 文档，改其他文件的工具被拦截，非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
    */
   planMode?: boolean;
+  /** 会话档位（Telegram 值班）：来自会话记录，普通会话不带 */
+  profile?: SessionProfile;
 }
 
 /**
  * host-invoke 的目标：编排工具背后的 OrchestrationHost、worker 工具背后的 WorkerHost，
  * 或 fynvra_config 背后的 Main 配置宿主（所有会话都有）。
  */
-export type HostKind = 'orchestration' | 'worker' | 'config';
+export type HostKind = 'orchestration' | 'worker' | 'config' | 'telegram';
 
 /** 配置 Fynvra 的 agent 工具名（与 agent-runtime 的 CONFIG_TOOL_NAME 相同） */
 export const CONFIG_TOOL_NAME = 'fynvra_config';
@@ -389,7 +392,12 @@ const APPROVAL_KIND_SET: Record<ApprovalKind, true> = {
   network: true,
   plugin: true,
 };
-const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true, config: true };
+const HOST_KIND_SET: Record<HostKind, true> = {
+  orchestration: true,
+  worker: true,
+  config: true,
+  telegram: true,
+};
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };
 
 function memberOf<T extends string>(set: Record<T, true>, value: unknown): value is T {
@@ -891,6 +899,8 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   }
   if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
   if (!isOptional(planMode, isBoolean)) return null;
+  const { profile } = record;
+  if (profile !== undefined && profile !== 'triage' && profile !== 'restricted') return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
@@ -927,6 +937,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
     ...(planMode === true ? { planMode: true } : {}),
+    ...(profile !== undefined ? { profile } : {}),
   };
 }
 
