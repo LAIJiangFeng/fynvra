@@ -1892,6 +1892,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
+      const parent = parentSessionId ? deps.store.get(parentSessionId) : undefined;
       // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型、思考档位与 Fast
       let requested: SessionModelRef | undefined;
       if (input.model !== undefined) {
@@ -1934,8 +1935,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
           role.approvalMode,
         // 计划模式不随主 agent：worker 会话永远没有
-        // restricted 协调者派出的 worker 一律受限
-        ...(parentSessionId && deps.store.get(parentSessionId)?.profile === 'restricted'
+        // restricted 协调者派出的 worker 一律受限；查不到协调者或它的记录时也按受限（fail-closed）
+        ...(parent === undefined || parent.profile === 'restricted'
           ? { profile: 'restricted' as const }
           : {}),
       };

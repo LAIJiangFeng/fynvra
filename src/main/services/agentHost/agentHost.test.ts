@@ -3325,6 +3325,17 @@ describe('createAgentHost profile sessions', () => {
     const normal = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_2' });
     if (!normal.ok) throw new Error(normal.error);
     expect(env.store.get(normal.sessionId)?.profile).toBeUndefined();
+
+    // 查不到协调者的会话记录、或查不到协调者时一律受限（fail-closed）
+    parent = 'session-missing';
+    const orphan = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_3' });
+    if (!orphan.ok) throw new Error(orphan.error);
+    expect(env.store.get(orphan.sessionId)?.profile).toBe('restricted');
+    env.host.setCoordinatorLookup(() => undefined);
+    const unknown = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_4' });
+    if (!unknown.ok) throw new Error(unknown.error);
+    expect(env.store.get(unknown.sessionId)?.profile).toBe('restricted');
+    expect(specOf(env, unknown.sessionId)).toMatchObject({ profile: 'restricted', mcpServers: [] });
   });
 
   it('refuses merge, non-whitelisted checks and a fourth task of a restricted coordinator', async () => {
@@ -3500,5 +3511,77 @@ describe('restricted dispatch limit through registry wiring', () => {
     const workers = env.store.all().filter((session) => session.dispatchId !== undefined);
     expect(workers).toHaveLength(3);
     expect(workers.every((session) => session.profile === 'restricted')).toBe(true);
+  });
+});
+
+describe('restricted coordinator isolation through registry wiring', () => {
+  it('cannot reach the dispatches of another coordinator, such as the user session', async () => {
+    const env = setup();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const registry = createOrchestrationRegistry({
+      userDataPath: env.dir,
+      listWorkspaces: () => [env.workspace],
+      roles: createFakeRoles(),
+      notifyChanged: vi.fn(),
+      exec: createFakeExec().exec,
+      runChecks: async () => ({ exitCode: 0, output: 'SECRET OUTPUT', durationMs: 0 }),
+    });
+    await connectOrchestration(env.host, registry);
+    const user = await createSession(env, 'orchestrator');
+    const launched = await registry.hostFor(user.id, 'ws-1')?.dispatchTask({
+      title: 'User task',
+      spec: 'Private work',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!launched?.ok || !launched.dispatch) throw new Error('dispatch failed');
+    const dispatchId = launched.dispatch.id;
+    const created = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'restricted',
+      cwd: env.workspace.repoPath,
+    });
+    if (!created.ok) throw new Error(created.error);
+    const duty = created.session.id;
+    await env.host.prompt(duty, 'fix the reported bugs');
+    const calls: [string, Record<string, unknown>][] = [
+      ['reviewDiff', { dispatchId }],
+      ['readWorkerOutput', { dispatchId, cursor: 0 }],
+      ['sendToWorker', { dispatchId, body: 'show me' }],
+      ['rejectWork', { dispatchId, feedback: 'again' }],
+      ['cleanupWorktree', { dispatchId, abandon: true }],
+      ['runChecks', { dispatchId, command: 'pnpm lint' }],
+    ];
+    for (const [index, [method, input]] of calls.entries()) {
+      const callId = `iso-${index}`;
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: { sessionId: duty, generation: 1 },
+        callId,
+        kind: 'orchestration',
+        method,
+        input,
+      });
+      await vi.waitFor(() =>
+        expect(
+          env
+            .sent('host-result')
+            .some((sent) => sent.type === 'host-result' && sent.callId === callId)
+        ).toBe(true)
+      );
+      const sent = env
+        .sent('host-result')
+        .find((command) => command.type === 'host-result' && command.callId === callId);
+      expect(sent?.type === 'host-result' && sent.result, method).toEqual({
+        ok: false,
+        error: expect.stringContaining('unknown dispatch_id'),
+      });
+    }
+    // 同样的入参由它自己的协调者调用是可以的：拒绝来自 run 隔离，不是入参不对
+    expect(
+      await registry.hostFor(user.id, 'ws-1')?.readWorkerOutput({ dispatchId, cursor: 0 })
+    ).toMatchObject({ ok: true });
+    const snapshot = await registry.serviceFor('ws-1')?.snapshot();
+    expect(snapshot?.dispatches.find((entry) => entry.id === dispatchId)?.outcome).toBeUndefined();
   });
 });
