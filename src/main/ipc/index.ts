@@ -10,6 +10,7 @@ import { registerRoleHandlers } from './roles';
 import { registerSessionHandlers } from './sessions';
 import { registerSettingsHandlers } from './settings';
 import { registerSkillHandlers } from './skills';
+import { registerTelegramHandlers } from './telegram';
 import { registerTerminalHandlers } from './terminals';
 import { registerUpdateHandlers } from './updates';
 import { registerUsageHandlers } from './usage';
@@ -39,4 +40,5 @@ export function registerIpcHandlers(): void {
   registerPluginHandlers();
   registerNotificationHandlers();
   registerUsageHandlers();
+  registerTelegramHandlers();
 }
