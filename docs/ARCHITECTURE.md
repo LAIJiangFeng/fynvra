@@ -210,7 +210,7 @@ export interface Message {
       - 路径限制：读、写、搜索、列目录的目标先解析真实路径（含符号链接 / junction），必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝；
       - 敏感文件名单（读写都拒绝）：`.env*`、`*.pem`、`*.key`、`id_*`、`*.p12`、`*.pfx`、`.npmrc`、`.netrc`；
       - 保护路径不可写：`.github/**`、`package.json`、锁文件、`pnpm-workspace.yaml`、`.pnpmfile.cjs`、`.npmrc`、`patches/**`、`scripts/**`、`*.config.*`、`tsconfig*.json`、`biome.json`、`electron-builder*.yml`、`.husky/**`；
-      - 命令白名单（复用 `checkCommand.ts` 的分段解析，每段都要命中，含重定向、命令替换等一律拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit`；禁止 `-C`、`--dir`、`--prefix`、`--git-dir`、`--work-tree` 等改变目标目录的参数，参数里的路径也必须在工作目录内；其余命令拒绝；
+      - 命令白名单（复用 `checkCommand.ts` 的分段解析，每段都要命中，含重定向、命令替换等一律拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`（`rm` / `mv` 的路径参数按保护路径规则检查，保护路径不能删、不能移）；禁止 `-C`、`--dir`、`--prefix`、`--git-dir`、`--work-tree` 等改变目标目录的参数，参数里的路径也必须在工作目录内；其余命令拒绝；
       - `network`（`web_fetch`）、`mcp`、`plugin` 类一律拒绝。
     - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 只放行上述白名单命令；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
   - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment? }`：只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
@@ -593,7 +593,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   - **密钥检测** `src/main/services/secrets/`（群回复和推送闸门共用）：
     - 已知密钥精确匹配：`providers.json` 里的 key、telegram token、MCP env 的值，以及名字像 KEY / TOKEN / SECRET / PASSWORD 的环境变量值（过短的值不入库，避免误报）；
     - 常见格式：私钥块（`-----BEGIN … PRIVATE KEY-----`）、`sk-`、`ghp_`、`github_pat_`、`AKIA`、Telegram bot token（`<数字>:<35 位>`）；
-    - 本机信息：本机绝对路径（主目录、工作区和 userData 路径，Windows 不分大小写、兆容 `\` 与 `/`）、用户名、主机名；
+    - 本机信息：本机绝对路径（主目录、工作区和 userData 路径，Windows 不分大小写、兼容 `\` 与 `/`）、用户名、主机名；
     - 纯函数 `scan(text)`（返回命中类别，不返回命中的值）与 `sanitize(text)`（替换本机信息）；密钥命中一律整条拒绝，不做部分打码发送。
   - **IPC**（领域 `telegram`，通道常量 / handler / preload 三处同步）：`telegram:get-state`、`telegram:set-token { token: string | null }`、`telegram:allow-group { groupId, workspaceId }`、`telegram:remove-group { groupId }`、`telegram:resolve-card { cardId, action: 'approve' | 'reject' }`、`telegram:set-enabled { enabled }`；推送 `telegram:changed`。视图里不含 token（只给首尾几位的掩码，如 `123456:AB…yz`）；入参按 `unknown` 收窄，拒绝多余的键；Renderer 只传 id，工作区路径由 Main 从注册表取。`allow-group` 只接受候选群和 `vcs: 'git'` 的工作区；`resolve-card` 只接受待确认状态的卡片，重复提交无副作用。
   - **Renderer**：`components/settings/TelegramSettings.tsx`（连接状态、token、候选群与已允许的群、待确认需求、最近记录、启用开关）、`SettingsView` 入口、`i18n/{zh-CN,en}.ts`。桌面通知沿用现有通知开关，点击定位到设置页或对应会话。
