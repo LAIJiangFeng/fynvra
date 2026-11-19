@@ -3343,6 +3343,7 @@ describe('createAgentHost profile sessions', () => {
     const coordinator = await profileSession(env, 'restricted');
     const host = {
       mergeWorktree: vi.fn(async () => ({ ok: true as const, merged: true })),
+      openPullRequest: vi.fn(async () => ({ ok: true as const, url: 'https://example.com/pr/1' })),
       runChecks: vi.fn(async () => ({ ok: true as const, exitCode: 0, output: '', durationMs: 1 })),
       dispatchTask: vi.fn(async () => ({ ok: true as const, taskId: 't', dispatchId: 'd' })),
     } as unknown as OrchestrationHost;
@@ -3355,6 +3356,16 @@ describe('createAgentHost profile sessions', () => {
       error: expect.stringContaining('open_pull_request'),
     });
     expect(host.mergeWorktree).not.toHaveBeenCalled();
+
+    // 受限会话唯一的交付方式照常放行
+    invoke(env, coordinator.id, 'orchestration', 'openPullRequest', {
+      dispatchId: 'd1',
+      title: 'Fix the crash',
+      summary: 'Restores the intended behavior.',
+    });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: true, url: 'https://example.com/pr/1' });
+    expect(host.openPullRequest).toHaveBeenCalledTimes(1);
 
     invoke(env, coordinator.id, 'orchestration', 'runChecks', {
       dispatchId: 'd1',

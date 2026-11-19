@@ -981,7 +981,16 @@ describe('createRoleSession restricted coordinator', () => {
     });
     const active = restricted.session.getActiveToolNames();
     for (const name of excluded) expect(active).not.toContain(name);
-    expect(active).toEqual(expect.arrayContaining(['read', 'dispatch_task', 'review_diff']));
+    // open_pull_request 是受限会话唯一的交付方式
+    expect(active).toEqual(
+      expect.arrayContaining([
+        'read',
+        'dispatch_task',
+        'review_diff',
+        'open_pull_request',
+        'merge_worktree',
+      ])
+    );
   });
 
   it('appends the restricted section to the coordinator prompt only for restricted sessions', async () => {
