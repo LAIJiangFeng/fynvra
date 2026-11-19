@@ -1,0 +1,176 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { ApprovalMode, SessionProfile } from '@fynvra/core';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { type ApprovalRequestFn, createApprovalGate } from './gate';
+
+let root: string;
+let cwd: string;
+let outside: string;
+let linked = false;
+
+beforeAll(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'fynvra-profile-gate-'));
+  cwd = path.join(root, 'repo');
+  outside = path.join(root, 'outside');
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(cwd, 'src', 'a.ts'), '');
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'x');
+  try {
+    // Windows 上没有权限时建不了符号链接，相关用例跳过
+    fs.symlinkSync(outside, path.join(cwd, 'escape'), 'junction');
+    linked = true;
+  } catch {
+    linked = false;
+  }
+});
+
+afterAll(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+function setup(mode: ApprovalMode = 'supervised', profile: SessionProfile = 'restricted') {
+  const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+  const gate = createApprovalGate({ mode, request, profile: () => profile, cwd });
+  const check = (toolName: string, input: unknown) =>
+    gate.check({ toolCallId: 'c', toolName, input });
+  return { gate, request, check };
+}
+
+const write = (target: string) => ['write', { path: target, content: 'x' }] as const;
+const read = (target: string) => ['read', { path: target }] as const;
+const bash = (command: string) => ['bash', { command }] as const;
+
+describe('approval gate: restricted profile', () => {
+  it('refuses reads and writes outside the working directory', async () => {
+    const env = setup();
+    for (const [tool, input] of [
+      read(path.join(outside, 'secret.txt')),
+      write(path.join(outside, 'new.txt')),
+      read('../outside/secret.txt'),
+      write('../outside/new.txt'),
+      read('~/x'),
+      ['grep', { pattern: 'x', path: '..' }] as const,
+      ['ls', { path: outside }] as const,
+    ]) {
+      const result = await env.check(tool, input);
+      expect(result?.reason).toContain(
+        'restricted session: path outside the working directory is not allowed'
+      );
+    }
+    expect(env.request).not.toHaveBeenCalled();
+  });
+
+  it('refuses a symbolic link inside the working directory that points outside', async (ctx) => {
+    if (!linked) ctx.skip(); // 本机不允许创建符号链接 / junction
+    const env = setup();
+    expect((await env.check(...read('escape/secret.txt')))?.reason).toContain('outside');
+    expect((await env.check(...write('escape/new.txt')))?.reason).toContain('outside');
+  });
+
+  it('refuses sensitive files for reading and protected paths for writing', async () => {
+    const env = setup();
+    expect((await env.check(...read('.env')))?.reason).toContain('sensitive file');
+    expect((await env.check(...read('config/id_rsa')))?.reason).toContain('sensitive file');
+    expect((await env.check(...write('package.json')))?.reason).toContain('protected');
+    expect((await env.check(...write('.github/workflows/x.yml')))?.reason).toContain('protected');
+    expect((await env.check('edit', { path: 'tsconfig.json', edits: [] }))?.reason).toContain(
+      'protected'
+    );
+    expect(
+      (await env.check('apply_patch', { input: '*** Delete File: pnpm-lock.yaml\n' }))?.reason
+    ).toContain('protected');
+    expect(env.request).not.toHaveBeenCalled();
+  });
+
+  it('allows writing project files and reading inside the working directory without asking', async () => {
+    const env = setup('supervised');
+    expect(await env.check(...write('src/a.ts'))).toBeUndefined();
+    expect(await env.check(...write('src/new/b.ts'))).toBeUndefined();
+    expect(await env.check('edit', { path: 'src/a.ts', edits: [] })).toBeUndefined();
+    expect(await env.check(...read('src/a.ts'))).toBeUndefined();
+    expect(await env.check('grep', { pattern: 'x' })).toBeUndefined();
+    expect(await env.check('find', { pattern: '*.ts' })).toBeUndefined();
+    expect(await env.check('ls', {})).toBeUndefined();
+    expect(env.request).not.toHaveBeenCalled();
+  });
+
+  it('runs only whitelisted commands, without asking in any approval mode', async () => {
+    for (const mode of ['supervised', 'auto-edits', 'full'] as const) {
+      const env = setup(mode);
+      for (const command of ['curl x', 'pnpm test', 'git commit -m x', 'git push']) {
+        expect((await env.check(...bash(command)))?.reason).toMatch(/^restricted session: /);
+      }
+      expect(await env.check(...bash('git commit --no-verify -m x'))).toBeUndefined();
+      expect(await env.check(...bash('pnpm lint'))).toBeUndefined();
+      expect(await env.check('powershell', { command: 'pnpm typecheck' })).toBeUndefined();
+      expect(env.request).not.toHaveBeenCalled();
+    }
+  });
+
+  it('checks run_checks against the checks whitelist', async () => {
+    const env = setup();
+    expect(
+      (await env.check('run_checks', { dispatch_id: 'd', command: 'pnpm test' }))?.reason
+    ).toMatch(/^restricted session: /);
+    expect(
+      await env.check('run_checks', { dispatch_id: 'd', command: 'pnpm typecheck' })
+    ).toBeUndefined();
+  });
+
+  it('refuses network, MCP and Fynvra configuration tools', async () => {
+    const env = setup('full');
+    expect((await env.check('web_fetch', { url: 'https://example.com' }))?.reason).toContain(
+      'restricted session: web_fetch is not allowed'
+    );
+    expect((await env.check('mcp__docs__search', { query: 'x' }))?.reason).toContain('not allowed');
+    expect((await env.check('fynvra_config', { action: 'list' }))?.reason).toContain(
+      'not available'
+    );
+    expect(env.request).not.toHaveBeenCalled();
+  });
+
+  it('ignores allowSession: a refused call stays refused', async () => {
+    const request = vi.fn<ApprovalRequestFn>(async () => 'allowSession');
+    const gate = createApprovalGate({
+      mode: 'supervised',
+      request,
+      profile: () => 'restricted',
+      cwd,
+    });
+    const call = { toolCallId: 'c', toolName: 'bash', input: { command: 'curl x' } };
+    expect(await gate.check(call)).toMatchObject({ block: true });
+    expect(await gate.check(call)).toMatchObject({ block: true });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the profile cannot be read', async () => {
+    const gate = createApprovalGate({
+      mode: 'full',
+      request: async () => 'allow',
+      profile: () => {
+        throw new Error('gone');
+      },
+      cwd,
+    });
+    const result = await gate.check({
+      toolCallId: 'c',
+      toolName: 'bash',
+      input: { command: 'curl x' },
+    });
+    expect(result?.reason).toMatch(/^restricted session: /);
+  });
+});
+
+describe('approval gate: triage profile', () => {
+  it('confines reads to the working directory and refuses sensitive files', async () => {
+    const env = setup('full', 'triage');
+    expect(await env.check(...read('src/a.ts'))).toBeUndefined();
+    expect((await env.check(...read('../outside/secret.txt')))?.reason).toContain(
+      'triage session: path outside the working directory is not allowed'
+    );
+    expect((await env.check(...read('.env.local')))?.reason).toContain('sensitive file');
+  });
+});

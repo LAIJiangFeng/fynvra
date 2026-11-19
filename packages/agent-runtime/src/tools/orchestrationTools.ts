@@ -1,6 +1,7 @@
 import { type Static, StringEnum, type TSchema, Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
+  checkRestrictedCommand,
   type Dispatch,
   type Message,
   normalizeThinkingLevel,
@@ -92,7 +93,12 @@ export interface OrchestrationToolsOptions {
    * 不调用 Host，直接返回错误。其他编排工具不受影响，已经在跑的 worker 照常处理。缺省视为关闭。
    */
   planMode?: () => boolean;
+  /** restricted 协调者（§7.14）：merge_worktree 直接拒绝，run_checks 只放行白名单命令（Main 侧再查一次） */
+  restricted?: boolean;
 }
+
+const RESTRICTED_MERGE_REFUSAL =
+  'restricted session: merge_worktree is not allowed; deliver the work with open_pull_request instead';
 
 /** 计划模式下 dispatch_task 的拒绝文本 */
 const PLAN_MODE_DISPATCH_REFUSAL =
@@ -299,6 +305,11 @@ export function createOrchestrationTools(
       run: async (params, signal) => {
         const input = parseTextArgs(params, 'command');
         if (!input.ok) return errorResult('run_checks', input.error);
+        if (options.restricted) {
+          const checked = checkRestrictedCommand(input.value.text, { mode: 'checks' });
+          if (!checked.ok)
+            return errorResult('run_checks', `restricted session: ${checked.reason}`);
+        }
         const payload: RunChecksInput = {
           dispatchId: input.value.dispatchId,
           command: input.value.text,
@@ -324,6 +335,7 @@ export function createOrchestrationTools(
       executionMode: 'sequential',
       normalize: normalizeRefArgs,
       run: async (params, signal) => {
+        if (options.restricted) return errorResult('merge_worktree', RESTRICTED_MERGE_REFUSAL);
         const input = parseRefArgs(params);
         if (!input.ok) return errorResult('merge_worktree', input.error);
         const result = await host.mergeWorktree(input.value, signal);

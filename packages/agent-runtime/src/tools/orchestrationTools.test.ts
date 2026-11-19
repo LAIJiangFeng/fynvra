@@ -702,3 +702,33 @@ describe('execute never throws', () => {
     }
   });
 });
+
+describe('restricted coordinator', () => {
+  it('refuses merge_worktree without calling the host and points to open_pull_request', async () => {
+    const host = createHost();
+    const tools = createOrchestrationTools(host, { restricted: true });
+    const run = await runTool(toolByName(tools, 'merge_worktree'), { dispatch_id: 'd1' });
+    expect(run.isError).toBe(true);
+    expect(run.text).toContain('open_pull_request');
+    expect(host.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it('runs only whitelisted check commands', async () => {
+    const host = createHost();
+    host.runChecks.mockResolvedValue({ ok: true, exitCode: 0, output: '', durationMs: 1 });
+    const tools = createOrchestrationTools(host, { restricted: true });
+    const refused = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm test',
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('restricted session');
+    expect(host.runChecks).not.toHaveBeenCalled();
+    const allowed = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm typecheck && pnpm lint',
+    });
+    expect(allowed.isError).toBe(false);
+    expect(host.runChecks).toHaveBeenCalledTimes(1);
+  });
+});

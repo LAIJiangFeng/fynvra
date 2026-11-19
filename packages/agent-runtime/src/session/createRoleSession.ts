@@ -16,7 +16,7 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import type { Role, ThinkingLevel } from '@fynvra/core';
+import type { Role, SessionProfile, ThinkingLevel } from '@fynvra/core';
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
 import { type ExecFn, nodeExec } from '../exec';
 import type { ConfigHost, OrchestrationHost, WorkerHost } from '../host';
@@ -28,6 +28,7 @@ import {
   DIRECT_PLAN_MODE_PROMPT,
   PLAN_MODE_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { TRIAGE_PROMPT } from '../prompts/triagePrompt';
 import { createConfigTool } from '../tools/configTool';
 import {
   createOrchestrationTools,
@@ -35,6 +36,7 @@ import {
   type WorkflowOption,
 } from '../tools/orchestrationTools';
 import { createReadonlyTools } from '../tools/readonlyTools';
+import { createTriageReportTool, type TriageHost } from '../tools/triageReportTool';
 import { createWebFetchTool } from '../tools/web/webFetchTool';
 import {
   createWorkerTools,
@@ -126,6 +128,13 @@ export interface CreateRoleSessionOptions {
    * 不提供时需要审批的调用一律拒绝（fail-closed）；不需要审批的照常执行。
    */
   approval?: ApprovalPolicyHooks;
+  /**
+   * 会话档位（§5、§7.14）：两档都不加载 MCP、插件、skills 与指令文件，不注册 fynvra_config，审批门按档位直接放行或拒绝。
+   * triage 只有 read / grep / find / ls 与 triage_report（需要 `triageHost`），系统提示词固定为 TRIAGE_PROMPT
+   */
+  profile?: SessionProfile;
+  /** triage_report 背后的宿主；只有 triage 档位用 */
+  triageHost?: TriageHost | null;
 }
 
 /** 没有审批通道：需要审批的调用全部拒绝，拒绝文本说明原因 */
@@ -153,15 +162,21 @@ export interface RoleSession {
  *   其他策略的非 worker 会话追加 `DIRECT_PLAN_MODE_PROMPT`，审批门只放行写 Markdown 文档的文件工具、非只读命令与 MCP 要人确认。
  * - role.approvalMode → 审批门（tool_call 拦截），经 `approval` 请求人工审批。
  */
-export async function createRoleSession(options: CreateRoleSessionOptions): Promise<RoleSession> {
+export async function createRoleSession(input: CreateRoleSessionOptions): Promise<RoleSession> {
+  // 档位会话不带用户的个人配置：即使宿主传了也在这里丢掉
+  const options: CreateRoleSessionOptions = input.profile
+    ? { ...input, resourcePaths: { skills: [], mcpServers: [] }, configHost: null }
+    : input;
   const { role, cwd, agentDir } = options;
-  const workerToolset = options.workerHost
-    ? createWorkerTools(options.workerHost, options.workerTools)
-    : undefined;
+  const triage = options.profile === 'triage';
+  const workerToolset =
+    options.workerHost && !triage
+      ? createWorkerTools(options.workerHost, options.workerTools)
+      : undefined;
   const orchestrator = role.tools === 'orchestrator';
   // 计划模式：orchestrator 策略照旧（拒绝派发 + PLAN_MODE_PROMPT）；其他策略只对非 worker 会话生效
   // （write_plan + DIRECT_PLAN_MODE_PROMPT + 审批门拦截），worker 会话忽略开关
-  const planMode = orchestrator || !workerToolset ? options.planMode : undefined;
+  const planMode = !triage && (orchestrator || !workerToolset) ? options.planMode : undefined;
   const directPlanMode = orchestrator ? undefined : planMode;
   const settingsManager = options.settingsManager ?? createDefaultSettings();
   const { customTools, noTools } = selectTools(
@@ -172,14 +187,18 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
   );
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
-  const promptAppend = buildRolePromptAppend(role, {
-    worker: workerToolset !== undefined,
-    inPlace: options.inPlace === true,
-    ...(options.workflows && options.workflows.length > 0 ? { workflows: options.workflows } : {}),
-    ...(options.resourcePaths.instructionFile
-      ? { instructionFile: options.resourcePaths.instructionFile }
-      : {}),
-  });
+  const promptAppend = triage
+    ? TRIAGE_PROMPT
+    : buildRolePromptAppend(role, {
+        worker: workerToolset !== undefined,
+        inPlace: options.inPlace === true,
+        ...(options.workflows && options.workflows.length > 0
+          ? { workflows: options.workflows }
+          : {}),
+        ...(options.resourcePaths.instructionFile
+          ? { instructionFile: options.resourcePaths.instructionFile }
+          : {}),
+      });
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
@@ -187,6 +206,7 @@ export async function createRoleSession(options: CreateRoleSessionOptions): Prom
     ...(directPlanMode ? { planMode: directPlanMode } : {}),
     // 插件扩展注册的工具按 plugin 类别审批；loader 在下方创建，check 只在会话运行后发生
     pluginTools: () => pluginTools(),
+    ...(options.profile ? { profile: () => options.profile, cwd } : {}),
   });
   const extensionFactories: InlineExtension[] = [
     // 第一个注册：拦截在其他扩展的 tool_call 处理之前
@@ -287,6 +307,17 @@ function selectTools(
     proxyEnv: () => (commandEnv ? commandEnv(process.env) : process.env),
     ...(options.webFetch?.allowLoopback === true ? { allowLoopback: true } : {}),
   });
+  // triage 优先于角色的工具策略：只读文件（不含 git_readonly）与 triage_report
+  if (options.profile === 'triage') {
+    if (!options.triageHost) throw new Error('a triage session needs a TriageHost');
+    return {
+      noTools: 'builtin',
+      customTools: [
+        ...createReadonlyTools(cwd).filter((tool) => tool.name !== 'git_readonly'),
+        createTriageReportTool(options.triageHost),
+      ],
+    };
+  }
   switch (role.tools) {
     case 'orchestrator': {
       if (!options.host) {
@@ -303,6 +334,7 @@ function selectTools(
             ...(options.roles ? { roles: options.roles } : {}),
             ...(options.workflows ? { workflows: options.workflows } : {}),
             ...(options.planMode ? { planMode: options.planMode } : {}),
+            ...(options.profile === 'restricted' ? { restricted: true } : {}),
           }),
           createWritePlanTool(cwd),
           createWriteDocTool(cwd, { planMode: options.planMode ?? (() => false) }),

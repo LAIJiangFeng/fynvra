@@ -794,3 +794,114 @@ describe('createRoleSession approval gate', () => {
     expect(runChecks.mock.calls.map(([input]) => input.command)).toEqual(['pnpm test']);
   });
 });
+
+describe('createRoleSession profiles', () => {
+  const configHost = { configure: async () => ({ ok: true as const }) };
+
+  function triageHost() {
+    return { triageReport: vi.fn(async () => ({ ok: true as const })) };
+  }
+
+  it('keeps fynvra_config for a session without a profile', async () => {
+    const { session } = await open({ role: role({ tools: 'readonly' }), configHost });
+    expect(session.getActiveToolNames()).toContain('fynvra_config');
+  });
+
+  it('gives triage only read / grep / find / ls and triage_report, whatever the role says', async () => {
+    const { session } = await open({
+      role: role({ tools: 'all', approvalMode: 'full' }),
+      profile: 'triage',
+      triageHost: triageHost(),
+      configHost,
+      workerHost: workerHost(),
+      planMode: () => true,
+    });
+    expect(session.getActiveToolNames().sort()).toEqual(
+      ['read', 'grep', 'find', 'ls', 'triage_report'].sort()
+    );
+  });
+
+  it('refuses a triage session without a triage host', async () => {
+    await expect(open({ role: role({}), profile: 'triage' })).rejects.toThrow('TriageHost');
+  });
+
+  it('gives triage the fixed prompt only and hands triage_report to the host', async () => {
+    const host = triageHost();
+    const { session } = await open({
+      role: role({ systemPrompt: 'ROLE PROMPT MARKER' }),
+      profile: 'triage',
+      triageHost: host,
+      resourcePaths: {
+        skills: [],
+        mcpServers: [],
+        instructionFile: { name: 'AGENTS.md', content: 'USER INSTRUCTIONS MARKER' },
+      },
+    });
+    const report = { kind: 'question', title: 't', summary: 's', reply: 'r' };
+    const contexts: TranscriptContext[] = [];
+    faux.setResponses([
+      (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage(fauxToolCall('triage_report', report, { id: 'call-0' }), {
+          stopReason: 'toolUse',
+        });
+      },
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('<untrusted-content>how do I start?</untrusted-content>');
+    const prompt = systemText(contexts[0] as TranscriptContext);
+    expect(prompt).toContain('# Fynvra triage');
+    expect(prompt).not.toContain('ROLE PROMPT MARKER');
+    expect(prompt).not.toContain('USER INSTRUCTIONS MARKER');
+    expect(host.triageReport).toHaveBeenCalledWith(report, expect.anything());
+  });
+
+  it('gives a restricted session no fynvra_config and blocks protected writes without asking', async () => {
+    const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+    const { session } = await open({
+      role: role({ tools: 'all', approvalMode: 'supervised' }),
+      profile: 'restricted',
+      configHost,
+      approval: { request },
+    });
+    expect(session.getActiveToolNames()).not.toContain('fynvra_config');
+    faux.setResponses([
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall('write', { path: 'package.json', content: '{}' }, { id: 'call-0' }),
+          { stopReason: 'toolUse' }
+        ),
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall('write', { path: 'src/ok.ts', content: 'ok' }, { id: 'call-1' }),
+          { stopReason: 'toolUse' }
+        ),
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('Edit the files.');
+    expect(existsSync(path.join(workdir, 'package.json'))).toBe(false);
+    expect(await readFile(path.join(workdir, 'src', 'ok.ts'), 'utf8')).toBe('ok');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('gives a restricted orchestrator a merge_worktree that refuses without calling the host', async () => {
+    const host = orchestrationHost();
+    const merge = vi.spyOn(host, 'mergeWorktree');
+    const { session } = await open({
+      role: role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' }),
+      host,
+      profile: 'restricted',
+      configHost,
+    });
+    expect(session.getActiveToolNames()).not.toContain('fynvra_config');
+    faux.setResponses([
+      () =>
+        fauxAssistantMessage(fauxToolCall('merge_worktree', { dispatch_id: 'd1' }, { id: 'c' }), {
+          stopReason: 'toolUse',
+        }),
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('Merge it.');
+    expect(merge).not.toHaveBeenCalled();
+  });
+});
