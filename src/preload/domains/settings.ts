@@ -10,6 +10,7 @@ export function createSettingsApi(
     update: (patch) => ipc.invoke(IPC_CHANNELS.SETTINGS_UPDATE, patch),
     testNetwork: (draft) => ipc.invoke(IPC_CHANNELS.SETTINGS_TEST_NETWORK, draft),
     cancelNetworkTest: () => ipc.invoke(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST),
+    systemProxy: () => ipc.invoke(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY),
     availableShells: () => ipc.invoke(IPC_CHANNELS.SETTINGS_AVAILABLE_SHELLS),
     pickShell: (target) => ipc.invoke(IPC_CHANNELS.SETTINGS_PICK_SHELL, target),
     pickWorktreesRoot: (input) =>

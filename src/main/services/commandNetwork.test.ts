@@ -6,17 +6,57 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ exec: vi.fn(), spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: mocks.exec, spawn: mocks.spawn }));
 
-import { configureCommandNetwork } from './commandNetwork';
+import {
+  configureCommandNetwork,
+  freshCommandEnvironment,
+  savedCommandEnvironment,
+  savedNetworkProxy,
+} from './commandNetwork';
 import { nodeExec } from './orchestration/nodeExec';
 import { createShellRunner } from './orchestration/shellRunner';
+import { createSystemProxyResolver, setSystemProxy } from './systemProxy';
 
-afterEach(() => configureCommandNetwork(() => undefined));
+afterEach(() => {
+  configureCommandNetwork(() => undefined);
+  setSystemProxy(null);
+});
 
 // 只挑出相关键再断言，避免失败时 vitest 打印整份环境变量（可能含真实 token）
 const pick = (env: NodeJS.ProcessEnv | undefined, keys: string[]) =>
   Object.fromEntries(keys.map((key) => [key, env?.[key]]));
 
 describe('Main command proxy wiring', () => {
+  it('默认跟随系统代理：用解析出的地址，spec 也带上它；显式保存的模式不受影响', async () => {
+    let time = 0;
+    let raw = 'PROXY 127.0.0.1:7890; DIRECT';
+    const resolver = createSystemProxyResolver({ resolve: async () => raw, now: () => time });
+    setSystemProxy(resolver);
+    const keys = ['HTTPS_PROXY', 'NO_PROXY'];
+    // 解析前为未知：继承原环境
+    expect(pick(savedCommandEnvironment(), keys)).toEqual(pick(process.env, keys));
+    await resolver.fresh();
+    expect(savedNetworkProxy()).toEqual({
+      mode: 'system',
+      url: 'http://127.0.0.1:7890',
+      gitCompatibility: false,
+    });
+    expect(pick(savedCommandEnvironment(), keys)).toEqual({
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+    });
+    mocks.exec.mockImplementation((_cmd, _args, _options, callback) => callback(null, 'ok', ''));
+    await nodeExec('gh', ['pr', 'create'], '/repo');
+    expect(pick(mocks.exec.mock.calls.at(-1)?.[2].env, ['HTTPS_PROXY'])).toEqual({
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+    });
+    // Telegram 请求前：缓存超过 5 秒先刷新
+    raw = 'DIRECT';
+    time = 6_000;
+    expect(pick(await freshCommandEnvironment(), keys)).toEqual(pick(process.env, keys));
+    configureCommandNetwork(() => ({ mode: 'environment', gitCompatibility: false }));
+    expect(savedNetworkProxy()).toEqual({ mode: 'environment', gitCompatibility: false });
+  });
+
   it('Git reads saved configuration on every command without changing argv/global env', async () => {
     let config: NetworkProxy | undefined = {
       mode: 'manual',

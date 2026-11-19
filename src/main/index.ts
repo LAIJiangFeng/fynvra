@@ -3,7 +3,7 @@ import { optimizer } from '@electron-toolkit/utils';
 import { ORCHESTRATOR_ROLE_ID } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { notificationPreferencesOf, watchdogPreferencesOf } from '@shared/types/settings';
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, session } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
@@ -17,7 +17,7 @@ import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/worksp
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { installSessionWatchdog } from './services/agentHost/watchdog';
-import { savedCommandEnvironment } from './services/commandNetwork';
+import { freshCommandEnvironment, savedCommandEnvironment } from './services/commandNetwork';
 import { showDesktopNotification } from './services/notifications/desktop';
 import { setPullRequestBodyExtension } from './services/orchestration/pullRequest';
 import {
@@ -26,6 +26,7 @@ import {
 } from './services/orchestration/worktreesRoot';
 import { collectAppSecrets } from './services/secrets';
 import { loadLoginShellPath } from './services/shellEnv';
+import { createSystemProxyResolver, setSystemProxy } from './services/systemProxy';
 import { createHttpsPost, createTelegramApi } from './services/telegram/api';
 import { createCleanCheckout } from './services/telegram/cleanCheckout';
 import {
@@ -140,6 +141,13 @@ if (!app.requestSingleInstanceLock()) {
         warnMissing: !app.isPackaged,
       });
       registerIpcHandlers();
+      // 跟随系统代理：Chromium 按系统代理 / PAC 解析，后台定期刷新；会话与 Telegram 启动前最多等 3 秒
+      const systemProxy = createSystemProxyResolver({
+        resolve: (url) => session.defaultSession.resolveProxy(url),
+        log: (message) => console.warn(`[fynvra] ${message}`),
+      });
+      setSystemProxy(systemProxy);
+      const systemProxyReady = systemProxy.start();
       const agentHost = getAgentHost();
       await shellPathReady;
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
@@ -161,7 +169,7 @@ if (!app.requestSingleInstanceLock()) {
       // Telegram 群反馈值班：启用且有 token 时开始长轮询
       const telegram = createTelegramService({
         store: createTelegramStore(join(app.getPath('userData'), 'telegram.json')),
-        api: createTelegramApi({ http: createHttpsPost(savedCommandEnvironment) }),
+        api: createTelegramApi({ http: createHttpsPost(freshCommandEnvironment) }),
         agentHost,
         workspaces: getWorkspaceService(),
         snapshot: async (workspaceId) =>
@@ -194,6 +202,7 @@ if (!app.requestSingleInstanceLock()) {
           session.roleId === ORCHESTRATOR_ROLE_ID ||
           (await getRoleStore().get(session.roleId))?.tools === 'orchestrator',
       });
+      await systemProxyReady;
       agentHost.start();
       // 会话 worker 起来后再开始收群消息
       void telegram

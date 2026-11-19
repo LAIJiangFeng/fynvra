@@ -13,6 +13,8 @@ export const IPC_CHANNELS = {
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_TEST_NETWORK: 'settings:test-network',
   SETTINGS_CANCEL_NETWORK_TEST: 'settings:cancel-network-test',
+  /** 无参：Main 返回当前检测到的系统代理（缓存超过 5 秒先刷新） */
+  SETTINGS_SYSTEM_PROXY: 'settings:system-proxy',
   SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
   SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */
