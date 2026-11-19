@@ -2,7 +2,7 @@ import { join, resolve } from 'node:path';
 import { optimizer } from '@electron-toolkit/utils';
 import { ORCHESTRATOR_ROLE_ID } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
-import { watchdogPreferencesOf } from '@shared/types/settings';
+import { notificationPreferencesOf, watchdogPreferencesOf } from '@shared/types/settings';
 import { app, BrowserWindow, dialog } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
@@ -16,11 +16,24 @@ import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/worksp
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { installSessionWatchdog } from './services/agentHost/watchdog';
+import { savedCommandEnvironment } from './services/commandNetwork';
+import { showDesktopNotification } from './services/notifications/desktop';
+import { setPullRequestBodyExtension } from './services/orchestration/pullRequest';
 import {
   createWorktreesRootResolver,
   fallbackWorktreesRoot,
 } from './services/orchestration/worktreesRoot';
+import { collectAppSecrets } from './services/secrets';
 import { loadLoginShellPath } from './services/shellEnv';
+import { createHttpsPost, createTelegramApi } from './services/telegram/api';
+import { createCleanCheckout } from './services/telegram/cleanCheckout';
+import {
+  collectLocalInfo,
+  getTelegramService,
+  setTelegramService,
+} from './services/telegram/instance';
+import { createTelegramService } from './services/telegram/service';
+import { createTelegramStore } from './services/telegram/store';
 import { getUpdateService } from './services/updates';
 import { registerCloseBehavior } from './windows/closeBehavior';
 import { createAppWindow } from './windows/createAppWindow';
@@ -97,8 +110,10 @@ if (!app.requestSingleInstanceLock()) {
       }
     },
     shutdown: () =>
-      getAgentHost()
-        .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)
+      // 先停 Telegram 轮询并等它落盘
+      (getTelegramService()?.stop() ?? Promise.resolve())
+        .catch((error: unknown) => console.error('[fynvra] 停止 Telegram 服务失败', error))
+        .then(() => getAgentHost().shutdown(AGENT_SHUTDOWN_TIMEOUT_MS))
         // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
         .then(() => getOrchestrationRegistry().flushAll())
         .catch((error: unknown) => console.error('[fynvra] 退出前收尾失败', error)),
@@ -129,19 +144,46 @@ if (!app.requestSingleInstanceLock()) {
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
-      // 档位会话的 cwd 校验与编排建 worktree 用同一套根目录规则
-      agentHost.setWorktreesRootLookup(
-        createWorktreesRootResolver({
-          fallbackRoot: fallbackWorktreesRoot(app.getPath('userData')),
-          configured: () => getSettingsFile().read().preferences.worktreesRoot,
-          repoPaths: () => {
-            const workspaces = getWorkspaceService();
-            return workspaces.list().flatMap((item) => workspaces.get(item.id)?.repoPath ?? []);
-          },
-        })
-      );
+      // 档位会话的 cwd 校验、编排建 worktree 与 Telegram 干净检出用同一套根目录规则
+      const listWorkspaces = () => {
+        const workspaces = getWorkspaceService();
+        return workspaces.list().flatMap((item) => workspaces.get(item.id) ?? []);
+      };
+      const worktreesRoot = createWorktreesRootResolver({
+        fallbackRoot: fallbackWorktreesRoot(app.getPath('userData')),
+        configured: () => getSettingsFile().read().preferences.worktreesRoot,
+        repoPaths: () => listWorkspaces().map((workspace) => workspace.repoPath),
+      });
+      agentHost.setWorktreesRootLookup(worktreesRoot);
       // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
       installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
+      // Telegram 群反馈值班：启用且有 token 时开始长轮询
+      const telegram = createTelegramService({
+        store: createTelegramStore(join(app.getPath('userData'), 'telegram.json')),
+        api: createTelegramApi({ http: createHttpsPost(savedCommandEnvironment) }),
+        agentHost,
+        workspaces: getWorkspaceService(),
+        snapshot: async (workspaceId) =>
+          getOrchestrationRegistry().serviceFor(workspaceId)?.snapshot(),
+        cleanCheckout: createCleanCheckout({ worktreesRoot, commandEnv: savedCommandEnvironment }),
+        knownSecrets: collectAppSecrets,
+        localInfo: () =>
+          collectLocalInfo({
+            userDataPath: app.getPath('userData'),
+            workspaces: listWorkspaces(),
+            worktreesRoot,
+          }),
+        notify: (title, body) => {
+          // 沿用通知偏好的总开关与提示音
+          const preferences = notificationPreferencesOf(getSettingsFile().read().preferences);
+          if (preferences.enabled) {
+            showDesktopNotification({ title, body, silent: !preferences.sound });
+          }
+        },
+      });
+      setTelegramService(telegram);
+      setPullRequestBodyExtension((taskId) => telegram.pullRequestBodyExtension(taskId));
+
       // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复
       installSessionWatchdog({
         agentHost,
@@ -151,6 +193,10 @@ if (!app.requestSingleInstanceLock()) {
           (await getRoleStore().get(session.roleId))?.tools === 'orchestrator',
       });
       agentHost.start();
+      // 会话 worker 起来后再开始收群消息
+      void telegram
+        .start()
+        .catch((error: unknown) => console.error('[fynvra] Telegram 服务启动失败', error));
       showMainWindow();
       getUpdateService().start();
     })

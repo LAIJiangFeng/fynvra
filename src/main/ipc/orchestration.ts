@@ -18,6 +18,7 @@ import {
   parseSessionChangesInput,
   readSessionChanges,
 } from '../services/sessionChanges';
+import { telegramOrchestrationChanged } from '../services/telegram/instance';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -45,8 +46,11 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
       roles: getRoleStore(),
       worktreesRoot: () => getSettingsFile().read().preferences.worktreesRoot,
       workflows: getWorkflowRegistry(),
-      notifyChanged: (workspaceId) =>
-        sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId),
+      notifyChanged: (workspaceId) => {
+        sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId);
+        // Telegram 卡片据此检查 PR 结果
+        telegramOrchestrationChanged(workspaceId);
+      },
       // 会话摘要的 awaitingWorkers 翻转：让会话列表重拉
       activeWorkChanged: (workspaceId) =>
         sendToAllWindows(IPC_CHANNELS.SESSIONS_CHANGED, workspaceId),
