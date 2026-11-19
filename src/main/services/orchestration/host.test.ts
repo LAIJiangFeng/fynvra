@@ -47,6 +47,7 @@ function makeHost(overrides: Partial<OrchestrationHostDeps> = {}): Orchestration
     workspace: WORKSPACE,
     coordinatorSessionId: COORDINATOR,
     coordinatorBranch: 'main',
+    restricted: false,
     store,
     git: new GitWorktreeManager({ exec: fake.exec }),
     inbox,

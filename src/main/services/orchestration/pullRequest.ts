@@ -77,19 +77,6 @@ export function buildPullRequestBody(input: {
   return `${sections.join('\n\n')}\n`;
 }
 
-let restrictedLookup: (taskId: string) => boolean = () => false;
-
-/** 注入「任务是否由受限协调者派出」的查询；只有受限任务查保护路径、符号链接与子模块。默认都不是。 */
-export function setPushGateRestrictedLookup(
-  lookup: ((taskId: string) => boolean) | undefined
-): void {
-  restrictedLookup = lookup ?? (() => false);
-}
-
-export function isRestrictedPushTask(taskId: string): boolean {
-  return restrictedLookup(taskId);
-}
-
 /** `git diff --raw -z` 里新 mode 为符号链接（120000）或子模块（160000）的路径。 */
 export function linkOrSubmodulePaths(raw: string): string[] {
   const parts = raw.split('\0');

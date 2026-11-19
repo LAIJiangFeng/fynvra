@@ -8,6 +8,12 @@ const FINISHED_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
   'abandoned',
 ]);
 
+/** 查不到会话也当受限（fail-closed）：受限只是换公开基线、加严闸门，误判不会泄露本地提交 */
+function isRestrictedSession(agentHost: Pick<AgentHostService, 'get'>, sessionId: string): boolean {
+  const session = agentHost.get(sessionId);
+  return session === undefined || session.profile === 'restricted';
+}
+
 /**
  * 把 agent host 与编排注册表接成一条链（ARCHITECTURE §6、§9.5），生产在 `src/main/index.ts` 调用：
  * - 编排派发的 worker 会话由 agent host 启动（注册表的 launcher）；
@@ -21,6 +27,7 @@ export async function connectOrchestration(
   registry: OrchestrationRegistry
 ): Promise<void> {
   registry.setLauncher(agentHost.implementsLauncher());
+  registry.setRestrictedCoordinatorLookup((sessionId) => isRestrictedSession(agentHost, sessionId));
   agentHost.setOrchestrationHostFactory((coordinatorSessionId, workspaceId) =>
     registry.hostFor(coordinatorSessionId, workspaceId)
   );
