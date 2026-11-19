@@ -54,6 +54,11 @@ describe('isProtectedPath', () => {
     '.yarnrc.yml',
     'AGENTS.md',
     'docs/CLAUDE.md',
+    // Unicode 大小写折叠
+    'package.jſon',
+    'src/package.jſon',
+    'bıome.json',
+    'pac\u212Aage.json',
   ])('命中 %s', (path) => {
     expect(isProtectedPath(path)).toBe(true);
   });
@@ -64,6 +69,7 @@ describe('isProtectedPath', () => {
     'docs/ARCHITECTURE.md',
     'src/rc.ts',
     'src/src.ts',
+    'ſrc/Key.ts',
   ])('不命中 %s', (path) => {
     expect(isProtectedPath(path)).toBe(false);
   });
@@ -82,11 +88,16 @@ describe('isSensitivePath', () => {
     'ENV~1',
     '.env ',
     '.env.',
+    '.env::$DATA',
+    'config/.env:x',
+    '.ſsh/id_rſa',
+    'certs/server.\u212Aey',
+    'config/.ENV.ıocal',
   ])('命中 %s', (path) => {
     expect(isSensitivePath(path)).toBe(true);
   });
 
-  it.each(['id_utils.ts', 'environment.ts', 'src/env.ts'])('不命中 %s', (path) => {
+  it.each(['id_utils.ts', 'environment.ts', 'src/env.ts', 'ſrc/env.ts'])('不命中 %s', (path) => {
     expect(isSensitivePath(path)).toBe(false);
   });
 });
@@ -113,6 +124,13 @@ describe('checkRestrictedCommand', () => {
     'git commit --no-verify --verbose -m x',
     'git commit --no-verify --amend --no-edit',
     "git add 'pages/[id].tsx'",
+    'git log HEAD~1',
+    'git log -p',
+    'git show -p HEAD',
+    'git diff -p',
+    'git commit --no-verify -i -m x -- src/a.ts',
+    'git add -A -u',
+    'git add src/pipe.ts',
   ])('worker 允许 %s', (command) => {
     expect(checkRestrictedCommand(command, { mode: 'worker' })).toEqual({ ok: true });
   });
@@ -185,6 +203,31 @@ describe('checkRestrictedCommand', () => {
     "git rm '*.json'",
     'git add -f .env',
     'git add config/.env.local',
+    // 任意子命令的参数指向敏感文件
+    'git show HEAD:.env',
+    'git show HEAD:config/.ENV.local',
+    'git log -p -- .env',
+    'git log -p .env',
+    'git diff -- config/key.pem',
+    'git diff HEAD -- certs/id_rsa',
+    'git log -p -- .npmrc',
+    'git show HEAD:certs/SERVER.KEY',
+    // 编辑器 / 交互
+    'git add -e src/a.ts',
+    'git add --edit',
+    'git add --ed',
+    'git add -i',
+    'git add --interactive',
+    'git add --inter',
+    'git add -p',
+    'git add --patch',
+    'git add --pat',
+    'git add -Ap',
+    'git commit --no-verify --interactive -m x',
+    'git commit --no-verify --interac -m x',
+    'git commit --no-verify -p -m x',
+    'git commit --no-verify --patch -m x',
+    'git commit --no-verify --pa -m x',
   ])('worker 拒绝 %j', (command) => {
     const result = checkRestrictedCommand(command, { mode: 'worker' });
     expect(result.ok).toBe(false);

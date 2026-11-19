@@ -25,6 +25,9 @@ export function normalizeRepoPath(raw: string): string | null {
   return out.length === 0 ? null : out.join('/');
 }
 
+// NTFS 先转大写再比较：ſ、ı、K（Kelvin）等经大写后与 s、i、k 同名
+const foldCase = (s: string): string => s.toUpperCase().toLowerCase();
+
 const PROTECTED_NAMES = new Set([
   'package.json',
   'pnpm-lock.yaml',
@@ -51,7 +54,7 @@ const PROTECTED_ROOT_DIRS = new Set(['.github', 'patches', 'scripts', '.husky'])
 export function isProtectedPath(rel: string): boolean {
   const normalized = normalizeRepoPath(rel);
   if (normalized === null) return true;
-  const segments = normalized.toLowerCase().split('/');
+  const segments = foldCase(normalized).split('/');
   if (PROTECTED_ROOT_DIRS.has(segments[0] ?? '')) return true;
   // 任意层级的名字命中即受保护（含 .git、node_modules 这类目录下的一切）
   return segments.some(
@@ -72,14 +75,21 @@ const SENSITIVE_EXTENSIONS = ['.pem', '.key', '.p12', '.pfx', '.keystore', '.jks
 
 /** 受限会话不可读写的敏感文件（不区分大小写，任意层级的名字命中即算）。 */
 export function isSensitivePath(rel: string): boolean {
-  return rel
-    .replace(/\\/g, '/')
-    .toLowerCase()
+  return matchesSensitiveName(rel, true);
+}
+
+/**
+ * 敏感文件判定的内部实现（不从包入口导出）。
+ * shortNames=false 供 git 参数检查用：git 按跟踪的确切文件名匹配，且 HEAD~1 必须放行。
+ */
+export function matchesSensitiveName(rel: string, shortNames: boolean): boolean {
+  return foldCase(rel.replace(/\\/g, '/'))
     .split('/')
     .map((segment) => segment.replace(/[. ]+$/, ''))
     .some(
       (name) =>
-        SHORT_NAME.test(name) ||
+        name.includes(':') ||
+        (shortNames && SHORT_NAME.test(name)) ||
         SENSITIVE_NAMES.has(name) ||
         name.startsWith('.env.') ||
         SENSITIVE_EXTENSIONS.some((ext) => name.endsWith(ext)) ||
