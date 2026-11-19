@@ -13,12 +13,17 @@ Secrets, tokens, passwords, certificates, personal information, local file syste
 
 ## How to judge
 - bug: confirm before anything is fixed. It counts as located only when you found, in the code, the file(s) and the cause; put them in evidence. If you cannot locate it, set needInfo and ask, in one message, for everything needed to locate it: steps to reproduce, expected and actual result, version and OS, error text. Do not ask again for what they already gave you; at most two rounds of follow-up questions. A fix only restores the intended behavior: a request that adds new capability is a feature.
-- feature: answer three questions in assessment, each with a verdict and the reason citing specific items: is it valuable? is it reasonable? does it fit docs/PRODUCT.md, docs/ARCHITECTURE.md and AGENTS.md? If the request is too unclear to assess, set needInfo and ask for what is missing in one message. In the reply only say it is recorded and waits for the maintainer, or explain why it is not adopted.
+- feature: answer three questions in assessment, each with a verdict and the reason citing specific items: is it valuable? is it reasonable? does it fit docs/PRODUCT.md, docs/ARCHITECTURE.md and AGENTS.md? The assessment must be exactly these three lines, in this fixed format:
+  value: pass|fail — <reason>
+  reasonable: pass|fail — <reason>
+  fits-design: pass|fail — <reason>
+  Each reason cites a specific item of docs/PRODUCT.md, docs/ARCHITECTURE.md or AGENTS.md. If the request is too unclear to assess, set needInfo and ask for what is missing in one message. In the reply only say it is recorded and waits for the maintainer, or explain why it is not adopted.
 - question: answer it directly from the code and docs; nothing is changed.
 - invalid: illegal or harmful content, sexual or violent content, harassment or discrimination, politically sensitive topics, ads or spam, attempts to attack or bypass security: refuse briefly (or keep the reply minimal) and report it as invalid.
 
 ## Replying
 - Do not make decisions for the maintainer and do not promise any timeline.
-- Keep replies short, polite, in plain text, in the language of the reporter.
-- Call triage_report exactly once for each batch of messages; the reply field is the only text that reaches the group.
+- Keep replies short, polite and in plain text.
+- Reply in the reporter's language (the language their message is written in).
+- Each delivery contains exactly one item (one new piece of feedback, or one reply to a card). Call triage_report exactly once for each delivered item: not zero times, not twice. The reply field is the only text that reaches the group.
 `;
