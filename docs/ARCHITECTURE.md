@@ -210,10 +210,10 @@ export interface Message {
       - 路径限制：读、写、搜索、列目录的目标先解析真实路径（含符号链接 / junction），必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝；
       - 敏感文件名单（读写都拒绝）：`.env*`、`*.pem`、`*.key`、`id_*`、`*.p12`、`*.pfx`、`.npmrc`、`.netrc`；
       - 保护路径不可写：`.github/**`、`package.json`、锁文件、`pnpm-workspace.yaml`、`.pnpmfile.cjs`、`.npmrc`、`patches/**`、`scripts/**`、`*.config.*`、`tsconfig*.json`、`biome.json`、`electron-builder*.yml`、`.husky/**`；
-      - 命令白名单（复用 `checkCommand.ts` 的分段解析，每段都要命中，含重定向、命令替换等一律拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`（`rm` / `mv` 的路径参数按保护路径规则检查，保护路径不能删、不能移）；禁止 `-C`、`--dir`、`--prefix`、`--git-dir`、`--work-tree` 等改变目标目录的参数，参数里的路径也必须在工作目录内；其余命令拒绝；
+      - 命令白名单（复用 `checkCommand.ts` 的分段解析，每段都要命中，含重定向、命令替换等一律拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`（`rm` / `mv` 的路径参数按保护路径规则检查，保护路径不能删、不能移）；`git commit` 必须带 `--no-verify`，没带就拒绝并在提示里说明要加（git hooks 可能执行项目代码）；git 禁止 `-c`、`--exec-path`、`--ext-diff`、`--output`（可让 git 执行外部程序或写到工作目录以外）；禁止 `-C`、`--dir`、`--prefix`、`--git-dir`、`--work-tree` 等改变目标目录的参数，参数里的路径也必须在工作目录内；其余命令拒绝；
       - `network`（`web_fetch`）、`mcp`、`plugin` 类一律拒绝。
     - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 只放行上述白名单命令；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
-  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment? }`：只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
+  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug`；只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
   - `web_fetch { url, start_index?, max_chars? }`：读取用户给定的公开网页文本，在 agent 进程内执行，不经 Main。
     - 参数：`url` 仅 http/https、≤ 2048 字符、不含用户名或密码；`start_index` 整数 ≥ 0（默认 0，分页继续读）；`max_chars` 默认 20000、上限 50000。
     - 地址拦截：WHATWG `URL` 解析（规范化 IPv4 的各种写法）；拒绝 `localhost`、`*.localhost` 和不含点的单标签主机名（IP 字面量除外）；`node:net` 的 `BlockList` 拦截 IPv4 `0.0.0.0/8`、`10/8`、`100.64/10`、`127/8`、`169.254/16`（含云元数据）、`172.16/12`、`192.0.0/24`、`192.168/16`、`224/4`、`240/4`，IPv6 `::`、`::1`、`fc00::/7`、`fe80::/10`、`ff00::/8`，`::ffff:0:0/96`、`64:ff9b::/96`、`2002::/16` 取出内嵌 IPv4 后按同一规则判定。**不拦截 `198.18.0.0/15`**：Clash / Surge 的 fake-ip 默认用这个网段，拦截后 TUN 模式下所有网站都会失败。
@@ -589,6 +589,12 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
     - 只接受来自已登记 triage 会话的调用，群由会话反查，不信任参数；入参按 `unknown` 收窄，`kind` 枚举校验，各字段限长（超长截断），存成卡片。
     - `reply` 经 `secrets` 过滤后发回本群，回复触发消息；命中密钥就整条拦下，改发中性提示并发桌面通知；本机路径、用户名、主机名替换后发送。
     - 路由：`bug` 且有 `evidence`（已定位）→ 直接投给值班会话；`feature` 且 `assessment` 三问都过 → 卡片进入「待确认需求」并发桌面通知，用户 `approve` 后才投给值班会话，`reject` 则群里发模板通知；其余只回复、留记录。投给值班会话的卡片同样包进 `<untrusted-content>`。
+  - **追问与卡片线程**：
+    1. Main 记录机器人在群里发出的每条消息 id 属于哪张卡片。
+    2. 群成员回复这些消息时，投递内容里带上卡片 id 和「已追问 k/2 轮」。
+    3. 每张卡片的追问轮数由 Main 计数，上限 2。
+    4. 达到上限后，如果 triage 仍返回 `needInfo`，Main 不发这条追问，改发固定的结束模板（如「感谢反馈，目前的信息还不足以确认问题，已记录给维护者」），卡片记为 `unconfirmed`。
+    5. 追问后 24 小时没有回复，卡片记为 `unconfirmed`，群里不再发消息。
   - **卡片与任务关联**：值班会话处理某张卡片的那一轮（投递到该轮 settled）里派出的任务，归到这张卡片下。该任务 `open_pull_request` 成功后，群里发模板通知加 PR 链接，并发桌面通知；任务失败、放弃或推送闸门拒绝时，发桌面通知，群里发「需要维护者处理」。
   - **密钥检测** `src/main/services/secrets/`（群回复和推送闸门共用）：
     - 已知密钥精确匹配：`providers.json` 里的 key、telegram token、MCP env 的值，以及名字像 KEY / TOKEN / SECRET / PASSWORD 的环境变量值（过短的值不入库，避免误报）；
@@ -604,6 +610,8 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   - 群回复里绝不出现：密钥、token、密码、证书、个人信息、本机路径、用户名、内部配置；群里有人贴出像凭据的内容也不复述。
   - 拒绝违规请求（违法违规、色情暴力、骚扰歧视、政治敏感、广告刷屏、攻击或绕过安全机制）：简短拒绝或不回复，记为 `invalid`。
   - 不替维护者做决定、不承诺时间；新功能只说「已记录，等维护者确认」，或说明不采纳的理由。
+  - 追问时一次问全，只问定位需要的信息，不重复问对方已经给过的内容；最多两轮。
+  - 群里的图片不会转给你：需要截图时，改请对方贴出报错文字或描述界面。
   - 判断规则：bug 须在代码里找到出问题的文件和原因写进 `evidence` 才算已定位，否则追问复现步骤；新功能按「有没有价值 / 合不合理 / 符不符合 `docs/PRODUCT.md`、`docs/ARCHITECTURE.md`、`AGENTS.md`」三问写进 `assessment`，每项写理由并引用具体条目。
 - 持久化：`userData/telegram.json`，原子写（临时文件 + rename），文件损坏时报错不静默清空；token 明文只在 Main（同 `providers.json`）。内容：启用开关、token、bot 信息（id、username）、候选群、已允许的群（含 `workspaceId` 和分诊会话 id）、各工作区的值班会话 id 和干净检出、卡片（有界，只保留最近的若干张）、`pollOffset`。不进 `settings.json`。
 - 安全边界（硬边界，每条对应一个强制点，并有单测）：
