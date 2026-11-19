@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTelegramApi, type HttpPost, redactToken, TelegramApiError } from './api';
+import {
+  createHttpsPost,
+  createTelegramApi,
+  type HttpPost,
+  redactToken,
+  TelegramApiError,
+} from './api';
 
 const TOKEN = `123456789:${'A'.repeat(35)}`;
 
@@ -22,6 +28,27 @@ async function caught(promise: Promise<unknown>): Promise<TelegramApiError> {
   }
   throw new Error('expected rejection');
 }
+
+describe('createHttpsPost 守卫', () => {
+  const send = (env: NodeJS.ProcessEnv, version?: string) =>
+    caught(createTelegramApi({ http: createHttpsPost(() => env, version) }).getMe(TOKEN));
+
+  it('TLS 校验被关闭时拒绝请求且错误不含 token', async () => {
+    const error = await send({ NODE_TLS_REJECT_UNAUTHORIZED: '0' });
+    expect(error.kind).toBe('network');
+    expect(error.message).toContain('NODE_TLS_REJECT_UNAUTHORIZED');
+    expect(error.message).not.toContain(TOKEN);
+  });
+
+  it('配了代理但不支持 proxyEnv 时拒绝请求且错误不含 token', async () => {
+    for (const key of ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']) {
+      const error = await send({ [key]: 'http://127.0.0.1:9' }, '22.20.0');
+      expect(error.kind).toBe('network');
+      expect(error.message).toContain('proxyEnv');
+      expect(error.message).not.toContain(TOKEN);
+    }
+  });
+});
 
 describe('telegram api', () => {
   it('getUpdates 用长轮询并只收 message 与 my_chat_member', async () => {

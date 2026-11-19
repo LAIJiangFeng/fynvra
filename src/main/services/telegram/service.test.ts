@@ -630,6 +630,17 @@ describe('值班、卡片关联与 PR 通知', () => {
     expect(h.service.pullRequestBodyExtension('other')).toBeUndefined();
   });
 
+  it('非 GitHub PR 链接不发到群里，桌面通知仍带原 URL', async () => {
+    const h = harness();
+    await fixingCard(h);
+    const url = 'https://evil.example/o/r/pull/9';
+    (h.snapshot.tasks[0] as Task).pullRequest = { url, branch: 'b', base: 'main', headCommit: 'c' };
+    await h.service.maintain();
+    expect(h.service.getState().cards[0]).toMatchObject({ status: 'pr-opened', prUrl: url });
+    expect(h.sent.at(-1)?.text).toBe('已提交修复 PR。');
+    expect(h.notifications.at(-1)?.body).toContain(url);
+  });
+
   it('任务 abandoned 时记为 needs-maintainer；值班空闲 30 分钟没 PR 同样', async () => {
     const h = harness();
     await fixingCard(h);

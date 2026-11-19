@@ -1,6 +1,7 @@
 // Telegram Bot API 客户端（ARCHITECTURE §7.14）：HTTP 可注入；token 与带 token 的 URL 绝不进日志、错误与返回值。
 import { Agent, request } from 'node:https';
 import { asRecord, errorMessage } from '@shared/guards';
+import { disablesNodeTlsVerification } from '../networkTest';
 
 export type TelegramErrorKind = 'network' | 'unauthorized' | 'conflict' | 'api';
 
@@ -222,10 +223,40 @@ export function createTelegramApi(options: TelegramApiOptions = {}): TelegramApi
 }
 
 /** 生产用：照 networkTest 的写法走 §7.7 代理（每次请求现读环境）；错误文本不含 url。 */
-export function createHttpsPost(env: () => NodeJS.ProcessEnv): HttpPost {
+export function createHttpsPost(
+  env: () => NodeJS.ProcessEnv,
+  nodeVersion: string = process.versions.node
+): HttpPost {
   return (url, body, { signal, timeoutMs }) =>
     new Promise((resolve, reject) => {
-      const proxyEnv = { ...env() };
+      const current = env();
+      // 代理握手不继承请求的 rejectUnauthorized：TLS 校验被全局关掉时不发 token
+      if (disablesNodeTlsVerification(current) || disablesNodeTlsVerification(process.env)) {
+        reject(
+          new TelegramApiError(
+            'network',
+            'NODE_TLS_REJECT_UNAUTHORIZED=0 关闭了 TLS 校验，已拒绝连接'
+          )
+        );
+        return;
+      }
+      // 同 networkTest：proxyEnv 需 Node 24.5+ / 22.21+，旧版本配了代理也不能悄悄直连
+      const [major = 0, minor = 0] = nodeVersion.split('.').map(Number);
+      const supportsProxyEnv =
+        major > 24 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);
+      if (
+        !supportsProxyEnv &&
+        (current.HTTPS_PROXY || current.https_proxy || current.ALL_PROXY || current.all_proxy)
+      ) {
+        reject(
+          new TelegramApiError(
+            'network',
+            `当前 Node ${nodeVersion} 不支持 proxyEnv，配置的代理无法生效，已拒绝直连`
+          )
+        );
+        return;
+      }
+      const proxyEnv = { ...current };
       if (!proxyEnv.https_proxy && !proxyEnv.HTTPS_PROXY) {
         proxyEnv.HTTPS_PROXY = proxyEnv.all_proxy || proxyEnv.ALL_PROXY;
       }

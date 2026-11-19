@@ -4,13 +4,17 @@ import type { TelegramCardKind } from '@shared/types/telegram';
 
 export const MAX_FOLLOW_UPS = 2;
 
+const GITHUB_PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/;
+
 /** 群里只会出现 triage 回复（过滤后）与这些模板 */
 export const TEMPLATES = {
   blocked: '已收到反馈，处理结果会由维护者跟进。',
   closing: '感谢反馈，目前的信息还不足以确认问题，已记录给维护者。',
   rejected: '暂不采纳，感谢建议。',
   needsMaintainer: '需要维护者处理。',
-  prOpened: (url: string) => `已提交修复 PR：${url}`,
+  /** 只有完整的 GitHub PR 地址才在群里带链接，其余只说已提交 */
+  prOpened: (url: string) =>
+    GITHUB_PR_URL.test(url) ? `已提交修复 PR：${url}` : '已提交修复 PR。',
 } as const;
 
 /** 转义伪造的 `<untrusted-content …>` / `</untrusted-content>` 开闭标签 */
