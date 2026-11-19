@@ -633,7 +633,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   3. **不带入用户的个人配置**：两档不加载 MCP、插件、全局指令文件，不注册 `fynvra_config`，跨会话记忆关闭。强制点：Main 按 `profile` 构建 spawn spec + `createRoleSession` 按档位装配。
   4. **群里的人接触不到私有内容**：群消息只进本群的 triage 会话，其上下文没有用户对话和其他群消息；值班会话内容不发到群。强制点：Main 按群路由投递，群发送只接受 `triage_report.reply` 与固定模板。
   5. **密钥不会发到群里或推上 GitHub**：群回复命中整条拦下，推送内容命中拒绝推送。强制点：`secrets.scan` 在群发送前与推送闸门。
-  6. **不泄露本机信息**：群回复里的本机路径、用户名、主机名被替换；diff 或 PR 文本里出现本机路径或用户名拒绝推送。强制点：`secrets.sanitize` + 推送闸门。
+  6. **不泄露本机信息**：群回复里的本机路径、用户名、主机名被替换；推送内容里出现本机绝对路径前缀或主机名时拒绝推送（不查单独出现的用户名单词，避免误报）。强制点：`secrets.sanitize` + 推送闸门。
   7. **外部来源的任务不在本机执行项目代码，也不能联网**：`web_fetch`、MCP、插件拒绝；命令只放行白名单，只有允许或拒绝，不弹审批。强制点：§5 restricted 审批门谓词 + `run_checks` 白名单。
   8. **不改会被执行的文件**：保护路径不可写，推送闸门对 base..head 整段 diff 再查一次；确需改保护文件时停下交给用户。强制点：§5 保护路径谓词 + 推送闸门。
   9. **改动不直接进用户的代码**：restricted 协调者不能 `merge_worktree`，只能 `open_pull_request`；PR 只开不合并。强制点：Main `OrchestrationHost` 按会话 `profile` 拒绝。
