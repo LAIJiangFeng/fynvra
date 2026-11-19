@@ -156,6 +156,7 @@ export function orchestrationHostProxy(call: HostCall): OrchestrationHost {
     reviewDiff: (input, signal) => forward(call('reviewDiff', input, signal)),
     runChecks: (input, signal) => forward(call('runChecks', input, signal)),
     mergeWorktree: (input, signal) => forward(call('mergeWorktree', input, signal)),
+    openPullRequest: (input, signal) => forward(call('openPullRequest', input, signal)),
     rejectWork: (input, signal) => forward(call('rejectWork', input, signal)),
     cleanupWorktree: (input, signal) => forward(call('cleanupWorktree', input, signal)),
   };

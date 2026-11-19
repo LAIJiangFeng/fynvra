@@ -59,6 +59,7 @@ function orchestrationHost(): OrchestrationHost {
     reviewDiff: unused,
     runChecks: unused,
     mergeWorktree: unused,
+    openPullRequest: unused,
     rejectWork: unused,
     cleanupWorktree: unused,
   };

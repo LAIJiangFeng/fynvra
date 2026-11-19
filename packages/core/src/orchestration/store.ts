@@ -336,8 +336,13 @@ export class InMemoryOrchestrationStore implements OrchestrationStore {
 // ---- 快照解析 ----
 
 type Check = (value: unknown) => boolean;
-/** 每个字段一个校验；可选字段写成 `{ optional: check }`。键与可选性由类型强制和 §4 对齐。 */
-type Schema<T> = { [K in keyof T]-?: undefined extends T[K] ? { optional: Check } : Check };
+/**
+ * 每个字段一个校验；可选字段写成 `{ optional: check }`，`dropInvalid` 时非法值丢弃而不是整份快照报错。
+ * 键与可选性由类型强制和 §4 对齐。
+ */
+type Schema<T> = {
+  [K in keyof T]-?: undefined extends T[K] ? { optional: Check; dropInvalid?: true } : Check;
+};
 
 const isString: Check = (value) => typeof value === 'string';
 const isNumber: Check = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -365,6 +370,15 @@ const TASK_SCHEMA: Schema<Task> = {
   mergedDiff: {
     optional: (value) =>
       isRecord(value) && isString(value.baseCommit) && isString(value.headCommit),
+  },
+  pullRequest: {
+    optional: (value) =>
+      isRecord(value) &&
+      isString(value.url) &&
+      isString(value.branch) &&
+      isString(value.base) &&
+      isString(value.headCommit),
+    dropInvalid: true,
   },
   workflow: { optional: isTaskWorkflow },
 };
@@ -413,11 +427,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readEntity<T>(input: unknown, schema: Schema<T>, label: string): T {
   if (!isRecord(input)) throw new SnapshotError(`${label} must be an object`);
   const entity: Record<string, unknown> = {};
-  for (const [key, spec] of Object.entries<Check | { optional: Check }>(schema)) {
+  for (const [key, spec] of Object.entries<Check | { optional: Check; dropInvalid?: true }>(
+    schema
+  )) {
     const value = Object.hasOwn(input, key) ? input[key] : undefined;
     const optional = typeof spec !== 'function';
     if (value === undefined && optional) continue;
     if (!(optional ? spec.optional : spec)(value)) {
+      if (optional && spec.dropInvalid) continue;
       throw new SnapshotError(`${label}.${key} is missing or invalid`);
     }
     entity[key] = value;

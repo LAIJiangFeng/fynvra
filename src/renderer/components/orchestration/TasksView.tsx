@@ -1,5 +1,13 @@
 import type { Run, Task, TaskStatus } from '@fynvra/core';
-import { ChevronRight, GitBranch, Link2, Loader2, MessageSquare, Target } from 'lucide-react';
+import {
+  ChevronRight,
+  GitBranch,
+  GitPullRequest,
+  Link2,
+  Loader2,
+  MessageSquare,
+  Target,
+} from 'lucide-react';
 import { type Ref, useRef, useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Progress } from '@/components/ui/progress';
@@ -252,6 +260,12 @@ function TaskGroup({
   );
 }
 
+/** 「PR #7」；链接里没有编号时只写「PR」 */
+export function pullRequestLabel(url: string, label: string): string {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  return number ? `${label} #${number}` : label;
+}
+
 function TaskCard({
   task,
   view,
@@ -319,6 +333,16 @@ function TaskCard({
           </span>
         )}
         {attempts > 1 && <span>{t('orchestration.attemptNth', { count: attempts })}</span>}
+        {task.pullRequest && (
+          // 卡片本身是按钮，不能嵌链接：这里只显示，可点的链接在任务抽屉
+          <span
+            className="flex items-center gap-1 text-sky-700 dark:text-sky-300"
+            title={task.pullRequest.url}
+          >
+            <GitPullRequest className="size-3 shrink-0" />
+            {pullRequestLabel(task.pullRequest.url, t('orchestration.pullRequest'))}
+          </span>
+        )}
       </div>
 
       {task.workflow && (

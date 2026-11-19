@@ -96,6 +96,13 @@ function createHost() {
       targetBranch: 'main',
       commit: 'fff0001',
     })),
+    openPullRequest: vi.fn<OrchestrationHost['openPullRequest']>(async () => ({
+      ok: true,
+      url: 'https://github.com/o/r/pull/7',
+      branch: 'fynvra/add-login',
+      base: 'main',
+      headCommit: 'abc1234def567',
+    })),
     rejectWork: vi.fn<OrchestrationHost['rejectWork']>(async () => ({
       ok: true,
       messageId: 'm2',
@@ -488,6 +495,30 @@ describe('review, checks, merge and follow-up tools', () => {
     expect(run.text).toContain('aborted');
     expect(run.text).toContain('src/a.ts');
     expect(run.text).toContain('reject_work');
+  });
+
+  it('open_pull_request maps to openPullRequest and passes the normalized input', async () => {
+    expect(ORCHESTRATION_TOOL_METHODS.open_pull_request).toBe('openPullRequest');
+    const host = createHost();
+    const tool = toolByName(createOrchestrationTools(host), 'open_pull_request');
+    const run = await runTool(tool, {
+      dispatch_id: ' d1 ',
+      title: ' Fix login ',
+      summary: 'Fixes the form.',
+      base: ' ',
+      draft: true,
+    });
+    expect(run.isError).toBe(false);
+    expect(host.openPullRequest.mock.calls[0]?.[0]).toEqual({
+      dispatchId: 'd1',
+      title: 'Fix login',
+      summary: 'Fixes the form.',
+      draft: true,
+    });
+    expect(run.text).toContain('https://github.com/o/r/pull/7');
+    const missing = await runTool(tool, { dispatch_id: 'd1', title: 'x' });
+    expect(missing.isError).toBe(true);
+    expect(host.openPullRequest).toHaveBeenCalledTimes(1);
   });
 
   it('requires text for send_to_worker and reject_work', async () => {

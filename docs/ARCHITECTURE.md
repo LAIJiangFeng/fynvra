@@ -207,13 +207,26 @@ export interface Message {
   - 会话档位 `profile`（Telegram 群反馈值班用，§7.14）：优先于上面按策略的工具装配；两档都不加载 MCP、插件和用户的全局指令文件，不注册 `fynvra_config`，只读仓库里已提交的 `AGENTS.md`，跨会话记忆保持关闭。
     - **triage**：工具只有 `read` / `grep` / `find` / `ls`（带路径校验，规则同下方 restricted 的路径与敏感文件两条）和 `triage_report`；没有 `web_fetch`、`fynvra_config`、`git_readonly`、`write_plan`；系统提示词由 Fynvra 固定（§7.14「分诊 AI 的固定规则」），不追加角色提示词。
     - **restricted**：不注册 `fynvra_config`，不加载 MCP 和插件。审批门（`approval/gate.ts`）新增实时谓词（写法同 `planMode`），以下规则只直接允许或直接拒绝，不弹审批（无人值守时不会卡住），也不受审批档位和 `allowSession` 影响：
-      - 路径限制：读、写、搜索、列目录的目标先解析真实路径（含符号链接 / junction），必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝；
-      - 敏感文件名单（读写都拒绝）：`.env*`、`*.pem`、`*.key`、`id_*`、`*.p12`、`*.pfx`、`.npmrc`、`.netrc`；
-      - 保护路径不可写：`.github/**`、`package.json`、锁文件、`pnpm-workspace.yaml`、`.pnpmfile.cjs`、`.npmrc`、`patches/**`、`scripts/**`、`*.config.*`、`tsconfig*.json`、`biome.json`、`electron-builder*.yml`、`.husky/**`；
-      - 命令白名单（复用 `checkCommand.ts` 的分段解析，每段都要命中，含重定向、命令替换等一律拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`（`rm` / `mv` 的路径参数按保护路径规则检查，保护路径不能删、不能移）；`git commit` 必须带 `--no-verify`，没带就拒绝并在提示里说明要加（git hooks 可能执行项目代码）；git 禁止 `-c`、`--exec-path`、`--ext-diff`、`--output`（可让 git 执行外部程序或写到工作目录以外）；禁止 `-C`、`--dir`、`--prefix`、`--git-dir`、`--work-tree` 等改变目标目录的参数，参数里的路径也必须在工作目录内；其余命令拒绝；
+      - 路径限制：读、写、搜索、列目录的目标必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝。
+        - 请求路径相对 cwd 后必须能被 `normalizeRepoPath` 规范化（拒绝 ADS、末尾带点或空格、`*` / `?` 等）；
+        - 用原生 realpath（`fs.promises.realpath` / `realpathSync.native`）取真实路径（含符号链接 / junction，并还原 8.3 短名和大小写）；目标不存在时对最近一个已存在的祖先求 realpath；
+        - 敏感与保护判定对「请求路径」和「真实路径」都要做；
+        - triage / restricted 档位下，grep / find / ls 的结果过滤掉敏感文件。
+      - 敏感文件名单（读写都拒绝，任意层级的名字命中即算，以 `packages/core/src/security/paths.ts` 为准）：`.env*`、`*.pem`、`*.key`、`id_*`、`*.p12`、`*.pfx`、`*.keystore`、`*.jks`、`.npmrc`、`.netrc` / `_netrc`；8.3 短名（含 `~数字`）、ADS（段内含 `:`）、末尾带点或空格的变体同样命中；比较前先做 Unicode 大小写折叠（先转大写再转小写，`ſ`→`s`、`ı`→`i`、`K`→`k`）。
+      - 保护路径不可写（以 `paths.ts` 为准）：
+        - 任意层级出现的 `node_modules`、`.git`、`.gitattributes`、`.gitmodules`、`package.json`、锁文件、`pnpm-workspace.yaml`、`.pnpmfile.*`、`.npmrc`、`biome.json(c)`、`tsconfig*.json`、`*.config.*`、`electron-builder*.yml`、工具 rc 配置（`/^\.[^/]*rc(\..+)?$/`）、`AGENTS.md`、`CLAUDE.md`；
+        - 仓库根下的 `.github/`、`patches/`、`scripts/`、`.husky/`；
+        - Windows 别名（ADS、末尾带点或空格、8.3 短名）一律按命中处理；比较前先做 Unicode 大小写折叠。
+      - 命令白名单（以 `packages/core/src/security/restrictedCommand.ts` 为准，每段都要命中，其余命令拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`。
+        - 解析器：同时满足 bash 与 PowerShell 两套语义，只允许 `&&` 连接，重定向、命令替换、变量展开等一律拒绝；整条命令（引号内也算）禁止控制字符、Unicode 引号 U+2018–U+201F、行分隔符、双向控制字符、零宽字符；禁止 `--%`。
+        - git 全局选项一律拒绝（子命令必须紧跟 `git`）；禁用选项 `-c`、`-C`、`--exec-path`、`--ext-diff`、`--output`、`--git-dir`、`--work-tree`、`--namespace`、`--super-prefix`、`--no-index`、`--pathspec-from-file`、`--orderfile`、`-O*`，含长选项的前缀写法。
+        - git 非选项参数（`--` 之后全部算；commit 的 `-m` 取值跳过）：不能以 `/`、`\`、`~`、`:` 开头，不能是盘符，不能含 `\`，不能有 `..` 段（避免 `git diff` 碰到仓库外路径时自动进入 no-index）；按 `:` 切开后任一部分指向敏感文件就拒绝（如 `git show HEAD:.env`），这里不套 8.3 短名规则，`HEAD~1` 照常放行。
+        - commit：必须带 `--no-verify`（没带就拒绝并在提示里说明要加，git hooks 可能执行项目代码），并带 `-m` / `--message` 或 `--no-edit`；禁止 `-F`、`--file`、`-t`、`--template`、`-e`、`--edit`、`--verify`、`--no-no-…`、`--interactive`、`-p`、`--patch`（`-i` 是 `--include`，不禁）；禁止合并写的短选项。
+        - add：禁止 `-e`、`--edit`、`-i`、`--interactive`、`-p`、`--patch`（含合并写的短选项），不能暂存敏感文件。
+        - rm / mv：不能动保护路径，不能用 `[`、`]`、`*`、`?` 通配。
       - `network`（`web_fetch`）、`mcp`、`plugin` 类一律拒绝。
     - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 只放行上述白名单命令；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
-  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug`；只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
+  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug` 或 `feature`（追问轮数由 Main 计数，上限 2 轮，见 §7.14）；只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
   - `web_fetch { url, start_index?, max_chars? }`：读取用户给定的公开网页文本，在 agent 进程内执行，不经 Main。
     - 参数：`url` 仅 http/https、≤ 2048 字符、不含用户名或密码；`start_index` 整数 ≥ 0（默认 0，分页继续读）；`max_chars` 默认 20000、上限 50000。
     - 地址拦截：WHATWG `URL` 解析（规范化 IPv4 的各种写法）；拒绝 `localhost`、`*.localhost` 和不含点的单标签主机名（IP 字面量除外）；`node:net` 的 `BlockList` 拦截 IPv4 `0.0.0.0/8`、`10/8`、`100.64/10`、`127/8`、`169.254/16`（含云元数据）、`172.16/12`、`192.0.0/24`、`192.168/16`、`224/4`、`240/4`，IPv6 `::`、`::1`、`fc00::/7`、`fe80::/10`、`ff00::/8`，`::ffff:0:0/96`、`64:ff9b::/96`、`2002::/16` 取出内嵌 IPv4 后按同一规则判定。**不拦截 `198.18.0.0/15`**：Clash / Surge 的 fake-ip 默认用这个网段，拦截后 TUN 模式下所有网站都会失败。
@@ -288,11 +301,11 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 **PR 交付**（`open_pull_request { dispatch_id, title, summary, base?, draft? }`，只给主 agent）：`merge_worktree` 之外的另一种验收方式。
 - 前置条件同 `merge_worktree`（当前 dispatch、任务 in-review）；只用于 git 工作区（in-place 模式返回错误）。`base` 缺省为工作区默认分支。
 - 推送闸门（Main，任一不过就拒绝、不推送，错误写明原因）：
-  - 保护路径：base..head 的整段 diff 碰到 §5 restricted 的保护路径就拒绝；
-  - 密钥扫描：对 base..head 的 diff、范围内所有提交信息、PR 标题和正文用 `src/main/services/secrets/` 扫描（§7.14）；
-  - 本机信息：上述内容里出现本机绝对路径或用户名即拒绝；
+  - 保护路径、符号链接与子模块：只对「受限协调者派出的任务」执行，用户自己的会话可以正常改 `package.json` 等文件再开 PR。改动文件列表用 `git diff --name-only --no-renames -z` 取 base..head 的整段 diff，碰到 §5 restricted 的保护路径就拒绝；新 mode 为 120000（符号链接）或 160000（子模块）的条目一律拒绝；
+  - 密钥扫描：对所有任务都做，用 `src/main/services/secrets/` 扫描（§7.14）：`git diff --no-color --no-ext-diff --no-textconv --text --no-renames` 的正文、范围内所有提交信息及作者和提交者的名字、邮箱、PR 标题和正文；
+  - 本机信息：上述内容里出现本机绝对路径前缀或主机名即拒绝；不查单独出现的用户名单词（误报太多），单词形式的用户名只在群回复里替换；
   - 不设改动规模上限。
-- 执行（独立 argv、不经 shell、套用 §7.7 网络代理环境）：`git push -u origin <branch>`，再 `gh pr create --head <branch> --base <base> --title … --body-file …`（`draft` 时加 `--draft`）；该分支已有 PR 时返回已有链接，保证幂等；没装 `gh` 或未登录时返回可读错误。
+- 执行（独立 argv、不经 shell、套用 §7.7 网络代理环境）：`git push -u origin <branch>`（受限任务用 `git -c core.hooksPath=<空目录> push --no-verify`，避免 pre-push 等 hooks 在本机运行被改过的代码；普通任务照常 push），再 `gh pr create --head <branch> --base <base> --title … --body-file …`（`draft` 时加 `--draft`；设 `GH_PROMPT_DISABLED=1`，保持非交互）；该分支已有 PR 时返回已有链接，保证幂等；没装 `gh` 或未登录时返回可读错误。
 - PR 正文由 Main 按模板拼接：问题 / 改动（文件列表 + `summary`）/ 验证 / 来源（如「Telegram 群反馈，卡片 #id」，不写群名）。
 - 成功后写 `Task.pullRequest { url, branch, base, headCommit }` 和 `mergedDiff`，任务从 in-review 变为 completed；失败不改任务状态。任务卡片显示 PR 链接。
 - 清理：worktree 干净、且 HEAD 等于已推送的 `headCommit` 时可以删 worktree，本地分支保留（PR 未合并，不按「无未合并提交」规则删分支）。
@@ -592,7 +605,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   - **追问与卡片线程**：
     1. Main 记录机器人在群里发出的每条消息 id 属于哪张卡片。
     2. 群成员回复这些消息时，投递内容里带上卡片 id 和「已追问 k/2 轮」。
-    3. 每张卡片的追问轮数由 Main 计数，上限 2。
+    3. 每张卡片的追问轮数由 Main 计数，上限 2；`kind` 为 `bug` 或 `feature` 时都可以追问，共用同一计数。
     4. 达到上限后，如果 triage 仍返回 `needInfo`，Main 不发这条追问，改发固定的结束模板（如「感谢反馈，目前的信息还不足以确认问题，已记录给维护者」），卡片记为 `unconfirmed`。
     5. 追问后 24 小时没有回复，卡片记为 `unconfirmed`，群里不再发消息。
   - **卡片与任务关联**：值班会话处理某张卡片的那一轮（投递到该轮 settled）里派出的任务，归到这张卡片下。该任务 `open_pull_request` 成功后，群里发模板通知加 PR 链接，并发桌面通知；任务失败、放弃或推送闸门拒绝时，发桌面通知，群里发「需要维护者处理」。
@@ -620,7 +633,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   3. **不带入用户的个人配置**：两档不加载 MCP、插件、全局指令文件，不注册 `fynvra_config`，跨会话记忆关闭。强制点：Main 按 `profile` 构建 spawn spec + `createRoleSession` 按档位装配。
   4. **群里的人接触不到私有内容**：群消息只进本群的 triage 会话，其上下文没有用户对话和其他群消息；值班会话内容不发到群。强制点：Main 按群路由投递，群发送只接受 `triage_report.reply` 与固定模板。
   5. **密钥不会发到群里或推上 GitHub**：群回复命中整条拦下，推送内容命中拒绝推送。强制点：`secrets.scan` 在群发送前与推送闸门。
-  6. **不泄露本机信息**：群回复里的本机路径、用户名、主机名被替换；diff 或 PR 文本里出现本机路径或用户名拒绝推送。强制点：`secrets.sanitize` + 推送闸门。
+  6. **不泄露本机信息**：群回复里的本机路径、用户名、主机名被替换；推送内容里出现本机绝对路径前缀或主机名时拒绝推送（不查单独出现的用户名单词，避免误报）。强制点：`secrets.sanitize` + 推送闸门。
   7. **外部来源的任务不在本机执行项目代码，也不能联网**：`web_fetch`、MCP、插件拒绝；命令只放行白名单，只有允许或拒绝，不弹审批。强制点：§5 restricted 审批门谓词 + `run_checks` 白名单。
   8. **不改会被执行的文件**：保护路径不可写，推送闸门对 base..head 整段 diff 再查一次；确需改保护文件时停下交给用户。强制点：§5 保护路径谓词 + 推送闸门。
   9. **改动不直接进用户的代码**：restricted 协调者不能 `merge_worktree`，只能 `open_pull_request`；PR 只开不合并。强制点：Main `OrchestrationHost` 按会话 `profile` 拒绝。
@@ -628,6 +641,8 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   11. **新功能必须用户点头**：新功能卡片只有在电脑上 `approve` 后才投给值班会话。强制点：Main 路由 + `telegram:resolve-card`。
   12. **防刷屏、控制费用**：只认 `/bug@机器人` 和回复机器人的消息；防抖合批；每人每小时最多 5 条；每群最多排 50 条；每个工作区同时最多 3 个修复任务。强制点：Main 准入与排队 + restricted `dispatch_task` 并发上限。
   - 剩余风险（如实说明）：密钥检测会漏，主防线是第 1、2 条；私有仓库的已提交代码可能被群回复引用；用户在值班会话里说的话可能进入提交信息；限制由 Fynvra 工具闸门执行，不是操作系统级沙箱；Telegram 不是端到端加密。
+    - 受限档位的前提是：项目的 `typecheck` / `lint` 只调用 `node_modules` 里的工具，且这些工具的配置都在保护名单内。Fynvra 自身满足（tsc + biome）；以后绑定的项目脚本如果会直接执行仓库里的文件，要先把这些文件加进保护名单。
+    - 用户自己的 git hooks 中，除 pre-commit 和 commit-msg 以外的 hooks 在 commit 时仍会运行；hooks 本身不能被改。
 - 明确不做：私聊和手机端功能（手机确认、手机通知）、操作系统级沙箱、自动合并 PR、本机自动跑测试、改动规模上限、个人账号登录（MTProto）、转达图片和文件、富文本、群内管理命令、其他渠道（飞书、微信）、webhook 模式、群里有人要什么就执行什么。
 
 ## 8. 分阶段

@@ -5,7 +5,7 @@ import type { Dispatch, Task, TaskStatus } from '../types';
  * 任务状态合法迁移表（ARCHITECTURE §6）：
  * - `todo` → `in-progress`（派发）| `abandoned`
  * - `in-progress` → `in-review`（worker 报告成功）| `failed`（报告失败）| `abandoned`
- * - `in-review` → `completed`（验收合并）| `in-progress`（打回继续改）| `failed` | `abandoned`
+ * - `in-review` → `completed`（验收合并，或 open_pull_request 开出 PR）| `in-progress`（打回继续改）| `failed` | `abandoned`
  * - `failed` → `in-progress`（重试）| `abandoned`
  * - `completed`、`abandoned` 是终态。
  */
