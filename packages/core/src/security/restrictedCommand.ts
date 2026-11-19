@@ -1,4 +1,4 @@
-import { isProtectedPath, isSensitivePath, normalizeRepoPath } from './paths';
+import { isProtectedPath, isSensitivePath, matchesSensitiveName, normalizeRepoPath } from './paths';
 
 export type RestrictedCommandResult = { ok: true } | { ok: false; reason: string };
 export interface RestrictedCommandOptions {
@@ -94,9 +94,12 @@ const GIT_FORBIDDEN_LONG = [
   '--pathspec-from-file',
   '--orderfile',
 ];
-// 会把任意文件读进提交信息，或打开编辑器卡住命令
-const COMMIT_FORBIDDEN_SHORT = new Set(['-F', '-t', '-e']);
-const COMMIT_FORBIDDEN_LONG = ['--file', '--template', '--edit'];
+// 会把任意文件读进提交信息，或打开编辑器/交互卡住命令（commit 的 -i 是 --include，不禁）
+const COMMIT_FORBIDDEN_SHORT = new Set(['-F', '-t', '-e', '-p']);
+const COMMIT_FORBIDDEN_LONG = ['--file', '--template', '--edit', '--interactive', '--patch'];
+// add 的短选项都不带取值，合并写法（如 -Ap）里含这些字母就会打开编辑器或进入交互
+const ADD_FORBIDDEN_SHORT_LETTERS = /^-[^-]*[eip]/;
+const ADD_FORBIDDEN_LONG = ['--edit', '--interactive', '--patch'];
 // commit 中这些选项的下一个词是提交信息，不能当作 -n 之类的开关或路径
 const COMMIT_MESSAGE_OPTIONS = new Set(['-m', '--message']);
 
@@ -162,7 +165,9 @@ function checkCommitOptions(args: string[]): RestrictedCommandResult {
       );
     }
     if (COMMIT_FORBIDDEN_SHORT.has(arg) || matchesLongOption(arg, COMMIT_FORBIDDEN_LONG)) {
-      return deny(`git commit option "${arg}" is not allowed; pass the message with -m "...".`);
+      return deny(
+        `git commit option "${arg}" is not allowed (it reads a file or opens an editor/interactive prompt); pass the message with -m "...".`
+      );
     }
     // 后出现的 --verify / --no-no-verify 会抵消 --no-verify
     if (arg.startsWith('--no-n') || matchesLongOption(arg, ['--verify'])) {
@@ -208,6 +213,18 @@ function checkGit(args: string[]): RestrictedCommandResult {
     const result = checkCommitOptions(rest);
     if (!result.ok) return result;
   }
+  if (sub === 'add') {
+    const interactive = rest
+      .slice(0, rest.includes('--') ? rest.indexOf('--') : rest.length)
+      .find(
+        (arg) => ADD_FORBIDDEN_SHORT_LETTERS.test(arg) || matchesLongOption(arg, ADD_FORBIDDEN_LONG)
+      );
+    if (interactive !== undefined) {
+      return deny(
+        `git add option "${interactive}" is not allowed (it opens an editor or interactive prompt).`
+      );
+    }
+  }
 
   // 非选项参数：`--` 之后全部算路径；commit 的 -m 取值跳过
   const operands: string[] = [];
@@ -223,6 +240,10 @@ function checkGit(args: string[]): RestrictedCommandResult {
   for (const arg of operands) {
     if (isOutsideRepoArg(arg)) {
       return deny(`Argument "${arg}" must be a relative path inside the repository.`);
+    }
+    // HEAD:.env 这类 rev:path 也会读出文件内容，所以按 : 切开逐段判定
+    if (arg.split(':').some((part) => matchesSensitiveName(part, false))) {
+      return deny(`Argument "${arg}" refers to a sensitive file.`);
     }
     if (sub !== 'add' && sub !== 'rm' && sub !== 'mv') continue;
     if (sub === 'add' && arg === '.') continue;
