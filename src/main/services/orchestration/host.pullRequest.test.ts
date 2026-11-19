@@ -3,7 +3,7 @@ import type { DispatchTaskOutput, OrchestrationHost } from '@fynvra/agent-runtim
 import { GitWorktreeManager, Inbox, InMemoryOrchestrationStore } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOrchestrationHost, type OrchestrationHostDeps } from './host';
-import { setPullRequestBodyExtension } from './pullRequest';
+import { setPullRequestBodyExtension, setPushGateRestrictedLookup } from './pullRequest';
 import { createFakeExec, createFakeLauncher, createFakeRoles, type FakeExec } from './testing';
 import { createWorkerHost } from './workerHost';
 
@@ -86,7 +86,10 @@ beforeEach(() => {
   bodies = [];
   host = makeHost();
 });
-afterEach(() => setPullRequestBodyExtension(undefined));
+afterEach(() => {
+  setPullRequestBodyExtension(undefined);
+  setPushGateRestrictedLookup(undefined);
+});
 
 type Dispatched = DispatchTaskOutput & { dispatch: NonNullable<DispatchTaskOutput['dispatch']> };
 
@@ -208,25 +211,92 @@ describe('openPullRequest', () => {
     expect(store.tasks.get(first.task.id)?.pullRequest).toBeUndefined();
   });
 
-  it('diff 碰到保护路径：拒绝并列出文件，不推送', async () => {
+  const changedFiles = (stdout: string) =>
+    fake.respond(({ args }) =>
+      args[0] === 'diff' && args[1] === '--name-only' ? { stdout } : undefined
+    );
+
+  it('受限任务改了 package.json：拒绝并列出文件，不推送', async () => {
+    const first = await reported();
+    setPushGateRestrictedLookup((taskId) => taskId === first.task.id);
+    scriptRepo();
+    changedFiles('src/a.ts\0package.json\0');
+    const result = await host.openPullRequest(input(first.dispatch.id));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('package.json') });
+    expect(pushedOrGh(0)).toEqual([]);
+  });
+
+  it('普通任务改了 package.json 与 .github：放行，照常 push（保留用户 hooks）', async () => {
     const first = await reported();
     scriptRepo();
+    changedFiles('package.json\0.github/workflows/ci.yml\0');
+    expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
+    expect(fake.commands()).toContain(`git push -u origin ${BRANCH}`);
+    expect(fake.commands().some((line) => line.startsWith('git diff --raw'))).toBe(false);
+  });
+
+  it('受限任务把保护文件改名移走：不认重命名，旧名字也在列表里，拒绝', async () => {
+    const first = await reported();
+    setPushGateRestrictedLookup(() => true);
+    scriptRepo();
+    changedFiles('AGENTS.md\0docs/agents.txt\0');
+    const result = await host.openPullRequest(input(first.dispatch.id));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('AGENTS.md') });
+    expect(fake.commands()).toContain(`git diff --name-only --no-renames -z ${MB}..${HEAD}`);
+    expect(pushedOrGh(0)).toEqual([]);
+  });
+
+  it('受限任务新增符号链接：拒绝', async () => {
+    const first = await reported();
+    setPushGateRestrictedLookup(() => true);
+    scriptRepo();
     fake.respond(({ args }) =>
-      args[0] === 'diff' && args[1] === '--name-only'
-        ? { stdout: 'src/a.ts\0.github/workflows/ci.yml\0' }
+      args[0] === 'diff' && args[1] === '--raw'
+        ? {
+            stdout: `:000000 100644 ${'0'.repeat(7)} abc1234 A\0src/a.ts\0:000000 120000 ${'0'.repeat(7)} def5678 A\0src/link\0`,
+          }
         : undefined
     );
     const result = await host.openPullRequest(input(first.dispatch.id));
     expect(result).toMatchObject({
       ok: false,
-      error: expect.stringContaining('.github/workflows/ci.yml'),
+      error: expect.stringContaining('symlinks or submodules (src/link)'),
     });
+    expect(fake.commands()).toContain(`git diff --raw --no-renames -z ${MB}..${HEAD}`);
     expect(pushedOrGh(0)).toEqual([]);
+  });
+
+  it('受限任务：push 带空 hooks 目录与 --no-verify，扫描用的 diff 带 --text / --no-textconv', async () => {
+    const first = await reported();
+    setPushGateRestrictedLookup(() => true);
+    scriptRepo();
+    expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
+    const push = fake.calls.find((call) => call.args.includes('push'));
+    expect(push?.args).toEqual([
+      '-c',
+      expect.stringMatching(/^core\.hooksPath=.+fynvra-hooks-/),
+      'push',
+      '--no-verify',
+      '-u',
+      'origin',
+      BRANCH,
+    ]);
+    expect(fake.commands()).toContain(
+      `git diff --no-color --no-ext-diff --no-textconv --text --no-renames ${MB}..${HEAD}`
+    );
+    expect(fake.commands()).toContain(`git log --format=%an%n%ae%n%cn%n%ce%n%B ${MB}..${HEAD}`);
+  });
+
+  it('代码里出现与用户名相同的单词：不误报', async () => {
+    const first = await reported();
+    scriptRepo('+const alice = 1;\n', 'alice\nalice@example.com\nalice\nalice@example.com\nAdd\n');
+    expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
   });
 
   it.each([
     ['diff 含已知 key', `+const key = "${KNOWN}";\n`, 'Add toggle\n', KNOWN],
     ['提交信息含私钥块', '+x\n', `Add key\n-----BEGIN ${'PRIVATE'} KEY-----\nMIIE\n`, 'MIIE'],
+    ['提交作者含已知 key', '+x\n', `${KNOWN}\na@b.c\nme\na@b.c\nAdd\n`, KNOWN],
   ])('%s：拒绝，错误里不含该值', async (_label, diff, log, value) => {
     const first = await reported();
     scriptRepo(diff, log);

@@ -77,24 +77,60 @@ export function buildPullRequestBody(input: {
   return `${sections.join('\n\n')}\n`;
 }
 
+let restrictedLookup: (taskId: string) => boolean = () => false;
+
+/** 注入「任务是否由受限协调者派出」的查询；只有受限任务查保护路径、符号链接与子模块。默认都不是。 */
+export function setPushGateRestrictedLookup(
+  lookup: ((taskId: string) => boolean) | undefined
+): void {
+  restrictedLookup = lookup ?? (() => false);
+}
+
+export function isRestrictedPushTask(taskId: string): boolean {
+  return restrictedLookup(taskId);
+}
+
+/** `git diff --raw -z` 里新 mode 为符号链接（120000）或子模块（160000）的路径。 */
+export function linkOrSubmodulePaths(raw: string): string[] {
+  const parts = raw.split('\0');
+  const found: string[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const meta = parts[index] ?? '';
+    if (!meta.startsWith(':')) continue;
+    const newMode = meta.slice(1).split(' ')[1];
+    const path = parts[index + 1] ?? '';
+    if (newMode === '120000' || newMode === '160000') found.push(path);
+    index += 1;
+  }
+  return found;
+}
+
 /**
- * 推送闸门：保护路径、密钥、本机信息任一命中就返回拒绝原因（只列文件名与类别，不含命中的值）；通过返回 null。
+ * 推送闸门：任一命中就返回拒绝原因（只列文件名与类别，不含命中的值）；通过返回 null。
+ * 受限任务另查保护路径与符号链接 / 子模块；所有任务查密钥与本机路径、主机名（不查单独的用户名单词，误报太多）。
  */
 export function pushGateError(input: {
+  restricted: boolean;
   files: readonly string[];
+  links: readonly string[];
   text: string;
   known: readonly string[];
   local: LocalInfoContext;
 }): string | null {
-  const protectedFiles = input.files.filter((file) => isProtectedPath(file));
-  if (protectedFiles.length > 0) {
-    return `refusing to push: the change touches protected paths (${protectedFiles.join(', ')}); a maintainer must handle these files`;
+  if (input.restricted) {
+    const protectedFiles = input.files.filter((file) => isProtectedPath(file));
+    if (protectedFiles.length > 0) {
+      return `refusing to push: the change touches protected paths (${protectedFiles.join(', ')}); a maintainer must handle these files`;
+    }
+    if (input.links.length > 0) {
+      return `refusing to push: the change adds symlinks or submodules (${input.links.join(', ')}); a maintainer must handle these entries`;
+    }
   }
   const secrets = scanSecrets(input.text, input.known);
   if (secrets.hit) {
     return `refusing to push: the diff, commit messages or PR text contain possible secrets (${secrets.kinds.join(', ')}); remove them from the branch history first`;
   }
-  const local = findLocalInfo(input.text, input.local);
+  const local = findLocalInfo(input.text, { ...input.local, userName: undefined });
   if (local.hit) {
     return `refusing to push: the diff, commit messages or PR text contain local machine info (${local.kinds.join(', ')}); remove it first`;
   }

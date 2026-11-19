@@ -1,5 +1,5 @@
 import * as nodeFs from 'node:fs/promises';
-import { homedir, hostname, userInfo } from 'node:os';
+import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import {
@@ -137,6 +137,7 @@ export function createOrchestrationRegistry(
     return {
       paths: [
         homedir(),
+        tmpdir(),
         options.userDataPath,
         fallbackWorktreesRoot(options.userDataPath),
         ...workspaces.map((workspace) => workspace.repoPath),

@@ -61,7 +61,9 @@ import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import {
   buildPullRequestBody,
+  isRestrictedPushTask,
   isValidBranchName,
+  linkOrSubmodulePaths,
   type PullRequestGateDeps,
   pullRequestInputError,
   pullRequestUrlOf,
@@ -887,6 +889,21 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return undefined;
   }
 
+  /** 受限任务指向空 hooks 目录并 --no-verify：不让 pre-push 等 hooks 在本机跑被改过的项目代码 */
+  async function pushBranch(branch: string, restricted: boolean) {
+    if (!restricted) return deps.exec('git', ['push', '-u', 'origin', branch], repoPath);
+    const hooks = await mkdtemp(join(tmpdir(), 'fynvra-hooks-'));
+    try {
+      return await deps.exec(
+        'git',
+        ['-c', `core.hooksPath=${hooks}`, 'push', '--no-verify', '-u', 'origin', branch],
+        repoPath
+      );
+    } finally {
+      await rm(hooks, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
   /** gh 起不来（没装）时返回 undefined */
   async function runGh(args: string[]) {
     try {
@@ -951,21 +968,25 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (!(count > 0))
       return fail(`${branch} has no new commits relative to ${base}; nothing to push`);
 
-    // 闸门：整段改动文件（不认重命名，源路径也要查）、diff 正文、提交信息、标题与正文
-    const files = (
-      await gitText(['diff', '--name-only', '--no-renames', '-z', mergeBase, headCommit])
-    )
+    // 闸门：整段改动文件（不认重命名，源路径也要查）、diff 正文、提交元数据、标题与正文
+    const restricted = isRestrictedPushTask(task.id);
+    const files = (await gitText(['diff', '--name-only', '--no-renames', '-z', range]))
       .split('\0')
       .filter((file) => file !== '');
+    const links = restricted
+      ? linkOrSubmodulePaths(await gitText(['diff', '--raw', '--no-renames', '-z', range]))
+      : [];
+    // --text / --no-textconv：.gitattributes 不能把真实内容藏成 binary 或交给 textconv
     const diff = await gitText([
       'diff',
       '--no-color',
       '--no-ext-diff',
+      '--no-textconv',
+      '--text',
       '--no-renames',
-      mergeBase,
-      headCommit,
+      range,
     ]);
-    const messages = await gitText(['log', '--format=%B', range]);
+    const messages = await gitText(['log', '--format=%an%n%ae%n%cn%n%ce%n%B', range]);
     const body = buildPullRequestBody({
       taskId: task.id,
       summary: input.summary,
@@ -982,7 +1003,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail('could not read the known secrets for the push check; nothing was pushed');
     }
     const refused = pushGateError({
+      restricted,
       files,
+      links,
       text: [diff, messages, input.title, body].join('\n'),
       known,
       local,
@@ -994,7 +1017,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const auth = await runGh(['auth', 'status']);
     if (auth === undefined || auth.code !== 0) return fail(GH_LOGGED_OUT);
 
-    const pushed = await deps.exec('git', ['push', '-u', 'origin', branch], repoPath);
+    const pushed = await pushBranch(branch, restricted);
     if (pushed.code !== 0) {
       return fail(`git push failed: ${redact(pushed.stderr || pushed.stdout, known)}`);
     }
