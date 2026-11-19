@@ -30,6 +30,7 @@ import type { CheckCommandPolicy } from './checkCommand';
 import { createOrchestrationHost, type RunChecksFn } from './host';
 import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
+import type { PullRequestGateDeps } from './pullRequest';
 import {
   currentBranch,
   type PanelReviewDiff,
@@ -75,6 +76,8 @@ export interface OrchestrationServiceOptions {
   canLaunch?: () => boolean;
   log?: (message: string) => void;
   now?: () => number;
+  /** open_pull_request 的推送闸门数据（见 `pullRequest.ts`）；缺省时该工具拒绝 */
+  pullRequestGate?: PullRequestGateDeps;
 }
 
 /** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
@@ -232,6 +235,7 @@ function deferredHost(resolve: () => HostLookup): OrchestrationHost {
     reviewDiff: (input, signal) => call((host) => host.reviewDiff(input, signal)),
     runChecks: (input, signal) => call((host) => host.runChecks(input, signal)),
     mergeWorktree: (input, signal) => call((host) => host.mergeWorktree(input, signal)),
+    openPullRequest: (input, signal) => call((host) => host.openPullRequest(input, signal)),
     rejectWork: (input, signal) => call((host) => host.rejectWork(input, signal)),
     cleanupWorktree: (input, signal) => call((host) => host.cleanupWorktree(input, signal)),
   };
@@ -443,6 +447,7 @@ export function createOrchestrationService(
         ...(options.workflows ? { workflows: options.workflows } : {}),
         workflowEngine,
         now,
+        ...(options.pullRequestGate ? { pullRequestGate: options.pullRequestGate } : {}),
       });
       return { ok: true, host };
     })();

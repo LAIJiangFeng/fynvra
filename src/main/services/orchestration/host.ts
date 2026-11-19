@@ -1,4 +1,6 @@
-import { basename, dirname } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import type {
   CleanupWorktreeInput,
   CleanupWorktreeOutput,
@@ -8,6 +10,8 @@ import type {
   HostResult,
   ListWorkersOutput,
   MergeWorktreeOutput,
+  OpenPullRequestInput,
+  OpenPullRequestOutput,
   OrchestrationHost,
   ReadWorkerOutputInput,
   ReadWorkerOutputOutput,
@@ -55,10 +59,20 @@ import {
 } from './checkCommand';
 import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
+import {
+  buildPullRequestBody,
+  isRestrictedPushTask,
+  isValidBranchName,
+  linkOrSubmodulePaths,
+  type PullRequestGateDeps,
+  pullRequestInputError,
+  pullRequestUrlOf,
+  pushGateError,
+} from './pullRequest';
 import { currentBranch, readDispatchOutput, reviewDispatchDiff } from './queries';
 import { pendingQuestionOf, takePendingQuestion } from './workerHost';
 import type { WorkflowEngine } from './workflowEngine';
-import { mergedCleanupBlocker, worktreeGone } from './worktreeCleanup';
+import { cleanupStatus, mergedCleanupBlocker, worktreeGone } from './worktreeCleanup';
 import { isInsideDirectory } from './worktreesRoot';
 
 /** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
@@ -106,6 +120,20 @@ export interface OrchestrationHostDeps {
   workflowEngine?: WorkflowEngine;
   /** 时钟（epoch ms），默认 `Date.now`。 */
   now?: () => number;
+  /** open_pull_request 推送闸门的数据；缺省时该工具一律拒绝（宁可不推也不带着未检查的内容推）。 */
+  pullRequestGate?: PullRequestGateDeps;
+}
+
+const GH_MISSING =
+  'the GitHub CLI (gh) is not installed or cannot run; install it from https://cli.github.com and run `gh auth login`, then try again';
+const GH_LOGGED_OUT =
+  'the GitHub CLI (gh) is not logged in; run `gh auth login` in a terminal, then try again';
+
+/** 命令输出里可能带密钥（如带凭据的 remote URL）：已知值打码、截短后才进错误文本 */
+function redact(text: string, known: readonly string[]): string {
+  let out = text.trim();
+  for (const value of known) out = out.split(value).join('***');
+  return out.length > 600 ? `…${out.slice(-600)}` : out;
 }
 
 /** Host 自己投递的消息（如排队任务启动失败的 escalation）的发送方。 */
@@ -138,6 +166,18 @@ function notMergeable(task: Task, inPlace: boolean): string {
       return `task ${task.id} is already ${inPlace ? 'accepted' : 'merged'}; call cleanup_worktree`;
     default:
       return `task ${task.id} is ${task.status} and cannot be merged`;
+  }
+}
+
+/** `gh pr list --json url` 输出里第一个已有 PR 的链接 */
+function existingPullRequestUrl(stdout: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    if (!Array.isArray(parsed)) return undefined;
+    const url = (parsed[0] as { url?: unknown } | undefined)?.url;
+    return typeof url === 'string' && url.startsWith('https://') ? url : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -176,6 +216,8 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   const inPlace = workspace.vcs === 'none';
   const now = deps.now ?? Date.now;
   const policy = deps.checkPolicy ?? DEFAULT_CHECK_COMMAND_POLICY;
+  /** 本宿主里 run_checks 退出码为 0 的命令（dispatch id → 命令），写进 PR 正文「验证」段 */
+  const passedChecks = new Map<string, string[]>();
   /** 正在建 worktree / 起会话的 task，排队推进时跳过 */
   const launching = new Set<string>();
   let queueTurn: Promise<void> = Promise.resolve();
@@ -746,6 +788,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     const verdict = checkCommand(input.command, policy);
     if (!verdict.ok) return fail(verdict.error);
     const result = await deps.runChecks(cwd, verdict.command, signal);
+    if (result.exitCode === 0) {
+      const passed = passedChecks.get(found.dispatch.id) ?? [];
+      if (!passed.includes(verdict.command)) passed.push(verdict.command);
+      passedChecks.set(found.dispatch.id, passed);
+    }
     return {
       ok: true,
       exitCode: result.exitCode,
@@ -830,6 +877,201 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       targetBranch: coordinatorBranch,
       ...(merged.commit === '' ? {} : { commit: merged.commit }),
     };
+  }
+
+  /** base 与 worker 提交的合并基线；优先取远端跟踪分支，读不到再取本地分支 */
+  async function mergeBaseOf(base: string, headCommit: string): Promise<string | undefined> {
+    for (const ref of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+      const found = await deps.exec('git', ['merge-base', ref, headCommit], repoPath);
+      const commit = found.stdout.trim();
+      if (found.code === 0 && commit !== '') return commit;
+    }
+    return undefined;
+  }
+
+  /** 受限任务指向空 hooks 目录并 --no-verify：不让 pre-push 等 hooks 在本机跑被改过的项目代码 */
+  async function pushBranch(branch: string, restricted: boolean) {
+    if (!restricted) return deps.exec('git', ['push', '-u', 'origin', branch], repoPath);
+    const hooks = await mkdtemp(join(tmpdir(), 'fynvra-hooks-'));
+    try {
+      return await deps.exec(
+        'git',
+        ['-c', `core.hooksPath=${hooks}`, 'push', '--no-verify', '-u', 'origin', branch],
+        repoPath
+      );
+    } finally {
+      await rm(hooks, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /** gh 起不来（没装）时返回 undefined */
+  async function runGh(args: string[]) {
+    try {
+      return await deps.exec('gh', args, repoPath);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function gitText(args: string[]): Promise<string> {
+    const result = await deps.exec('git', args, repoPath);
+    if (result.code !== 0) throw new Error(`git ${args[0]} failed; nothing was pushed`);
+    return result.stdout;
+  }
+
+  async function openPullRequest(
+    input: OpenPullRequestInput
+  ): Promise<HostResult<OpenPullRequestOutput>> {
+    const invalid = pullRequestInputError(input);
+    if (invalid !== null) return fail(invalid);
+    const found = resolveCurrent(input.dispatchId);
+    if (!found.ok) return found;
+    const { task, dispatch, worktree } = found;
+    if (isInPlace(dispatch)) {
+      return fail(
+        'open_pull_request needs a git workspace; this workspace has no git, so accept the work with merge_worktree'
+      );
+    }
+    if (worktree === undefined) return fail(cleanedUp(dispatch));
+    if (task.status !== 'in-review') return fail(notMergeable(task, false));
+    if (dispatch.outcome !== 'succeeded') {
+      return fail(`dispatch ${dispatch.id} did not report success`);
+    }
+    const gate = deps.pullRequestGate;
+    if (gate === undefined) return fail('open_pull_request is not available in this host');
+
+    const status = await git.status(worktree);
+    if (!status.ok) return fail(`could not read the worktree status: ${status.error}`);
+    if (status.status.dirty) {
+      return fail(
+        `the worktree of dispatch ${dispatch.id} has uncommitted changes or untracked files and only committed work is pushed; ask the worker to commit them first (reject_work)`
+      );
+    }
+    const base = input.base ?? workspace.defaultBranch ?? coordinatorBranch;
+    if (!isValidBranchName(base)) return fail('base must be a valid branch name');
+    const branch = worktree.branch;
+    const head = await deps.exec(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`],
+      repoPath
+    );
+    const headCommit = head.stdout.trim();
+    if (head.code !== 0 || headCommit === '') {
+      return fail(`could not read the worker commit for ${branch}; nothing was pushed`);
+    }
+    const mergeBase = await mergeBaseOf(base, headCommit);
+    if (mergeBase === undefined) {
+      return fail(`could not find the merge base of ${branch} and ${base}; check the base branch`);
+    }
+    const range = `${mergeBase}..${headCommit}`;
+    const count = Number((await gitText(['rev-list', '--count', range])).trim());
+    if (!(count > 0))
+      return fail(`${branch} has no new commits relative to ${base}; nothing to push`);
+
+    // 闸门：整段改动文件（不认重命名，源路径也要查）、diff 正文、提交元数据、标题与正文
+    const restricted = isRestrictedPushTask(task.id);
+    const files = (
+      await gitText(['diff', '--name-only', '--no-renames', '-z', mergeBase, headCommit])
+    )
+      .split('\0')
+      .filter((file) => file !== '');
+    const links = restricted
+      ? linkOrSubmodulePaths(
+          await gitText(['diff', '--raw', '--no-renames', '-z', mergeBase, headCommit])
+        )
+      : [];
+    // --text / --no-textconv：.gitattributes 不能把真实内容藏成 binary 或交给 textconv
+    const diff = await gitText([
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--text',
+      '--no-renames',
+      mergeBase,
+      headCommit,
+    ]);
+    const messages = await gitText(['log', '--format=%an%n%ae%n%cn%n%ce%n%B', range]);
+    const body = buildPullRequestBody({
+      taskId: task.id,
+      summary: input.summary,
+      files,
+      checks: passedChecks.get(dispatch.id) ?? [],
+    });
+    let known: readonly string[];
+    let local: Awaited<ReturnType<PullRequestGateDeps['localInfo']>>;
+    try {
+      known = await gate.knownSecrets();
+      local = await gate.localInfo();
+    } catch {
+      // 不带原始错误：可能引用配置文件片段（含 key）
+      return fail('could not read the known secrets for the push check; nothing was pushed');
+    }
+    const refused = pushGateError({
+      restricted,
+      files,
+      links,
+      text: [diff, messages, input.title, body].join('\n'),
+      known,
+      local,
+    });
+    if (refused !== null) return fail(refused);
+
+    const version = await runGh(['--version']);
+    if (version === undefined || version.code !== 0) return fail(GH_MISSING);
+    const auth = await runGh(['auth', 'status']);
+    if (auth === undefined || auth.code !== 0) return fail(GH_LOGGED_OUT);
+
+    const pushed = await pushBranch(branch, restricted);
+    if (pushed.code !== 0) {
+      return fail(`git push failed: ${redact(pushed.stderr || pushed.stdout, known)}`);
+    }
+    const listed = await runGh([
+      'pr',
+      'list',
+      '--head',
+      branch,
+      '--state',
+      'open',
+      '--json',
+      'url',
+    ]);
+    if (listed === undefined || listed.code !== 0) {
+      return fail(
+        `${branch} was pushed, but gh pr list failed: ${redact(listed?.stderr ?? '', known)}`
+      );
+    }
+    let url = existingPullRequestUrl(listed.stdout);
+    if (url === undefined) {
+      const dir = await mkdtemp(join(tmpdir(), 'fynvra-pr-'));
+      try {
+        const bodyFile = join(dir, 'body.md');
+        await writeFile(bodyFile, body, 'utf8');
+        const args = ['pr', 'create', '--head', branch, '--base', base, '--title', input.title];
+        args.push('--body-file', bodyFile, ...(input.draft === true ? ['--draft'] : []));
+        const created = await runGh(args);
+        if (created === undefined) return fail(GH_MISSING);
+        url = created.code === 0 ? pullRequestUrlOf(created.stdout) : undefined;
+        if (url === undefined) {
+          return fail(
+            `${branch} was pushed, but gh pr create failed: ${redact(created.stderr || created.stdout, known)}`
+          );
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
+    const pullRequest = { url, branch, base, headCommit };
+    const completed = store.tasks.update(task.id, {
+      status: 'completed',
+      mergedDiff: { baseCommit: worktree.baseCommit, headCommit },
+      pullRequest,
+    });
+    if (!completed.ok) {
+      return fail(`opened ${url}, but the task could not be marked completed: ${completed.error}`);
+    }
+    await advanceQueue();
+    return { ok: true, ...pullRequest };
   }
 
   async function rejectWork(
@@ -1064,9 +1306,13 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     // .git 已不在（上次删到一半）：没有检出可保护，跳过状态检查，用强删清掉残留目录；分支仍只用 -d。
     const gone = completed && (await worktreeGone(worktree));
     if (completed && !gone) {
-      const status = await git.status(worktree);
+      const status = await cleanupStatus(git, worktree, task);
       if (!status.ok) return fail(`could not read the worktree status: ${status.error}`);
-      const blocker = mergedCleanupBlocker(task.status, status.status);
+      const blocker = mergedCleanupBlocker(
+        task.status,
+        status.status,
+        task.pullRequest !== undefined
+      );
       if (blocker !== null) {
         return fail(
           `cannot clean up completed task ${task.id}: ${blocker}; preserve and resolve the remaining work before retrying cleanup`
@@ -1083,6 +1329,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail(`could not remove the worktree ${worktree.path}: ${removed.error}`);
     }
     store.worktrees.delete(worktree.id);
+    // PR 还没合并：本地分支保留
+    if (task.pullRequest !== undefined) {
+      return { ok: true, removedWorktree: true, deletedBranch: false };
+    }
     // 已验收任务只用 -d，且不用 --force 删目录，保护验收之后的新改动。
     const deleted = await git.deleteBranch({
       repoPath,
@@ -1101,6 +1351,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     reviewDiff: (input) => guard(() => reviewDiff(input)),
     runChecks: (input, signal) => guard(() => runChecks(input, signal)),
     mergeWorktree: (input) => guard(() => mergeWorktree(input)),
+    openPullRequest: (input) => guard(() => openPullRequest(input)),
     rejectWork: (input, signal) => guard(() => rejectWork(input, signal)),
     cleanupWorktree: (input) => guard(() => cleanupWorktree(input)),
   };

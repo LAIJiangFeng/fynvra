@@ -18,6 +18,7 @@ function orchestrationHost() {
     reviewDiff: ok,
     runChecks: ok,
     mergeWorktree: ok,
+    openPullRequest: ok,
     rejectWork: ok,
     cleanupWorktree: ok,
   };

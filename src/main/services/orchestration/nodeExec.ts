@@ -22,7 +22,8 @@ export const nodeExec: ExecFn = (cmd, args, cwd) =>
         maxBuffer: MAX_BUFFER,
         timeout: GIT_TIMEOUT_MS,
         windowsHide: true,
-        env: { ...savedCommandEnvironment(), GIT_TERMINAL_PROMPT: '0' },
+        // gh（open_pull_request）同样不能进入交互
+        env: { ...savedCommandEnvironment(), GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' },
       },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') reject(error);

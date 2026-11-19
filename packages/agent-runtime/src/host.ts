@@ -127,6 +127,20 @@ export interface MergeWorktreeOutput {
   mode?: 'in-place';
 }
 
+export interface OpenPullRequestInput extends DispatchRef {
+  title: string;
+  summary: string;
+  /** 目标分支；缺省为工作区默认分支 */
+  base?: string;
+  draft?: boolean;
+}
+export interface OpenPullRequestOutput {
+  url: string;
+  branch: string;
+  base: string;
+  headCommit: string;
+}
+
 export interface RejectWorkInput {
   dispatchId: string;
   feedback: string;
@@ -176,6 +190,10 @@ export interface OrchestrationHost {
   reviewDiff(input: DispatchRef, signal?: AbortSignal): Promise<HostResult<ReviewDiffOutput>>;
   runChecks(input: RunChecksInput, signal?: AbortSignal): Promise<HostResult<RunChecksOutput>>;
   mergeWorktree(input: DispatchRef, signal?: AbortSignal): Promise<HostResult<MergeWorktreeOutput>>;
+  openPullRequest(
+    input: OpenPullRequestInput,
+    signal?: AbortSignal
+  ): Promise<HostResult<OpenPullRequestOutput>>;
   rejectWork(input: RejectWorkInput, signal?: AbortSignal): Promise<HostResult<RejectWorkOutput>>;
   cleanupWorktree(
     input: CleanupWorktreeInput,
@@ -193,6 +211,7 @@ export const ORCHESTRATION_TOOL_METHODS = {
   review_diff: 'reviewDiff',
   run_checks: 'runChecks',
   merge_worktree: 'mergeWorktree',
+  open_pull_request: 'openPullRequest',
   reject_work: 'rejectWork',
   cleanup_worktree: 'cleanupWorktree',
 } as const satisfies Record<string, keyof OrchestrationHost>;

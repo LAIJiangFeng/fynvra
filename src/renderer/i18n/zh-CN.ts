@@ -643,6 +643,8 @@ export const zhCN = {
     backToTasks: '返回任务列表',
     backToTasksHint: '返回任务列表（Esc）',
     viewChanges: '查看改动',
+    pullRequest: 'PR',
+    openPullRequest: '在浏览器中打开 PR：{url}',
     attempts: '尝试',
     attemptsCount: '尝试（{count}）',
     waitingDeps: '等待依赖完成后派发',

@@ -7,6 +7,7 @@ import type {
   Dispatch,
   GitWorktreeManager,
   OrchestrationStore,
+  Task,
   TaskStatus,
   Worktree,
   WorktreeStatus,
@@ -62,12 +63,28 @@ export async function worktreeGone(worktree: Worktree): Promise<boolean> {
  */
 async function worktreeStatus(
   git: GitWorktreeManager,
-  worktree: Worktree
+  worktree: Worktree,
+  task?: Task
 ): ReturnType<GitWorktreeManager['status']> {
   if (await worktreeGone(worktree)) {
     return { ok: true, status: { dirty: false, ahead: 0, behind: 0 } };
   }
-  return git.status(worktree);
+  return cleanupStatus(git, worktree, task);
+}
+
+/**
+ * 清理判定用的 worktree 状态：带 PR 的任务以已推送的 headCommit 为基准，
+ * ahead / behind 都为 0 即 HEAD 等于已推送提交（见 {@link mergedCleanupBlocker}）。
+ */
+export function cleanupStatus(
+  git: GitWorktreeManager,
+  worktree: Worktree,
+  task: Pick<Task, 'pullRequest'> | undefined
+): ReturnType<GitWorktreeManager['status']> {
+  const pushed = task?.pullRequest?.headCommit;
+  return pushed === undefined
+    ? git.status(worktree)
+    : git.status({ path: worktree.path, baseRef: pushed, baseCommit: pushed });
 }
 
 export type MergedCleanupResult =
@@ -78,13 +95,17 @@ export type MergedCleanupResult =
 /**
  * 归档时能不能删 worker 的 worktree：任务经 merge_worktree 合并过（completed），git 也确认干净、
  * 没有合并之后的新提交（相对基准分支当前位置 ahead 为 0）。能删返回 null。
+ * `pullRequest`：任务经 open_pull_request 完成，`status` 相对已推送提交（{@link cleanupStatus}），
+ * HEAD 必须正好等于它。
  */
 export function mergedCleanupBlocker(
   taskStatus: TaskStatus | undefined,
-  status: WorktreeStatus
+  status: WorktreeStatus,
+  pullRequest = false
 ): MergedCleanupBlocker | null {
   if (taskStatus !== 'completed') return 'not-merged';
   if (status.dirty) return 'dirty';
+  if (pullRequest) return status.ahead > 0 || status.behind > 0 ? 'unmerged-commits' : null;
   return status.ahead > 0 ? 'unmerged-commits' : null;
 }
 
@@ -108,10 +129,14 @@ export async function cleanupMergedWorktree(
   if (dispatch === undefined || worktree === undefined) {
     return { removed: false, reason: 'no-worktree' };
   }
-  const status = await worktreeStatus(deps.git, worktree);
-  if (!status.ok) return { removed: false, reason: 'failed', error: status.error };
   const task = deps.store.tasks.get(dispatch.taskId);
-  const blocker = mergedCleanupBlocker(task?.status, status.status);
+  const status = await worktreeStatus(deps.git, worktree, task);
+  if (!status.ok) return { removed: false, reason: 'failed', error: status.error };
+  const blocker = mergedCleanupBlocker(
+    task?.status,
+    status.status,
+    task?.pullRequest !== undefined
+  );
   if (blocker !== null) return { removed: false, reason: blocker };
 
   if (resolve(worktree.path) === resolve(deps.repoPath)) {
@@ -127,8 +152,10 @@ export async function cleanupMergedWorktree(
   const pruned = await deps.git.prune(deps.repoPath);
   if (!pruned.ok) return { removed: false, reason: 'failed', error: pruned.error };
   deps.store.worktrees.delete(worktree.id);
-  // -d：git 再确认一次分支已合并进当前检出的分支，确认不了就留着分支
-  await deps.git.deleteBranch({ repoPath: deps.repoPath, branch: worktree.branch });
+  // PR 未合并，本地分支保留；其余用 -d，git 再确认一次分支已合并进当前检出的分支
+  if (task?.pullRequest === undefined) {
+    await deps.git.deleteBranch({ repoPath: deps.repoPath, branch: worktree.branch });
+  }
   return { removed: true };
 }
 
@@ -143,9 +170,11 @@ export async function checkSessionWorktree(
   if (dispatch === undefined || worktree === undefined) return 'none';
   const task = deps.store.tasks.get(dispatch.taskId);
   if (task?.status === 'todo' || task?.status === 'in-progress') return 'busy';
-  const status = await worktreeStatus(deps.git, worktree);
+  const status = await worktreeStatus(deps.git, worktree, task);
   if (!status.ok) return { error: status.error };
-  return mergedCleanupBlocker(task?.status, status.status) ?? 'clean';
+  return (
+    mergedCleanupBlocker(task?.status, status.status, task?.pullRequest !== undefined) ?? 'clean'
+  );
 }
 
 /**
