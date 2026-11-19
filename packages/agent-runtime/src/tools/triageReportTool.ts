@@ -58,7 +58,7 @@ const triageSchema = Type.Object(
     needInfo: Type.Optional(
       Type.Boolean({
         description:
-          'true when the bug cannot be located yet and reply asks for the missing details.',
+          'true when a bug cannot be located yet, or a feature request is too unclear to assess, and reply asks for the missing details.',
       })
     ),
   },
@@ -86,7 +86,9 @@ export function parseTriageReport(raw: unknown): TriageReport | string {
   }
   if (args.needInfo !== undefined) {
     if (typeof args.needInfo !== 'boolean') return 'needInfo must be a boolean';
-    if (args.needInfo && kind !== 'bug') return 'needInfo is only for kind "bug"';
+    if (args.needInfo && kind !== 'bug' && kind !== 'feature') {
+      return 'needInfo is only for kind "bug" or "feature"';
+    }
     report.needInfo = args.needInfo;
   }
   return report;

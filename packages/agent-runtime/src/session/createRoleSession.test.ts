@@ -905,3 +905,61 @@ describe('createRoleSession profiles', () => {
     expect(merge).not.toHaveBeenCalled();
   });
 });
+
+describe('createRoleSession profile search results', () => {
+  function lastToolText(context: TranscriptContext | undefined): string {
+    const result = context?.messages.filter((message) => message.role === 'toolResult').at(-1);
+    if (result?.role !== 'toolResult') throw new Error('no tool result in the context');
+    return result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+  }
+
+  async function search(options: Partial<CreateRoleSessionOptions> & { role: Role }) {
+    await writeFile(path.join(workdir, '.env'), 'PASSWORD=hunter2\n');
+    await mkdir(path.join(workdir, 'src'), { recursive: true });
+    await writeFile(path.join(workdir, 'src', 'login.ts'), 'const PASSWORD_FIELD = 1;\n');
+    const { session } = await open(options);
+    const contexts: TranscriptContext[] = [];
+    const calls: { name: string; args: ToolCall['arguments'] }[] = [
+      { name: 'grep', args: { pattern: 'PASSWORD' } },
+      { name: 'ls', args: {} },
+    ];
+    faux.setResponses([
+      ...calls.map((call, index) => (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage(fauxToolCall(call.name, call.args, { id: `call-${index}` }), {
+          stopReason: 'toolUse',
+        });
+      }),
+      (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage('done');
+      },
+    ]);
+    await session.prompt('Search.');
+    await rm(path.join(workdir, '.env'), { force: true });
+    return { grep: lastToolText(contexts[1]), ls: lastToolText(contexts[2]) };
+  }
+
+  it('hides committed sensitive files from triage grep and ls results', async () => {
+    const { grep, ls } = await search({
+      role: role({}),
+      profile: 'triage',
+      triageHost: { triageReport: async () => ({ ok: true }) },
+    });
+    expect(grep).toContain('src/login.ts');
+    expect(grep).not.toContain('hunter2');
+    expect(ls).toContain('src/');
+    expect(ls).not.toContain('.env');
+  });
+
+  it('hides them for a restricted session too', async () => {
+    const { grep, ls } = await search({
+      role: role({ tools: 'readonly', approvalMode: 'full' }),
+      profile: 'restricted',
+    });
+    expect(grep).toContain('src/login.ts');
+    expect(ls).toContain('src/');
+    expect(grep).not.toContain('hunter2');
+    expect(ls).not.toContain('.env');
+  });
+});

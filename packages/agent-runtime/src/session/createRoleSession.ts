@@ -6,6 +6,9 @@ import {
   type BashSpawnHook,
   createAgentSession,
   createBashToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
   createPowerShellToolDefinition,
   DefaultResourceLoader,
   defineTool,
@@ -18,6 +21,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Role, SessionProfile, ThinkingLevel } from '@fynvra/core';
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
+import { filterSensitiveResults } from '../approval/profilePolicy';
 import { type ExecFn, nodeExec } from '../exec';
 import type { ConfigHost, OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
@@ -179,12 +183,16 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
   const planMode = !triage && (orchestrator || !workerToolset) ? options.planMode : undefined;
   const directPlanMode = orchestrator ? undefined : planMode;
   const settingsManager = options.settingsManager ?? createDefaultSettings();
-  const { customTools, noTools } = selectTools(
+  const selected = selectTools(
     options,
     workerToolset,
     settingsManager,
     directPlanMode !== undefined
   );
+  const { noTools } = selected;
+  const customTools = options.profile
+    ? withSensitiveFilter(cwd, selected.customTools, noTools !== undefined)
+    : selected.customTools;
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
   const promptAppend = triage
@@ -380,6 +388,32 @@ function selectTools(
     default:
       throw new Error(`role "${role.id}" has an unknown tool policy: ${String(role.tools)}`);
   }
+}
+
+/**
+ * 档位会话的 grep / find / ls 过滤掉指向敏感文件的结果。pi 默认工具（all 策略）没有自定义版本时，
+ * 用同名的 defaultActive: false 定义覆盖实现（不改变默认是否启用）。
+ */
+function withSensitiveFilter(
+  cwd: string,
+  tools: ToolDefinition[],
+  builtinDisabled: boolean
+): ToolDefinition[] {
+  const present = new Set(tools.map((tool) => tool.name));
+  const overrides = builtinDisabled
+    ? []
+    : [createGrepToolDefinition(cwd), createFindToolDefinition(cwd), createLsToolDefinition(cwd)]
+        .filter((tool) => !present.has(tool.name))
+        .map((tool) => defineTool({ ...(tool as ToolDefinition), defaultActive: false }));
+  return [...tools, ...overrides].map((tool) =>
+    ['grep', 'find', 'ls'].includes(tool.name)
+      ? {
+          ...tool,
+          execute: async (...args: Parameters<ToolDefinition['execute']>) =>
+            filterSensitiveResults(tool.name, await tool.execute(...args)),
+        }
+      : tool
+  );
 }
 
 /** 内存设置：与用户本机的 pi CLI 配置隔离；关掉 pi 的安装遥测与 provider 署名请求头 */

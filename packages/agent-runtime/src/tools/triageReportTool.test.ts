@@ -23,8 +23,12 @@ describe('parseTriageReport', () => {
     expect(parseTriageReport({ ...base, reply })).toContain('too long');
   });
 
-  it('allows needInfo only for bugs', () => {
-    expect(parseTriageReport({ ...base, kind: 'feature', needInfo: true })).toContain('only for');
+  it('allows needInfo only for bugs and features', () => {
+    expect(parseTriageReport({ ...base, kind: 'question', needInfo: true })).toContain('only for');
+    expect(parseTriageReport({ ...base, kind: 'invalid', needInfo: true })).toContain('only for');
+    expect(parseTriageReport({ ...base, kind: 'feature', needInfo: true })).toMatchObject({
+      needInfo: true,
+    });
     expect(parseTriageReport({ ...base, needInfo: true })).toMatchObject({ needInfo: true });
   });
 });

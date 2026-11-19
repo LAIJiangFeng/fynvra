@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ApprovalMode, SessionProfile } from '@fynvra/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type ApprovalRequestFn, createApprovalGate } from './gate';
+import { filterSensitiveResults } from './profilePolicy';
 
 let root: string;
 let cwd: string;
@@ -51,7 +52,6 @@ describe('approval gate: restricted profile', () => {
       write(path.join(outside, 'new.txt')),
       read('../outside/secret.txt'),
       write('../outside/new.txt'),
-      read('~/x'),
       ['grep', { pattern: 'x', path: '..' }] as const,
       ['ls', { path: outside }] as const,
     ]) {
@@ -172,5 +172,73 @@ describe('approval gate: triage profile', () => {
       'triage session: path outside the working directory is not allowed'
     );
     expect((await env.check(...read('.env.local')))?.reason).toContain('sensitive file');
+  });
+});
+
+describe('approval gate: path forms and shell directories', () => {
+  it('refuses short names, alternate data streams, dependency folders and malformed paths for writing', async () => {
+    const env = setup();
+    for (const target of [
+      'PACKAG~1.JSO',
+      'package.json::$DATA',
+      'src/a.ts::$DATA',
+      'node_modules/x.js',
+      'src/a.ts.',
+      'src/a.ts ',
+      'src/*.ts',
+    ]) {
+      const result = await env.check(...write(target));
+      expect(result?.reason, target).toMatch(/^restricted session: /);
+    }
+    expect((await env.check(...read('src/a?.ts')))?.reason).toMatch(/not allowed/);
+    expect((await env.check(...read('~/x')))?.reason).toMatch(/not allowed/);
+    expect(env.request).not.toHaveBeenCalled();
+  });
+
+  it('confines a working-directory argument of a shell tool', async () => {
+    const env = setup();
+    expect((await env.check('bash', { command: 'pnpm lint', cwd: outside }))?.reason).toContain(
+      'path outside the working directory is not allowed'
+    );
+    expect(
+      (await env.check('powershell', { command: 'pnpm lint', workdir: '..' }))?.reason
+    ).toContain('outside');
+    expect(await env.check('bash', { command: 'pnpm lint', cwd: 'src' })).toBeUndefined();
+  });
+});
+
+describe('filterSensitiveResults', () => {
+  const text = (value: string) => ({ content: [{ type: 'text', text: value }], details: { x: 1 } });
+
+  it('drops grep matches and context lines from sensitive files', () => {
+    const result = filterSensitiveResults(
+      'grep',
+      text(
+        [
+          '.env:1: PASSWORD=hunter2',
+          'config/.env.local-2- TOKEN=x',
+          'keys/server.pem:3: -----BEGIN',
+          'src/a.ts:4: const PASSWORD_FIELD = 1;',
+          'docs/a-1- b.md:2: PASSWORD',
+        ].join('\n')
+      )
+    );
+    expect(result.content).toEqual([
+      { type: 'text', text: 'src/a.ts:4: const PASSWORD_FIELD = 1;\ndocs/a-1- b.md:2: PASSWORD' },
+    ]);
+    expect(result.details).toBeUndefined();
+  });
+
+  it('drops sensitive entries from find and ls and keeps other tools as they are', () => {
+    expect(filterSensitiveResults('find', text('src/a.ts\n.env\nid_rsa.pub')).content).toEqual([
+      { type: 'text', text: 'src/a.ts' },
+    ]);
+    expect(filterSensitiveResults('ls', text('.env\n.npmrc')).content).toEqual([
+      { type: 'text', text: 'No results (sensitive files are hidden)' },
+    ]);
+    const untouched = text('src/a.ts');
+    expect(filterSensitiveResults('ls', untouched)).toBe(untouched);
+    const read = text('.env:1: x');
+    expect(filterSensitiveResults('read', read)).toBe(read);
   });
 });
