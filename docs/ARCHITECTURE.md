@@ -235,9 +235,9 @@ export interface Message {
     - 内容处理：HTML / XHTML 取前 2 MB，linkedom + `@mozilla/readability`（设 `maxElemsToParse`）提取正文、turndown 转 Markdown，失败或过短则回退整个 body，正文极短且有脚本时提示可能需要 JavaScript 渲染；纯文本、Markdown、CSV、JSON（≤ 1 MB 时格式化）、XML / RSS / Atom 按文本输出；PDF、图片等其他类型返回不支持的错误。字符集依次取 Content-Type charset、BOM、前 4 KB 内的 `<meta charset>` / `http-equiv`，都没有用 utf-8，由 `TextDecoder` 解码（gbk / gb18030 / big5 等），标签无效时回退 utf-8 并注明。
     - 输出：头部列 URL、Title、Content-Type、Redirected from（如有）和“显示第 X–Y 字符，共 Z”；正文包在 `--- BEGIN UNTRUSTED WEB CONTENT ---` / `--- END UNTRUSTED WEB CONTENT ---` 之间（网页内容是数据不是指令）；有剩余时提示用 `start_index=Y` 继续。错误：4xx/5xx 返回状态码与 ≤ 500 字符正文摘录；网络错误、超时、地址拦截分别给出可读原因，不泄露环境变量的值。
     - 缓存：每个 worker 进程一个内存 LRU（最多 32 条、保留 15 分钟、正文合计 ≤ 20 MB），以请求 URL 为键，只缓存成功的转换结果，用于分页；不落盘、不跨会话持久。
-    - 代理：用会话加载时的代理快照（§7.7），`createRoleSession` 把 `options.commandEnv ? options.commandEnv(process.env) : process.env` 作为 `proxyEnv` 交给工具；不新增 spawn 字段，设置修改后新加载的会话才生效。
+    - 代理：用会话加载时的代理快照（§7.7，默认跟随系统代理，地址由 Main 解析后随 `SpawnSessionSpec.networkProxy` 下发），`createRoleSession` 把 `options.commandEnv ? options.commandEnv(process.env) : process.env` 作为 `proxyEnv` 交给工具；设置或系统代理修改后新加载的会话才生效。
     - 本机回环开关：`preferences.webFetchAllowLoopback`（默认关闭）→ spawn spec `webFetchAllowLoopback?: true`（与代理一样每次构建 spec 时读取，之后新加载的会话生效）→ `createRoleSession({ webFetch: { allowLoopback } })` → `createWebFetchTool({ allowLoopback })`。开启后只放行回环：主机名 `localhost` / `*.localhost` 与回环 IP 字面量（`127/8`、`::1`、`::ffff:127.x.x.x`），其余拦截规则不变；URL 主机本身须是回环名或回环字面量，公网域名解析到回环仍拒绝；重定向按当前这一跳判定：只有从回环页面才能重定向到回环，公网页面不能重定向到本机（回环 → 公网 → 回环同样拒绝）；回环目标始终直连不走代理（lookup 只接受回环地址），结果不进缓存。关闭时行为不变，拒绝本机地址的错误文本提示可在「设置 → 通用」开启。
-    - 不做：联网搜索 `web_search`（未实现）、浏览器自动化 / JavaScript 渲染 / 截图 / 页面交互、复用 Cookie 或登录态、读取 PDF / Word、用辅助模型总结网页、按角色开关 / 域名白名单 / 记住域名审批、读取 Windows 系统代理或 PAC。
+    - 不做：联网搜索 `web_search`（未实现）、浏览器自动化 / JavaScript 渲染 / 截图 / 页面交互、复用 Cookie 或登录态、读取 PDF / Word、用辅助模型总结网页、按角色开关 / 域名白名单 / 记住域名审批、按目标 URL 逐个解析 PAC、SOCKS 代理。
   - 审批门（`createApprovalGate`）：类别为命令 `command`（bash / powershell / run_checks）、文件写改 `file-write` / `file-edit`（write / edit / apply_patch）、`mcp`（MCP 工具）、`network`（`web_fetch`，详情显示完整 URL）、`plugin`（插件注册的工具，详情显示工具名和参数预览）。`plugin` 由审批门选项 `pluginTools?: () => ReadonlySet<string>`（实时读取）判定，只用于 `approvalKindOf` 判不出类别的工具；被插件覆盖的内置工具名仍按原类别（如 bash 仍是 command）。`ApprovalKind` 在 runtime 与 shared 两边同形。档位：`supervised` 审批 command、file-write、file-edit、mcp、network、plugin；`auto-edits` 审批 command、mcp、network、plugin；`full` 放行普通操作。计划模式（§7.10）下 plugin 与 mcp 一样不论档位都要人确认，network 照档位处理。保护底线（`rm -rf`、`Remove-Item -Recurse`、`del /s`、`git push`、`git reset --hard`、包管理器 `publish`）在 `supervised` / `auto-edits` 下都要人确认，`allowSession` 不豁免；`full` 下由审批门选项 `confirmProtected?: () => boolean`（实时读取，缺省或读取失败视为 true）决定，为 false 时直接放行。宿主链路：`preferences.confirmDangerousActions`（默认关闭）→ spawn spec `confirmDangerousActions?: true`，设置变更时 Main 向 worker 里的所有会话发 `set-confirm-dangerous-actions`，已打开的会话从下一次工具调用起生效；计划模式的确认不受它影响；10 分钟未答复、回合中止、通道缺失或断连按 deny，拒绝以可读文本作为工具结果返回模型。`allow` 放行一次；`allowSession` 按 kind + 工具名缓存，从 full 切回更严档位清空缓存；切档位不自动答复已有请求。
   - worker 先发 `approval-request`（kind / title / detail / expiresAt）给 Main 登记，再发 `approval_request` 会话事件；请求等待 `allow` / `allowSession` / `deny`。Main 校验 session / request id、generation、有效期与一次响应，维持 `waiting-approval` 并推送 `sessions:approval-request`；Stop、超时、结算、销毁时撤下请求，迟到 / 重复 / 旧 generation 答复不能执行工具。OS 桌面审批通知继续遵循 `askAndApproval` 偏好并按 request id 去重，不等待启动静默期或合并窗口，聚焦当前会话也提醒一次；点击只定位会话。
   - Renderer 保留会话内审批卡和三档权限选择，只移除 App 顶部跨会话全局审批横幅及其详情弹窗（ApprovalAttention）。`tool_notice` 仅保留历史解析兼容，新执行路径不以通知替代审批。持久化 `waiting-approval` 沿用重启后归 idle 的恢复规则（原 worker 已不存在），不重放未执行的旧工具；实时等待状态保持真实审批状态。源码修改不会热更新已安装应用或原进程里的待答复调用。
@@ -413,11 +413,18 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 
 ### 7.7 Git 与命令网络代理
 
-- 作用范围：命令 / Git 子进程、内置 `web_fetch`（§5，用会话加载时的环境快照）与 Telegram Bot API 流量（§7.14，Main 照 `networkTest.ts` 的 `https.Agent({ proxyEnv })` 使用 `preferences.networkProxy`，每次请求现读设置）。不读 Windows 系统代理或 PAC；模型 API、MCP 和应用更新的流量仍不走这个设置。
-
-- 通用设置 `preferences.networkProxy` 仅包含模式（默认沿用进程环境）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
+- 作用范围：命令 / Git 子进程（git、gh、run_checks、新终端、技能 clone、Telegram 干净检出的 fetch）、内置 `web_fetch`（§5，用会话加载时的环境快照）与 Telegram Bot API 流量（§7.14，Main 照 `networkTest.ts` 的 `https.Agent({ proxyEnv })` 使用 `preferences.networkProxy`，每次请求现读设置）。模型 API、MCP 和应用更新的流量仍不走这个设置。
+- 三种模式：「跟随系统代理」（`system`，默认，未保存设置时即此模式）、「使用现有环境」（`environment`，只继承 `HTTP(S)_PROXY` 等环境变量）、「手动代理」（`manual`）。用户显式保存过的 environment / manual 照旧生效。
+- 跟随系统代理：
+  - 解析：Main 用 `session.defaultSession.resolveProxy('https://github.com')`（Chromium 读系统代理 / PAC，跨平台），由 shared 纯函数把结果转成代理 URL：取第一个条目，`PROXY h:p` → `http://h:p`、`HTTPS h:p` → `https://h:p`（IPv6 加方括号）；`DIRECT` 为直连；`SOCKS` / `SOCKS4` / `SOCKS5` 为「不支持」，按直连处理并在设置页提示改用手动代理；得到的 URL 走与 manual 相同的校验（无账号密码、端口合法），不合法按「未知」处理。
+  - 缓存与刷新（`src/main/services/systemProxy.ts`）：同步读取缓存的当前结果；启动时先刷新一次，在 Agent 会话与 Telegram 启动前等它完成，但最多等 3 秒，超时照常启动；之后每 10 秒后台刷新（timer unref）；设置页查询状态、「测试连接」、Telegram 每次请求前，缓存超过 5 秒先刷新再用。刷新失败保留上一次的结果，连续失败只记一次日志。
+  - 生效：解析到代理时，环境变量的处理同手动模式（删掉所有大小写形式的代理变量，设 `HTTP(S)_PROXY`，加 Git `http.proxy`），唯一区别是 `NO_PROXY` 设为 `localhost,127.0.0.1,::1`，让本机服务直连；直连、不支持或未知时继承原环境，不做任何改动。
+  - 解析出的地址不写入 `settings.json`；Agent 会话由 Main 在 spawn 时把它随 `SpawnSessionSpec.networkProxy`（`{ mode: 'system', gitCompatibility, url? }`，`url` 即解析出的地址，两端同样校验）下发，worker 用它算环境，会话加载时取一次快照。
+  - `settings:system-proxy` 无参数，返回 `{ ok: true, status }`，status 为 `{ kind: 'proxy', url }` / `{ kind: 'direct' }` / `{ kind: 'unsupported' }` / `{ kind: 'unknown' }`；查询前缓存超过 5 秒先刷新。
+  - 限制：PAC 不按目标逐个解析（统一按 `https://github.com` 解析一次）；不支持 SOCKS 与代理认证；日志只出现代理的 host:port。
+- 通用设置 `preferences.networkProxy` 仅包含模式（默认跟随系统代理）、无认证 HTTP/HTTPS 代理地址及 Git 兼容开关；两端严格校验，恢复默认删除覆盖。手动模式统一 HTTP_PROXY/HTTPS_PROXY 的大小写值，清除 ALL_PROXY，并清空 NO_PROXY（不继承绕过规则）。兼容模式仅设置 HTTP/1.1 与 Git protocol v0，不降低 TLS。
 - 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
-- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段，双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
+- Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段（system 模式可多带解析出的 `url`），双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
 - `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
 
 ### 7.8 上下文自动压缩
@@ -592,7 +599,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   - 群里只能收到两类内容：经过滤的 `triage_report.reply`，和 Main 生成的固定模板通知（PR 链接、暂不采纳、需要维护者处理、中性拦截提示）。值班会话与 worker 的内容永远不发到群里。
 - 所属层与必改文件：
   - **Main 服务** `src/main/services/telegram/`：
-    - `api.ts`：Bot API `getMe`、`getUpdates`（`allowed_updates: ['message', 'my_chat_member']`，长轮询）、`sendMessage`（纯文本）、`setMyCommands`（只注册 `/bug`）；走 §7.7 代理；429 按 `retry_after` 重试一次；错误分为 `network` / `unauthorized` / `conflict`（同一 token 另有实例在轮询）/ `api` 四类；token 和带 token 的 URL 不进日志与错误文案。
+    - `api.ts`：Bot API `getMe`、`getUpdates`（`allowed_updates: ['message', 'my_chat_member']`，长轮询）、`sendMessage`（纯文本）、`setMyCommands`（只注册 `/bug`）；走 §7.7 代理（默认跟随系统代理，每次请求前按缓存规则刷新）；网络错误的提示说明检查 VPN 或改用手动代理，不含 token；429 按 `retry_after` 重试一次；错误分为 `network` / `unauthorized` / `conflict`（同一 token 另有实例在轮询）/ `api` 四类；token 和带 token 的 URL 不进日志与错误文案。
     - 轮询：全局只有一个长轮询（启用且有 token 时）；每批 update 先把新的 `pollOffset` 落盘再处理（崩溃时宁可丢一批，不重复处理）；失败按 3 秒起、翻倍、最多 60 秒退避，成功后归零；私聊（`chat.type === 'private'`）一律忽略，不回复。
     - 群发现与准入：机器人被拉进的群（`my_chat_member`）、在未允许的群里收到的消息，都把该群记为候选（只存 id 与标题，最多 20 个，超出淘汰最旧的），消息本身丢弃；只在电脑上允许并绑定 git 工作区，没有群内命令。机器人被移出已允许的群时停止投递。已允许群里只有 `/bug@机器人 …` 和回复机器人的消息才投递，只取文字（图片、文件忽略）。
     - 限流与批次：每人每小时最多 5 条（超出丢弃）；每批只含一个群，防抖 3 秒后合成一条 prompt；每群最多排 50 条，超出丢最旧的。正文包进 `<untrusted-content>` … `</untrusted-content>`，正文里伪造的开闭标签要转义；发送者只带显示名与消息 id。
