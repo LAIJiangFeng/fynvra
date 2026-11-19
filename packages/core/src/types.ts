@@ -117,6 +117,8 @@ export interface Task {
   fastMode?: boolean;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
+  /** open_pull_request 成功时写入；PR 只开不合并，本地分支保留。旧快照缺省。 */
+  pullRequest?: { url: string; branch: string; base: string; headCommit: string };
   /** 按工作流派发时的定义快照与进度；普通任务没有。`roleId` 是最近启动的节点的角色。 */
   workflow?: TaskWorkflow;
 }

@@ -48,6 +48,8 @@ export {
   type HostResult,
   type ListWorkersOutput,
   type MergeWorktreeOutput,
+  type OpenPullRequestInput,
+  type OpenPullRequestOutput,
   ORCHESTRATION_TOOL_METHODS,
   type OrchestrationHost,
   type OrchestrationToolName,

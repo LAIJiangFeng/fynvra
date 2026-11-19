@@ -1,4 +1,5 @@
 import * as nodeFs from 'node:fs/promises';
+import { homedir, hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import {
@@ -12,10 +13,12 @@ import {
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
+import { collectAppSecrets, type LocalInfoContext } from '../secrets';
 import type { CheckCommandPolicy } from './checkCommand';
 import type { RunChecksFn } from './host';
 import type { WorkerSessionLauncher } from './launcher';
 import { nodeExec } from './nodeExec';
+import type { PullRequestGateDeps } from './pullRequest';
 import {
   type CoordinatorWork,
   createOrchestrationService,
@@ -47,6 +50,8 @@ export interface OrchestrationRegistryOptions {
   /** 用户定义的工作流（生产为 workflows.json 注册表）；缺省时不能按工作流派发 */
   workflows?: { list(): Promise<readonly Workflow[]> };
   log?: (message: string) => void;
+  /** open_pull_request 推送闸门的数据；缺省读 providers.json / mcp.json / 环境变量与本机路径 */
+  pullRequestGate?: PullRequestGateDeps;
 }
 
 /** Main 内所有工作区的 OrchestrationService；agent-host 的两个工厂与 orchestration IPC 都经它查找。 */
@@ -118,6 +123,33 @@ export function createOrchestrationRegistry(
     repoPaths: () => options.listWorkspaces().map((workspace) => workspace.repoPath),
     log: options.log,
   });
+  const localInfo = async (): Promise<LocalInfoContext> => {
+    const workspaces = options.listWorkspaces();
+    const roots = await Promise.all(
+      workspaces.map((workspace) => resolveWorktreesRoot(workspace).catch(() => undefined))
+    );
+    let userName: string | undefined;
+    try {
+      userName = userInfo().username;
+    } catch {
+      // 没有用户记录时只按路径与主机名检查
+    }
+    return {
+      paths: [
+        homedir(),
+        options.userDataPath,
+        fallbackWorktreesRoot(options.userDataPath),
+        ...workspaces.map((workspace) => workspace.repoPath),
+        ...roots.filter((root): root is string => root !== undefined),
+      ],
+      ...(userName ? { userName } : {}),
+      hostName: hostname(),
+    };
+  };
+  const pullRequestGate = options.pullRequestGate ?? {
+    knownSecrets: collectAppSecrets,
+    localInfo,
+  };
   const services = new Map<string, OrchestrationService>();
   const reconcileWorkers = () => {
     for (const service of services.values()) service.reconcileWorkers();
@@ -169,6 +201,7 @@ export function createOrchestrationRegistry(
       ...(options.workflows ? { workflows: options.workflows } : {}),
       canLaunch: () => launcher !== unwiredLauncher,
       log: options.log,
+      pullRequestGate,
     });
     services.set(workspace.id, service);
     return service;

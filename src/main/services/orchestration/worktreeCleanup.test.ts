@@ -40,6 +40,18 @@ describe('mergedCleanupBlocker（归档时能不能删 worker 的 worktree）', 
     expect(mergedCleanupBlocker('completed', { ...clean, ahead: 1 })).toBe('unmerged-commits');
     expect(mergedCleanupBlocker('completed', { dirty: true, ahead: 2, behind: 0 })).toBe('dirty');
   });
+
+  it('带 PR 的任务：HEAD 必须正好等于已推送提交（相对它 ahead / behind 都为 0）', () => {
+    const pushed = { dirty: false, ahead: 0, behind: 0 };
+    expect(mergedCleanupBlocker('completed', pushed, true)).toBeNull();
+    expect(mergedCleanupBlocker('completed', { ...pushed, ahead: 1 }, true)).toBe(
+      'unmerged-commits'
+    );
+    expect(mergedCleanupBlocker('completed', { ...pushed, behind: 1 }, true)).toBe(
+      'unmerged-commits'
+    );
+    expect(mergedCleanupBlocker('completed', { ...pushed, dirty: true }, true)).toBe('dirty');
+  });
 });
 
 const fsError = (code: string) => Object.assign(new Error(code), { code });
