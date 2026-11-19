@@ -339,6 +339,16 @@ describe('轮询与 token', () => {
     const rejected = await h.service.setToken(TOKEN);
     expect(rejected.ok).toBe(false);
     expect(JSON.stringify(rejected)).not.toContain(TOKEN);
+    // 网络错误给人话提示，即使错误文本里带了 token 也要打码
+    h.api.getMe.mockRejectedValueOnce(
+      new TelegramApiError('network', `getMe: ECONNRESET ${TOKEN}`)
+    );
+    const offline = await h.service.setToken(TOKEN);
+    expect(offline.ok).toBe(false);
+    expect(offline.ok ? '' : offline.error).toMatch(
+      /^连不上 api\.telegram\.org（ECONNRESET .*）：请确认 VPN 或代理已开启.*网络代理/
+    );
+    expect(JSON.stringify(offline)).not.toContain(TOKEN);
     expect((await h.service.setToken(TOKEN)).ok).toBe(true);
     expect(h.saved().token).toBe(TOKEN);
     expect(h.service.getState().bot).toEqual({ id: BOT_ID, username: 'fyn_bot' });

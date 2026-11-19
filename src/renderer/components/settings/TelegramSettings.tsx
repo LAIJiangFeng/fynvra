@@ -148,6 +148,9 @@ export function TelegramSettings() {
               )}
             </dl>
           )}
+          {state?.connection === 'network-error' && (
+            <InlineMessage tone="error">{t('settings.telegram.networkHint')}</InlineMessage>
+          )}
         </div>
       </section>
 
