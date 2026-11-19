@@ -26,6 +26,7 @@ import {
   ORCHESTRATOR_PROMPT,
   WORKER_CONTRACT_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import {
   type CreateRoleSessionOptions,
   createRoleSession,
@@ -961,5 +962,46 @@ describe('createRoleSession profile search results', () => {
     expect(ls).toContain('src/');
     expect(grep).not.toContain('hunter2');
     expect(ls).not.toContain('.env');
+  });
+});
+
+describe('createRoleSession restricted coordinator', () => {
+  const coordinator = () =>
+    role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' });
+
+  it('drops git_readonly, web_fetch, write_plan and write_doc, which a normal coordinator keeps', async () => {
+    const excluded = ['git_readonly', 'web_fetch', 'write_plan', 'write_doc'];
+    const normal = await open({ role: coordinator(), host: orchestrationHost() });
+    expect(normal.session.getActiveToolNames()).toEqual(expect.arrayContaining(excluded));
+    const restricted = await open({
+      role: coordinator(),
+      host: orchestrationHost(),
+      profile: 'restricted',
+    });
+    const active = restricted.session.getActiveToolNames();
+    for (const name of excluded) expect(active).not.toContain(name);
+    expect(active).toEqual(expect.arrayContaining(['read', 'dispatch_task', 'review_diff']));
+  });
+
+  it('appends the restricted section to the coordinator prompt only for restricted sessions', async () => {
+    const prompts: string[] = [];
+    for (const profile of ['restricted', undefined] as const) {
+      const { session } = await open({
+        role: builtinRole(ORCHESTRATOR_ROLE_ID),
+        host: orchestrationHost(),
+        ...(profile ? { profile } : {}),
+      });
+      faux.setResponses([
+        (context: TranscriptContext) => {
+          prompts.push(systemText(context));
+          return fauxAssistantMessage('ok');
+        },
+      ]);
+      await session.prompt('hi');
+    }
+    const [restricted, normal] = prompts;
+    expect(restricted).toContain(RESTRICTED_COORDINATOR_PROMPT.trim());
+    expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
+    expect(normal).not.toContain('# Restricted session');
   });
 });

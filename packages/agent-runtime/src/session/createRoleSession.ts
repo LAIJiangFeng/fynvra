@@ -32,6 +32,7 @@ import {
   DIRECT_PLAN_MODE_PROMPT,
   PLAN_MODE_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import { TRIAGE_PROMPT } from '../prompts/triagePrompt';
 import { createConfigTool } from '../tools/configTool';
 import {
@@ -141,6 +142,12 @@ export interface CreateRoleSessionOptions {
   triageHost?: TriageHost | null;
 }
 
+/**
+ * restricted 会话不注册的工具：git_readonly 不受受限命令规则约束（`git diff --no-index`、`git show HEAD:.env`
+ * 能读到仓库外或敏感文件）；web_fetch 联网；write_plan / write_doc 写到 cwd 之外的 `.fynvra/plans`
+ */
+const RESTRICTED_EXCLUDED_TOOLS = new Set(['git_readonly', 'web_fetch', 'write_plan', 'write_doc']);
+
 /** 没有审批通道：需要审批的调用全部拒绝，拒绝文本说明原因 */
 const NO_APPROVAL_CHANNEL: ApprovalPolicyHooks = {
   request: async () => {
@@ -191,11 +198,17 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
   );
   const { noTools } = selected;
   const customTools = options.profile
-    ? withSensitiveFilter(cwd, selected.customTools, noTools !== undefined)
+    ? withSensitiveFilter(
+        cwd,
+        options.profile === 'restricted'
+          ? selected.customTools.filter((tool) => !RESTRICTED_EXCLUDED_TOOLS.has(tool.name))
+          : selected.customTools,
+        noTools !== undefined
+      )
     : selected.customTools;
 
   const mcp = createRoleMcpExtensions(options.resourcePaths.mcpServers);
-  const promptAppend = triage
+  const roleAppend = triage
     ? TRIAGE_PROMPT
     : buildRolePromptAppend(role, {
         worker: workerToolset !== undefined,
@@ -207,6 +220,10 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
           ? { instructionFile: options.resourcePaths.instructionFile }
           : {}),
       });
+  const promptAppend =
+    options.profile === 'restricted' && orchestrator
+      ? [roleAppend, RESTRICTED_COORDINATOR_PROMPT].filter(Boolean).join('\n\n')
+      : roleAppend;
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),
