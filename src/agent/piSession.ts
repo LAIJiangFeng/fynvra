@@ -83,7 +83,7 @@ export interface PiSessionFactoryOptions {
  * 审批门由 createRoleSession 按 spec.role.approvalMode（Main 给的会话档位）建好，经 onGate 交回这里，换档位调它的 setMode。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
-  return async ({ identity, spec, host, workerHost, configHost, approval }) => {
+  return async ({ identity, spec, host, workerHost, configHost, triageHost, approval }) => {
     const model = await options.resolveModel(withRoleThinking(spec.model, spec.role));
     // 插件在 createRoleSession 里加载，此前先让它们按服务 id 找得到模型服务
     if (spec.pluginRefs?.length) options.registerPlugins?.(spec.pluginRefs);
@@ -146,6 +146,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         host,
         workerHost,
         configHost: configHost ?? null,
+        ...(spec.profile ? { profile: spec.profile, triageHost: triageHost ?? null } : {}),
         // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
         ...(approval
           ? {
