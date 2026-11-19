@@ -1,4 +1,10 @@
-import type { ConfigHost, HostResult, OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
+import type {
+  ConfigHost,
+  CreateRoleSessionOptions,
+  HostResult,
+  OrchestrationHost,
+  WorkerHost,
+} from '@fynvra/agent-runtime';
 import { errorMessage } from '@shared/guards';
 import type {
   AgentWorkerEvent,
@@ -159,6 +165,13 @@ export function orchestrationHostProxy(call: HostCall): OrchestrationHost {
 /** fynvra_config 背后的配置宿主（kind: 'config'，method: 'configure'） */
 export function configHostProxy(call: HostCall): ConfigHost {
   return { configure: (input, signal) => forward(call('configure', input, signal)) };
+}
+
+export type TriageHost = NonNullable<CreateRoleSessionOptions['triageHost']>;
+
+/** triage_report 背后的宿主（kind: 'telegram'，method: 'triageReport'）；消息由 Main 发，不在 agent 进程里发 */
+export function triageHostProxy(call: HostCall): TriageHost {
+  return { triageReport: (report, signal) => forward(call('triageReport', report, signal)) };
 }
 
 /** worker 工具背后的 WorkerHost：位置参数打包成对象转发（kind: 'worker'） */

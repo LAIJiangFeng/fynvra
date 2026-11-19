@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
 import type {
   ApprovalMode,
@@ -6,11 +8,18 @@ import type {
   FynvraSessionEvent,
   FynvraSessionEventBody,
   Role,
+  SessionProfile,
   ThinkingLevel,
   Workflow,
 } from '@fynvra/core';
-import { summarizeWorkflow } from '@fynvra/core';
-import { errorMessage } from '@shared/guards';
+import {
+  checkRestrictedCommand,
+  getBuiltinRole,
+  ORCHESTRATOR_ROLE_ID,
+  summarizeWorkflow,
+  WORKER_ROLE_ID,
+} from '@fynvra/core';
+import { asRecord, errorMessage } from '@shared/guards';
 import { supportsFastMode } from '@shared/modelFast';
 import type {
   AgentApprovalRequest,
@@ -52,6 +61,7 @@ import {
 } from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
 import { translate } from '../../i18n';
+import { isInsideDirectory } from '../orchestration/worktreesRoot';
 import type { BranchTracker } from '../sessions/branches';
 import { readHistory, readHistoryProjection, sessionFilePath } from '../sessions/history';
 import type { LastModelStore } from '../sessions/lastModels';
@@ -134,6 +144,8 @@ export interface AgentHostDeps {
   config?: {
     invoke(method: string, input: unknown, signal: AbortSignal): Promise<HostCallResult>;
   };
+  /** triage_report 等 host-invoke（kind: 'telegram'）的宿主（T4 的 Telegram 服务）；只有 triage 会话能调，缺省时一律失败 */
+  telegram?: TelegramHostDeps;
   /**
    * 删除带 worktree 的会话前删掉它的 worktree 与分支（生产为 OrchestrationService.removeSessionWorktree）；
    * 失败时会话保留。缺省只删注册表记录
@@ -151,6 +163,27 @@ export interface AgentHostDeps {
 export interface CreateSessionInput {
   workspaceId: string;
   roleId: string;
+  model?: SessionModelRef;
+}
+
+export interface TelegramHostDeps {
+  /** sessionId 已由 Main 确认是 triage 会话；input 未收窄，由实现方校验；永不抛异常为佳 */
+  invoke(
+    sessionId: string,
+    method: string,
+    input: unknown,
+    signal: AbortSignal
+  ): Promise<HostCallResult>;
+}
+
+/** Main 内部创建档位会话（不经 IPC）：triage 用内置 worker 角色的固定配置，restricted 用 orchestrator 角色 */
+export interface CreateProfileSessionInput {
+  workspaceId: string;
+  profile: SessionProfile;
+  /** 必须是工作区仓库根，或工作区 worktree 根目录（`<worktreesRoot>/<workspaceId>`）下的目录；按真实路径校验 */
+  cwd: string;
+  /** 缺省为角色名 */
+  title?: string;
   model?: SessionModelRef;
 }
 
@@ -192,6 +225,17 @@ export interface AgentHostService extends AgentHost {
   setCoordinatorLookup(f: (workspaceId: string, runId: string) => string | undefined): void;
   /** 主 agent 会话是否还有未完成的编排任务（摘要的 awaitingWorkers）；由 orchestration 接线时注入 */
   setActiveWorkLookup(f: (sessionId: string) => boolean): void;
+  /**
+   * 工作区里未结束的任务，每个任务给出它所属 Run 的主 agent 会话 id；restricted 的 dispatchTask 并发上限用。
+   * 由 orchestration 接线时注入；未注入时 restricted 会话不能派发
+   */
+  setOpenTaskLookup(f: (workspaceId: string) => Promise<readonly string[]>): void;
+  /** 工作区的 worktree 托管根目录（`worktreesRoot.ts`）；未注入时档位会话只能建在仓库根 */
+  setWorktreesRootLookup(f: (workspace: Workspace) => Promise<string>): void;
+  /** Main 内部入口（T4 用，不暴露成 IPC）：创建带档位与指定 cwd 的会话 */
+  createProfileSession(
+    input: CreateProfileSessionInput
+  ): Promise<IpcResult<{ session: SessionSummary }>>;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -345,6 +389,8 @@ const NO_ORCHESTRATION_HOST =
 const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
 const TITLE_MAX_CHARS = 60;
+/** restricted 会话所在工作区同时未结束的任务上限（§7.14 第 12 条） */
+const MAX_RESTRICTED_OPEN_TASKS = 3;
 const DESCRIBE_TIMEOUT_MS = 15_000;
 /** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
 const SUGGESTION_TIMEOUT_MS = 10_000;
@@ -395,6 +441,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   let workerHostFor: (sessionId: string) => WorkerHost | null = () => null;
   let coordinatorOf: (workspaceId: string, runId: string) => string | undefined = () => undefined;
   let hasActiveWork: (sessionId: string) => boolean = () => false;
+  let openTasksOf: ((workspaceId: string) => Promise<readonly string[]>) | undefined;
+  let worktreesRootOf: ((workspace: Workspace) => Promise<string>) | undefined;
+  /** 各工作区 restricted 会话正在进行的 dispatchTask：并发调用也计入上限 */
+  const restrictedDispatching = new Map<string, number>();
   const observers = new Set<SessionObserver>();
   const failureListeners = new Set<() => void>();
   const roundWaiters = new Set<() => void>();
@@ -629,12 +679,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     stored: StoredSession
   ): Promise<Result<{ spec: SpawnSessionSpec; ref: ModelRef }>> {
     try {
-      const role = await deps.roles.get(stored.roleId);
+      const { profile } = stored;
+      // triage 不认用户改过的角色：用内置 worker 的固定配置（工具与提示词由档位决定）
+      const role =
+        profile === 'triage' ? getBuiltinRole(WORKER_ROLE_ID) : await deps.roles.get(stored.roleId);
       if (!role) return fail(translate('agent.roleNotFound', { id: stored.roleId }));
       const resolved = await deps.models.resolve(stored.model ?? modelRefOf(role));
       if (!resolved.ok) return resolved;
       const model = withReasoning(resolved.model, await reasoningOf(resolved.ref));
-      const resources = await resolveResources(role);
+      // 档位会话不带用户的个人配置：MCP、插件、skills、全局指令文件都不读
+      const resources: RoleResources = profile
+        ? { skills: [], mcpServers: [], warnings: [] }
+        : await resolveResources(role);
       for (const warning of resources.warnings) log('warn', `session ${stored.id}: ${warning}`);
       const roles = role.tools === 'orchestrator' ? roleOptions(await deps.roles.list()) : [];
       const workflows = role.tools === 'orchestrator' ? await workflowOptions(stored.id) : [];
@@ -685,6 +741,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(stored.planMode === true && stored.dispatchId === undefined
             ? { planMode: true }
             : {}),
+          ...(profile ? { profile, plugins: [] } : {}),
         },
       };
     } catch (error) {
@@ -1170,14 +1227,22 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     let result: HostCallResult;
     try {
       if (kind === 'config') {
-        result = deps.config
-          ? await deps.config.invoke(method, input, controller.signal)
-          : fail('Fynvra configuration is not available in this session');
+        result =
+          stored.profile !== undefined
+            ? fail(`${stored.profile} session: Fynvra configuration is not available`)
+            : deps.config
+              ? await deps.config.invoke(method, input, controller.signal)
+              : fail('Fynvra configuration is not available in this session');
       } else if (kind === 'orchestration') {
-        const host = orchestrationHostFor(stored.id, stored.workspaceId);
-        result = host
-          ? await invokeOrchestrationHost(host, method, input, controller.signal)
-          : fail(NO_ORCHESTRATION_HOST);
+        result = await invokeOrchestration(stored, method, input, controller.signal);
+      } else if (kind === 'telegram') {
+        // 只认会话记录的档位，不信任工具参数
+        result =
+          stored.profile !== 'triage'
+            ? fail('Telegram tools are only available in triage sessions')
+            : deps.telegram
+              ? await deps.telegram.invoke(stored.id, method, input, controller.signal)
+              : fail('Telegram is not available');
       } else {
         // Never rebind an old run to a retry inserted while report_done is returning.
         if (stored.dispatchId !== undefined) state.workerHost ??= workerHostFor(stored.id);
@@ -1198,6 +1263,89 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // 结果无法跨进程传递（如带函数）时至少让工具拿到错误，而不是等到超时
       send({ ...command, result: fail(`${method} returned a result that cannot be delivered`) });
     }
+  }
+
+  /** 编排调用：档位会话先按会话记录的 profile 拦截（与 agent-runtime 工具层的拦截互为纵深防御） */
+  async function invokeOrchestration(
+    stored: StoredSession,
+    method: string,
+    input: unknown,
+    signal: AbortSignal
+  ): Promise<HostCallResult> {
+    if (stored.profile === 'triage') {
+      return fail('triage session: orchestration tools are not available; use triage_report');
+    }
+    const restricted = stored.profile === 'restricted';
+    if (restricted) {
+      const denied = await restrictedDenial(stored.workspaceId, method, input);
+      if (denied) return fail(denied);
+    }
+    const host = orchestrationHostFor(stored.id, stored.workspaceId);
+    if (!host) return fail(NO_ORCHESTRATION_HOST);
+    if (!restricted || method !== 'dispatchTask') {
+      return invokeOrchestrationHost(host, method, input, signal);
+    }
+    const workspaceId = stored.workspaceId;
+    restrictedDispatching.set(workspaceId, (restrictedDispatching.get(workspaceId) ?? 0) + 1);
+    try {
+      return await invokeOrchestrationHost(host, method, input, signal);
+    } finally {
+      const left = (restrictedDispatching.get(workspaceId) ?? 1) - 1;
+      if (left > 0) restrictedDispatching.set(workspaceId, left);
+      else restrictedDispatching.delete(workspaceId);
+    }
+  }
+
+  /** restricted 会话的编排拦截；放行返回 undefined */
+  async function restrictedDenial(
+    workspaceId: string,
+    method: string,
+    input: unknown
+  ): Promise<string | undefined> {
+    if (method === 'mergeWorktree') {
+      return 'restricted session: merge_worktree is not allowed; deliver the work with open_pull_request instead';
+    }
+    if (method === 'runChecks') {
+      const command = asRecord(input)?.command;
+      if (typeof command !== 'string') return 'runChecks needs a command';
+      const checked = checkRestrictedCommand(command, { mode: 'checks' });
+      return checked.ok ? undefined : `restricted session: ${checked.reason}`;
+    }
+    if (method !== 'dispatchTask') return undefined;
+    if (!openTasksOf) return 'restricted session: the task count is unavailable, cannot dispatch';
+    const coordinators = await openTasksOf(workspaceId);
+    const open =
+      coordinators.filter((id) => deps.store.get(id)?.profile === 'restricted').length +
+      (restrictedDispatching.get(workspaceId) ?? 0);
+    return open >= MAX_RESTRICTED_OPEN_TASKS
+      ? `restricted session: at most ${MAX_RESTRICTED_OPEN_TASKS} unfinished tasks per workspace; wait for a task to finish (or abandon one) before dispatching another`
+      : undefined;
+  }
+
+  /** 档位会话的 cwd：真实路径必须是仓库根，或在 `<worktreesRoot>/<workspaceId>` 之下 */
+  async function profileCwdOf(workspace: Workspace, cwd: string): Promise<Result<{ cwd: string }>> {
+    const refused = fail(
+      'session directory must be the workspace repository or under its worktrees root'
+    );
+    if (!isAbsolute(cwd)) return refused;
+    let real: string;
+    try {
+      real = await realpath(cwd);
+      if (!(await stat(real)).isDirectory()) return refused;
+    } catch {
+      return refused;
+    }
+    const repo = await realpath(workspace.repoPath).catch(() => undefined);
+    if (repo && isInsideDirectory(real, repo) && isInsideDirectory(repo, real)) {
+      return { ok: true, cwd: real };
+    }
+    if (!worktreesRootOf) return refused;
+    const root = await realpath(join(await worktreesRootOf(workspace), workspace.id)).catch(
+      () => undefined
+    );
+    return root && isInsideDirectory(real, root) && !isInsideDirectory(root, real)
+      ? { ok: true, cwd: real }
+      : refused;
   }
 
   /** 审批门的请求：记为待审批，推给 Renderer 的审批条（kind / 标题 / 详情 / 到期时间以 worker 为准） */
@@ -1744,6 +1892,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       }
       if (!role) return fail(translate('agent.roleNotFound', { id: input.roleId }));
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
+      const parent = parentSessionId ? deps.store.get(parentSessionId) : undefined;
       // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型、思考档位与 Fast
       let requested: SessionModelRef | undefined;
       if (input.model !== undefined) {
@@ -1786,6 +1935,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
           role.approvalMode,
         // 计划模式不随主 agent：worker 会话永远没有
+        // restricted 协调者派出的 worker 一律受限；查不到协调者或它的记录时也按受限（fail-closed）
+        ...(parent === undefined || parent.profile === 'restricted'
+          ? { profile: 'restricted' as const }
+          : {}),
       };
       deps.store.put(stored);
       changed(stored.workspaceId);
@@ -1851,6 +2004,46 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setActiveWorkLookup(lookup) {
       hasActiveWork = lookup;
+    },
+    setOpenTaskLookup(lookup) {
+      openTasksOf = lookup;
+    },
+    setWorktreesRootLookup(lookup) {
+      worktreesRootOf = lookup;
+    },
+    async createProfileSession(input) {
+      const workspace = deps.workspaces.get(input.workspaceId);
+      if (!workspace) return fail(translate('common.workspaceNotFound'));
+      const checked = await profileCwdOf(workspace, input.cwd);
+      if (!checked.ok) return checked;
+      const roleId = input.profile === 'triage' ? WORKER_ROLE_ID : ORCHESTRATOR_ROLE_ID;
+      let role: Role | undefined;
+      try {
+        role = input.profile === 'triage' ? getBuiltinRole(roleId) : await deps.roles.get(roleId);
+      } catch (error) {
+        return fail(errorMessage(error));
+      }
+      if (!role) return fail(translate('agent.roleNotFound', { id: roleId }));
+      const requested = input.model ?? modelRefOf(role);
+      const resolved = await deps.models.resolve(requested && bareRef(requested));
+      if (!resolved.ok) return resolved;
+      const time = now();
+      const stored: StoredSession = {
+        id: newId(),
+        workspaceId: workspace.id,
+        roleId,
+        title: input.title ?? role.name,
+        cwd: checked.cwd,
+        status: 'idle',
+        createdAt: time,
+        updatedAt: time,
+        model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
+        approvalMode: role.approvalMode,
+        profile: input.profile,
+      };
+      deps.store.put(stored);
+      changed(workspace.id);
+      return { ok: true, session: summaryOf(stored) };
     },
     start() {
       client.start();

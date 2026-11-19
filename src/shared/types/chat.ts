@@ -3,6 +3,7 @@ import {
   type ApprovalMode,
   type ContextRuntimeSnapshot,
   type FynvraSessionEvent,
+  type SessionProfile,
   type ThinkingLevel,
 } from '@fynvra/core'; // 事件类型由 Task 10 挪进 core；src/shared 不得 import agent-runtime
 import { asRecord } from '../guards';
@@ -33,6 +34,8 @@ export interface SessionSummary {
   worktreeId?: string;
   parentSessionId?: string;
   dispatchId?: string;
+  /** 会话档位（只读）：只由 Main 内部创建时写入，任何 IPC 入参都不接受 */
+  readonly profile?: SessionProfile;
   status: SessionStatus;
   /** Present only while loaded. Compare contextRuntimeSeq with live event seq before applying. */
   contextRuntime?: ContextRuntimeSnapshot;

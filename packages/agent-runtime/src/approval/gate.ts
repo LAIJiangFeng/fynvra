@@ -3,7 +3,7 @@ import type {
   ExtensionFactory,
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
-import type { ApprovalMode } from '@fynvra/core';
+import type { ApprovalMode, SessionProfile } from '@fynvra/core';
 import { CONFIG_TOOL_NAME } from '../tools/configTool';
 import { isDocumentPath } from '../tools/documentPath';
 import { errorMessage } from '../tools/result';
@@ -16,6 +16,7 @@ import {
   fileTargetsOf,
   modeRequiresApproval,
 } from './policy';
+import { profileRefusal } from './profilePolicy';
 import { protectedAction } from './protectedCommand';
 import { isReadOnlyCommand } from './readonlyCommand';
 
@@ -82,6 +83,13 @@ export interface ApprovalGateOptions extends ApprovalPolicyHooks {
    * `plugin`；内置工具名即使出现在集合里也保持原类别。读取失败按 plugin 处理（fail-closed）。
    */
   pluginTools?: () => ReadonlySet<string>;
+  /**
+   * 会话档位（实时读取，写法同 planMode）：有值时每个工具调用只直接放行或直接拒绝（见 {@link profileRefusal}），
+   * 不问人，不受档位与 allowSession 影响。读取失败按 restricted 处理（fail-closed）
+   */
+  profile?: () => SessionProfile | undefined;
+  /** 会话工作目录：档位会话的路径都必须在它的真实路径之内 */
+  cwd?: string;
 }
 
 /** pi `tool_call` 事件里审批门用到的部分 */
@@ -152,6 +160,20 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     }
     const kind =
       approvalKindOf(call.toolName, call.input) ?? (isPluginTool(call.toolName) ? 'plugin' : null);
+    const profile = profileOf();
+    if (profile) {
+      const reason = await profileRefusal(
+        profile,
+        options.cwd,
+        call.toolName,
+        call.input,
+        kind
+      ).catch(
+        (error: unknown) =>
+          `${profile} session: the call could not be checked (${errorMessage(error)}), so it was refused`
+      );
+      return reason === undefined ? undefined : { block: true, reason };
+    }
     if (!kind) return undefined;
     const planning = planModeOn();
     if (planning && (kind === 'file-write' || kind === 'file-edit')) {
@@ -210,6 +232,15 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
       return options.planMode?.() === true;
     } catch {
       return true;
+    }
+  }
+
+  function profileOf(): SessionProfile | undefined {
+    if (!options.profile) return undefined;
+    try {
+      return options.profile();
+    } catch {
+      return 'restricted';
     }
   }
 

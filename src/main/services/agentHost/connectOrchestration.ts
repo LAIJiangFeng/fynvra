@@ -1,5 +1,12 @@
+import type { TaskStatus } from '@fynvra/core';
 import type { OrchestrationRegistry } from '../orchestration/registry';
 import type { AgentHostService } from './agentHost';
+
+const FINISHED_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'completed',
+  'failed',
+  'abandoned',
+]);
 
 /**
  * 把 agent host 与编排注册表接成一条链（ARCHITECTURE §6、§9.5），生产在 `src/main/index.ts` 调用：
@@ -22,5 +29,14 @@ export async function connectOrchestration(
     registry.coordinatorOf(workspaceId, runId)
   );
   agentHost.setActiveWorkLookup((sessionId) => registry.hasActiveWork(sessionId));
+  agentHost.setOpenTaskLookup(async (workspaceId) => {
+    const service = registry.serviceFor(workspaceId);
+    if (!service) return [];
+    const { runs, tasks } = await service.snapshot();
+    const coordinators = new Map(runs.map((run) => [run.id, run.coordinatorSessionId]));
+    return tasks
+      .filter((task) => !FINISHED_TASK_STATUSES.has(task.status))
+      .flatMap((task) => coordinators.get(task.runId) ?? []);
+  });
   await registry.openAll();
 }

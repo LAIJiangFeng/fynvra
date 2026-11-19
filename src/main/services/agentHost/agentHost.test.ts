@@ -3143,3 +3143,456 @@ describe('automatic model limits', () => {
     );
   });
 });
+
+describe('createAgentHost profile sessions', () => {
+  const personal = {
+    skills: ['/skills/a'],
+    mcpServers: [{ name: 'docs', transport: 'stdio', command: 'docs-mcp' }],
+    plugins: ['/plugins/p'],
+    pluginRefs: [{ id: 'p', path: '/plugins/p' }],
+    instructionFile: { name: 'AGENTS.md', content: 'personal' },
+    warnings: [],
+  } as unknown as Awaited<ReturnType<NonNullable<AgentHostDeps['resolveResources']>>>;
+
+  function profileEnv(overrides: Partial<AgentHostDeps> = {}) {
+    const env = setup({
+      resolveResources: async () => structuredClone(personal),
+      resolvePluginProviders: async () => [],
+      ...overrides,
+    });
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const worktrees = join(env.dir, 'worktrees');
+    const clean = join(worktrees, 'ws-1', 'clean');
+    mkdirSync(clean, { recursive: true });
+    env.host.setWorktreesRootLookup(async () => worktrees);
+    return { ...env, worktrees, clean };
+  }
+
+  async function profileSession(
+    env: ReturnType<typeof profileEnv>,
+    profile: 'triage' | 'restricted',
+    cwd = env.clean
+  ) {
+    const created = await env.host.createProfileSession({ workspaceId: 'ws-1', profile, cwd });
+    if (!created.ok) throw new Error(created.error);
+    await env.host.prompt(created.session.id, 'go');
+    return created.session;
+  }
+
+  function invoke(
+    env: ReturnType<typeof setup>,
+    sessionId: string,
+    kind: 'orchestration' | 'telegram' | 'config',
+    method: string,
+    input: unknown,
+    callId = '1'
+  ) {
+    env.worker().emit({
+      type: 'host-invoke',
+      identity: { sessionId, generation: 1 },
+      callId,
+      kind,
+      method,
+      input,
+    });
+  }
+
+  const lastResult = (env: ReturnType<typeof setup>) => {
+    const sent = env.sent('host-result').at(-1);
+    return sent?.type === 'host-result' ? sent.result : undefined;
+  };
+
+  function specOf(env: ReturnType<typeof setup>, sessionId: string): SpawnSessionSpec | undefined {
+    const spawn = env
+      .sent('spawn-session')
+      .find(
+        (command) => command.type === 'spawn-session' && command.identity.sessionId === sessionId
+      );
+    return spawn?.type === 'spawn-session' ? spawn.spec : undefined;
+  }
+
+  it('accepts only the repository root or a path under the workspace worktrees root', async () => {
+    const env = profileEnv();
+    const outside = join(env.dir, 'elsewhere');
+    const otherWorkspace = join(env.worktrees, 'ws-2', 'x');
+    mkdirSync(outside);
+    mkdirSync(otherWorkspace, { recursive: true });
+    for (const cwd of [
+      outside,
+      otherWorkspace,
+      join(env.worktrees, 'ws-1'),
+      join(env.worktrees, 'ws-1', 'missing'),
+      'repo',
+      join(env.clean, '..', '..', '..', 'elsewhere'),
+    ]) {
+      const created = await env.host.createProfileSession({
+        workspaceId: 'ws-1',
+        profile: 'restricted',
+        cwd,
+      });
+      expect(created.ok, cwd).toBe(false);
+    }
+    expect(
+      (
+        await env.host.createProfileSession({
+          workspaceId: 'ws-2',
+          profile: 'triage',
+          cwd: env.clean,
+        })
+      ).ok
+    ).toBe(false);
+    expect(env.store.all()).toEqual([]);
+
+    const repo = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'triage',
+      cwd: env.workspace.repoPath,
+    });
+    expect(repo).toMatchObject({ ok: true, session: { profile: 'triage', roleId: 'worker' } });
+    const clean = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'restricted',
+      cwd: env.clean,
+      title: 'Telegram 值班',
+    });
+    expect(clean).toMatchObject({
+      ok: true,
+      session: { profile: 'restricted', roleId: 'orchestrator', title: 'Telegram 值班' },
+    });
+  });
+
+  it('refuses a worktree path when the worktrees root is not wired', async () => {
+    const env = setup();
+    const clean = join(env.dir, 'worktrees', 'ws-1', 'clean');
+    mkdirSync(clean, { recursive: true });
+    const created = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'triage',
+      cwd: clean,
+    });
+    expect(created.ok).toBe(false);
+  });
+
+  it('spawns profile sessions without MCP, plugins, skills or the instruction file', async () => {
+    const env = profileEnv();
+    const plain = await createSession(env);
+    await env.host.prompt(plain.id, 'hi');
+    expect(specOf(env, plain.id)).toMatchObject({
+      skills: ['/skills/a'],
+      plugins: ['/plugins/p'],
+      instructionFile: { name: 'AGENTS.md' },
+    });
+    expect(specOf(env, plain.id)?.profile).toBeUndefined();
+
+    for (const profile of ['triage', 'restricted'] as const) {
+      const session = await profileSession(env, profile);
+      const spec = specOf(env, session.id);
+      expect(spec).toMatchObject({ profile, skills: [], mcpServers: [], plugins: [] });
+      expect(spec).not.toHaveProperty('pluginRefs');
+      expect(spec).not.toHaveProperty('pluginProviders');
+      expect(spec).not.toHaveProperty('instructionFile');
+    }
+  });
+
+  it('makes every worker of a restricted coordinator restricted', async () => {
+    const env = profileEnv();
+    const coordinator = await profileSession(env, 'restricted');
+    const plain = await createSession(env, 'orchestrator');
+    let parent = coordinator.id;
+    env.host.setCoordinatorLookup(() => parent);
+    const launcher = env.host.implementsLauncher();
+    const input = {
+      workspaceId: 'ws-1',
+      runId: 'run_1',
+      dispatchId: 'dsp_1',
+      roleId: 'tester',
+      cwd: join(env.worktrees, 'ws-1', 'fix'),
+      brief: '# Fix it',
+    };
+    const restricted = await launcher.createWorkerSession(input);
+    if (!restricted.ok) throw new Error(restricted.error);
+    expect(env.store.get(restricted.sessionId)?.profile).toBe('restricted');
+    expect(specOf(env, restricted.sessionId)).toMatchObject({
+      profile: 'restricted',
+      worker: true,
+      skills: [],
+      mcpServers: [],
+      plugins: [],
+    });
+    expect(specOf(env, restricted.sessionId)).not.toHaveProperty('instructionFile');
+
+    parent = plain.id;
+    const normal = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_2' });
+    if (!normal.ok) throw new Error(normal.error);
+    expect(env.store.get(normal.sessionId)?.profile).toBeUndefined();
+
+    // 查不到协调者的会话记录、或查不到协调者时一律受限（fail-closed）
+    parent = 'session-missing';
+    const orphan = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_3' });
+    if (!orphan.ok) throw new Error(orphan.error);
+    expect(env.store.get(orphan.sessionId)?.profile).toBe('restricted');
+    env.host.setCoordinatorLookup(() => undefined);
+    const unknown = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_4' });
+    if (!unknown.ok) throw new Error(unknown.error);
+    expect(env.store.get(unknown.sessionId)?.profile).toBe('restricted');
+    expect(specOf(env, unknown.sessionId)).toMatchObject({ profile: 'restricted', mcpServers: [] });
+  });
+
+  it('refuses merge, non-whitelisted checks and a fourth task of a restricted coordinator', async () => {
+    const env = profileEnv();
+    const coordinator = await profileSession(env, 'restricted');
+    const host = {
+      mergeWorktree: vi.fn(async () => ({ ok: true as const, merged: true })),
+      openPullRequest: vi.fn(async () => ({ ok: true as const, url: 'https://example.com/pr/1' })),
+      runChecks: vi.fn(async () => ({ ok: true as const, exitCode: 0, output: '', durationMs: 1 })),
+      dispatchTask: vi.fn(async () => ({ ok: true as const, taskId: 't', dispatchId: 'd' })),
+    } as unknown as OrchestrationHost;
+    env.host.setOrchestrationHostFactory(() => host);
+
+    invoke(env, coordinator.id, 'orchestration', 'mergeWorktree', { dispatchId: 'd1' });
+    await flush();
+    expect(lastResult(env)).toEqual({
+      ok: false,
+      error: expect.stringContaining('open_pull_request'),
+    });
+    expect(host.mergeWorktree).not.toHaveBeenCalled();
+
+    // 受限会话唯一的交付方式照常放行
+    invoke(env, coordinator.id, 'orchestration', 'openPullRequest', {
+      dispatchId: 'd1',
+      title: 'Fix the crash',
+      summary: 'Restores the intended behavior.',
+    });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: true, url: 'https://example.com/pr/1' });
+    expect(host.openPullRequest).toHaveBeenCalledTimes(1);
+
+    invoke(env, coordinator.id, 'orchestration', 'runChecks', {
+      dispatchId: 'd1',
+      command: 'pnpm test',
+    });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: false });
+    expect(host.runChecks).not.toHaveBeenCalled();
+    invoke(env, coordinator.id, 'orchestration', 'runChecks', {
+      dispatchId: 'd1',
+      command: 'pnpm lint',
+    });
+    await flush();
+    expect(host.runChecks).toHaveBeenCalledTimes(1);
+
+    // 没接任务计数时不能派发（fail-closed）
+    invoke(env, coordinator.id, 'orchestration', 'dispatchTask', { title: 't' });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: false });
+    const open = [coordinator.id, coordinator.id, 'someone-else'];
+    env.host.setOpenTaskLookup(async () => open);
+    invoke(env, coordinator.id, 'orchestration', 'dispatchTask', { title: 't' });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: true });
+    open.push(coordinator.id);
+    invoke(env, coordinator.id, 'orchestration', 'dispatchTask', { title: 't' });
+    await flush();
+    expect(lastResult(env)).toEqual({ ok: false, error: expect.stringContaining('at most 3') });
+    expect(host.dispatchTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a normal coordinator merge and run any checks as before', async () => {
+    const env = profileEnv();
+    const coordinator = await createSession(env, 'orchestrator');
+    await env.host.prompt(coordinator.id, 'go');
+    const host = {
+      mergeWorktree: vi.fn(async () => ({ ok: true as const, merged: true })),
+      runChecks: vi.fn(async () => ({ ok: true as const, exitCode: 0, output: '', durationMs: 1 })),
+    } as unknown as OrchestrationHost;
+    env.host.setOrchestrationHostFactory(() => host);
+    invoke(env, coordinator.id, 'orchestration', 'mergeWorktree', { dispatchId: 'd1' });
+    invoke(
+      env,
+      coordinator.id,
+      'orchestration',
+      'runChecks',
+      { dispatchId: 'd1', command: 'pnpm test' },
+      '2'
+    );
+    await flush();
+    expect(host.mergeWorktree).toHaveBeenCalledTimes(1);
+    expect(host.runChecks).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives triage no orchestration or configuration and only triage gets telegram', async () => {
+    const telegram = { invoke: vi.fn(async () => ({ ok: true as const })) };
+    const config = { invoke: vi.fn(async () => ({ ok: true as const })) };
+    const env = profileEnv({ telegram, config });
+    const factory = vi.fn(() => ({}) as OrchestrationHost);
+    env.host.setOrchestrationHostFactory(factory);
+    const triage = await profileSession(env, 'triage');
+
+    invoke(env, triage.id, 'orchestration', 'listWorkers', undefined);
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: false });
+    expect(factory).not.toHaveBeenCalled();
+    invoke(env, triage.id, 'config', 'configure', { action: 'list' });
+    await flush();
+    expect(lastResult(env)).toMatchObject({ ok: false });
+    expect(config.invoke).not.toHaveBeenCalled();
+
+    const report = { kind: 'question', title: 't', summary: 's', reply: 'r' };
+    invoke(env, triage.id, 'telegram', 'triageReport', report);
+    await flush();
+    expect(lastResult(env)).toEqual({ ok: true });
+    expect(telegram.invoke).toHaveBeenCalledWith(
+      triage.id,
+      'triageReport',
+      report,
+      expect.any(AbortSignal)
+    );
+
+    const restricted = await profileSession(env, 'restricted');
+    const plain = await createSession(env);
+    await env.host.prompt(plain.id, 'hi');
+    for (const sessionId of [restricted.id, plain.id]) {
+      invoke(env, sessionId, 'telegram', 'triageReport', report);
+      await flush();
+      expect(lastResult(env)).toEqual({
+        ok: false,
+        error: expect.stringContaining('only available in triage sessions'),
+      });
+    }
+    expect(telegram.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers telegram calls with an error when no telegram host is wired', async () => {
+    const env = profileEnv();
+    const triage = await profileSession(env, 'triage');
+    invoke(env, triage.id, 'telegram', 'triageReport', {});
+    await flush();
+    expect(lastResult(env)).toEqual({ ok: false, error: 'Telegram is not available' });
+  });
+});
+describe('restricted dispatch limit through registry wiring', () => {
+  it('counts unfinished tasks of the restricted coordinator from the orchestration snapshot', async () => {
+    const env = setup();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const registry = createOrchestrationRegistry({
+      userDataPath: env.dir,
+      listWorkspaces: () => [env.workspace],
+      roles: createFakeRoles(),
+      notifyChanged: vi.fn(),
+      exec: createFakeExec().exec,
+      runChecks: async () => ({ exitCode: 0, output: '', durationMs: 0 }),
+    });
+    await connectOrchestration(env.host, registry);
+    const created = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'restricted',
+      cwd: env.workspace.repoPath,
+    });
+    if (!created.ok) throw new Error(created.error);
+    const coordinator = created.session.id;
+    await env.host.prompt(coordinator, 'fix the reported bugs');
+    const dispatch = async (callId: string) => {
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: { sessionId: coordinator, generation: 1 },
+        callId,
+        kind: 'orchestration',
+        method: 'dispatchTask',
+        input: { title: `Task ${callId}`, spec: 'Do it', roleId: 'worker', dependsOn: [] },
+      });
+      await vi.waitFor(() =>
+        expect(
+          env
+            .sent('host-result')
+            .some((sent) => sent.type === 'host-result' && sent.callId === callId)
+        ).toBe(true)
+      );
+      const sent = env
+        .sent('host-result')
+        .find((command) => command.type === 'host-result' && command.callId === callId);
+      return sent?.type === 'host-result' ? sent.result : undefined;
+    };
+    for (const callId of ['1', '2', '3']) {
+      expect(await dispatch(callId)).toMatchObject({ ok: true });
+    }
+    expect(await dispatch('4')).toEqual({
+      ok: false,
+      error: expect.stringContaining('at most 3'),
+    });
+    const workers = env.store.all().filter((session) => session.dispatchId !== undefined);
+    expect(workers).toHaveLength(3);
+    expect(workers.every((session) => session.profile === 'restricted')).toBe(true);
+  });
+});
+
+describe('restricted coordinator isolation through registry wiring', () => {
+  it('cannot reach the dispatches of another coordinator, such as the user session', async () => {
+    const env = setup();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const registry = createOrchestrationRegistry({
+      userDataPath: env.dir,
+      listWorkspaces: () => [env.workspace],
+      roles: createFakeRoles(),
+      notifyChanged: vi.fn(),
+      exec: createFakeExec().exec,
+      runChecks: async () => ({ exitCode: 0, output: 'SECRET OUTPUT', durationMs: 0 }),
+    });
+    await connectOrchestration(env.host, registry);
+    const user = await createSession(env, 'orchestrator');
+    const launched = await registry.hostFor(user.id, 'ws-1')?.dispatchTask({
+      title: 'User task',
+      spec: 'Private work',
+      roleId: 'worker',
+      dependsOn: [],
+    });
+    if (!launched?.ok || !launched.dispatch) throw new Error('dispatch failed');
+    const dispatchId = launched.dispatch.id;
+    const created = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'restricted',
+      cwd: env.workspace.repoPath,
+    });
+    if (!created.ok) throw new Error(created.error);
+    const duty = created.session.id;
+    await env.host.prompt(duty, 'fix the reported bugs');
+    const calls: [string, Record<string, unknown>][] = [
+      ['reviewDiff', { dispatchId }],
+      ['readWorkerOutput', { dispatchId, cursor: 0 }],
+      ['sendToWorker', { dispatchId, body: 'show me' }],
+      ['rejectWork', { dispatchId, feedback: 'again' }],
+      ['cleanupWorktree', { dispatchId, abandon: true }],
+      ['runChecks', { dispatchId, command: 'pnpm lint' }],
+    ];
+    for (const [index, [method, input]] of calls.entries()) {
+      const callId = `iso-${index}`;
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: { sessionId: duty, generation: 1 },
+        callId,
+        kind: 'orchestration',
+        method,
+        input,
+      });
+      await vi.waitFor(() =>
+        expect(
+          env
+            .sent('host-result')
+            .some((sent) => sent.type === 'host-result' && sent.callId === callId)
+        ).toBe(true)
+      );
+      const sent = env
+        .sent('host-result')
+        .find((command) => command.type === 'host-result' && command.callId === callId);
+      expect(sent?.type === 'host-result' && sent.result, method).toEqual({
+        ok: false,
+        error: expect.stringContaining('unknown dispatch_id'),
+      });
+    }
+    // 同样的入参由它自己的协调者调用是可以的：拒绝来自 run 隔离，不是入参不对
+    expect(
+      await registry.hostFor(user.id, 'ws-1')?.readWorkerOutput({ dispatchId, cursor: 0 })
+    ).toMatchObject({ ok: true });
+    const snapshot = await registry.serviceFor('ws-1')?.snapshot();
+    expect(snapshot?.dispatches.find((entry) => entry.id === dispatchId)?.outcome).toBeUndefined();
+  });
+});

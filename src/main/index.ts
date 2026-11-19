@@ -11,10 +11,15 @@ import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
+import { getWorkspaceService } from './ipc/workspaces';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { installSessionWatchdog } from './services/agentHost/watchdog';
+import {
+  createWorktreesRootResolver,
+  fallbackWorktreesRoot,
+} from './services/orchestration/worktreesRoot';
 import { loadLoginShellPath } from './services/shellEnv';
 import { getUpdateService } from './services/updates';
 import { registerCloseBehavior } from './windows/closeBehavior';
@@ -124,6 +129,17 @@ if (!app.requestSingleInstanceLock()) {
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
+      // 档位会话的 cwd 校验与编排建 worktree 用同一套根目录规则
+      agentHost.setWorktreesRootLookup(
+        createWorktreesRootResolver({
+          fallbackRoot: fallbackWorktreesRoot(app.getPath('userData')),
+          configured: () => getSettingsFile().read().preferences.worktreesRoot,
+          repoPaths: () => {
+            const workspaces = getWorkspaceService();
+            return workspaces.list().flatMap((item) => workspaces.get(item.id)?.repoPath ?? []);
+          },
+        })
+      );
       // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
       installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
       // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复
