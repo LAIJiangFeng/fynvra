@@ -718,3 +718,99 @@ describe('编排全流程（普通目录，没有 git）', () => {
     expect(snapshot.dispatches[0]).toMatchObject({ mode: 'in-place', outcome: 'succeeded' });
   });
 });
+
+describe.skipIf(!hasGit)('受限协调者从公开基线切出（真实 git）', () => {
+  let root: string;
+  let repo: string;
+  let pushedMain: string;
+  let privateCommit: string;
+
+  function serviceFor(
+    workspace: { vcs: 'git' | 'none'; defaultBranch?: string },
+    restricted: boolean
+  ): OrchestrationService {
+    return createOrchestrationService({
+      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, ...workspace },
+      statePath: join(root, 'userData', 'orchestration', 'ws_1.json'),
+      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
+      launcher: createFakeLauncher(),
+      roles: createFakeRoles(),
+      exec: nodeExec,
+      runChecks: createShellRunner(),
+      fs,
+      notifyChanged: () => {},
+      log: () => {},
+      isRestrictedCoordinator: (sessionId) => restricted && sessionId === 'session_coord',
+    });
+  }
+
+  const dispatchWith = (service: OrchestrationService) =>
+    service
+      .hostFor('session_coord')
+      .dispatchTask({ title: 'Fix bug', spec: '## Change\nFix.', roleId: 'worker', dependsOn: [] });
+
+  /** 派发成功后 worker worktree 的路径 */
+  async function dispatchedPath(service: OrchestrationService): Promise<string> {
+    const result = await dispatchWith(service);
+    if (!result.ok || result.dispatch === undefined) throw new Error(JSON.stringify(result));
+    const path = (await service.snapshot()).worktrees[0]?.path;
+    if (path === undefined) throw new Error('worktree not registered');
+    return path;
+  }
+
+  beforeEach(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'fynvra-restricted-it-')));
+    repo = join(root, 'repo');
+    const remote = join(root, 'remote.git');
+    mkdirSync(repo);
+    git(root, 'init', '-q', '--bare', remote);
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.name', 'fynvra-test');
+    git(repo, 'config', 'user.email', 'test@fynvra.invalid');
+    git(repo, 'config', 'core.autocrlf', 'false');
+    git(repo, 'config', 'commit.gpgsign', 'false');
+    commitFile(repo, 'a.txt', 'base\n', 'init');
+    git(repo, 'remote', 'add', 'origin', remote);
+    git(repo, 'push', '-q', '-u', 'origin', 'main');
+    pushedMain = git(repo, 'rev-parse', 'refs/remotes/origin/main');
+    // 用户本地分支上有一个没推送的私有提交
+    git(repo, 'checkout', '-q', '-b', 'private-work');
+    commitFile(repo, 'secret.txt', 'private\n', 'private commit');
+    privateCommit = git(repo, 'rev-parse', 'HEAD');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  it('受限协调者：worktree HEAD 等于 origin/main，不含未推送的提交', async () => {
+    const path = await dispatchedPath(serviceFor({ vcs: 'git', defaultBranch: 'main' }, true));
+    expect(git(path, 'rev-parse', 'HEAD')).toBe(pushedMain);
+    expect(existsSync(join(path, 'secret.txt'))).toBe(false);
+    expect(
+      spawnSync('git', ['merge-base', '--is-ancestor', privateCommit, 'HEAD'], { cwd: path }).status
+    ).toBe(1);
+  });
+
+  it('普通协调者：照旧从当前检出的分支切出', async () => {
+    const path = await dispatchedPath(serviceFor({ vcs: 'git', defaultBranch: 'main' }, false));
+    expect(git(path, 'rev-parse', 'HEAD')).toBe(privateCommit);
+  });
+
+  it('受限协调者：没有 origin/<默认分支>、没有默认分支、或不是 git 工作区时拒绝派发', async () => {
+    git(repo, 'update-ref', '-d', 'refs/remotes/origin/main');
+    expect(await dispatchWith(serviceFor({ vcs: 'git', defaultBranch: 'main' }, true))).toEqual({
+      ok: false,
+      error: expect.stringContaining('refs/remotes/origin/main does not exist'),
+    });
+    expect(await dispatchWith(serviceFor({ vcs: 'git' }, true))).toEqual({
+      ok: false,
+      error: expect.stringContaining('no default branch'),
+    });
+    expect(await dispatchWith(serviceFor({ vcs: 'none', defaultBranch: 'main' }, true))).toEqual({
+      ok: false,
+      error: expect.stringContaining('not a git repository'),
+    });
+    expect(existsSync(join(root, 'userData', 'worktrees'))).toBe(false);
+  });
+});

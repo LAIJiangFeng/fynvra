@@ -61,7 +61,6 @@ import { ABORTED, fail, guard, untilAborted } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
 import {
   buildPullRequestBody,
-  isRestrictedPushTask,
   isValidBranchName,
   linkOrSubmodulePaths,
   type PullRequestGateDeps,
@@ -96,6 +95,11 @@ export interface OrchestrationHostDeps {
    * 普通目录（`workspace.vcs` 为 `none`）没有分支，为空串：worker 直接在工作区目录里干活，整条编排不跑 git。
    */
   coordinatorBranch: string;
+  /**
+   * 主 agent 会话受限：此时 `coordinatorBranch` 是公开基线 `refs/remotes/origin/<defaultBranch>`，
+   * 不能合并，open_pull_request 的推送闸门加查保护路径、符号链接与子模块。
+   */
+  restricted: boolean;
   store: OrchestrationStore;
   git: GitWorktreeManager;
   inbox: Inbox;
@@ -824,6 +828,9 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
         `the worktree of dispatch ${dispatch.id} has uncommitted changes or untracked files and only committed work is merged; ask the worker to commit them first (reject_work)`
       );
     }
+    if (deps.restricted) {
+      return fail('a restricted coordinator cannot merge; deliver the work with open_pull_request');
+    }
     if (worktree.baseRef !== coordinatorBranch) {
       return fail(
         `this worktree was branched from ${worktree.baseRef}, but this run merges into ${coordinatorBranch}`
@@ -969,7 +976,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       return fail(`${branch} has no new commits relative to ${base}; nothing to push`);
 
     // 闸门：整段改动文件（不认重命名，源路径也要查）、diff 正文、提交元数据、标题与正文
-    const restricted = isRestrictedPushTask(task.id);
+    const restricted = deps.restricted;
     const files = (
       await gitText(['diff', '--name-only', '--no-renames', '-z', mergeBase, headCommit])
     )

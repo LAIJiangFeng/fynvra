@@ -3,7 +3,7 @@ import type { DispatchTaskOutput, OrchestrationHost } from '@fynvra/agent-runtim
 import { GitWorktreeManager, Inbox, InMemoryOrchestrationStore } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOrchestrationHost, type OrchestrationHostDeps } from './host';
-import { setPullRequestBodyExtension, setPushGateRestrictedLookup } from './pullRequest';
+import { setPullRequestBodyExtension } from './pullRequest';
 import { createFakeExec, createFakeLauncher, createFakeRoles, type FakeExec } from './testing';
 import { createWorkerHost } from './workerHost';
 
@@ -36,6 +36,7 @@ function makeHost(overrides: Partial<OrchestrationHostDeps> = {}): Orchestration
     workspace: WORKSPACE,
     coordinatorSessionId: 'session_coord',
     coordinatorBranch: 'main',
+    restricted: false,
     store,
     git: new GitWorktreeManager({ exec: fake.exec }),
     inbox,
@@ -88,7 +89,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   setPullRequestBodyExtension(undefined);
-  setPushGateRestrictedLookup(undefined);
 });
 
 type Dispatched = DispatchTaskOutput & { dispatch: NonNullable<DispatchTaskOutput['dispatch']> };
@@ -218,12 +218,22 @@ describe('openPullRequest', () => {
 
   it('受限任务改了 package.json：拒绝并列出文件，不推送', async () => {
     const first = await reported();
-    setPushGateRestrictedLookup((taskId) => taskId === first.task.id);
+    host = makeHost({ restricted: true });
     scriptRepo();
     changedFiles('src/a.ts\0package.json\0');
     const result = await host.openPullRequest(input(first.dispatch.id));
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('package.json') });
     expect(pushedOrGh(0)).toEqual([]);
+  });
+
+  it('受限协调者不能合并：提示改用 open_pull_request', async () => {
+    const first = await reported();
+    host = makeHost({ restricted: true });
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toEqual({
+      ok: false,
+      error: expect.stringContaining('open_pull_request'),
+    });
+    expect(store.tasks.get(first.task.id)).toMatchObject({ status: 'in-review' });
   });
 
   it('普通任务改了 package.json 与 .github：放行，照常 push（保留用户 hooks）', async () => {
@@ -241,7 +251,7 @@ describe('openPullRequest', () => {
 
   it('受限任务把保护文件改名移走：不认重命名，旧名字也在列表里，拒绝', async () => {
     const first = await reported();
-    setPushGateRestrictedLookup(() => true);
+    host = makeHost({ restricted: true });
     scriptRepo();
     changedFiles('AGENTS.md\0docs/agents.txt\0');
     const result = await host.openPullRequest(input(first.dispatch.id));
@@ -252,7 +262,7 @@ describe('openPullRequest', () => {
 
   it('受限任务新增符号链接：拒绝', async () => {
     const first = await reported();
-    setPushGateRestrictedLookup(() => true);
+    host = makeHost({ restricted: true });
     scriptRepo();
     fake.respond(({ args }) =>
       args[0] === 'diff' && args[1] === '--raw'
@@ -272,7 +282,7 @@ describe('openPullRequest', () => {
 
   it('受限任务：push 带空 hooks 目录与 --no-verify，扫描用的 diff 带 --text / --no-textconv', async () => {
     const first = await reported();
-    setPushGateRestrictedLookup(() => true);
+    host = makeHost({ restricted: true });
     scriptRepo();
     expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
     const push = fake.calls.find((call) => call.args.includes('push'));
