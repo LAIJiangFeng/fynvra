@@ -44,7 +44,7 @@ function gitDiagnosticEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function disablesNodeTlsVerification(env: NodeJS.ProcessEnv): boolean {
+export function disablesNodeTlsVerification(env: NodeJS.ProcessEnv): boolean {
   return Object.entries(env).some(
     ([key, value]) => key.toUpperCase() === 'NODE_TLS_REJECT_UNAUTHORIZED' && value === '0'
   );
