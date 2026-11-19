@@ -670,6 +670,8 @@ export const en: MessagesShape<typeof zhCN> = {
     backToTasks: 'Back to tasks',
     backToTasksHint: 'Back to tasks (Esc)',
     viewChanges: 'View changes',
+    pullRequest: 'PR',
+    openPullRequest: 'Open the PR in your browser: {url}',
     attempts: 'Attempts',
     attemptsCount: 'Attempts ({count})',
     waitingDeps: 'Dispatched once dependencies finish',
