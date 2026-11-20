@@ -217,7 +217,10 @@ export function parseBotMention(
   // 从后往前删，前面的 offset 不受影响
   let body = text;
   for (const span of spans.sort((a, b) => b.offset - a.offset)) {
-    body = body.slice(0, span.offset) + body.slice(span.offset + span.length);
+    let end = span.offset + span.length;
+    // 去掉句中 @ 后左右都是空格时只留一个，其他位置的空格不动
+    if (body[span.offset - 1] === ' ' && body[end] === ' ') end += 1;
+    body = body.slice(0, span.offset) + body.slice(end);
   }
   return body.trim();
 }

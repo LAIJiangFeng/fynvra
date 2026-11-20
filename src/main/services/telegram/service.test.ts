@@ -349,7 +349,7 @@ describe('准入', () => {
     h.settle('sA');
     await new Promise((resolve) => setTimeout(resolve, 30));
     const bodies = h.prompts.map((p) => p.text.split('消息正文：\n')[1]?.split('\n')[0]);
-    expect(bodies).toEqual(['页面白屏', '页面白屏', '点保存  没反应', '命令形式', '回复形式']);
+    expect(bodies).toEqual(['页面白屏', '页面白屏', '点保存 没反应', '命令形式', '回复形式']);
   });
 
   it('未允许的群收到 @ 消息：记为候选，不入队', async () => {

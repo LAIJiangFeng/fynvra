@@ -82,8 +82,10 @@ describe('telegram content', () => {
   it('@本 bot 解析：按 UTF-16 位置截取，坏 entity 忽略', () => {
     const at = (offset: number, length = 8) => ({ type: 'mention', offset, length });
     // 表情占 2 个 UTF-16 单元
-    expect(parseBotMention('😀 @fyn_bot 白屏', [at(3)], 'fyn_bot')).toBe('😀  白屏');
+    expect(parseBotMention('😀 @fyn_bot 白屏', [at(3)], 'fyn_bot')).toBe('😀 白屏');
     expect(parseBotMention('@FYN_BOT x', [at(0)], 'fyn_bot')).toBe('x');
+    // 只合并被删 @ 两侧的空格，正文里其他双空格保留
+    expect(parseBotMention('a  b @fyn_bot c', [at(5)], 'fyn_bot')).toBe('a  b c');
     expect(parseBotMention('@fyn_bot', [at(0)], 'fyn_bot')).toBe('');
     expect(parseBotMention('@fyn_botx x', [at(0, 9)], 'fyn_bot')).toBeNull();
     expect(
