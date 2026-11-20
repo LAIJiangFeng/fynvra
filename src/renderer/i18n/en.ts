@@ -496,6 +496,10 @@ export const en: MessagesShape<typeof zhCN> = {
     modes: { supervised: 'Supervised', 'auto-edits': 'Auto-accept edits', full: 'Full access' },
     cycleHint: 'Shift+Tab to switch',
     statusHint: 'Approval mode (Shift+Tab to switch)',
+    ruleGated: 'Automatic (rule-gated)',
+    ruleGatedHint:
+      'Telegram sessions never ask for approval: fixed rules allow or deny every action directly, so nothing waits on you',
+    profileBadge: { triage: 'Triage', restricted: 'Restricted' },
     kinds: {
       command: 'Command',
       'file-edit': 'Edit file',

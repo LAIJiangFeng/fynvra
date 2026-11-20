@@ -1211,9 +1211,9 @@ describe('createAgentHost sessions', () => {
     // 主 agent 切成 supervised 后再派：新 worker 跟随新档位
     await env.host.setApprovalMode({ sessionId: coordinator.id, mode: 'supervised' });
     expect(await dispatch()).toMatchObject({ approvalMode: 'supervised' });
-    // 没有主 agent（未接线）：回落角色自己的档位
+    // 没有主 agent（未接线）：按受限处理（fail-closed），档位固定兜底的 supervised
     env.host.setCoordinatorLookup(() => undefined);
-    expect(await dispatch()).toMatchObject({ approvalMode: 'auto-edits' });
+    expect(await dispatch()).toMatchObject({ profile: 'restricted', approvalMode: 'supervised' });
     // 落盘的也是它们
     expect(env.store.flush()).toBe(true);
     const file = JSON.parse(readFileSync(join(env.dir, 'sessions.json'), 'utf8'));
@@ -1227,7 +1227,7 @@ describe('createAgentHost sessions', () => {
       ['careful', 'supervised'],
       ['tester', 'full'],
       ['tester', 'supervised'],
-      ['tester', 'auto-edits'],
+      ['tester', 'supervised'],
     ]);
   });
 
@@ -3291,7 +3291,26 @@ describe('createAgentHost profile sessions', () => {
       expect(spec).not.toHaveProperty('pluginRefs');
       expect(spec).not.toHaveProperty('pluginProviders');
       expect(spec).not.toHaveProperty('instructionFile');
+      // 档位会话记录里的审批档位固定 supervised 作兜底
+      expect(session.approvalMode).toBe('supervised');
+      expect(env.store.get(session.id)?.approvalMode).toBe('supervised');
+      expect(spec?.role.approvalMode).toBe('supervised');
     }
+  });
+
+  it('refuses to switch the approval mode of a profile session and keeps the record', async () => {
+    const env = profileEnv();
+    for (const profile of ['triage', 'restricted'] as const) {
+      const session = await profileSession(env, profile);
+      const switched = await env.host.setApprovalMode({ sessionId: session.id, mode: 'full' });
+      expect(switched.ok).toBe(false);
+      expect(env.store.get(session.id)?.approvalMode).toBe('supervised');
+      expect(env.sent('set-approval-mode')).toEqual([]);
+    }
+    const plain = await createSession(env);
+    const switched = await env.host.setApprovalMode({ sessionId: plain.id, mode: 'full' });
+    expect(switched).toMatchObject({ ok: true, session: { approvalMode: 'full' } });
+    expect(env.store.get(plain.id)?.approvalMode).toBe('full');
   });
 
   it('makes every worker of a restricted coordinator restricted', async () => {
@@ -3312,6 +3331,7 @@ describe('createAgentHost profile sessions', () => {
     const restricted = await launcher.createWorkerSession(input);
     if (!restricted.ok) throw new Error(restricted.error);
     expect(env.store.get(restricted.sessionId)?.profile).toBe('restricted');
+    expect(env.store.get(restricted.sessionId)?.approvalMode).toBe('supervised');
     expect(specOf(env, restricted.sessionId)).toMatchObject({
       profile: 'restricted',
       worker: true,
@@ -3325,6 +3345,9 @@ describe('createAgentHost profile sessions', () => {
     const normal = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_2' });
     if (!normal.ok) throw new Error(normal.error);
     expect(env.store.get(normal.sessionId)?.profile).toBeUndefined();
+    expect(env.store.get(normal.sessionId)?.approvalMode).toBe(
+      env.store.get(plain.id)?.approvalMode
+    );
 
     // 查不到协调者的会话记录、或查不到协调者时一律受限（fail-closed）
     parent = 'session-missing';
@@ -3335,6 +3358,7 @@ describe('createAgentHost profile sessions', () => {
     const unknown = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_4' });
     if (!unknown.ok) throw new Error(unknown.error);
     expect(env.store.get(unknown.sessionId)?.profile).toBe('restricted');
+    expect(env.store.get(unknown.sessionId)?.approvalMode).toBe('supervised');
     expect(specOf(env, unknown.sessionId)).toMatchObject({ profile: 'restricted', mcpServers: [] });
   });
 

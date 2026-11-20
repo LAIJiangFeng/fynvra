@@ -52,11 +52,24 @@ function useFlash(value: unknown): boolean {
  */
 export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
+  const profile = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.profile);
   const setApprovalMode = useSessionsStore((state) => state.setApprovalMode);
   const [open, setOpen] = useState(false);
   const flashing = useFlash(mode);
   const t = useT();
   if (!mode) return null;
+  // 档位会话从不弹审批：只显示固定文案，不可切换（记录里的 supervised 只是兜底）
+  if (profile !== undefined) {
+    return (
+      <span
+        title={t('approval.ruleGatedHint')}
+        className="flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-muted-foreground text-xs"
+      >
+        <ShieldCheck aria-hidden className="size-3.5 shrink-0" />
+        <span>{t('approval.ruleGated')}</span>
+      </span>
+    );
+  }
   const Icon = MODE_ICON[mode];
 
   return (
@@ -120,9 +133,18 @@ export function ApprovalModePicker({ sessionId }: { sessionId: string }) {
 /** 状态栏里的审批档位：切换后同样闪一下；屏幕阅读器会读出新的档位 */
 export function ApprovalModeStatus({ sessionId }: { sessionId: string }) {
   const mode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
+  const profile = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.profile);
   const flashing = useFlash(mode);
   const t = useT();
   if (!mode) return null;
+  if (profile !== undefined) {
+    return (
+      <span title={t('approval.ruleGatedHint')} className="flex shrink-0 items-center gap-1 px-1">
+        <ShieldCheck aria-hidden className="size-3 shrink-0" />
+        {t('approval.ruleGated')}
+      </span>
+    );
+  }
   const Icon = MODE_ICON[mode];
   return (
     <span

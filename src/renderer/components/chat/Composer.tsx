@@ -232,6 +232,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const suggestion = useSessionsStore(selectReplySuggestionOf(sessionId));
   const approvals = useSessionsStore(selectApprovalsOf(sessionId));
   const approvalMode = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.approvalMode);
+  const profile = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.profile);
   const roleId = useSessionsStore((state) => selectSessionOf(sessionId)(state)?.roleId);
   const planMode = useSessionsStore(
     (state) => selectSessionOf(sessionId)(state)?.planMode === true
@@ -624,7 +625,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
     if (matchAction(event, 'cycle-approval')) {
       event.preventDefault();
-      if (approvalMode) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
+      // 档位会话的审批由档位规则决定，快捷键不切换
+      if (approvalMode && !profile) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
       return;
     }
     if (matchAction(event, 'history-prev') && caretOnVisualLineEdge(textarea, 'first')) {
