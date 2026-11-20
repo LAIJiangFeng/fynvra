@@ -69,7 +69,23 @@ function message(
   };
 }
 
-function harness(options: { data?: TelegramData; origin?: boolean } = {}) {
+/** 给文本里的每个 @name 按 UTF-16 位置生成 mention entity */
+function mentions(text: string): Partial<TgMessage> {
+  const entities = [...text.matchAll(/@[A-Za-z0-9_]+/g)].map((m) => ({
+    type: 'mention',
+    offset: m.index,
+    length: m[0].length,
+  }));
+  return { entities };
+}
+
+function harness(
+  options: {
+    data?: TelegramData;
+    origin?: boolean;
+    failSave?: (data: TelegramData) => boolean;
+  } = {}
+) {
   let saved: TelegramData = structuredClone(options.data ?? baseData());
   const saves: TelegramData[] = [];
   const logs: string[] = [];
@@ -160,6 +176,7 @@ function harness(options: { data?: TelegramData; origin?: boolean } = {}) {
     store: {
       load: async () => structuredClone(saved),
       save: async (data) => {
+        if (options.failSave?.(data)) throw new Error('disk full');
         saved = structuredClone(data);
         saves.push(structuredClone(data));
       },
@@ -285,6 +302,49 @@ describe('准入', () => {
     expect(h.prompts.some((p) => p.text.includes('第6条'))).toBe(false);
   });
 
+  it('已允许的群：@本 bot（句首/句中/句尾）、/bug@bot、回复 bot 入队，其余丢弃', async () => {
+    const h = harness();
+    await h.service.start();
+    const texts = [
+      '@fyn_bot 页面白屏',
+      '页面白屏 @Fyn_Bot',
+      '点保存 @fyn_bot 没反应',
+      '@other_bot 别人的',
+      '没有 at 的普通文字',
+      '@fyn_botx 前缀相同',
+      '@fyn_bot',
+    ];
+    const updates = texts.map((text, i) => message(CHAT_A, 10 + i, text, mentions(text)));
+    updates.push(message(CHAT_A, 30, '/bug@fyn_bot 命令形式'));
+    updates.push(
+      message(CHAT_A, 31, '回复形式', {
+        reply_to_message: { message_id: 1, from: { id: BOT_ID } },
+      })
+    );
+    await deliver(h, updates, 1);
+    for (let i = 1; i < 5; i += 1) {
+      await h.report('sA', { kind: 'question', title: 't', summary: 's', reply: 'r' });
+      h.settle('sA');
+      await vi.waitFor(() => expect(h.prompts).toHaveLength(i + 1));
+    }
+    await h.report('sA', { kind: 'question', title: 't', summary: 's', reply: 'r' });
+    h.settle('sA');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const bodies = h.prompts.map((p) => p.text.split('消息正文：\n')[1]?.split('\n')[0]);
+    expect(bodies).toEqual(['页面白屏', '页面白屏', '点保存  没反应', '命令形式', '回复形式']);
+  });
+
+  it('未允许的群收到 @ 消息：记为候选，不入队', async () => {
+    const h = harness();
+    await h.service.start();
+    h.batches.push([message(-300, 1, '@fyn_bot 你好', mentions('@fyn_bot 你好'))]);
+    await vi.waitFor(() =>
+      expect(h.service.getState().candidates.map((c) => c.chatId)).toEqual([-300])
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(h.prompts).toEqual([]);
+  });
+
   it('群 A 的消息不进群 B 的分诊会话', async () => {
     const h = harness();
     await h.service.start();
@@ -310,6 +370,32 @@ describe('轮询与 token', () => {
     const again = harness({ data: h.saved() });
     await again.service.start();
     await vi.waitFor(() => expect(again.offsets[0]).toBe(78));
+  });
+
+  it('getMe 成功即 connected，不等长轮询返回', async () => {
+    const h = harness();
+    await h.service.start();
+    // 假 getUpdates 在没有批次时一直挂起，直到被 abort
+    await vi.waitFor(() => expect(h.api.getUpdates).toHaveBeenCalled());
+    expect(h.service.getState().connection).toBe('connected');
+  });
+
+  it('offset 写盘失败时照常处理这批，记 warn，下次用前进后的 offset', async () => {
+    let failed = false;
+    const h = harness({
+      failSave: (data) => {
+        if (failed || data.pollOffset !== 78) return false;
+        failed = true;
+        return true;
+      },
+    });
+    await h.service.start();
+    h.batches.push([{ ...message(-300, 1, 'hi'), update_id: 77 }]);
+    await vi.waitFor(() => expect(h.service.getState().candidates).toHaveLength(1));
+    await vi.waitFor(() => expect(h.offsets.at(-1)).toBe(78));
+    expect(failed).toBe(true);
+    expect(h.logs.filter((line) => line.includes('disk full'))).toHaveLength(1);
+    expect(h.logs.join('\n')).not.toContain(TOKEN);
   });
 
   it('401 停止轮询并标为 unauthorized；409 标为 conflict 后继续；日志不含 token', async () => {

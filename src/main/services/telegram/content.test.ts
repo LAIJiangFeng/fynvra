@@ -3,6 +3,7 @@ import {
   dutyPrompt,
   escapeUntrusted,
   parseAssessment,
+  parseBotMention,
   parseBugCommand,
   parseTriageInput,
   pullRequestSection,
@@ -76,6 +77,27 @@ describe('telegram content', () => {
     expect(parseBugCommand('/bug@other_bot crash', 'fyn_bot')).toBeNull();
     expect(parseBugCommand('/bugs x', 'fyn_bot')).toBeNull();
     expect(parseBugCommand('hello', 'fyn_bot')).toBeNull();
+  });
+
+  it('@本 bot 解析：按 UTF-16 位置截取，坏 entity 忽略', () => {
+    const at = (offset: number, length = 8) => ({ type: 'mention', offset, length });
+    // 表情占 2 个 UTF-16 单元
+    expect(parseBotMention('😀 @fyn_bot 白屏', [at(3)], 'fyn_bot')).toBe('😀  白屏');
+    expect(parseBotMention('@FYN_BOT x', [at(0)], 'fyn_bot')).toBe('x');
+    expect(parseBotMention('@fyn_bot', [at(0)], 'fyn_bot')).toBe('');
+    expect(parseBotMention('@fyn_botx x', [at(0, 9)], 'fyn_bot')).toBeNull();
+    expect(
+      parseBotMention('@fyn_bot x', [{ type: 'hashtag', offset: 0, length: 8 }], 'fyn_bot')
+    ).toBeNull();
+    expect(parseBotMention('@fyn_bot x', [at(5)], 'fyn_bot')).toBeNull();
+    expect(
+      parseBotMention(
+        '@fyn_bot x',
+        [null, 'x', { type: 'mention', offset: '0', length: 8 }],
+        'fyn_bot'
+      )
+    ).toBeNull();
+    expect(parseBotMention('@fyn_bot x', undefined, 'fyn_bot')).toBeNull();
   });
 
   it('triage_report 入参收窄', () => {

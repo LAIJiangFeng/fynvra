@@ -33,6 +33,7 @@ import {
   dutyPrompt,
   MAX_FOLLOW_UPS,
   parseAssessment,
+  parseBotMention,
   parseBugCommand,
   parseTriageInput,
   pullRequestSection,
@@ -559,7 +560,10 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
           : { contextCardId: card.id };
       }
     } else {
-      body = parseBugCommand(text, bot.username);
+      // /bug[@bot] 优先，其次 @本 bot；其余消息丢弃
+      body =
+        parseBugCommand(text, bot.username) ??
+        parseBotMention(text, message.entities, bot.username);
     }
     if (!body) return;
     const time = message.date * 1000;
@@ -634,6 +638,8 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
         if (!ready) {
           data.bot = await deps.api.getMe(token, signal);
           ready = true;
+          // getMe 成功即已连接，不等第一次长轮询返回
+          setConnection('connected');
           await deps.api
             .setMyCommands(token, signal)
             .catch((error) => warn(`注册 /bug 命令失败：${errorMessage(error)}`));
@@ -643,9 +649,10 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
         delay = 0;
         setConnection('connected');
         if (updates.length === 0) continue;
-        // 先把 offset 落盘再处理：崩溃时宁可丢一批，不重复处理
+        // 先前进 offset 并尝试落盘；写盘失败只记 warn、照常处理这一批
+        // （内存 offset 已前进，本次运行不重复；若随后崩溃，重启可能重复处理这一批）
         data.pollOffset = Math.max(...updates.map((update) => update.update_id)) + 1;
-        await persist();
+        await persist().catch(() => undefined); // persist 内已记 warn
         for (const update of updates) {
           try {
             handleUpdate(update);

@@ -185,3 +185,35 @@ export function parseBugCommand(text: string, botUsername: string): string | nul
   if (match[1] !== undefined && match[1].toLowerCase() !== botUsername.toLowerCase()) return null;
   return text.trimStart().slice(match[0].length).trim();
 }
+
+/**
+ * 消息里 @ 了本 bot（mention entity，按 UTF-16 offset/length 截取，不区分大小写）时，
+ * 返回去掉这些 @ 片段后的正文；没有 @ 本 bot 返回 null。entities 来自外部，按 unknown 收窄。
+ */
+export function parseBotMention(
+  text: string,
+  entities: unknown,
+  botUsername: string
+): string | null {
+  if (!Array.isArray(entities)) return null;
+  const target = `@${botUsername}`.toLowerCase();
+  const spans: { offset: number; length: number }[] = [];
+  for (const raw of entities) {
+    const entity = asRecord(raw);
+    if (entity?.type !== 'mention') continue;
+    const { offset, length } = entity;
+    if (!Number.isInteger(offset) || !Number.isInteger(length)) continue;
+    const start = offset as number;
+    const end = start + (length as number);
+    if (start < 0 || end > text.length) continue;
+    if (text.slice(start, end).toLowerCase() === target)
+      spans.push({ offset: start, length: end - start });
+  }
+  if (spans.length === 0) return null;
+  // 从后往前删，前面的 offset 不受影响
+  let body = text;
+  for (const span of spans.sort((a, b) => b.offset - a.offset)) {
+    body = body.slice(0, span.offset) + body.slice(span.offset + span.length);
+  }
+  return body.trim();
+}
