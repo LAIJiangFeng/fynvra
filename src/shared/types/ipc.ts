@@ -270,6 +270,8 @@ export const IPC_CHANNELS = {
   TELEGRAM_REMOVE_GROUP: 'telegram:remove-group',
   TELEGRAM_RESOLVE_CARD: 'telegram:resolve-card',
   TELEGRAM_SET_ENABLED: 'telegram:set-enabled',
+  /** 每人每小时最多处理几条（1–1000） */
+  TELEGRAM_SET_RATE_LIMIT: 'telegram:set-rate-limit',
   /** Main → Renderer 推送：状态变化，无参数，Renderer 收到后重新 get-state */
   TELEGRAM_CHANGED: 'telegram:changed',
 } as const;

@@ -1,6 +1,6 @@
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
-import type { TelegramCardAction } from '@shared/types/telegram';
+import { isTelegramRateLimit, type TelegramCardAction } from '@shared/types/telegram';
 import { ipcMain } from 'electron';
 import type { TelegramStateResult } from '../../preload/domains/telegram';
 import { translate } from '../i18n';
@@ -52,6 +52,10 @@ export function registerTelegramHandlers(): void {
 
   handle(IPC_CHANNELS.TELEGRAM_SET_ENABLED, ['enabled'], ({ enabled }) =>
     typeof enabled === 'boolean' ? (service) => service.setEnabled(enabled) : null
+  );
+
+  handle(IPC_CHANNELS.TELEGRAM_SET_RATE_LIMIT, ['perHour'], ({ perHour }) =>
+    isTelegramRateLimit(perHour) ? (service) => service.setRateLimit(perHour) : null
   );
 }
 

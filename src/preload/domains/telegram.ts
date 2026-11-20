@@ -12,6 +12,8 @@ export interface TelegramApi {
   removeGroup(input: { groupId: number }): Promise<IpcResult>;
   resolveCard(input: { cardId: number; action: TelegramCardAction }): Promise<IpcResult>;
   setEnabled(input: { enabled: boolean }): Promise<IpcResult>;
+  /** 每人每小时最多处理几条（1–1000） */
+  setRateLimit(input: { perHour: number }): Promise<IpcResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -27,6 +29,7 @@ export function createTelegramApi(ipc: Invoker, subscribe: Subscribe): TelegramA
     removeGroup: (input) => ipc.invoke(IPC_CHANNELS.TELEGRAM_REMOVE_GROUP, input),
     resolveCard: (input) => ipc.invoke(IPC_CHANNELS.TELEGRAM_RESOLVE_CARD, input),
     setEnabled: (input) => ipc.invoke(IPC_CHANNELS.TELEGRAM_SET_ENABLED, input),
+    setRateLimit: (input) => ipc.invoke(IPC_CHANNELS.TELEGRAM_SET_RATE_LIMIT, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.TELEGRAM_CHANGED, () => callback()),
   };
 }

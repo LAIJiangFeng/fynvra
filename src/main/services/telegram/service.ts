@@ -5,6 +5,7 @@ import type { HostCallResult } from '@shared/types/agent';
 import type { IpcResult } from '@shared/types/ipc';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
 import {
+  isTelegramRateLimit,
   maskTelegramToken,
   type TelegramCardAction,
   type TelegramCardStatus,
@@ -51,7 +52,6 @@ import {
 } from './store';
 
 export const DEBOUNCE_MS = 3_000;
-export const RATE_LIMIT_PER_HOUR = 5;
 export const MAX_QUEUE_PER_GROUP = 50;
 export const FOLLOW_UP_TIMEOUT_MS = 24 * 60 * 60_000;
 export const DUTY_IDLE_MS = 30 * 60_000;
@@ -105,6 +105,8 @@ export interface TelegramService {
   removeGroup(chatId: number): Promise<IpcResult>;
   resolveCard(cardId: number, action: TelegramCardAction): Promise<IpcResult>;
   setEnabled(enabled: boolean): Promise<IpcResult>;
+  /** 每人每小时限额（1–1000），落盘后立即生效 */
+  setRateLimit(perHour: number): Promise<IpcResult>;
   onChange(listener: () => void): () => void;
   /** agentHost 的 deps.telegram.invoke（只有 triage 会话的调用会到这里） */
   invoke(
@@ -533,7 +535,7 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
 
   const rateLimited = (userId: number, time: number): boolean => {
     const recent = (rate.get(userId) ?? []).filter((t) => t > time - HOUR_MS);
-    if (recent.length >= RATE_LIMIT_PER_HOUR) {
+    if (recent.length >= data.rateLimitPerHour) {
       rate.set(userId, recent);
       return true;
     }
@@ -1001,6 +1003,7 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
       createdAt: card.createdAt,
       updatedAt: card.updatedAt,
     })),
+    rateLimitPerHour: data.rateLimitPerHour,
   });
 
   return {
@@ -1150,6 +1153,17 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
         return { ok: false, error: safe(`保存失败：${errorMessage(error)}`) };
       }
       startPolling();
+      emit();
+      return { ok: true };
+    },
+    async setRateLimit(perHour) {
+      if (!isTelegramRateLimit(perHour)) return { ok: false, error: '限额需为 1–1000 的整数' };
+      data.rateLimitPerHour = perHour;
+      try {
+        await persist();
+      } catch (error) {
+        return { ok: false, error: safe(`保存失败：${errorMessage(error)}`) };
+      }
       emit();
       return { ok: true };
     },

@@ -320,6 +320,48 @@ describe('准入', () => {
     expect(h.prompts).toHaveLength(1);
   });
 
+  it('限额来自配置：设为 2 时第 3 条被限流并提示一次', async () => {
+    const h = harness();
+    await h.service.start();
+    expect(await h.service.setRateLimit(2)).toEqual({ ok: true });
+    const updates = Array.from({ length: 4 }, (_, i) =>
+      message(CHAT_A, 1, `/bug 第${i + 1}条`, { date: 1_000 + i * 60 })
+    );
+    await deliver(h, updates, 1);
+    await vi.waitFor(() =>
+      expect(h.sent.filter((s) => s.text === TEMPLATES.rateLimited)).toHaveLength(1)
+    );
+    await h.report('sA', { kind: 'question', title: 't', summary: 's', reply: 'r' });
+    h.settle('sA');
+    await vi.waitFor(() => expect(h.prompts).toHaveLength(2));
+    await h.report('sA', { kind: 'question', title: 't', summary: 's', reply: 'r' });
+    h.settle('sA');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(h.prompts).toHaveLength(2);
+    expect(h.prompts.some((p) => p.text.includes('第3条'))).toBe(false);
+    expect(h.sent.filter((s) => s.text === TEMPLATES.rateLimited)).toEqual([
+      { chatId: CHAT_A, text: TEMPLATES.rateLimited, replyTo: updates[2]?.message?.message_id },
+    ]);
+  });
+
+  it('setRateLimit 只接受 1–1000 的整数；合法值落盘并出现在视图里', async () => {
+    const h = harness();
+    await h.service.start();
+    expect(h.service.getState().rateLimitPerHour).toBe(5);
+    for (const bad of [0, 1001, 1.5, Number.NaN, '3']) {
+      expect((await h.service.setRateLimit(bad as number)).ok).toBe(false);
+    }
+    expect(h.saved().rateLimitPerHour).toBe(5);
+    let changes = 0;
+    h.service.onChange(() => {
+      changes += 1;
+    });
+    expect(await h.service.setRateLimit(1000)).toEqual({ ok: true });
+    expect(h.saved().rateLimitPerHour).toBe(1000);
+    expect(h.service.getState().rateLimitPerHour).toBe(1000);
+    expect(changes).toBeGreaterThan(0);
+  });
+
   it('已允许的群：@本 bot（句首/句中/句尾）、/bug@bot、回复 bot 入队，其余丢弃', async () => {
     const h = harness();
     await h.service.start();

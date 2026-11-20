@@ -37,6 +37,7 @@ const state: TelegramStateView = {
   candidates: [],
   groups: [],
   cards: [],
+  rateLimitPerHour: 5,
 };
 
 function createService() {
@@ -48,6 +49,7 @@ function createService() {
     removeGroup: vi.fn(async () => ({ ok: true })),
     resolveCard: vi.fn(async () => ({ ok: true })),
     setEnabled: vi.fn(async () => ({ ok: true })),
+    setRateLimit: vi.fn(async () => ({ ok: true })),
     onChange: vi.fn((next: () => void) => {
       listener = next;
       return () => {};
@@ -157,6 +159,27 @@ describe('telegram IPC', () => {
     expect(service.resolveCard).toHaveBeenCalledWith(7, 'reject');
     await invoke(IPC_CHANNELS.TELEGRAM_SET_ENABLED, { enabled: false });
     expect(service.setEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('set-rate-limit 拒绝多余的键与 1–1000 之外的值', async () => {
+    const cases: unknown[] = [
+      { perHour: 5, enabled: true },
+      { perHour: 0 },
+      { perHour: 1001 },
+      { perHour: 1.5 },
+      { perHour: '5' },
+      { perHour: Number.NaN },
+      {},
+      null,
+    ];
+    for (const raw of cases) {
+      expect(await invoke(IPC_CHANNELS.TELEGRAM_SET_RATE_LIMIT, raw)).toEqual(invalid);
+    }
+    expect(service.setRateLimit).not.toHaveBeenCalled();
+    expect(await invoke(IPC_CHANNELS.TELEGRAM_SET_RATE_LIMIT, { perHour: 1000 })).toEqual({
+      ok: true,
+    });
+    expect(service.setRateLimit).toHaveBeenCalledWith(1000);
   });
 
   it('connectTelegramChanged 把 onChange 广播为 telegram:changed（不带参数）', async () => {

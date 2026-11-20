@@ -37,6 +37,14 @@ describe('telegram store', () => {
     expect(data.pollOffset).toBe(0);
   });
 
+  it('rateLimitPerHour 缺失或非法时按 5，合法时保留', () => {
+    for (const bad of [undefined, 0, 1001, 1.5, '10', null]) {
+      expect(parseTelegramData({ rateLimitPerHour: bad }).rateLimitPerHour).toBe(5);
+    }
+    expect(parseTelegramData({ rateLimitPerHour: 1 }).rateLimitPerHour).toBe(1);
+    expect(parseTelegramData({ rateLimitPerHour: 1000 }).rateLimitPerHour).toBe(1000);
+  });
+
   it('卡片只保留最近 500 张', () => {
     const cards = Array.from({ length: MAX_CARDS + 3 }, (_, i) => ({
       id: i + 1,
