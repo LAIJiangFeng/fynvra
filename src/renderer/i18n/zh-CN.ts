@@ -759,7 +759,7 @@ export const zhCN = {
   settings: {
     telegram: {
       connection: '连接',
-      enable: '启用群反馈值班',
+      disableHint: '在「插件 → 官方插件」里停用',
       token: 'Bot Token',
       tokenSaved: '已设置：{masked}',
       tokenPlaceholder: '粘贴 @BotFather 给的 token',
@@ -1375,6 +1375,20 @@ export const zhCN = {
     plugins: {
       title: '插件',
       subtitle: 'pi 扩展或 pi 包，挂到角色后新会话生效',
+      official: {
+        title: '官方插件',
+        badge: '官方',
+        on: '已启用',
+        off: '未启用',
+        enable: '启用',
+        disable: '停用',
+        settings: '设置',
+        keepHint: '停用只是不再接收群消息，token、群和记录都保留，再次启用即可接着用',
+        telegram: {
+          name: 'Telegram 群反馈值班',
+          description: '在 Telegram 群里 @机器人 反馈问题，Fynvra 在电脑上分诊、修复并开 PR',
+        },
+      },
       addLocal: '添加本地插件',
       installPlaceholder: 'npm:<包名>、git:<主机>/<路径> 或 https:// 仓库地址',
       install: '安装',
