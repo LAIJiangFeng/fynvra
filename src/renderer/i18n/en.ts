@@ -792,7 +792,8 @@ export const en: MessagesShape<typeof zhCN> = {
   settings: {
     telegram: {
       connection: 'Connection',
-      disableHint: 'Disable it in Plugins → Official plugins',
+      disableHint:
+        'To disable: click “Back to plugins” above, then “Disable” on the official plugin card',
       token: 'Bot token',
       tokenSaved: 'Saved: {masked}',
       tokenPlaceholder: 'Paste the token from @BotFather',
@@ -824,6 +825,10 @@ export const en: MessagesShape<typeof zhCN> = {
       active: 'In group',
       inactive: 'Removed from group',
       remove: 'Remove',
+      rateLimit: 'Rate limit',
+      rateLimitLabel: 'Max messages handled per person per hour',
+      rateLimitHint:
+        'Beyond this, the bot replies once with “you’re sending a bit fast” and stops calling the model (1–1000, default 5)',
       pending: 'Pending feature requests',
       pendingEmpty: 'No feature requests waiting for you',
       from: 'From {group}',
@@ -929,7 +934,6 @@ export const en: MessagesShape<typeof zhCN> = {
       appearance: 'Appearance',
       keybindings: 'Shortcuts',
       usage: 'Usage',
-      telegram: 'Telegram',
     },
     dangerousActions: {
       title: 'Safety',
@@ -1439,6 +1443,7 @@ export const en: MessagesShape<typeof zhCN> = {
         enable: 'Enable',
         disable: 'Disable',
         settings: 'Settings',
+        back: 'Back to plugins',
         keepHint:
           'Disabling only stops receiving group messages; the token, groups and history are kept, so you can pick up where you left off when you enable it again',
         telegram: {

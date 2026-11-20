@@ -8,14 +8,13 @@ import {
   Palette,
   Plug,
   Puzzle,
-  Send,
   SlidersHorizontal,
   Sparkles,
   UserCog,
   Workflow,
   X,
 } from 'lucide-react';
-import { type ComponentType, useEffect, useMemo, useRef } from 'react';
+import { type ComponentType, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,13 +26,11 @@ import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
 import { NotificationSettings } from './NotificationSettings';
-import { useTelegramEnabled, visibleSections } from './officialPlugins';
 import { PluginsSettings } from './PluginsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { RolesSettings } from './RolesSettings';
 import { SkillsSettings } from './SkillsSettings';
 import { isSettingsSection, type SettingsSection, useSettingsViewStore } from './settingsViewStore';
-import { TelegramSettings } from './TelegramSettings';
 import { UsageSettings } from './UsageSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
@@ -56,7 +53,6 @@ const SECTIONS: SectionSpec[] = [
   { value: 'skills', icon: Sparkles, Component: SkillsSettings },
   { value: 'mcp', icon: Plug, Component: McpSettings },
   { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
-  { value: 'telegram', icon: Send, Component: TelegramSettings },
   { value: 'appearance', icon: Palette, Component: AppearanceSettings },
   { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
   { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },
@@ -77,21 +73,11 @@ function SettingsPanel() {
   const close = useSettingsViewStore((state) => state.close);
   const containerRef = useRef<HTMLDivElement>(null);
   const t = useT();
-  const telegramEnabled = useTelegramEnabled();
-  const sections = useMemo(
-    () => visibleSections(SECTIONS, new Set(telegramEnabled ? ['telegram' as const] : [])),
-    [telegramEnabled]
-  );
-  const current = sections.find((item) => item.value === section) ?? sections[0];
+  const current = SECTIONS.find((item) => item.value === section) ?? SECTIONS[0];
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
-
-  // 正停在 Telegram 页时被停用（或读取失败），切回插件页；读取中（null）不动
-  useEffect(() => {
-    if (section === 'telegram' && telegramEnabled === false) setSection('plugins');
-  }, [section, telegramEnabled, setSection]);
 
   return (
     <div
@@ -121,7 +107,7 @@ function SettingsPanel() {
             {t('settings.title')}
           </p>
           <TabsList className="w-full gap-0.5 bg-transparent p-0">
-            {sections.map(({ value, icon: Icon }) => (
+            {SECTIONS.map(({ value, icon: Icon }) => (
               <TabsTrigger
                 key={value}
                 value={value}
@@ -149,7 +135,7 @@ function SettingsPanel() {
             </Button>
           </header>
           <ScrollArea className="flex-1">
-            {sections.map(({ value, Component, wide }) => (
+            {SECTIONS.map(({ value, Component, wide }) => (
               <TabsContent
                 key={value}
                 value={value}

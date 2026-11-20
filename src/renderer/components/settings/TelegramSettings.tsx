@@ -1,9 +1,11 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
-import type {
-  TelegramCandidateView,
-  TelegramCardView,
-  TelegramStateView,
+import {
+  isTelegramRateLimit,
+  TELEGRAM_RATE_LIMIT_MAX,
+  type TelegramCandidateView,
+  type TelegramCardView,
+  type TelegramStateView,
 } from '@shared/types/telegram';
 import { ExternalLink, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -23,7 +25,7 @@ import { InlineMessage, SectionHeader } from './common';
 
 const api = window.fynvra.telegram;
 
-/** 设置 → Telegram：连接、群、待确认需求、最近记录、使用说明。状态全在 Main，这里只读视图、传 id。 */
+/** 设置 → 插件 → Telegram：连接、群、限流、待确认需求、最近记录、使用说明。状态全在 Main，这里只读视图、传 id。 */
 export function TelegramSettings() {
   const t = useT();
   const id = useId();
@@ -206,6 +208,26 @@ export function TelegramSettings() {
           </section>
 
           <section>
+            <SectionHeader title={t('settings.telegram.rateLimit')} />
+            <div className="grid gap-2 rounded-lg border p-4">
+              <div className="flex items-center gap-3">
+                <label htmlFor={`${id}-rate`} className="flex-1 text-sm">
+                  {t('settings.telegram.rateLimitLabel')}
+                </label>
+                <RateLimitInput
+                  id={`${id}-rate`}
+                  value={state.rateLimitPerHour}
+                  disabled={busy}
+                  onCommit={(perHour) => run(() => api.setRateLimit({ perHour }))}
+                />
+              </div>
+              <p className="text-muted-foreground text-xs">
+                {t('settings.telegram.rateLimitHint')}
+              </p>
+            </div>
+          </section>
+
+          <section>
             <SectionHeader title={t('settings.telegram.pending')} />
             {pending.length === 0 ? (
               <InlineMessage>{t('settings.telegram.pendingEmpty')}</InlineMessage>
@@ -281,6 +303,51 @@ export function TelegramSettings() {
         </ol>
       </section>
     </div>
+  );
+}
+
+/** 数字输入：失焦或回车保存；非法值或保存失败时恢复原值 */
+function RateLimitInput({
+  id,
+  value,
+  disabled,
+  onCommit,
+}: {
+  id: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (perHour: number) => Promise<boolean>;
+}) {
+  const shown = String(value);
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
+  const parsed = draft.trim() === '' ? Number.NaN : Number(draft);
+  const commit = async () => {
+    if (!isTelegramRateLimit(parsed)) {
+      setDraft(shown);
+      return;
+    }
+    setDraft(String(parsed));
+    if (parsed !== value && !(await onCommit(parsed))) setDraft(shown);
+  };
+  return (
+    <Input
+      id={id}
+      className="w-24"
+      type="number"
+      min={1}
+      max={TELEGRAM_RATE_LIMIT_MAX}
+      step={1}
+      value={draft}
+      disabled={disabled}
+      aria-invalid={!isTelegramRateLimit(parsed) || undefined}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(event) => {
+        // 输入法选词的回车不算提交
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) void commit();
+      }}
+    />
   );
 }
 
