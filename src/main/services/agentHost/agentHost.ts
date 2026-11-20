@@ -1736,6 +1736,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }: SetApprovalModeInput): Promise<Result<{ session: SessionSummary }>> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
+    // 档位会话从不弹审批，记录里的 supervised 只作兜底，不许切换
+    if (stored.profile !== undefined) return fail(translate('sessions.profileApprovalLocked'));
     if (stored.approvalMode === mode) return { ok: true, session: summaryOf(stored) };
     const updated =
       deps.store.update(sessionId, { approvalMode: mode, updatedAt: now() }) ?? stored;
@@ -1931,9 +1933,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         updatedAt: time,
         model: sessionModelOf(resolved.ref, input.thinking ?? requested?.thinking, fastMode),
         // 权限随主 agent：按派发时主 agent 会话的当前档位（用户可能切过）；没有主 agent 时才用角色自己的
+        // 受限 worker 的档位只作兜底，固定 supervised
         approvalMode:
-          (parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
-          role.approvalMode,
+          parent === undefined || parent.profile === 'restricted'
+            ? 'supervised'
+            : ((parentSessionId ? deps.store.get(parentSessionId)?.approvalMode : undefined) ??
+              role.approvalMode),
         // 计划模式不随主 agent：worker 会话永远没有
         // restricted 协调者派出的 worker 一律受限；查不到协调者或它的记录时也按受限（fail-closed）
         ...(parent === undefined || parent.profile === 'restricted'
@@ -2038,7 +2043,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         createdAt: time,
         updatedAt: time,
         model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
-        approvalMode: role.approvalMode,
+        // 档位会话从不弹审批（档位规则直接放行或拒绝）；万一规则失效，退回人工审批卡住而不是放开
+        approvalMode: 'supervised',
         profile: input.profile,
       };
       deps.store.put(stored);
