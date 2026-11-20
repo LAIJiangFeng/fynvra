@@ -12,6 +12,10 @@ export const TEMPLATES = {
   closing: '感谢反馈，目前的信息还不足以确认问题，已记录给维护者。',
   rejected: '暂不采纳，感谢建议。',
   needsMaintainer: '需要维护者处理。',
+  /** 这一轮没有调用 triage_report（含模型出错）时的兜底 */
+  unreported: '收到，不过这次没处理好，请稍后再 @ 我一次。',
+  /** 同一人在一个限流窗口内只提示一次 */
+  rateLimited: '你发得有点快，请过一会儿再 @ 我。',
   /** 只有完整的 GitHub PR 地址才在群里带链接，其余只说已提交 */
   prOpened: (url: string) =>
     GITHUB_PR_URL.test(url) ? `已提交修复 PR：${url}` : '已提交修复 PR。',
@@ -144,7 +148,7 @@ export function parseTriageInput(raw: unknown): ParsedTriageReport | string {
   const reply = str('reply')?.trim() ?? '';
   if (!title) return 'title is required';
   if (!summary) return 'summary is required';
-  if (!reply && kind !== 'invalid') return 'reply is required';
+  if (!reply) return 'reply is required';
   if (r.needInfo !== undefined && typeof r.needInfo !== 'boolean')
     return 'needInfo must be a boolean';
   const needInfo = r.needInfo === true;
@@ -184,4 +188,39 @@ export function parseBugCommand(text: string, botUsername: string): string | nul
   if (!match) return null;
   if (match[1] !== undefined && match[1].toLowerCase() !== botUsername.toLowerCase()) return null;
   return text.trimStart().slice(match[0].length).trim();
+}
+
+/**
+ * 消息里 @ 了本 bot（mention entity，按 UTF-16 offset/length 截取，不区分大小写）时，
+ * 返回去掉这些 @ 片段后的正文；没有 @ 本 bot 返回 null。entities 来自外部，按 unknown 收窄。
+ */
+export function parseBotMention(
+  text: string,
+  entities: unknown,
+  botUsername: string
+): string | null {
+  if (!Array.isArray(entities)) return null;
+  const target = `@${botUsername}`.toLowerCase();
+  const spans: { offset: number; length: number }[] = [];
+  for (const raw of entities) {
+    const entity = asRecord(raw);
+    if (entity?.type !== 'mention') continue;
+    const { offset, length } = entity;
+    if (!Number.isInteger(offset) || !Number.isInteger(length)) continue;
+    const start = offset as number;
+    const end = start + (length as number);
+    if (start < 0 || end > text.length) continue;
+    if (text.slice(start, end).toLowerCase() === target)
+      spans.push({ offset: start, length: end - start });
+  }
+  if (spans.length === 0) return null;
+  // 从后往前删，前面的 offset 不受影响
+  let body = text;
+  for (const span of spans.sort((a, b) => b.offset - a.offset)) {
+    let end = span.offset + span.length;
+    // 去掉句中 @ 后左右都是空格时只留一个，其他位置的空格不动
+    if (body[span.offset - 1] === ' ' && body[end] === ' ') end += 1;
+    body = body.slice(0, span.offset) + body.slice(end);
+  }
+  return body.trim();
 }

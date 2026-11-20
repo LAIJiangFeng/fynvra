@@ -36,14 +36,14 @@ const triageSchema = Type.Object(
   {
     kind: StringEnum(TRIAGE_KINDS, {
       description:
-        'bug: something that used to or should work is broken; feature: a new capability; question: asks how something works; invalid: spam, abuse or off-topic.',
+        'bug: something that used to or should work is broken; feature: a new capability; question: a question or casual chat; invalid: spam, abuse or off-topic.',
     }),
     title: Type.String({ description: `One-line title (max ${TRIAGE_LIMITS.title} characters).` }),
     summary: Type.String({
       description: `What the reporter said and what you found, for the maintainer (max ${TRIAGE_LIMITS.summary}).`,
     }),
     reply: Type.String({
-      description: `Plain-text reply posted to the group. With needInfo it is the follow-up question (max ${TRIAGE_LIMITS.reply}).`,
+      description: `Plain-text reply posted to the group; required and non-empty for every kind (a short polite refusal for invalid). With needInfo it is the follow-up question (max ${TRIAGE_LIMITS.reply}).`,
     }),
     evidence: Type.Optional(
       Type.String({

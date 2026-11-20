@@ -59,6 +59,8 @@ export interface TgMessage {
   chat: TgChat;
   from?: TgUser;
   text?: string;
+  /** 外部数据，使用前逐项收窄（见 parseBotMention） */
+  entities?: { type: string; offset: number; length: number }[];
   reply_to_message?: { message_id: number; from?: TgUser };
   migrate_to_chat_id?: number;
   migrate_from_chat_id?: number;

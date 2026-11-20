@@ -3,6 +3,7 @@ import {
   dutyPrompt,
   escapeUntrusted,
   parseAssessment,
+  parseBotMention,
   parseBugCommand,
   parseTriageInput,
   pullRequestSection,
@@ -78,14 +79,45 @@ describe('telegram content', () => {
     expect(parseBugCommand('hello', 'fyn_bot')).toBeNull();
   });
 
+  it('@本 bot 解析：按 UTF-16 位置截取，坏 entity 忽略', () => {
+    const at = (offset: number, length = 8) => ({ type: 'mention', offset, length });
+    // 表情占 2 个 UTF-16 单元
+    expect(parseBotMention('😀 @fyn_bot 白屏', [at(3)], 'fyn_bot')).toBe('😀 白屏');
+    expect(parseBotMention('@FYN_BOT x', [at(0)], 'fyn_bot')).toBe('x');
+    // 只合并被删 @ 两侧的空格，正文里其他双空格保留
+    expect(parseBotMention('a  b @fyn_bot c', [at(5)], 'fyn_bot')).toBe('a  b c');
+    expect(parseBotMention('@fyn_bot', [at(0)], 'fyn_bot')).toBe('');
+    expect(parseBotMention('@fyn_botx x', [at(0, 9)], 'fyn_bot')).toBeNull();
+    expect(
+      parseBotMention('@fyn_bot x', [{ type: 'hashtag', offset: 0, length: 8 }], 'fyn_bot')
+    ).toBeNull();
+    expect(parseBotMention('@fyn_bot x', [at(5)], 'fyn_bot')).toBeNull();
+    expect(
+      parseBotMention(
+        '@fyn_bot x',
+        [null, 'x', { type: 'mention', offset: '0', length: 8 }],
+        'fyn_bot'
+      )
+    ).toBeNull();
+    expect(parseBotMention('@fyn_bot x', undefined, 'fyn_bot')).toBeNull();
+  });
+
   it('triage_report 入参收窄', () => {
     expect(parseTriageInput(null)).toBe('input must be an object');
     expect(parseTriageInput({ kind: 'x' })).toBe('invalid kind');
     expect(
       parseTriageInput({ kind: 'question', title: 't', summary: 's', reply: 'r', needInfo: true })
     ).toMatch(/needInfo/);
-    const report = parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '' });
-    expect(report).toMatchObject({ kind: 'invalid', reply: '' });
+    // reply 对所有 kind 必填，包括 invalid
+    expect(parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '' })).toBe(
+      'reply is required'
+    );
+    expect(parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '  ' })).toBe(
+      'reply is required'
+    );
+    expect(
+      parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '不处理' })
+    ).toMatchObject({ kind: 'invalid', reply: '不处理' });
     const long = parseTriageInput({
       kind: 'bug',
       title: 'x'.repeat(500),
