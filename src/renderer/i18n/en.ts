@@ -830,7 +830,7 @@ export const en: MessagesShape<typeof zhCN> = {
       recentEmpty: 'Nothing yet',
       followUps: 'Follow-ups {count}/2',
       openPr: 'Open PR',
-      kinds: { bug: 'Bug', feature: 'Feature', question: 'Question', invalid: 'Invalid' },
+      kinds: { bug: 'Bug', feature: 'Feature', question: 'Question / chat', invalid: 'Invalid' },
       statuses: {
         asking: 'Asking for details',
         answered: 'Answered',
@@ -849,7 +849,7 @@ export const en: MessagesShape<typeof zhCN> = {
         token:
           'In Telegram, send /newbot to @BotFather to get a token, then add the bot to your group',
         feedback:
-          "Group members @mention the bot with a description of the problem, or reply to the bot's message, to give feedback",
+          "Group members can @mention the bot to ask questions, chat or report problems, or reply to the bot's message",
         privacy:
           'If the bot does not respond to @mentions: send /setprivacy to @BotFather to turn off privacy mode, then remove the bot from the group and add it back. With privacy mode off the bot receives every group message, but Fynvra only handles @mentions of the bot, /bug and replies to the bot; everything else is dropped without being saved',
         gh: 'Run gh auth login on this computer first so PRs can be opened',

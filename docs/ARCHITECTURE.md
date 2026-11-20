@@ -226,7 +226,7 @@ export interface Message {
         - rm / mv：不能动保护路径，不能用 `[`、`]`、`*`、`?` 通配。
       - `network`（`web_fetch`）、`mcp`、`plugin` 类一律拒绝。
     - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 只放行上述白名单命令；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
-  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug` 或 `feature`（追问轮数由 Main 计数，上限 2 轮，见 §7.14）；只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
+  - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`reply` 对所有 `kind` 必填且非空（`invalid` 是一句简短的拒绝）；`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug` 或 `feature`（追问轮数由 Main 计数，上限 2 轮，见 §7.14）；只注册给 triage 档位；经 `host-invoke`（新 kind `telegram`）交给 Main，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
   - `web_fetch { url, start_index?, max_chars? }`：读取用户给定的公开网页文本，在 agent 进程内执行，不经 Main。
     - 参数：`url` 仅 http/https、≤ 2048 字符、不含用户名或密码；`start_index` 整数 ≥ 0（默认 0，分页继续读）；`max_chars` 默认 20000、上限 50000。
     - 地址拦截：WHATWG `URL` 解析（规范化 IPv4 的各种写法）；拒绝 `localhost`、`*.localhost` 和不含点的单标签主机名（IP 字面量除外）；`node:net` 的 `BlockList` 拦截 IPv4 `0.0.0.0/8`、`10/8`、`100.64/10`、`127/8`、`169.254/16`（含云元数据）、`172.16/12`、`192.0.0/24`、`192.168/16`、`224/4`、`240/4`，IPv6 `::`、`::1`、`fc00::/7`、`fe80::/10`、`ff00::/8`，`::ffff:0:0/96`、`64:ff9b::/96`、`2002::/16` 取出内嵌 IPv4 后按同一规则判定。**不拦截 `198.18.0.0/15`**：Clash / Surge 的 fake-ip 默认用这个网段，拦截后 TUN 模式下所有网站都会失败。
@@ -596,19 +596,20 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
 
 - 行为差异：
   - Telegram 只是群消息通道，只做电脑端。群消息进入本群的 triage 分诊会话；分诊结论经 `triage_report`（§5）交给 Main，由 Main 按确定性规则路由：已定位的 bug 投给该工作区的 restricted 值班会话，由它派 restricted worker 修复并用 `open_pull_request`（§6）交付；建议采纳的新功能等用户在电脑上采纳。判断规则见 PRODUCT「Telegram 群反馈值班」。
-  - 群里只能收到两类内容：经过滤的 `triage_report.reply`，和 Main 生成的固定模板通知（PR 链接、暂不采纳、需要维护者处理、中性拦截提示）。值班会话与 worker 的内容永远不发到群里。
+  - 群里只能收到两类内容：经过滤的 `triage_report.reply`，和 Main 生成的固定模板通知（PR 链接、暂不采纳、需要维护者处理、中性拦截提示、处理失败兜底、限流提示）。值班会话与 worker 的内容永远不发到群里。
 - 所属层与必改文件：
   - **Main 服务** `src/main/services/telegram/`：
     - `api.ts`：Bot API `getMe`、`getUpdates`（`allowed_updates: ['message', 'my_chat_member']`，长轮询）、`sendMessage`（纯文本）、`setMyCommands`（只注册 `/bug`）；走 §7.7 代理（默认跟随系统代理，每次请求前按缓存规则刷新）；网络错误的提示说明检查 VPN 或改用手动代理，不含 token；429 按 `retry_after` 重试一次；错误分为 `network` / `unauthorized` / `conflict`（同一 token 另有实例在轮询）/ `api` 四类；token 和带 token 的 URL 不进日志与错误文案。
     - 轮询：全局只有一个长轮询（启用且有 token 时）；`getMe` 成功即置为 `connected`，不等第一次长轮询返回，之后 getUpdates 出错切到对应错误状态、再次成功恢复 `connected`；每批 update 先前进内存里的 `pollOffset` 并尝试落盘，写盘失败只记一条 warn（不含 token），照常处理这一批；本次运行内不会重复处理，代价是写盘失败后进程若又崩溃，重启后可能把这一批再处理一次（可接受）；失败按 3 秒起、翻倍、最多 60 秒退避，成功后归零；私聊（`chat.type === 'private'`）一律忽略，不回复。
     - 群发现与准入：在未允许的群里收到的任何一条消息都把该群记为候选（只存 id 与标题，最多 20 个，超出淘汰最旧的），消息本身丢弃；机器人被拉进群的 `my_chat_member` 照样处理，但不一定送达，所以界面提示用户拉群后在群里 @ 一下机器人。只在电脑上允许并绑定 git 工作区，没有群内命令。机器人被移出已允许的群时停止投递。已允许群里只有三类消息投递，其余直接丢弃（不保存、不投递）：① @本机器人：`entities` 里有 `type: 'mention'`、按 UTF-16 offset/length 截出的文本与 `@<bot.username>` 不区分大小写相等（前缀相同的用户名不算），正文为去掉这些 @ 片段后 trim，为空则忽略；② 以 `/bug` 或 `/bug@本机器人` 开头；③ 回复机器人的消息。只取 `text`（图片、文件与 caption 忽略）。Telegram 默认隐私模式只保证送达命令和回复，@ 收不到时由用户在 @BotFather 关闭隐私模式；关闭后准入规则不变。
-    - 限流与批次：每人每小时最多 5 条（超出丢弃）；每批只含一个群，防抖 3 秒后合成一条 prompt；每群最多排 50 条，超出丢最旧的。正文包进 `<untrusted-content>` … `</untrusted-content>`，正文里伪造的开闭标签要转义；发送者只带显示名与消息 id。
+    - 限流与批次：每人每小时最多 5 条（超出丢弃）；已允许的群里同一人在一个限流窗口（1 小时）内第一次超限时，用固定模板「你发得有点快，请过一会儿再 @ 我。」回复超限的那条消息，只提示一次、不调用模型、不投递，同窗口内再超限静默丢弃；每批只含一个群，防抖 3 秒后合成一条 prompt；每群最多排 50 条，超出丢最旧的。正文包进 `<untrusted-content>` … `</untrusted-content>`，正文里伪造的开闭标签要转义；发送者只带显示名与消息 id。
     - 会话：允许一个群时，Main 为它在绑定工作区的干净检出里创建 triage 会话（每群一个，群与群互不可见）；每个工作区第一次需要时创建 restricted 值班会话（角色 orchestrator，标题「Telegram 值班」）。两者的工作目录都是该工作区的**干净检出**：一个只含已提交文件的 detached worktree（由 Main 创建并登记在 `telegram.json`），每次投递前切到默认分支的最新提交；值班会话派出的 worker 照常在自己的 worktree 里工作。投递一律用 `agentHost.promptWhenIdle`，忙时排队、settled 后再投（同 `coordinatorWake.ts`）。
     - 接线：`src/main/index.ts` 的 `installCoordinatorWake` 之后安装；退出时停止轮询并等待落盘。
   - **`triage_report` 的处理与路由**（Main，经 `host-invoke` kind `telegram`）：
     - 只接受来自已登记 triage 会话的调用，群由会话反查，不信任参数；入参按 `unknown` 收窄，`kind` 枚举校验，各字段限长（超长截断），存成卡片。
-    - `reply` 经 `secrets` 过滤后发回本群，回复触发消息；命中密钥就整条拦下，改发中性提示并发桌面通知；本机路径、用户名、主机名替换后发送。
+    - `reply` 对所有 `kind` 必填，为空即拒绝（agent 侧与 Main 侧都校验）；经 `secrets` 过滤后发回本群，回复触发消息；命中密钥就整条拦下，改发中性提示并发桌面通知；本机路径、用户名、主机名替换后发送。
     - 路由：`bug` 且有 `evidence`（已定位）→ 直接投给值班会话；`feature` 且 `assessment` 三问都过 → 卡片进入「待确认需求」并发桌面通知，用户 `approve` 后才投给值班会话，`reject` 则群里发模板通知；其余只回复、留记录。投给值班会话的卡片同样包进 `<untrusted-content>`。
+    - 一轮 settled 仍没有调用 `triage_report`（含模型出错）：新反馈记为 `unreported` 卡片（追问回复的卡片状态不变），群里用固定模板「收到，不过这次没处理好，请稍后再 @ 我一次。」回复原消息。
   - **追问与卡片线程**：
     1. Main 记录机器人在群里发出的每条消息 id 属于哪张卡片。
     2. 群成员回复这些消息时，投递内容里带上卡片 id 和「已追问 k/2 轮」。

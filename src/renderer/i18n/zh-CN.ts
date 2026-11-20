@@ -797,7 +797,7 @@ export const zhCN = {
       recentEmpty: '还没有记录',
       followUps: '追问 {count}/2',
       openPr: '打开 PR',
-      kinds: { bug: 'Bug', feature: '新功能', question: '提问', invalid: '无效' },
+      kinds: { bug: 'Bug', feature: '新功能', question: '提问/闲聊', invalid: '无效' },
       statuses: {
         asking: '追问中',
         answered: '已回答',
@@ -814,7 +814,7 @@ export const zhCN = {
       guide: '使用说明',
       guideSteps: {
         token: '在 Telegram 找 @BotFather，发送 /newbot 取得 token，再把机器人拉进群',
-        feedback: '群成员在群里 @机器人 描述问题，或直接回复机器人的消息来反馈',
+        feedback: '群成员可以在群里 @机器人 提问、闲聊或反馈问题，也可以直接回复机器人的消息',
         privacy:
           '如果 @ 了机器人没有反应：在 @BotFather 用 /setprivacy 关闭隐私模式，再把机器人移出群、重新拉进来；关闭后机器人能收到群里的所有消息，但 Fynvra 只处理 @机器人、/bug 和回复机器人的消息，其余直接丢弃、不保存',
         gh: '本机需要先运行 gh auth login，才能开 PR',
