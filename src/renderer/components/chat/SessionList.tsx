@@ -431,7 +431,11 @@ const SessionRow = memo(function SessionRow({
             {session.title}
           </span>
           <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-            <RoleBadge roleId={session.roleId} className="min-w-0 max-w-[60%] shrink truncate" />
+            <RoleBadge
+              roleId={session.roleId}
+              profile={session.profile}
+              className="min-w-0 max-w-[60%] shrink truncate"
+            />
             <span className="min-w-0 flex-1 truncate text-right">
               {formatRelativeTime(session.updatedAt, now, t)}
             </span>

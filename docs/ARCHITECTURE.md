@@ -204,7 +204,7 @@ export interface Message {
   - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门：只放行目标全是 Markdown 文档的写改（§7.10）。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
-  - 会话档位 `profile`（Telegram 群反馈值班用，§7.14）：优先于上面按策略的工具装配；两档都不加载 MCP、插件和用户的全局指令文件，不注册 `fynvra_config`，只读仓库里已提交的 `AGENTS.md`，跨会话记忆保持关闭。
+  - 会话档位 `profile`（Telegram 群反馈值班用，§7.14）：优先于上面按策略的工具装配；两档都不加载 MCP、插件和用户的全局指令文件，不注册 `fynvra_config`，只读仓库里已提交的 `AGENTS.md`，跨会话记忆保持关闭。档位会话从不弹审批（档位规则直接放行或拒绝）：界面的审批档位显示为「自动执行（规则把关）」且不可切换（`setApprovalMode` 拒绝）；会话记录里固定存 `supervised` 只作兜底（建会话、restricted 派出的 worker、读旧记录时都规范成它），万一档位规则失效就退回人工审批，卡住而不是放开。
     - **triage**：工具只有 `read` / `grep` / `find` / `ls`（带路径校验，规则同下方 restricted 的路径与敏感文件两条）和 `triage_report`；没有 `web_fetch`、`fynvra_config`、`git_readonly`、`write_plan`；系统提示词由 Fynvra 固定（§7.14「分诊 AI 的固定规则」），不追加角色提示词。
     - **restricted**：不注册 `fynvra_config`，不加载 MCP 和插件。审批门（`approval/gate.ts`）新增实时谓词（写法同 `planMode`），以下规则只直接允许或直接拒绝，不弹审批（无人值守时不会卡住），也不受审批档位和 `allowSession` 影响：
       - 路径限制：读、写、搜索、列目录的目标必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝。

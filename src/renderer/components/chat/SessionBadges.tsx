@@ -1,3 +1,4 @@
+import type { SessionProfile } from '@fynvra/core';
 import type { SessionStatus } from '@shared/types/chat';
 import { Crown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -56,10 +57,28 @@ export function useSessionBranch(sessionId: string): { branch: string; cwd: stri
 }
 
 /** 角色徽标；主 agent（orchestrator）带皇冠、紫色。 */
-export function RoleBadge({ roleId, className }: { roleId: string; className?: string }) {
+export function RoleBadge({
+  roleId,
+  profile,
+  className,
+}: {
+  roleId: string;
+  profile?: SessionProfile;
+  className?: string;
+}) {
   const roles = useRoles();
-  const name = roles.find((role) => role.id === roleId)?.name ?? roleId;
-  if (isOrchestratorRole(roleId, roles)) {
+  const t = useT();
+  // 分诊会话只是借内置 worker 作底子，显示「分诊」而不是角色名，免得误以为是 worker 在处理问题
+  const name =
+    profile === 'triage'
+      ? t('approval.profileBadge.triage')
+      : (roles.find((role) => role.id === roleId)?.name ?? roleId);
+  const restricted = profile === 'restricted' && (
+    <span className="rounded-sm bg-muted px-1 font-normal text-[10px] text-muted-foreground">
+      {t('approval.profileBadge.restricted')}
+    </span>
+  );
+  if (profile !== 'triage' && isOrchestratorRole(roleId, roles)) {
     return (
       <Badge
         className={cn(
@@ -69,12 +88,14 @@ export function RoleBadge({ roleId, className }: { roleId: string; className?: s
       >
         <Crown />
         {name}
+        {restricted}
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className={className}>
       {name}
+      {restricted}
     </Badge>
   );
 }

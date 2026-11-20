@@ -470,6 +470,9 @@ export const zhCN = {
     modes: { supervised: '全程审批', 'auto-edits': '自动接受编辑', full: '完全放行' },
     cycleHint: 'Shift+Tab 切换',
     statusHint: '审批档位（Shift+Tab 切换）',
+    ruleGated: '自动执行（规则把关）',
+    ruleGatedHint: 'Telegram 会话不会弹审批：每个操作都由固定规则直接放行或拒绝，不会卡住等你',
+    profileBadge: { triage: '分诊', restricted: '受限' },
     kinds: {
       command: '执行命令',
       'file-edit': '编辑文件',
