@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { InlineMessage, SectionHeader } from './common';
@@ -90,17 +89,7 @@ export function TelegramSettings() {
       <section>
         <SectionHeader title={t('settings.telegram.connection')} />
         <div className="grid gap-3 rounded-lg border p-4">
-          <div className="flex items-center justify-between gap-4">
-            <label htmlFor={`${id}-enabled`} className="text-sm">
-              {t('settings.telegram.enable')}
-            </label>
-            <Switch
-              id={`${id}-enabled`}
-              checked={state?.enabled ?? false}
-              disabled={!state || busy}
-              onCheckedChange={(enabled) => void run(() => api.setEnabled({ enabled }))}
-            />
-          </div>
+          <p className="text-muted-foreground text-xs">{t('settings.telegram.disableHint')}</p>
           <label htmlFor={`${id}-token`} className="text-sm">
             {t('settings.telegram.token')}
           </label>

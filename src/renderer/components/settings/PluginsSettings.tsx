@@ -1,3 +1,4 @@
+import { errorMessage } from '@shared/guards';
 import { findCatalogProvider, providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelProviderView } from '@shared/types/llm';
 import {
@@ -24,6 +25,7 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
+  Settings2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -55,6 +57,7 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { OFFICIAL_PLUGINS, useTelegramEnabled } from './officialPlugins';
 import { PluginImportDialog } from './PluginImportDialog';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
@@ -104,77 +107,154 @@ export function PluginsSettings() {
   const trimmed = source.trim();
 
   return (
-    <section>
-      <SectionHeader title={t('settings.plugins.title')}>
-        <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
-          <HardDriveDownload />
-          <span className="hidden sm:inline">{t('settings.import.fromLocal')}</span>
-          <span className="sm:hidden">{t('settings.import.fromLocalShort')}</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={working !== null}
-          onClick={() => void proceed({ kind: 'local' })}
-        >
-          {working === 'local' ? <Loader2 className="animate-spin" /> : <FolderPlus />}
-          {t('settings.plugins.addLocal')}
-        </Button>
-      </SectionHeader>
-
-      <p className="mb-3 text-muted-foreground text-sm">{t('settings.plugins.subtitle')}</p>
-
-      <form
-        className="mb-1 flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (trimmed && working === null) void proceed({ kind: 'remote', source: trimmed });
-        }}
-      >
-        <Input
-          value={source}
-          maxLength={500}
-          spellCheck={false}
-          className="font-mono"
-          disabled={working !== null}
-          placeholder={t('settings.plugins.installPlaceholder')}
-          aria-label={t('settings.plugins.installPlaceholder')}
-          onChange={(event) => setSource(event.target.value)}
-        />
-        <Button type="submit" size="sm" disabled={!trimmed || working !== null}>
-          {working === 'remote' ? <Loader2 className="animate-spin" /> : <PackagePlus />}
-          {t(working === 'remote' ? 'settings.plugins.installing' : 'settings.plugins.install')}
-        </Button>
-      </form>
-      <p className="mb-4 text-muted-foreground text-xs">{t('settings.plugins.installHint')}</p>
-
-      {status && (
-        <InlineMessage tone={status.tone} className="mb-3 break-all">
-          {status.text}
-        </InlineMessage>
-      )}
-      {error && <InlineMessage tone="error">{error}</InlineMessage>}
-
-      {loaded && plugins.length === 0 ? (
-        <EmptyState icon={Puzzle} title={t('settings.plugins.empty')}>
+    <div className="grid gap-8">
+      <OfficialPluginsSection />
+      <section>
+        <SectionHeader title={t('settings.plugins.title')}>
           <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
             <HardDriveDownload />
-            {t('settings.import.fromLocalShort')}
+            <span className="hidden sm:inline">{t('settings.import.fromLocal')}</span>
+            <span className="sm:hidden">{t('settings.import.fromLocalShort')}</span>
           </Button>
-        </EmptyState>
-      ) : (
-        <ul className="divide-y rounded-lg border">
-          {plugins.map((plugin) => (
-            <PluginRow key={plugin.id} plugin={plugin} onStatus={setStatus} />
-          ))}
-        </ul>
-      )}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={working !== null}
+            onClick={() => void proceed({ kind: 'local' })}
+          >
+            {working === 'local' ? <Loader2 className="animate-spin" /> : <FolderPlus />}
+            {t('settings.plugins.addLocal')}
+          </Button>
+        </SectionHeader>
 
-      <PluginImportDialog
-        session={importSession}
-        onClose={() => setImportSession(null)}
-        onImported={setStatus}
-      />
+        <p className="mb-3 text-muted-foreground text-sm">{t('settings.plugins.subtitle')}</p>
+
+        <form
+          className="mb-1 flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmed && working === null) void proceed({ kind: 'remote', source: trimmed });
+          }}
+        >
+          <Input
+            value={source}
+            maxLength={500}
+            spellCheck={false}
+            className="font-mono"
+            disabled={working !== null}
+            placeholder={t('settings.plugins.installPlaceholder')}
+            aria-label={t('settings.plugins.installPlaceholder')}
+            onChange={(event) => setSource(event.target.value)}
+          />
+          <Button type="submit" size="sm" disabled={!trimmed || working !== null}>
+            {working === 'remote' ? <Loader2 className="animate-spin" /> : <PackagePlus />}
+            {t(working === 'remote' ? 'settings.plugins.installing' : 'settings.plugins.install')}
+          </Button>
+        </form>
+        <p className="mb-4 text-muted-foreground text-xs">{t('settings.plugins.installHint')}</p>
+
+        {status && (
+          <InlineMessage tone={status.tone} className="mb-3 break-all">
+            {status.text}
+          </InlineMessage>
+        )}
+        {error && <InlineMessage tone="error">{error}</InlineMessage>}
+
+        {loaded && plugins.length === 0 ? (
+          <EmptyState icon={Puzzle} title={t('settings.plugins.empty')}>
+            <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
+              <HardDriveDownload />
+              {t('settings.import.fromLocalShort')}
+            </Button>
+          </EmptyState>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {plugins.map((plugin) => (
+              <PluginRow key={plugin.id} plugin={plugin} onStatus={setStatus} />
+            ))}
+          </ul>
+        )}
+
+        <PluginImportDialog
+          session={importSession}
+          onClose={() => setImportSession(null)}
+          onImported={setStatus}
+        />
+      </section>
+    </div>
+  );
+}
+
+/** 「官方插件」区：随应用发布的可选功能，启用后设置侧边栏才出现同名入口。目前只有 Telegram。 */
+function OfficialPluginsSection() {
+  const t = useT();
+  const telegramEnabled = useTelegramEnabled();
+  const setSection = useSettingsViewStore((state) => state.setSection);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 启用状态以 telegram.json 的 enabled 为准；成功后 Main 广播 telegram:changed，hook 自行刷新
+  const setEnabled = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await window.fynvra.telegram.setEnabled({ enabled });
+      if (!result.ok) setError(result.error);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <SectionHeader title={t('settings.plugins.official.title')} />
+      {error && (
+        <InlineMessage tone="error" className="mb-3 break-all">
+          {error}
+        </InlineMessage>
+      )}
+      <ul className="divide-y rounded-lg border">
+        {OFFICIAL_PLUGINS.map(({ id, icon: Icon, nameKey, descriptionKey }) => {
+          const enabled = id === 'telegram' && telegramEnabled === true;
+          return (
+            <li key={id} className="flex items-start gap-3 px-4 py-3">
+              <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-sm">{t(nameKey)}</span>
+                  <Badge variant="outline">{t('settings.plugins.official.badge')}</Badge>
+                  <Badge variant={enabled ? 'outline' : 'secondary'}>
+                    {t(enabled ? 'settings.plugins.official.on' : 'settings.plugins.official.off')}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-muted-foreground text-sm">{t(descriptionKey)}</p>
+                <p className="mt-0.5 text-muted-foreground text-xs">
+                  {t('settings.plugins.official.keepHint')}
+                </p>
+              </div>
+              {enabled && (
+                <Button size="sm" variant="outline" onClick={() => setSection(id)}>
+                  <Settings2 />
+                  {t('settings.plugins.official.settings')}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={enabled ? 'outline' : 'default'}
+                disabled={busy || telegramEnabled === null}
+                onClick={() => void setEnabled(!enabled)}
+              >
+                {busy && <Loader2 className="animate-spin" />}
+                {t(
+                  enabled ? 'settings.plugins.official.disable' : 'settings.plugins.official.enable'
+                )}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

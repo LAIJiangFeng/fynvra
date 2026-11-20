@@ -792,7 +792,7 @@ export const en: MessagesShape<typeof zhCN> = {
   settings: {
     telegram: {
       connection: 'Connection',
-      enable: 'Enable group feedback duty',
+      disableHint: 'Disable it in Plugins → Official plugins',
       token: 'Bot token',
       tokenSaved: 'Saved: {masked}',
       tokenPlaceholder: 'Paste the token from @BotFather',
@@ -1431,6 +1431,22 @@ export const en: MessagesShape<typeof zhCN> = {
     plugins: {
       title: 'Plugins',
       subtitle: 'pi extensions or packages; attach to a role to use in new sessions',
+      official: {
+        title: 'Official plugins',
+        badge: 'Official',
+        on: 'Enabled',
+        off: 'Not enabled',
+        enable: 'Enable',
+        disable: 'Disable',
+        settings: 'Settings',
+        keepHint:
+          'Disabling only stops receiving group messages; the token, groups and history are kept, so you can pick up where you left off when you enable it again',
+        telegram: {
+          name: 'Telegram group feedback duty',
+          description:
+            'Group members @ the bot in Telegram to report issues; Fynvra triages, fixes and opens PRs on your computer',
+        },
+      },
       addLocal: 'Add local plugin',
       installPlaceholder: 'npm:<name>, git:<host>/<path> or an https:// repository URL',
       install: 'Install',
