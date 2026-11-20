@@ -777,7 +777,7 @@ export const zhCN = {
         '连不上 api.telegram.org：请确认 VPN 或代理已开启；网络代理默认跟随系统代理，也可以在「设置 → 通用 → 网络代理」改用手动代理',
       groups: '群',
       candidates: '候选群',
-      candidatesEmpty: '暂无候选群：把机器人拉进群后，群会出现在这里',
+      candidatesEmpty: '暂无候选群：把机器人拉进群后，在群里 @机器人 发一条消息，群就会出现在这里',
       workspace: '工作区',
       chooseWorkspace: '选择工作区',
       allow: '允许',
@@ -814,7 +814,9 @@ export const zhCN = {
       guide: '使用说明',
       guideSteps: {
         token: '在 Telegram 找 @BotFather，发送 /newbot 取得 token，再把机器人拉进群',
-        feedback: '群成员发送「/bug@机器人 描述」或直接回复机器人来反馈',
+        feedback: '群成员在群里 @机器人 描述问题，或直接回复机器人的消息来反馈',
+        privacy:
+          '如果 @ 了机器人没有反应：在 @BotFather 用 /setprivacy 关闭隐私模式，再把机器人移出群、重新拉进来；关闭后机器人能收到群里的所有消息，但 Fynvra 只处理 @机器人、/bug 和回复机器人的消息，其余直接丢弃、不保存',
         gh: '本机需要先运行 gh auth login，才能开 PR',
         proxy:
           '默认跟随系统代理（和浏览器一致）；连不上时检查 VPN，或在「通用 → 网络代理」改用手动代理',

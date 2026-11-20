@@ -809,7 +809,8 @@ export const en: MessagesShape<typeof zhCN> = {
         'Cannot reach api.telegram.org. Make sure your VPN or proxy is on. The network proxy follows the system proxy by default; you can also switch to a manual proxy in Settings → General → Network proxy',
       groups: 'Groups',
       candidates: 'Candidate groups',
-      candidatesEmpty: 'No candidates yet: add the bot to a group and it will show up here',
+      candidatesEmpty:
+        'No candidates yet: add the bot to a group, then @mention the bot in that group and it will show up here',
       workspace: 'Workspace',
       chooseWorkspace: 'Choose a workspace',
       allow: 'Allow',
@@ -848,7 +849,9 @@ export const en: MessagesShape<typeof zhCN> = {
         token:
           'In Telegram, send /newbot to @BotFather to get a token, then add the bot to your group',
         feedback:
-          'Group members send "/bug@yourbot description" or reply to the bot to give feedback',
+          "Group members @mention the bot with a description of the problem, or reply to the bot's message, to give feedback",
+        privacy:
+          'If the bot does not respond to @mentions: send /setprivacy to @BotFather to turn off privacy mode, then remove the bot from the group and add it back. With privacy mode off the bot receives every group message, but Fynvra only handles @mentions of the bot, /bug and replies to the bot; everything else is dropped without being saved',
         gh: 'Run gh auth login on this computer first so PRs can be opened',
         proxy:
           'Follows the system proxy by default (same as your browser). If it cannot connect, check your VPN or switch to a manual proxy in General → Network proxy',

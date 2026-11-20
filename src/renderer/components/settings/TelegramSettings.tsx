@@ -286,7 +286,7 @@ export function TelegramSettings() {
       <section>
         <SectionHeader title={t('settings.telegram.guide')} />
         <ol className="grid list-decimal gap-1 pl-5 text-muted-foreground text-sm">
-          {(['token', 'feedback', 'gh', 'proxy', 'offline'] as const).map((step) => (
+          {(['token', 'feedback', 'privacy', 'gh', 'proxy', 'offline'] as const).map((step) => (
             <li key={step}>{t(`settings.telegram.guideSteps.${step}`)}</li>
           ))}
         </ol>

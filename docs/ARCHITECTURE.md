@@ -600,8 +600,8 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
 - 所属层与必改文件：
   - **Main 服务** `src/main/services/telegram/`：
     - `api.ts`：Bot API `getMe`、`getUpdates`（`allowed_updates: ['message', 'my_chat_member']`，长轮询）、`sendMessage`（纯文本）、`setMyCommands`（只注册 `/bug`）；走 §7.7 代理（默认跟随系统代理，每次请求前按缓存规则刷新）；网络错误的提示说明检查 VPN 或改用手动代理，不含 token；429 按 `retry_after` 重试一次；错误分为 `network` / `unauthorized` / `conflict`（同一 token 另有实例在轮询）/ `api` 四类；token 和带 token 的 URL 不进日志与错误文案。
-    - 轮询：全局只有一个长轮询（启用且有 token 时）；每批 update 先把新的 `pollOffset` 落盘再处理（崩溃时宁可丢一批，不重复处理）；失败按 3 秒起、翻倍、最多 60 秒退避，成功后归零；私聊（`chat.type === 'private'`）一律忽略，不回复。
-    - 群发现与准入：机器人被拉进的群（`my_chat_member`）、在未允许的群里收到的消息，都把该群记为候选（只存 id 与标题，最多 20 个，超出淘汰最旧的），消息本身丢弃；只在电脑上允许并绑定 git 工作区，没有群内命令。机器人被移出已允许的群时停止投递。已允许群里只有 `/bug@机器人 …` 和回复机器人的消息才投递，只取文字（图片、文件忽略）。
+    - 轮询：全局只有一个长轮询（启用且有 token 时）；`getMe` 成功即置为 `connected`，不等第一次长轮询返回，之后 getUpdates 出错切到对应错误状态、再次成功恢复 `connected`；每批 update 先前进内存里的 `pollOffset` 并尝试落盘，写盘失败只记一条 warn（不含 token），照常处理这一批；本次运行内不会重复处理，代价是写盘失败后进程若又崩溃，重启后可能把这一批再处理一次（可接受）；失败按 3 秒起、翻倍、最多 60 秒退避，成功后归零；私聊（`chat.type === 'private'`）一律忽略，不回复。
+    - 群发现与准入：在未允许的群里收到的任何一条消息都把该群记为候选（只存 id 与标题，最多 20 个，超出淘汰最旧的），消息本身丢弃；机器人被拉进群的 `my_chat_member` 照样处理，但不一定送达，所以界面提示用户拉群后在群里 @ 一下机器人。只在电脑上允许并绑定 git 工作区，没有群内命令。机器人被移出已允许的群时停止投递。已允许群里只有三类消息投递，其余直接丢弃（不保存、不投递）：① @本机器人：`entities` 里有 `type: 'mention'`、按 UTF-16 offset/length 截出的文本与 `@<bot.username>` 不区分大小写相等（前缀相同的用户名不算），正文为去掉这些 @ 片段后 trim，为空则忽略；② 以 `/bug` 或 `/bug@本机器人` 开头；③ 回复机器人的消息。只取 `text`（图片、文件与 caption 忽略）。Telegram 默认隐私模式只保证送达命令和回复，@ 收不到时由用户在 @BotFather 关闭隐私模式；关闭后准入规则不变。
     - 限流与批次：每人每小时最多 5 条（超出丢弃）；每批只含一个群，防抖 3 秒后合成一条 prompt；每群最多排 50 条，超出丢最旧的。正文包进 `<untrusted-content>` … `</untrusted-content>`，正文里伪造的开闭标签要转义；发送者只带显示名与消息 id。
     - 会话：允许一个群时，Main 为它在绑定工作区的干净检出里创建 triage 会话（每群一个，群与群互不可见）；每个工作区第一次需要时创建 restricted 值班会话（角色 orchestrator，标题「Telegram 值班」）。两者的工作目录都是该工作区的**干净检出**：一个只含已提交文件的 detached worktree（由 Main 创建并登记在 `telegram.json`），每次投递前切到默认分支的最新提交；值班会话派出的 worker 照常在自己的 worktree 里工作。投递一律用 `agentHost.promptWhenIdle`，忙时排队、settled 后再投（同 `coordinatorWake.ts`）。
     - 接线：`src/main/index.ts` 的 `installCoordinatorWake` 之后安装；退出时停止轮询并等待落盘。
@@ -646,7 +646,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   9. **改动不直接进用户的代码**：restricted 协调者不能 `merge_worktree`，只能 `open_pull_request`；PR 只开不合并。强制点：Main `OrchestrationHost` 按会话 `profile` 拒绝。
   10. **CI 拿不到 secrets**：`check.yml` 只由 `pull_request` 触发、`permissions: contents: read`、`persist-credentials: false`、不引用 secrets；`release.yml` 只在推送 main 时运行。强制点：第 8 条禁止改 `.github/**`。
   11. **新功能必须用户点头**：新功能卡片只有在电脑上 `approve` 后才投给值班会话。强制点：Main 路由 + `telegram:resolve-card`。
-  12. **防刷屏、控制费用**：只认 `/bug@机器人` 和回复机器人的消息；防抖合批；每人每小时最多 5 条；每群最多排 50 条；每个工作区同时最多 3 个修复任务。强制点：Main 准入与排队 + restricted `dispatch_task` 并发上限。
+  12. **防刷屏、控制费用**：只认 @本机器人、`/bug[@机器人]` 和回复机器人的消息，其余丢弃；防抖合批；每人每小时最多 5 条；每群最多排 50 条；每个工作区同时最多 3 个修复任务。强制点：Main 准入与排队 + restricted `dispatch_task` 并发上限。
   - 剩余风险（如实说明）：密钥检测会漏，主防线是第 1、2 条；私有仓库的已提交代码可能被群回复引用；用户在值班会话里说的话可能进入提交信息；限制由 Fynvra 工具闸门执行，不是操作系统级沙箱；Telegram 不是端到端加密。
     - 受限档位的前提是：项目的 `typecheck` / `lint` 只调用 `node_modules` 里的工具，且这些工具的配置都在保护名单内。Fynvra 自身满足（tsc + biome）；以后绑定的项目脚本如果会直接执行仓库里的文件，要先把这些文件加进保护名单。
     - 用户自己的 git hooks 中，除 pre-commit 和 commit-msg 以外的 hooks 在 commit 时仍会运行；hooks 本身不能被改。
