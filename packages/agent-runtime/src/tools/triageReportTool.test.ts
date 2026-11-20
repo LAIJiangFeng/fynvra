@@ -14,6 +14,8 @@ describe('parseTriageReport', () => {
     expect(parseTriageReport({ ...base, kind: 'chat' })).toContain('kind must be one of');
     expect(parseTriageReport({ ...base, reply: undefined })).toContain('reply');
     expect(parseTriageReport({ ...base, title: '  ' })).toContain('title');
+    expect(parseTriageReport({ ...base, kind: 'invalid', reply: '' })).toContain('reply');
+    expect(parseTriageReport({ ...base, kind: 'invalid', reply: undefined })).toContain('reply');
     expect(parseTriageReport({ ...base, evidence: 3 })).toContain('evidence');
     expect(parseTriageReport({ ...base, needInfo: 'yes' })).toContain('needInfo');
   });

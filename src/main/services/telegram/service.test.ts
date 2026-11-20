@@ -302,6 +302,24 @@ describe('准入', () => {
     expect(h.prompts.some((p) => p.text.includes('第6条'))).toBe(false);
   });
 
+  it('限流窗口内第一次超限提示一次，再超限静默；提示不触发投递', async () => {
+    const h = harness();
+    await h.service.start();
+    const updates = Array.from({ length: 7 }, (_, i) =>
+      message(CHAT_A, 1, `/bug 第${i + 1}条`, { date: 1_000 + i * 60 })
+    );
+    await deliver(h, updates, 1);
+    await vi.waitFor(() =>
+      expect(h.sent.filter((s) => s.text === TEMPLATES.rateLimited)).toHaveLength(1)
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const notices = h.sent.filter((s) => s.text === TEMPLATES.rateLimited);
+    expect(notices).toEqual([
+      { chatId: CHAT_A, text: TEMPLATES.rateLimited, replyTo: updates[5]?.message?.message_id },
+    ]);
+    expect(h.prompts).toHaveLength(1);
+  });
+
   it('已允许的群：@本 bot（句首/句中/句尾）、/bug@bot、回复 bot 入队，其余丢弃', async () => {
     const h = harness();
     await h.service.start();
@@ -502,13 +520,34 @@ describe('triage_report', () => {
     expect(h.sent.at(-1)?.text).toBe('见 <本机路径>\\repo\\a.ts');
   });
 
-  it('整轮没有调用时只在电脑上记录，不发群消息', async () => {
+  it('整轮没有调用时记为 unreported，群里用兜底模板回复原消息', async () => {
     const h = harness();
     await h.service.start();
-    await deliver(h, [message(CHAT_A, 1, '/bug 没人理')], 1);
+    const update = message(CHAT_A, 1, '/bug 没人理');
+    await deliver(h, [update], 1);
     h.settle('sA');
     await vi.waitFor(() => expect(h.service.getState().cards[0]?.status).toBe('unreported'));
-    expect(h.sent).toEqual([]);
+    await vi.waitFor(() =>
+      expect(h.sent).toEqual([
+        { chatId: CHAT_A, text: TEMPLATES.unreported, replyTo: update.message?.message_id },
+      ])
+    );
+  });
+
+  it('invalid 的 reply 照常过滤后发送', async () => {
+    const h = harness();
+    await h.service.start();
+    await deliver(h, [message(CHAT_A, 1, '/bug 广告')], 1);
+    expect(await h.report('sA', { kind: 'invalid', title: 't', summary: 's', reply: '' })).toEqual(
+      expect.objectContaining({ ok: false, error: 'reply is required' })
+    );
+    await h.report('sA', {
+      kind: 'invalid',
+      title: 't',
+      summary: 's',
+      reply: '抱歉，这个不处理。',
+    });
+    expect(h.sent.at(-1)?.text).toBe('抱歉，这个不处理。');
   });
 });
 

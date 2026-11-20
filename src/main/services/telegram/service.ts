@@ -191,6 +191,8 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
   const pumping = new Set<number>();
   const inflight = new Map<string, InflightItem>();
   const rate = new Map<number, number[]>();
+  /** 每人上一次收到限流提示的消息时间；一个限流窗口内只提示一次 */
+  const rateNoticed = new Map<number, number>();
   const dutyRounds = new Map<string, DutyRound>();
   const dutyBusy = new Set<string>();
   const dutySettledAt = new Map<string, number>();
@@ -276,6 +278,17 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
       card.botMessageIds = [...card.botMessageIds, sent.messageId].slice(-20);
     } catch (error) {
       warn(`发送群消息失败（卡片 #${card.id}）：${errorMessage(error)}`);
+    }
+  };
+
+  /** 限流提示：固定模板，不关联卡片、不调用模型 */
+  const notifyRateLimited = async (chatId: number, replyTo: number) => {
+    const token = data.token;
+    if (!token) return;
+    try {
+      await deps.api.sendMessage(token, { chatId, text: TEMPLATES.rateLimited, replyTo });
+    } catch (error) {
+      warn(`发送限流提示失败：${errorMessage(error)}`);
     }
   };
 
@@ -452,15 +465,22 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
     if (data.cards.length > MAX_CARDS) data.cards.splice(0, data.cards.length - MAX_CARDS);
   };
 
-  /** 整轮没有调用 triage_report：只在电脑上记一笔，群里不发 */
+  /** 整轮没有调用 triage_report：电脑上记一笔，群里用固定模板回复原消息 */
   const recordUnreported = (item: InflightItem) => {
     const text = item.texts.join('\n');
     warn(`分诊会话这一轮没有调用 triage_report（群 ${item.chatId}）`);
-    if (item.cardId !== undefined) return;
     const group = groupOf(item.chatId);
     if (!group) return;
+    const reply = (card: StoredCard) =>
+      void sendToGroup(card, TEMPLATES.unreported, item.replyTo).then(commit);
+    if (item.cardId !== undefined) {
+      // 追问回复：卡片状态不变，只发兜底
+      const existing = cardById(item.cardId);
+      if (existing) reply(existing);
+      return;
+    }
     const time = now();
-    addCard({
+    const card: StoredCard = {
       id: nextCardId(),
       chatId: item.chatId,
       workspaceId: group.workspaceId,
@@ -474,8 +494,10 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
       taskIds: [],
       createdAt: time,
       updatedAt: time,
-    });
+    };
+    addCard(card);
     commit();
+    reply(card);
   };
 
   const addCandidate = (chat: TgChat) => {
@@ -567,7 +589,14 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
     }
     if (!body) return;
     const time = message.date * 1000;
-    if (rateLimited(from.id, time)) return;
+    if (rateLimited(from.id, time)) {
+      const noticed = rateNoticed.get(from.id);
+      if (noticed === undefined || time - noticed > HOUR_MS) {
+        rateNoticed.set(from.id, time);
+        void notifyRateLimited(chat.id, message.message_id);
+      }
+      return;
+    }
     const queue = queues.get(chat.id) ?? [];
     const last = queue[queue.length - 1];
     if (
@@ -784,7 +813,7 @@ export function createTelegramService(deps: TelegramServiceDeps): TelegramServic
         }
       } else {
         card.status = report.kind === 'question' ? 'answered' : 'invalid';
-        if (report.reply) await sendTriageReply(card, report.reply, replyTo, ctx, known);
+        await sendTriageReply(card, report.reply, replyTo, ctx, known);
       }
     } catch (error) {
       warn(`处理 triage_report 失败（卡片 #${card.id}）：${errorMessage(error)}`);

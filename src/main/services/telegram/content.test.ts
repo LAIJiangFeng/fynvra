@@ -106,8 +106,16 @@ describe('telegram content', () => {
     expect(
       parseTriageInput({ kind: 'question', title: 't', summary: 's', reply: 'r', needInfo: true })
     ).toMatch(/needInfo/);
-    const report = parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '' });
-    expect(report).toMatchObject({ kind: 'invalid', reply: '' });
+    // reply 对所有 kind 必填，包括 invalid
+    expect(parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '' })).toBe(
+      'reply is required'
+    );
+    expect(parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '  ' })).toBe(
+      'reply is required'
+    );
+    expect(
+      parseTriageInput({ kind: 'invalid', title: 't', summary: 's', reply: '不处理' })
+    ).toMatchObject({ kind: 'invalid', reply: '不处理' });
     const long = parseTriageInput({
       kind: 'bug',
       title: 'x'.repeat(500),

@@ -12,6 +12,10 @@ export const TEMPLATES = {
   closing: '感谢反馈，目前的信息还不足以确认问题，已记录给维护者。',
   rejected: '暂不采纳，感谢建议。',
   needsMaintainer: '需要维护者处理。',
+  /** 这一轮没有调用 triage_report（含模型出错）时的兜底 */
+  unreported: '收到，不过这次没处理好，请稍后再 @ 我一次。',
+  /** 同一人在一个限流窗口内只提示一次 */
+  rateLimited: '你发得有点快，请过一会儿再 @ 我。',
   /** 只有完整的 GitHub PR 地址才在群里带链接，其余只说已提交 */
   prOpened: (url: string) =>
     GITHUB_PR_URL.test(url) ? `已提交修复 PR：${url}` : '已提交修复 PR。',
@@ -144,7 +148,7 @@ export function parseTriageInput(raw: unknown): ParsedTriageReport | string {
   const reply = str('reply')?.trim() ?? '';
   if (!title) return 'title is required';
   if (!summary) return 'summary is required';
-  if (!reply && kind !== 'invalid') return 'reply is required';
+  if (!reply) return 'reply is required';
   if (r.needInfo !== undefined && typeof r.needInfo !== 'boolean')
     return 'needInfo must be a boolean';
   const needInfo = r.needInfo === true;
