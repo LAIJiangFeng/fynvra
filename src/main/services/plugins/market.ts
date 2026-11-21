@@ -16,7 +16,8 @@ import {
   revocationOf,
 } from '@shared/types/pluginMarket';
 import type { PluginEntry } from '@shared/types/plugins';
-import { type UnzipFileInfo, unzipSync } from 'fflate';
+// 不能用 'fflate'：Main 构建按 node 条件解析到其 node 版，内含 `var require`，与 electron-vite 注入的 require shim 重名导致启动崩溃
+import { type UnzipFileInfo, unzipSync } from 'fflate/browser';
 import { translate } from '../../i18n';
 import { toSlug, uniqueId, writeJsonAtomic } from '../providers/jsonRegistry';
 import { MARKET_BASE_URL } from './marketConfig';
