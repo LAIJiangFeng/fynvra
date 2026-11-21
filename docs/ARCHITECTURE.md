@@ -699,7 +699,7 @@ export interface ChatToolCall {
 /** 输入框粘贴的图片：base64（不含 data: 前缀）。缩放、转 PNG 由 pi 在 worker 里做 */
 export interface ChatImage { data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; }
 /**
- * 输入框的文档附件（UTF-8 文本 / PDF / .docx / .xlsx）：Renderer 抽出纯文本，文件名只用 File.name（不含路径）。`.xlsx` 用 read-excel-file 按工作表转 TSV。
+ * 输入框的文档附件（文本（BOM → UTF-16 探测 → 严格 UTF-8 → 严格 GB18030 → 有损择优；可疑字符超过 10% 视为二进制） / PDF / .docx / .xlsx）：Renderer 抽出纯文本，文件名只用 File.name（不含路径）。`.xlsx` 用 read-excel-file 按工作表转 TSV。
  * 不单独过 IPC：发送时 appendChatFiles 按 pi CLI `@file` 格式拼进正文，文件块在前、用户正文在后：
  * `<file name="a.md">\n内容\n</file>\n正文`（内容里的 </file> 转义为 <\/file>）。jsonl 里的 user 正文因此带着附件块，
  * Renderer 显示时用 splitChatFiles 从开头拆出来显示成文件标签；自动标题与回复建议也只看拆出的正文。
