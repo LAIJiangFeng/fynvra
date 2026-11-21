@@ -1,25 +1,77 @@
 import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { decodeUtf8Text, readChatFile, sheetsToText } from './chatFiles';
+import { decodeText, readChatFile, sheetsToText } from './chatFiles';
 
 const bytes = (...values: number[]) => new Uint8Array(values);
+const concat = (...parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+};
+const utf8 = (s: string) => new TextEncoder().encode(s);
+const utf16le = (s: string) => {
+  const out = new Uint8Array(s.length * 2);
+  for (let i = 0; i < s.length; i++) {
+    out[i * 2] = s.charCodeAt(i) & 0xff;
+    out[i * 2 + 1] = s.charCodeAt(i) >> 8;
+  }
+  return out;
+};
+const utf16be = (s: string) => {
+  const le = utf16le(s);
+  for (let i = 0; i < le.length; i += 2) [le[i], le[i + 1]] = [le[i + 1], le[i]];
+  return le;
+};
+// 「中文」的 GBK 编码
+const GBK_ZHONGWEN = [0xd6, 0xd0, 0xce, 0xc4];
 
-describe('decodeUtf8Text', () => {
+describe('decodeText', () => {
   it('正常 UTF-8 原样解码', () => {
-    expect(decodeUtf8Text(new TextEncoder().encode('# 标题\nok'))).toBe('# 标题\nok');
+    expect(decodeText(utf8('# 标题\nok'))).toBe('# 标题\nok');
   });
 
   it('去掉开头的 BOM', () => {
-    expect(decodeUtf8Text(bytes(0xef, 0xbb, 0xbf, 0x61))).toBe('a');
+    expect(decodeText(bytes(0xef, 0xbb, 0xbf, 0x61))).toBe('a');
   });
 
-  it('含 NUL 的当作二进制', () => {
-    expect(decodeUtf8Text(bytes(0x61, 0x00, 0x62))).toBeNull();
+  it('GBK 字节按 GB18030 解码', () => {
+    expect(decodeText(bytes(...GBK_ZHONGWEN))).toBe('中文');
   });
 
-  it('非法 UTF-8（GBK 字节）不支持', () => {
-    // 「中文」的 GBK 编码
-    expect(decodeUtf8Text(bytes(0xd6, 0xd0, 0xce, 0xc4))).toBeNull();
+  it('带 BOM 的 UTF-16LE / BE 与不带 BOM 的 UTF-16LE', () => {
+    const s = 'boot ok 上电就绪\r\nready';
+    expect(decodeText(concat(bytes(0xff, 0xfe), utf16le(s)))).toBe(s);
+    expect(decodeText(concat(bytes(0xfe, 0xff), utf16be(s)))).toBe(s);
+    expect(decodeText(utf16le(s))).toBe(s);
+  });
+
+  it('含少量 NUL 的 UTF-8 日志通过并去掉 NUL', () => {
+    const log = concat(bytes(0, 0), utf8('[0.001] 上电初始化完成\nsystem ready\n'), bytes(0));
+    expect(decodeText(log)).toBe('[0.001] 上电初始化完成\nsystem ready\n');
+  });
+
+  it('开头有乱码字节的 UTF-8 中文日志按 UTF-8 解码', () => {
+    const text = decodeText(
+      concat(bytes(0xff, 0xfe, 0xff, 0xfe), utf8('系统上电，版本 r6477 就绪\n电压正常\n'.repeat(3)))
+    );
+    expect(text).toContain('系统上电，版本 r6477 就绪\n电压正常');
+  });
+
+  it('开头有 0xFF 的 GBK 中文日志按 GB18030 解码', () => {
+    const text = decodeText(
+      concat(bytes(0xff), bytes(...GBK_ZHONGWEN), utf8(' log\n'), bytes(...GBK_ZHONGWEN))
+    );
+    expect(text).toBe('\uFFFD中文 log\n中文');
+  });
+
+  it('二进制返回 null', () => {
+    const cycle = Array.from({ length: 512 }, (_, i) => i % 256);
+    expect(decodeText(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...cycle))).toBeNull();
+    expect(decodeText(bytes(0, 1, 2))).toBeNull();
   });
 });
 
@@ -36,6 +88,13 @@ describe('readChatFile', () => {
     expect(await readChatFile(new File([bytes(0, 1, 2)], 'a.bin'))).toEqual({
       ok: false,
       reason: 'unsupported',
+    });
+  });
+
+  it('大写扩展名的 GBK 文本可以读', async () => {
+    expect(await readChatFile(new File([bytes(...GBK_ZHONGWEN)], '日志.TXT'))).toEqual({
+      ok: true,
+      file: { name: '日志.TXT', text: '中文' },
     });
   });
 
