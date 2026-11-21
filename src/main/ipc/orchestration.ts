@@ -19,7 +19,6 @@ import {
   parseSessionChangesInput,
   readSessionChanges,
 } from '../services/sessionChanges';
-import { telegramOrchestrationChanged } from '../services/telegram/instance';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -49,8 +48,6 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
       workflows: getWorkflowRegistry(),
       notifyChanged: (workspaceId) => {
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId);
-        // Telegram 卡片据此检查 PR 结果
-        telegramOrchestrationChanged(workspaceId);
         // 渠道插件：只推给在该工作区有 run 的插件
         channelOrchestrationChanged(workspaceId);
       },

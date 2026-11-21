@@ -144,7 +144,7 @@ export interface AgentHostDeps {
   config?: {
     invoke(method: string, input: unknown, signal: AbortSignal): Promise<HostCallResult>;
   };
-  /** triage_report 等 host-invoke（kind: 'telegram'）的宿主（T4 的 Telegram 服务）；只有 triage 会话能调，缺省时一律失败 */
+  /** triage_report 等 host-invoke（kind: 'telegram'）的宿主（渠道插件路由，kind 名沿用 telegram）；只有 triage 会话能调，缺省时一律失败 */
   telegram?: TelegramHostDeps;
   /**
    * 删除带 worktree 的会话前删掉它的 worktree 与分支（生产为 OrchestrationService.removeSessionWorktree）；

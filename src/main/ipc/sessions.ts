@@ -190,7 +190,7 @@ function createAppAgentHost(): AgentHostService {
       broadcast: (channel) => sendToAllWindows(channel),
       skillsDir: join(userData, 'skills'),
     }),
-    // triage_report：会话归属渠道插件时交给该插件的 channel.report，否则交给内置 Telegram 服务（服务启动前一律失败）
+    // triage_report：会话归属渠道插件时交给该插件的 channel.report，无归属时返回错误（kind 名沿用 telegram）
     telegram: channelReportHost,
     removeWorktree: async (session, force) => {
       // 工作区已移除：没有编排状态可对照，只删记录（同以前）

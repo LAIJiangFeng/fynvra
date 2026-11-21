@@ -41,7 +41,6 @@ import {
 import { getChannelHost } from '../services/channels/instance';
 import { freshCommandEnvironment } from '../services/commandNetwork';
 import { showDesktopNotification } from '../services/notifications/desktop';
-import { getTelegramService } from '../services/telegram/instance';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { busyResult, exclusive, getPluginMarket, pluginCopyRoot } from './plugins';
 import { getSettingsFile } from './settings';
@@ -78,7 +77,7 @@ function appPlugins() {
       log: (id, level, message) => logger.write(id, level, message),
       secrets,
       notify: (title, body) => {
-        // 同 Telegram：沿用通知偏好的总开关与提示音
+        // 沿用通知偏好的总开关与提示音
         const preferences = notificationPreferencesOf(getSettingsFile().read().preferences);
         if (preferences.enabled)
           showDesktopNotification({ title, body, silent: !preferences.sound });
@@ -90,20 +89,7 @@ function appPlugins() {
       },
       channel: getChannelHost,
       uiStore,
-      legacyTelegram: {
-        path: join(userData, 'telegram.json'),
-        stopBuiltin: async () => {
-          const telegram = getTelegramService();
-          if (!telegram) return;
-          try {
-            const result = await telegram.setEnabled(false);
-            if (!result.ok) console.error(`[appPlugins] 停用内置 Telegram 失败：${result.error}`);
-            await telegram.stop();
-          } catch (error) {
-            console.error(`[appPlugins] 停用内置 Telegram 失败：${errorMessage(error)}`);
-          }
-        },
-      },
+      legacyTelegram: { path: join(userData, 'telegram.json') },
     },
     dataRoot,
     ensureDir: async (dir) => {

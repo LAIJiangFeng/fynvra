@@ -26,7 +26,7 @@ export function savedCommandEnvironment(): NodeJS.ProcessEnv {
   return commandEnvironment(process.env, savedNetworkProxy(), process.platform === 'win32');
 }
 
-/** Telegram 每次请求前用：system 模式下缓存超过 5 秒先刷新再算环境 */
+/** 插件与市场每次联网前用：system 模式下缓存超过 5 秒先刷新再算环境 */
 export async function freshCommandEnvironment(): Promise<NodeJS.ProcessEnv> {
   if ((readConfiguration() ?? DEFAULT_NETWORK_PROXY).mode === 'system') {
     await getSystemProxy()?.fresh();

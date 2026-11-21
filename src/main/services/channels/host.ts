@@ -1,4 +1,4 @@
-// 渠道宿主（ARCHITECTURE §7.12「渠道 API」）：把内置 Telegram 依赖的核心能力按插件归属开放给渠道插件。
+// 渠道宿主（ARCHITECTURE §7.12「渠道 API」）：把渠道值班依赖的核心能力按插件归属开放给渠道插件。
 // 每个操作都先核对归属（会话 / 工作区 / 任务属于调用的插件），安全规则（档位、干净检出、出站过滤）由这里执行。
 import { errorMessage } from '@shared/guards';
 import type { HostCallResult } from '@shared/types/agent';
@@ -190,7 +190,7 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
     },
     async refreshCheckout(pluginId, workspaceId) {
       const workspace = ownWorkspace(pluginId, workspaceId);
-      // 本插件在该工作区有会话在跑时不动它的工作目录（同内置 Telegram）
+      // 本插件在该工作区有会话在跑时不动它的工作目录
       const busy = store.sessionsOf(pluginId).some((owner) => {
         if (owner.workspaceId !== workspaceId) return false;
         const status = statusOf(owner.sessionId);

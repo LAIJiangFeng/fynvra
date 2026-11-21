@@ -76,7 +76,7 @@ async function setup(options: { enabled?: boolean; autoActivate?: boolean } = {}
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
       uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
-      legacyTelegram: { path: '', stopBuiltin: async () => undefined },
+      legacyTelegram: { path: '' },
     },
     dataRoot: join(dir, 'data'),
     ensureDir: async (path) => {

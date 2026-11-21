@@ -16,7 +16,7 @@ export interface PullRequestGateDeps {
 const bodyExtensions = new Map<string, (taskId: string) => string | undefined>();
 
 /**
- * 按来源注入 PR 正文附加段（如内置 Telegram 的「问题 / 来源」、渠道插件的 note）；undefined 注销该来源。
+ * 按来源注入 PR 正文附加段（如渠道插件的 note）；undefined 注销该来源。
  * 多个来源按登记顺序拼接，返回 undefined 或空串的不加。
  */
 export function setPullRequestBodyExtension(

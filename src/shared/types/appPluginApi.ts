@@ -21,7 +21,7 @@ export interface PluginProxyEnv {
 
 export type Unsubscribe = () => void;
 
-/** 渠道会话的档位：只读分诊 triage，或受限值班 restricted（规则同内置 Telegram） */
+/** 渠道会话的档位：只读分诊 triage，或受限值班 restricted */
 export type ChannelProfile = 'triage' | 'restricted';
 
 /** 会话状态；已归档为 archived，会话已被用户删掉为 missing */
@@ -125,9 +125,9 @@ export interface FynvraPluginApi {
   };
   /** 旧数据迁移：只对官方 Telegram 插件（com.fynvra.telegram）开放，其他插件调用会被拒绝（method not allowed） */
   legacy: {
-    /** 内置版 telegram.json 的原始对象（含明文 token，字段由插件自行收窄）；文件不存在时为 null */
+    /** 旧内置版 telegram.json 的原始对象（含明文 token，字段由插件自行收窄）；文件不存在时为 null */
     telegramData(): Promise<unknown | null>;
-    /** 停掉内置服务并把文件改名为 telegram.json.migrated-<epoch ms> 留底；幂等 */
+    /** 把文件改名为 telegram.json.migrated-<epoch ms> 留底；幂等 */
     telegramMigrated(): Promise<void>;
   };
   /** 订阅宿主事件（如 H3 的 channel.session）；返回取消订阅 */

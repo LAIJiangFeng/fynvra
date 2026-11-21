@@ -88,7 +88,7 @@ beforeEach(() => {
   host = makeHost();
 });
 afterEach(() => {
-  setPullRequestBodyExtension('telegram', undefined);
+  setPullRequestBodyExtension('channel', undefined);
   setPullRequestBodyExtension('plugin:a', undefined);
   setPullRequestBodyExtension('plugin:b', undefined);
 });
@@ -121,7 +121,7 @@ describe('openPullRequest', () => {
     const first = await reported();
     scriptRepo();
     // 多个来源按登记顺序拼接，空的不加
-    setPullRequestBodyExtension('telegram', (taskId) =>
+    setPullRequestBodyExtension('channel', (taskId) =>
       taskId === first.task.id ? '## 来源\n\n卡片 #1' : undefined
     );
     setPullRequestBodyExtension('plugin:a', (taskId) =>

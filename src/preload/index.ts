@@ -13,7 +13,6 @@ import { createRolesApi } from './domains/roles';
 import { createSessionsApi } from './domains/sessions';
 import { createSettingsApi } from './domains/settings';
 import { createSkillsApi } from './domains/skills';
-import { createTelegramApi } from './domains/telegram';
 import { createTerminalsApi } from './domains/terminals';
 import { createUpdatesApi } from './domains/updates';
 import { createUsageApi } from './domains/usage';
@@ -66,7 +65,6 @@ const api: FynvraApi = {
   appPlugins: createAppPluginsApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
   usage: createUsageApi(ipcRenderer),
-  telegram: createTelegramApi(ipcRenderer, subscribe),
 };
 
 contextBridge.exposeInMainWorld('fynvra', api);

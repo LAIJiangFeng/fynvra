@@ -106,7 +106,7 @@ export function getPluginMarket(): PluginMarket {
     cachePath: join(app.getPath('userData'), 'plugin-market.json'),
     hostVersion: app.getVersion(),
     notify: (title, body) => {
-      // 同 Telegram：沿用通知偏好的总开关与提示音
+      // 沿用通知偏好的总开关与提示音
       const preferences = notificationPreferencesOf(getSettingsFile().read().preferences);
       if (preferences.enabled) showDesktopNotification({ title, body, silent: !preferences.sound });
     },

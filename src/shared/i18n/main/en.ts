@@ -101,7 +101,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidModel: 'Invalid model arguments',
     invalidApprovalMode: 'Invalid approval mode',
     profileApprovalLocked:
-      'Approval for Telegram sessions is set by profile rules and cannot be changed',
+      'Approval for channel sessions is set by profile rules and cannot be changed',
     invalidPlanMode: 'Invalid plan mode arguments',
     archiveBusy: 'Session is running; archive it after it finishes',
     removeBusy: 'The session or its task is still in progress; delete it after it finishes',

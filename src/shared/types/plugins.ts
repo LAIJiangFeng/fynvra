@@ -3,7 +3,7 @@ export type PluginKind = 'local' | 'npm' | 'git' | 'market';
 
 /** 市场插件的登记信息（仅 kind 为 market） */
 export interface PluginMarketInfo {
-  /** 市场里的插件 id（如 `fynvra.telegram`） */
+  /** 市场里的插件 id（如 `fynvra.demo`） */
   id: string;
   version: string;
   /** 已装包的 sha256 */

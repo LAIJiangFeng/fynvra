@@ -78,7 +78,7 @@ export interface SessionRef {
   profile?: SessionProfile;
 }
 
-/** 会话档位（Telegram 群反馈值班）：triage 分诊、restricted 受限值班与其 worker。 */
+/** 会话档位（渠道插件会话，如群反馈值班）：triage 分诊、restricted 受限值班与其 worker。 */
 export type SessionProfile = 'triage' | 'restricted';
 
 /** 任务状态。合法迁移见 `canTransitionTask`。 */
