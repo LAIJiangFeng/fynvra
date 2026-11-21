@@ -34,6 +34,7 @@ function context(patch: Partial<ApiDeps> = {}, pluginId = 'fynvra.demo'): ApiCon
       notify: vi.fn(),
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
+      uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
       ...patch,
     },
   };

@@ -55,9 +55,12 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '@/i18n/I18nProvider';
 import { confirmDialog } from '@/lib/appDialog';
+import { useAppPluginsStore } from '@/stores/appPlugins';
 import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { AppPluginSettings } from './AppPluginSettings';
+import { AppPluginsSection, hasAppPluginUi } from './AppPluginsSection';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
 import { OFFICIAL_PLUGINS, type OfficialPluginId, useTelegramEnabled } from './officialPlugins';
@@ -87,6 +90,17 @@ export function PluginsSettings() {
   const [tab, setTab] = useState<PluginsTab>('installed');
   // 正在看哪个官方插件的设置；只在插件页内部保存
   const [openPlugin, setOpenPlugin] = useState<OfficialPluginId | null>(null);
+  // 正在看哪个 Fynvra 插件的设置页（id）
+  const [openApp, setOpenApp] = useState<string | null>(null);
+  const appPlugin = useAppPluginsStore((state) =>
+    openApp ? state.plugins.find((plugin) => plugin.id === openApp) : undefined
+  );
+  const appLoaded = useAppPluginsStore((state) => state.loaded);
+
+  // 看设置时插件被删除、停用或不再有设置页，回到插件列表
+  useEffect(() => {
+    if (openApp && appLoaded && !(appPlugin && hasAppPluginUi(appPlugin))) setOpenApp(null);
+  }, [openApp, appLoaded, appPlugin]);
 
   // 看设置时被停用（或读取失败），回到插件列表；读取中（null）不动
   useEffect(() => {
@@ -112,6 +126,21 @@ export function PluginsSettings() {
     );
   }
 
+  if (openApp && appPlugin) {
+    return (
+      <div className="grid gap-4">
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => setOpenApp(null)}>
+            <ArrowLeft />
+            {t('settings.plugins.official.back')}
+          </Button>
+        </div>
+        <h3 className="font-medium">{appPlugin.name}</h3>
+        <AppPluginSettings key={openApp} id={openApp} />
+      </div>
+    );
+  }
+
   return (
     <Tabs
       value={tab}
@@ -129,7 +158,11 @@ export function PluginsSettings() {
         </TabsTrigger>
       </TabsList>
       <TabsContent value="installed">
-        <InstalledPlugins telegramEnabled={telegramEnabled} onOpenOfficial={setOpenPlugin} />
+        <InstalledPlugins
+          telegramEnabled={telegramEnabled}
+          onOpenOfficial={setOpenPlugin}
+          onOpenApp={setOpenApp}
+        />
       </TabsContent>
       <TabsContent value="market">
         <PluginMarketTab
@@ -150,9 +183,11 @@ export function PluginsSettings() {
 function InstalledPlugins({
   telegramEnabled,
   onOpenOfficial,
+  onOpenApp,
 }: {
   telegramEnabled: boolean | null;
   onOpenOfficial: (id: OfficialPluginId) => void;
+  onOpenApp: (id: string) => void;
 }) {
   const plugins = usePluginsStore((state) => state.plugins);
   const loaded = usePluginsStore((state) => state.loaded);
@@ -193,6 +228,7 @@ function InstalledPlugins({
 
   return (
     <div className="grid gap-8">
+      <AppPluginsSection onOpen={onOpenApp} />
       <OfficialPluginsSection telegramEnabled={telegramEnabled} onOpen={onOpenOfficial} />
       <section>
         <SectionHeader title={t('settings.plugins.title')}>

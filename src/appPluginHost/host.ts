@@ -85,6 +85,11 @@ export function startPluginHost(options: PluginHostOptions): void {
       },
       net: { proxyEnv: () => request('net.proxyEnv') as Promise<never> },
       workspaces: { list: () => request('workspaces.list') as Promise<never> },
+      ui: {
+        render: async (schema) => {
+          await request('ui.render', { schema });
+        },
+      },
       on: (event, handler) => {
         const set = listeners.get(event) ?? new Set();
         listeners.set(event, set);

@@ -75,6 +75,7 @@ async function setup(options: { enabled?: boolean; autoActivate?: boolean } = {}
       notify: vi.fn(),
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
+      uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
     },
     dataRoot: join(dir, 'data'),
     ensureDir: async (path) => {

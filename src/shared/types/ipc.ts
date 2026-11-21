@@ -247,6 +247,14 @@ export const IPC_CHANNELS = {
   APP_PLUGINS_RECOPY: 'appplugins:recopy',
   /** Main → Renderer：登记或运行状态变化 */
   APP_PLUGINS_CHANGED: 'appplugins:changed',
+  /** `{ id }` → `{ ui: PluginUi | null }`：插件最新的一份设置页描述 */
+  APP_PLUGINS_UI_GET: 'appplugins:ui-get',
+  /** `{ id, action, itemKey?, values? }`：Main 转给插件的 `ui.action`，带回 `{ ok } | { ok: false, error }` */
+  APP_PLUGINS_UI_ACTION: 'appplugins:ui-action',
+  /** `{ id, url }`：只接受 https，在系统浏览器打开 */
+  APP_PLUGINS_OPEN_LINK: 'appplugins:open-link',
+  /** Main → Renderer `{ id }`：该插件的设置页描述变了（含清掉） */
+  APP_PLUGINS_UI_CHANGED: 'appplugins:ui-changed',
 
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',

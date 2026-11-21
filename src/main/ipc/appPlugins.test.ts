@@ -1,5 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
+import { createPluginUiStore } from '../services/appPlugins/api/ui';
+import { createPluginConnection } from '../services/appPlugins/connection';
 import type { AppPluginService } from '../services/appPlugins/service';
 import { type AppPluginHandlerDeps, createAppPluginHandlers } from './appPlugins';
 
@@ -16,6 +18,8 @@ const view = {
   permissions: [],
 };
 
+const uiStore = createPluginUiStore(() => undefined);
+
 function setup(patch: Partial<AppPluginHandlerDeps> = {}) {
   const service = {
     views: vi.fn(async () => [view]),
@@ -30,6 +34,9 @@ function setup(patch: Partial<AppPluginHandlerDeps> = {}) {
     isPackaged: () => false,
     pickDirectory: vi.fn(async () => '/src/plugin'),
     exclusive: (_onBusy, task) => task(),
+    uiStore: () => uiStore,
+    callPlugin: vi.fn(async () => undefined),
+    openExternal: vi.fn(async () => undefined),
     ...patch,
   };
   const handlers = createAppPluginHandlers(deps);
@@ -117,5 +124,108 @@ describe('appPlugins IPC', () => {
       code: 'busy',
     });
     expect(service.remove).not.toHaveBeenCalled();
+  });
+
+  it('ui-get：返回最新描述，没有时为 null；入参收窄', async () => {
+    const { call } = setup();
+    expect(await call(IPC_CHANNELS.APP_PLUGINS_UI_GET, { id: 'fynvra.other' })).toEqual({
+      ok: true,
+      ui: null,
+    });
+    uiStore.set('fynvra.demo', { children: [] });
+    expect(await call(IPC_CHANNELS.APP_PLUGINS_UI_GET, { id: 'fynvra.demo' })).toEqual({
+      ok: true,
+      ui: { children: [] },
+    });
+    expect(await call(IPC_CHANNELS.APP_PLUGINS_UI_GET, { id: 'fynvra.demo', x: 1 })).toEqual(
+      invalid
+    );
+  });
+
+  it('ui-action：入参收窄，转给插件的 ui.action 并带回结果', async () => {
+    // 用真实连接：插件收到 call 后按 action 回结果
+    const connection = createPluginConnection({
+      pluginId: 'fynvra.demo',
+      dataDir: '/data',
+      permissions: [],
+      methods: {},
+      deps: {} as never,
+      post: (message) => {
+        if (message.type !== 'call') return;
+        const args = message.args as { action: string };
+        const result = args.action === 'bad' ? { ok: false, error: 'token 无效' } : { ok: true };
+        queueMicrotask(() =>
+          connection.receive({ type: 'ret', id: message.id, ok: true, result }, 10)
+        );
+      },
+    });
+    const callPlugin = vi.fn((_id: string, name: string, args: unknown) =>
+      connection.call(name, args)
+    );
+    const { call } = setup({ callPlugin });
+    expect(
+      await call(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, {
+        id: 'fynvra.demo',
+        action: 'save',
+        itemKey: 'chat:1',
+        values: { token: 'x', limit: 3, on: true },
+      })
+    ).toEqual({ ok: true });
+    expect(callPlugin).toHaveBeenCalledWith('fynvra.demo', 'ui.action', {
+      action: 'save',
+      itemKey: 'chat:1',
+      values: { token: 'x', limit: 3, on: true },
+    });
+    expect(
+      await call(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, { id: 'fynvra.demo', action: 'bad' })
+    ).toEqual({ ok: false, error: 'token 无效' });
+    expect(callPlugin).toHaveBeenLastCalledWith('fynvra.demo', 'ui.action', {
+      action: 'bad',
+      values: {},
+    });
+    for (const raw of [
+      { id: 'fynvra.demo', action: 'save', extra: 1 },
+      { id: 'fynvra.demo', action: 'a b' },
+      { id: 'fynvra.demo', action: 'save', values: { a: [] } },
+      { id: 'fynvra.demo', action: 'save', values: 'x' },
+    ]) {
+      expect(await call(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, raw)).toEqual(invalid);
+    }
+    expect(callPlugin).toHaveBeenCalledTimes(2);
+  });
+
+  it('ui-action：插件超时不回时返回错误', async () => {
+    const connection = createPluginConnection({
+      pluginId: 'fynvra.demo',
+      dataDir: '/data',
+      permissions: [],
+      methods: {},
+      deps: {} as never,
+      post: () => undefined,
+      timeoutMs: 20,
+    });
+    const { call } = setup({ callPlugin: (_id, name, args) => connection.call(name, args) });
+    expect(
+      await call(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, { id: 'fynvra.demo', action: 'save' })
+    ).toEqual({ ok: false, error: 'call timed out: ui.action' });
+  });
+
+  it('open-link 只接受 https', async () => {
+    const { deps, call } = setup();
+    expect(
+      await call(IPC_CHANNELS.APP_PLUGINS_OPEN_LINK, { id: 'fynvra.demo', url: 'https://a.com/x' })
+    ).toEqual({ ok: true });
+    expect(deps.openExternal).toHaveBeenCalledWith('https://a.com/x');
+    for (const url of [
+      'http://a.com',
+      'file:///C:/Windows',
+      'javascript:alert(1)',
+      'ms-settings:',
+    ]) {
+      expect(await call(IPC_CHANNELS.APP_PLUGINS_OPEN_LINK, { id: 'fynvra.demo', url })).toEqual(
+        invalid
+      );
+    }
+    expect(deps.openExternal).toHaveBeenCalledTimes(1);
   });
 });

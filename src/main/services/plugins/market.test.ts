@@ -466,6 +466,7 @@ function appStack() {
       notify: () => undefined,
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
+      uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
     },
     dataRoot,
     ensureDir: async (path) => {

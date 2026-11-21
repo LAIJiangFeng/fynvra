@@ -4,6 +4,7 @@ import {
   type MarketPermission,
   type MarketPluginView,
   type MarketTier,
+  type PluginKind,
 } from '@shared/types/pluginMarket';
 import { ArrowLeft, ExternalLink, Loader2, PackagePlus, RefreshCw, Store } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
@@ -30,6 +31,7 @@ import {
 } from '@/components/ui/select';
 import { useLocale, useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
+import { useAppPluginsStore } from '@/stores/appPlugins';
 import { usePluginsStore } from '@/stores/plugins';
 import { useRolesStore } from '@/stores/roles';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
@@ -47,6 +49,12 @@ export function MarketTierBadge({ tier }: { tier: MarketTier }) {
   );
 }
 
+/** 类别徽标：Fynvra 插件 / PI 插件 */
+export function MarketKindBadge({ kind }: { kind: PluginKind }) {
+  const t = useT();
+  return <Badge variant="outline">{t(`settings.plugins.market.kinds.${kind}`)}</Badge>;
+}
+
 /** 已撤回提示（红色） */
 export function MarketRevokedNote({ reason }: { reason: string }) {
   const t = useT();
@@ -57,9 +65,14 @@ export function MarketRevokedNote({ reason }: { reason: string }) {
   );
 }
 
-/** 「更新」按钮：id 是 plugins.json 里的 id；进行中转圈，失败在按钮下显示错误 */
-export function MarketUpdateButton({ id }: { id: string }) {
-  const marketUpdate = usePluginsStore((state) => state.marketUpdate);
+/**
+ * 「更新」按钮：id 是 kind 对应登记里的 id（pi → plugins.json，fynvra → fynvra-plugins.json，
+ * 后者走 appplugins:update）；进行中转圈，失败在按钮下显示错误
+ */
+export function MarketUpdateButton({ id, kind = 'pi' }: { id: string; kind?: PluginKind }) {
+  const piUpdate = usePluginsStore((state) => state.marketUpdate);
+  const appUpdate = useAppPluginsStore((state) => state.update);
+  const marketUpdate = kind === 'fynvra' ? appUpdate : piUpdate;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const t = useT();
@@ -288,7 +301,7 @@ function MarketActionButton({
   const t = useT();
   const action = marketAction(plugin);
   if (action === 'update' && plugin.installed) {
-    return <MarketUpdateButton id={plugin.installed.pluginId} />;
+    return <MarketUpdateButton id={plugin.installed.pluginId} kind={plugin.kind} />;
   }
   if (action === 'install') {
     return (
@@ -336,6 +349,7 @@ function MarketCard({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-sm hover:underline">{plugin.name}</span>
           <MarketTierBadge tier={plugin.tier} />
+          <MarketKindBadge kind={plugin.kind} />
           {plugin.latest && (
             <span className="text-muted-foreground text-xs">
               {t('settings.plugins.market.latest', { version: plugin.latest.version })}
@@ -444,6 +458,7 @@ function MarketDetail({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-medium">{plugin.name}</h3>
             <MarketTierBadge tier={plugin.tier} />
+            <MarketKindBadge kind={plugin.kind} />
           </div>
           <p className="text-muted-foreground text-xs">
             {t('settings.plugins.market.by', { author: plugin.author })}
@@ -624,6 +639,8 @@ function InstallContent({
   const [error, setError] = useState<string | null>(null);
   const t = useT();
   const baseId = useId();
+  // Fynvra 插件不挂角色，风险提示也不同
+  const isApp = plugin.kind === 'fynvra';
 
   const run = async () => {
     setBusy(true);
@@ -636,8 +653,7 @@ function InstallContent({
       setError(result.error);
       return;
     }
-    // Fynvra 插件不挂角色（安装确认由 H2 处理）
-    const pluginId = 'plugin' in result ? result.plugin.id : '';
+    const pluginId = !isApp && 'plugin' in result ? result.plugin.id : '';
     // 取最新的角色数据再改，逐个保存；某个失败不影响其他
     const failures: string[] = [];
     for (const roleId of pluginId ? selected : []) {
@@ -676,7 +692,9 @@ function InstallContent({
         role="alert"
         className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 font-medium text-destructive text-sm"
       >
-        {t('settings.plugins.market.installRisk')}
+        {t(
+          isApp ? 'settings.plugins.market.installRiskApp' : 'settings.plugins.market.installRisk'
+        )}
       </p>
 
       <div className="grid gap-1 text-sm">
@@ -694,48 +712,50 @@ function InstallContent({
         <PermissionList permissions={permissions} />
       </div>
 
-      <div className="grid gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="font-medium text-sm">{t('settings.plugins.market.attachRoles')}</span>
-          <span className="text-muted-foreground text-xs">
-            {t('settings.roles.selected', { count: selected.length })}
-          </span>
-        </div>
-        <ul className="max-h-48 divide-y overflow-y-auto rounded-md border">
-          {roles.length === 0 && (
-            <li className="px-3 py-4 text-center text-muted-foreground text-xs">
-              {t('settings.plugins.market.noRoles')}
-            </li>
-          )}
-          {roles.map((role) => {
-            const id = `${baseId}-${role.id}`;
-            return (
-              <li key={role.id}>
-                <label
-                  htmlFor={id}
-                  className={cn(
-                    'flex items-center gap-3 px-3 py-2 text-sm',
-                    busy ? 'cursor-default' : 'cursor-pointer hover:bg-accent/50'
-                  )}
-                >
-                  <Checkbox
-                    id={id}
-                    checked={selected.includes(role.id)}
-                    disabled={busy}
-                    onCheckedChange={(on) =>
-                      setSelected((current) =>
-                        on ? [...current, role.id] : current.filter((item) => item !== role.id)
-                      )
-                    }
-                  />
-                  <span className="truncate">{role.name}</span>
-                </label>
+      {!isApp && (
+        <div className="grid gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-sm">{t('settings.plugins.market.attachRoles')}</span>
+            <span className="text-muted-foreground text-xs">
+              {t('settings.roles.selected', { count: selected.length })}
+            </span>
+          </div>
+          <ul className="max-h-48 divide-y overflow-y-auto rounded-md border">
+            {roles.length === 0 && (
+              <li className="px-3 py-4 text-center text-muted-foreground text-xs">
+                {t('settings.plugins.market.noRoles')}
               </li>
-            );
-          })}
-        </ul>
-        <p className="text-muted-foreground text-xs">{t('settings.plugins.market.attachHint')}</p>
-      </div>
+            )}
+            {roles.map((role) => {
+              const id = `${baseId}-${role.id}`;
+              return (
+                <li key={role.id}>
+                  <label
+                    htmlFor={id}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 text-sm',
+                      busy ? 'cursor-default' : 'cursor-pointer hover:bg-accent/50'
+                    )}
+                  >
+                    <Checkbox
+                      id={id}
+                      checked={selected.includes(role.id)}
+                      disabled={busy}
+                      onCheckedChange={(on) =>
+                        setSelected((current) =>
+                          on ? [...current, role.id] : current.filter((item) => item !== role.id)
+                        )
+                      }
+                    />
+                    <span className="truncate">{role.name}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="text-muted-foreground text-xs">{t('settings.plugins.market.attachHint')}</p>
+        </div>
+      )}
 
       {error && (
         <InlineMessage tone="error" className="break-all">

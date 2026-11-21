@@ -3,13 +3,15 @@
 // 与依赖接口 `XxxApiDeps`，再在这里并进 API_METHODS 与 ApiDeps。方法名用 `<模块>.<动作>`。
 import { BASE_API, type BaseApiDeps } from './base';
 import type { ApiMethod } from './types';
+import { UI_API, type UiApiDeps } from './ui';
 
 export type { ApiContext, ApiMethod } from './types';
 export { defineMethod } from './types';
 
 /** 各模块依赖的并集（H2 / H3 在此加 `& UiApiDeps & ChannelApiDeps`） */
-export type ApiDeps = BaseApiDeps;
+export type ApiDeps = BaseApiDeps & UiApiDeps;
 
 export const API_METHODS: Readonly<Record<string, ApiMethod>> = Object.freeze({
   ...BASE_API,
+  ...UI_API,
 });
