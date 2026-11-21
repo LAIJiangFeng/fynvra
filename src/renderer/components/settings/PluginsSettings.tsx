@@ -52,14 +52,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '@/i18n/I18nProvider';
 import { confirmDialog } from '@/lib/appDialog';
 import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { marketViewOf } from './marketView';
 import { OFFICIAL_PLUGINS, type OfficialPluginId, useTelegramEnabled } from './officialPlugins';
 import { PluginImportDialog } from './PluginImportDialog';
+import {
+  MarketRevokedNote,
+  MarketTierBadge,
+  MarketUpdateButton,
+  PluginMarketTab,
+} from './PluginMarket';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
@@ -69,8 +77,83 @@ type Status = { tone: 'error' | 'success'; text: string };
 /** 添加目标：本地（Main 弹框选择并复制）或远程来源 */
 type Target = { kind: 'local' } | { kind: 'remote'; source: string };
 
-/** 设置 → 插件：添加本地插件（一律复制）、从 npm / git 安装，启用 / 停用 / 移除。 */
+type PluginsTab = 'installed' | 'market';
+
+/** 设置 → 插件：「已安装」「市场」两个标签；官方插件的设置在插件页内打开，返回后回到原来的标签。 */
 export function PluginsSettings() {
+  const t = useT();
+  const telegramEnabled = useTelegramEnabled();
+  const loadMarket = usePluginsStore((state) => state.loadMarket);
+  const [tab, setTab] = useState<PluginsTab>('installed');
+  // 正在看哪个官方插件的设置；只在插件页内部保存
+  const [openPlugin, setOpenPlugin] = useState<OfficialPluginId | null>(null);
+
+  // 看设置时被停用（或读取失败），回到插件列表；读取中（null）不动
+  useEffect(() => {
+    if (telegramEnabled === false) setOpenPlugin(null);
+  }, [telegramEnabled]);
+
+  // 已安装页也要市场视图来显示「有更新」；只读缓存，不联网
+  useEffect(() => {
+    void loadMarket();
+  }, [loadMarket]);
+
+  if (openPlugin === 'telegram') {
+    return (
+      <div className="grid gap-4">
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => setOpenPlugin(null)}>
+            <ArrowLeft />
+            {t('settings.plugins.official.back')}
+          </Button>
+        </div>
+        <TelegramSettings />
+      </div>
+    );
+  }
+
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(value) => {
+        if (value === 'installed' || value === 'market') setTab(value);
+      }}
+      className="gap-6"
+    >
+      <TabsList>
+        <TabsTrigger value="installed" className="px-3">
+          {t('settings.plugins.tabs.installed')}
+        </TabsTrigger>
+        <TabsTrigger value="market" className="px-3">
+          {t('settings.plugins.tabs.market')}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="installed">
+        <InstalledPlugins telegramEnabled={telegramEnabled} onOpenOfficial={setOpenPlugin} />
+      </TabsContent>
+      <TabsContent value="market">
+        <PluginMarketTab
+          official={
+            <OfficialPluginsSection
+              telegramEnabled={telegramEnabled}
+              onOpen={setOpenPlugin}
+              builtin
+            />
+          }
+        />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+/** 「已安装」：添加本地插件（一律复制）、从 npm / git 安装，启用 / 停用 / 移除。 */
+function InstalledPlugins({
+  telegramEnabled,
+  onOpenOfficial,
+}: {
+  telegramEnabled: boolean | null;
+  onOpenOfficial: (id: OfficialPluginId) => void;
+}) {
   const plugins = usePluginsStore((state) => state.plugins);
   const loaded = usePluginsStore((state) => state.loaded);
   const error = usePluginsStore((state) => state.error);
@@ -82,14 +165,6 @@ export function PluginsSettings() {
   const [importSession, setImportSession] = useState<number | null>(null);
   const importSessions = useRef(0);
   const t = useT();
-  const telegramEnabled = useTelegramEnabled();
-  // 正在看哪个官方插件的设置；只在插件页内部保存
-  const [openPlugin, setOpenPlugin] = useState<OfficialPluginId | null>(null);
-
-  // 看设置时被停用（或读取失败），回到插件列表；读取中（null）不动
-  useEffect(() => {
-    if (telegramEnabled === false) setOpenPlugin(null);
-  }, [telegramEnabled]);
 
   const openImport = () => {
     importSessions.current += 1;
@@ -116,23 +191,9 @@ export function PluginsSettings() {
 
   const trimmed = source.trim();
 
-  if (openPlugin === 'telegram') {
-    return (
-      <div className="grid gap-4">
-        <div>
-          <Button size="sm" variant="ghost" onClick={() => setOpenPlugin(null)}>
-            <ArrowLeft />
-            {t('settings.plugins.official.back')}
-          </Button>
-        </div>
-        <TelegramSettings />
-      </div>
-    );
-  }
-
   return (
     <div className="grid gap-8">
-      <OfficialPluginsSection telegramEnabled={telegramEnabled} onOpen={setOpenPlugin} />
+      <OfficialPluginsSection telegramEnabled={telegramEnabled} onOpen={onOpenOfficial} />
       <section>
         <SectionHeader title={t('settings.plugins.title')}>
           <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
@@ -213,9 +274,12 @@ export function PluginsSettings() {
 function OfficialPluginsSection({
   telegramEnabled,
   onOpen,
+  builtin = false,
 }: {
   telegramEnabled: boolean | null;
   onOpen: (id: OfficialPluginId) => void;
+  /** 市场页里标「官方 · 内置」 */
+  builtin?: boolean;
 }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -252,7 +316,13 @@ function OfficialPluginsSection({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-sm">{t(nameKey)}</span>
-                  <Badge variant="outline">{t('settings.plugins.official.badge')}</Badge>
+                  <Badge variant="outline">
+                    {t(
+                      builtin
+                        ? 'settings.plugins.market.builtinBadge'
+                        : 'settings.plugins.official.badge'
+                    )}
+                  </Badge>
                   <Badge variant={enabled ? 'outline' : 'secondary'}>
                     {t(enabled ? 'settings.plugins.official.on' : 'settings.plugins.official.off')}
                   </Badge>
@@ -302,6 +372,11 @@ function PluginRow({
   const t = useT();
   const mode = localPluginMode(plugin);
   const onError = (text: string) => onStatus({ tone: 'error', text });
+  const marketView = usePluginsStore((state) =>
+    plugin.market ? marketViewOf(state.market, plugin.id) : undefined
+  );
+  const newVersion =
+    marketView?.updateAvailable && marketView.latest ? marketView.latest.version : null;
 
   return (
     <li className="flex items-start gap-3 px-4 py-3">
@@ -309,6 +384,17 @@ function PluginRow({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-sm">{plugin.name}</span>
           <Badge variant="outline">{t(`settings.plugins.kinds.${plugin.kind}`)}</Badge>
+          {plugin.market && (
+            <>
+              <span className="text-muted-foreground text-xs">{plugin.market.version}</span>
+              <MarketTierBadge tier={plugin.market.tier} />
+            </>
+          )}
+          {newVersion && (
+            <span className="text-primary text-xs">
+              {t('settings.plugins.market.updateAvailable', { version: newVersion })}
+            </span>
+          )}
           {mode === 'link' && <Badge variant="outline">{t('settings.plugins.linked')}</Badge>}
           {!plugin.enabled && <Badge>{t('common.disabled')}</Badge>}
         </div>
@@ -318,6 +404,9 @@ function PluginRow({
         >
           {plugin.path}
         </p>
+        {plugin.market?.revokedReason !== undefined && (
+          <MarketRevokedNote reason={plugin.market.revokedReason} />
+        )}
         <RequestedProviders
           plugin={plugin}
           adding={addingName}
@@ -365,6 +454,7 @@ function PluginRow({
           </div>
         )}
       </div>
+      {newVersion && <MarketUpdateButton id={plugin.id} />}
       <Switch
         className="mt-1"
         checked={plugin.enabled}
