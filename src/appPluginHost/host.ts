@@ -104,6 +104,12 @@ export function startPluginHost(options: PluginHostOptions): void {
           await request('ui.render', { schema });
         },
       },
+      legacy: {
+        telegramData: () => request('legacy.telegramData'),
+        telegramMigrated: async () => {
+          await request('legacy.telegramMigrated');
+        },
+      },
       on: (event, handler) => {
         const set = listeners.get(event) ?? new Set();
         listeners.set(event, set);

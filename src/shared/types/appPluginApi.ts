@@ -123,6 +123,13 @@ export interface FynvraPluginApi {
      */
     render(schema: unknown): Promise<void>;
   };
+  /** 旧数据迁移：只对官方 Telegram 插件（com.fynvra.telegram）开放，其他插件调用会被拒绝（method not allowed） */
+  legacy: {
+    /** 内置版 telegram.json 的原始对象（含明文 token，字段由插件自行收窄）；文件不存在时为 null */
+    telegramData(): Promise<unknown | null>;
+    /** 停掉内置服务并把文件改名为 telegram.json.migrated-<epoch ms> 留底；幂等 */
+    telegramMigrated(): Promise<void>;
+  };
   /** 订阅宿主事件（如 H3 的 channel.session）；返回取消订阅 */
   on(event: string, handler: (payload: unknown) => void): Unsubscribe;
   /** 处理宿主发来的调用（如 H2 的 ui.action）；同名再注册覆盖；处理函数抛错时只把 message 传回 */
