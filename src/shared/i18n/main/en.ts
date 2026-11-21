@@ -280,6 +280,18 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     marketRevokedTitle: 'Plugin revoked and disabled',
     marketRevokedBody: '"{name}": {reason}',
   },
+  appPlugins: {
+    notFound: 'Fynvra plugin not found',
+    officialOnly: 'Only official Fynvra plugins are supported for now',
+    alreadyInstalled: '"{name}" is already installed',
+    invalidManifest: 'Not a valid Fynvra plugin: {error}',
+    installFailed: 'Failed to install the Fynvra plugin: {error}',
+    removeFailed: 'Failed to remove the Fynvra plugin: {error}',
+    devOnly: 'Only development builds can add Fynvra plugins from a local folder',
+    notLocal: 'Only Fynvra plugins added from a local folder can be re-copied',
+    pickTitle: 'Choose a Fynvra plugin folder',
+    readFailed: 'Failed to read Fynvra plugins: {error}',
+  },
   providers: {
     readFailed: 'Failed to read providers: {error}',
     saveFailed: 'Failed to save provider: {error}',
