@@ -66,6 +66,20 @@ describe('插件宿主', () => {
     await expect(denied).rejects.toThrow('permission required');
   });
 
+  it('api.legacy.* 发出对应的 req', async () => {
+    let api: FynvraPluginApi | undefined;
+    const { sent, deliver } = boot({ activate: (value: FynvraPluginApi) => (api = value) });
+    await vi.waitFor(() => expect(api).toBeDefined());
+    const data = api?.legacy.telegramData();
+    expect(sent.at(-1)).toMatchObject({ type: 'req', method: 'legacy.telegramData' });
+    deliver({ type: 'res', id: sent.at(-1)?.id, ok: true, result: { token: 't' } });
+    await expect(data).resolves.toEqual({ token: 't' });
+    const migrated = api?.legacy.telegramMigrated();
+    expect(sent.at(-1)).toMatchObject({ type: 'req', method: 'legacy.telegramMigrated' });
+    deliver({ type: 'res', id: sent.at(-1)?.id, ok: true, result: null });
+    await expect(migrated).resolves.toBeUndefined();
+  });
+
   it('req 超时', async () => {
     vi.useFakeTimers();
     let api: FynvraPluginApi | undefined;

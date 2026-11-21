@@ -468,6 +468,7 @@ function appStack() {
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
       uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
+      legacyTelegram: { path: '', stopBuiltin: async () => undefined },
     },
     dataRoot,
     ensureDir: async (path) => {
