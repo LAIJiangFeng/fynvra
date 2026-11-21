@@ -5,6 +5,7 @@ import {
   MARKET_STALE_MS,
   marketAction,
   marketNeedsRefresh,
+  marketViewOf,
 } from './marketView';
 
 const latest = {
@@ -79,5 +80,17 @@ describe('marketNeedsRefresh', () => {
         now
       )
     ).toBe(true);
+  });
+});
+
+describe('marketViewOf', () => {
+  it('按类别和已装 id 找市场视图，pi 与 fynvra 同 id 不串', () => {
+    const installed = { pluginId: 'same', version: '1.0.0', enabled: true };
+    const pi = view({ id: 'a.pi', installed });
+    const app = view({ id: 'a.app', kind: 'fynvra', installed });
+    const state = { configured: true, plugins: [pi, app] };
+    expect(marketViewOf(state, 'same')).toBe(pi);
+    expect(marketViewOf(state, 'same', 'fynvra')).toBe(app);
+    expect(marketViewOf(state, 'other', 'fynvra')).toBeUndefined();
   });
 });
