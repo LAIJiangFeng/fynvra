@@ -1,5 +1,6 @@
 // 渠道宿主（ARCHITECTURE §7.12「渠道 API」）：把渠道值班依赖的核心能力按插件归属开放给渠道插件。
 // 每个操作都先核对归属（会话 / 工作区 / 任务属于调用的插件），安全规则（档位、干净检出、出站过滤）由这里执行。
+import type { ChatFileExtractors } from '@shared/chatFileText';
 import { errorMessage } from '@shared/guards';
 import type { HostCallResult } from '@shared/types/agent';
 import type {
@@ -37,6 +38,8 @@ export interface ChannelHostDeps {
   call(pluginId: string, name: string, args: unknown): Promise<unknown>;
   emit(pluginId: string, event: string, payload: unknown): void;
   reportTimeoutMs?: number;
+  /** 附件抽取器；不传则在隔离 worker 里解析（测试传进程内抽取器） */
+  attachmentExtractors?: ChatFileExtractors;
 }
 
 export interface ChannelHost {
@@ -231,7 +234,7 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
     async prompt(pluginId, sessionId, text, attachments) {
       ownSession(pluginId, sessionId);
       const { files, images, rejected } = attachments
-        ? await loadAttachments(attachments.dataDir, attachments.items)
+        ? await loadAttachments(attachments.dataDir, attachments.items, deps.attachmentExtractors)
         : { files: [], images: [], rejected: [] };
       const finalText = withAttachmentBlocks(text, files);
       // 正文为空且附件全被拒：没有可发的内容
