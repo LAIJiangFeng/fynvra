@@ -20,15 +20,13 @@ afterEach(async () => {
 
 /** 走真实的 RPC 检查链，返回插件收到的 res */
 function connect(pluginId = TELEGRAM_PLUGIN_ID) {
-  const order: string[] = [];
-  const stopBuiltin = vi.fn(async () => {});
   const posted: Record<string, unknown>[] = [];
   const connection = createPluginConnection({
     pluginId,
     dataDir: '/data',
     permissions: [],
     methods: API_METHODS,
-    deps: { legacyTelegram: { path, stopBuiltin } } as unknown as ApiDeps,
+    deps: { legacyTelegram: { path } } as unknown as ApiDeps,
     post: (message) => posted.push(message as Record<string, unknown>),
   });
   let id = 0;
@@ -38,13 +36,13 @@ function connect(pluginId = TELEGRAM_PLUGIN_ID) {
     await vi.waitFor(() => expect(posted.length).toBe(before + 1));
     return posted.at(-1);
   }
-  return { call, stopBuiltin, order };
+  return { call };
 }
 
 describe('legacy.*', () => {
   it('其他插件调用两个方法都被拒，与方法不存在相同', async () => {
     await writeFile(path, '{"token":"secret"}');
-    const { call, stopBuiltin } = connect('fynvra.demo');
+    const { call } = connect('fynvra.demo');
     for (const method of ['legacy.telegramData', 'legacy.telegramMigrated']) {
       expect(await call(method)).toMatchObject({
         ok: false,
@@ -54,7 +52,6 @@ describe('legacy.*', () => {
         error: `method not allowed: ${method}`,
       });
     }
-    expect(stopBuiltin).not.toHaveBeenCalled();
     expect(await readdir(dir)).toEqual(['telegram.json']);
   });
 
@@ -82,19 +79,14 @@ describe('legacy.*', () => {
     expect(JSON.stringify(large)).not.toContain('SECRET');
   });
 
-  it('telegramMigrated 先停内置服务再改名；重复调用幂等；之后 telegramData 为 null', async () => {
+  it('telegramMigrated 改名留底；重复调用幂等；之后 telegramData 为 null', async () => {
     await writeFile(path, '{"enabled":true}');
-    const { call, stopBuiltin, order } = connect();
+    const { call } = connect();
     const now = vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
-    stopBuiltin.mockImplementation(async () => {
-      order.push((await readdir(dir)).includes('telegram.json') ? 'stop-before-rename' : 'late');
-    });
     expect(await call('legacy.telegramMigrated')).toMatchObject({ ok: true, result: null });
     now.mockRestore();
-    expect(order).toEqual(['stop-before-rename']);
     expect(await readdir(dir)).toEqual(['telegram.json.migrated-1700000000000']);
     expect(await call('legacy.telegramMigrated', {})).toMatchObject({ ok: true, result: null });
-    expect(stopBuiltin).toHaveBeenCalledTimes(1);
     expect(await readdir(dir)).toEqual(['telegram.json.migrated-1700000000000']);
     expect(await call('legacy.telegramData')).toMatchObject({ ok: true, result: null });
   });

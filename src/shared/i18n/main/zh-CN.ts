@@ -91,7 +91,7 @@ export const mainZhCN = {
     invalidApproval: '无效的审批结果',
     invalidModel: '无效的模型参数',
     invalidApprovalMode: '无效的审批档位',
-    profileApprovalLocked: 'Telegram 会话的审批由档位规则决定，不能切换',
+    profileApprovalLocked: '渠道会话的审批由档位规则决定，不能切换',
     invalidPlanMode: '无效的计划模式参数',
     archiveBusy: '会话正在运行，结束后再归档',
     removeBusy: '会话或它的任务还在进行，结束后再删除',

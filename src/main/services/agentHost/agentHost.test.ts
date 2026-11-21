@@ -3253,11 +3253,11 @@ describe('createAgentHost profile sessions', () => {
       workspaceId: 'ws-1',
       profile: 'restricted',
       cwd: env.clean,
-      title: 'Telegram 值班',
+      title: '渠道值班',
     });
     expect(clean).toMatchObject({
       ok: true,
-      session: { profile: 'restricted', roleId: 'orchestrator', title: 'Telegram 值班' },
+      session: { profile: 'restricted', roleId: 'orchestrator', title: '渠道值班' },
     });
   });
 

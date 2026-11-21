@@ -35,7 +35,7 @@ function context(patch: Partial<ApiDeps> = {}, pluginId = 'fynvra.demo'): ApiCon
       commandEnv: async () => ({}),
       listWorkspaces: () => [],
       uiStore: { get: () => null, set: () => undefined, clear: () => undefined },
-      legacyTelegram: { path: '', stopBuiltin: async () => undefined },
+      legacyTelegram: { path: '' },
       ...patch,
     },
   };

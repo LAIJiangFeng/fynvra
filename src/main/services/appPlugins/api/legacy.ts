@@ -1,5 +1,5 @@
 // 旧数据迁移（ARCHITECTURE §7.12「Fynvra 插件」）：官方 Telegram 插件首次启动时接走内置版本的
-// userData/telegram.json，并停掉内置服务（同一 bot token 两处长轮询会 409）。只对该插件开放。
+// userData/telegram.json，接走后改名留底。只对该插件开放。
 import { readFile, rename, stat } from 'node:fs/promises';
 import { asRecord } from '@shared/guards';
 import { type ApiContext, type ApiMethod, defineMethod } from './types';
@@ -11,8 +11,6 @@ export interface LegacyApiDeps {
   legacyTelegram: {
     /** 生产环境为 userData/telegram.json */
     path: string;
-    /** 停掉内置 Telegram 服务；出错只记日志，不抛 */
-    stopBuiltin(): Promise<void>;
   };
 }
 
@@ -56,15 +54,7 @@ export const LEGACY_API: Record<string, ApiMethod> = {
     parse: (raw) => ({ raw }),
     run: async (ctx, { raw }) => {
       guard(ctx, 'legacy.telegramMigrated', raw);
-      const { path, stopBuiltin } = ctx.deps.legacyTelegram;
-      // 已迁移过就不再停服务：setEnabled(false) 会落盘，重新生成 telegram.json
-      try {
-        await stat(path);
-      } catch (error) {
-        if (isMissing(error)) return null;
-        throw new Error('legacy data unreadable');
-      }
-      await stopBuiltin();
+      const { path } = ctx.deps.legacyTelegram;
       try {
         await rename(path, `${path}.migrated-${Date.now()}`);
       } catch (error) {

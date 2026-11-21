@@ -195,7 +195,7 @@ export interface SpawnSessionSpec {
    * 其他角色只能写/改 Markdown 文档，改其他文件的工具被拦截，非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
    */
   planMode?: boolean;
-  /** 会话档位（Telegram 值班）：来自会话记录，普通会话不带 */
+  /** 会话档位（渠道插件会话）：来自会话记录，普通会话不带 */
   profile?: SessionProfile;
 }
 

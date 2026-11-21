@@ -39,7 +39,6 @@ describe('preload bridge', () => {
       'sessions',
       'settings',
       'skills',
-      'telegram',
       'terminals',
       'updates',
       'usage',

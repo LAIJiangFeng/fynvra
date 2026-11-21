@@ -49,7 +49,7 @@ describe('Main command proxy wiring', () => {
     expect(pick(mocks.exec.mock.calls.at(-1)?.[2].env, ['HTTPS_PROXY'])).toEqual({
       HTTPS_PROXY: 'http://127.0.0.1:7890',
     });
-    // Telegram 请求前：缓存超过 5 秒先刷新
+    // 联网请求前：缓存超过 5 秒先刷新
     raw = 'DIRECT';
     time = 6_000;
     expect(pick(await freshCommandEnvironment(), keys)).toEqual(pick(process.env, keys));

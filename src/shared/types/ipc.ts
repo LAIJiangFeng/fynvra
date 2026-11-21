@@ -295,19 +295,6 @@ export const IPC_CHANNELS = {
   // --- usage ---
   /** 本机全部 jsonl 的用量，只接收时间范围，不接收路径 */
   USAGE_SUMMARY: 'usage:summary',
-  // --- telegram ---
-  /** 返回 TelegramStateView：不含 token 明文，只有掩码 */
-  TELEGRAM_GET_STATE: 'telegram:get-state',
-  /** token 明文只在这一跳从 Renderer 到 Main，不回传 */
-  TELEGRAM_SET_TOKEN: 'telegram:set-token',
-  TELEGRAM_ALLOW_GROUP: 'telegram:allow-group',
-  TELEGRAM_REMOVE_GROUP: 'telegram:remove-group',
-  TELEGRAM_RESOLVE_CARD: 'telegram:resolve-card',
-  TELEGRAM_SET_ENABLED: 'telegram:set-enabled',
-  /** 每人每小时最多处理几条（1–1000） */
-  TELEGRAM_SET_RATE_LIMIT: 'telegram:set-rate-limit',
-  /** Main → Renderer 推送：状态变化，无参数，Renderer 收到后重新 get-state */
-  TELEGRAM_CHANGED: 'telegram:changed',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

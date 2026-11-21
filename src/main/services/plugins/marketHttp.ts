@@ -26,7 +26,7 @@ type RequestFn = (
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * 生产用：网络沿用 Telegram 的 createHttpsPost（每次请求现读 §7.7 代理环境、TLS 守卫、Node 版本守卫）。
+ * 生产用：网络每次请求现读 §7.7 代理环境，带 TLS 守卫与 Node 版本守卫。
  * baseUrl / request / nodeVersion 只供测试注入。
  */
 export function createMarketHttpGet(options: {
@@ -47,7 +47,7 @@ export function createMarketHttpGet(options: {
     if (disablesNodeTlsVerification(current) || disablesNodeTlsVerification(process.env)) {
       throw new MarketHttpError('tls-verification-disabled');
     }
-    // 同 Telegram：proxyEnv 需 Node 24.5+ / 22.21+，旧版本配了代理也不能悄悄直连
+    // proxyEnv 需 Node 24.5+ / 22.21+，旧版本配了代理也不能悄悄直连
     const [major = 0, minor = 0] = nodeVersion.split('.').map(Number);
     const supportsProxyEnv =
       major > 24 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);

@@ -296,10 +296,9 @@ describe('setPullRequestNote', () => {
 });
 
 describe('channel.report 路由', () => {
-  it('插件会话路由到该插件；无归属时回退内置 Telegram', async () => {
+  it('插件会话路由到该插件；无归属时返回错误', async () => {
     const { h, a } = await withRuns();
-    const fallback = { invoke: vi.fn(async () => ({ ok: true as const, via: 'telegram' })) };
-    const router = routeChannelReport(() => h.host, fallback);
+    const router = routeChannelReport(() => h.host);
     const signal = new AbortController().signal;
     expect(await router.invoke(a, 'triageReport', { k: 1 }, signal)).toEqual({ ok: true });
     expect(h.deps.call).toHaveBeenCalledWith('p.a', 'channel.report', {
@@ -307,14 +306,10 @@ describe('channel.report 路由', () => {
       method: 'triageReport',
       input: { k: 1 },
     });
-    expect(await router.invoke('legacy', 'triageReport', {}, signal)).toEqual({
-      ok: true,
-      via: 'telegram',
-    });
-    expect(fallback.invoke).toHaveBeenCalledTimes(1);
-    // 渠道宿主还没接线时也回退
-    await routeChannelReport(() => undefined, fallback).invoke(a, 'm', {}, signal);
-    expect(fallback.invoke).toHaveBeenCalledTimes(2);
+    const notOwned = { ok: false, error: 'session is not owned by a channel plugin' };
+    expect(await router.invoke('legacy', 'triageReport', {}, signal)).toEqual(notOwned);
+    // 渠道宿主还没接线时同样返回错误
+    expect(await routeChannelReport(() => undefined).invoke(a, 'm', {}, signal)).toEqual(notOwned);
   });
 
   it('插件超时、抛错或返回非法值时返回错误', async () => {
