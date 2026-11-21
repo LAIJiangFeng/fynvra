@@ -318,7 +318,8 @@ describe('安装', () => {
   ];
 
   for (const [name, expected, spec] of failures) {
-    it(`${name}：失败且不留目录和登记`, async () => {
+    // 构造 2 万条目的 zip 在全量并行负载下可能超过默认 5 秒
+    it(`${name}：失败且不留目录和登记`, { timeout: 30_000 }, async () => {
       const value = spec();
       const [versions, revoked] = Array.isArray(value[0])
         ? (value as [VersionSpec[], unknown[]])

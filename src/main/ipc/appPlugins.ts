@@ -38,6 +38,7 @@ import {
   createAppPluginService,
   readAppPluginManifest,
 } from '../services/appPlugins/service';
+import { getChannelHost } from '../services/channels/instance';
 import { freshCommandEnvironment } from '../services/commandNetwork';
 import { showDesktopNotification } from '../services/notifications/desktop';
 import { sendToAllWindows } from '../windows/createAppWindow';
@@ -86,6 +87,7 @@ function appPlugins() {
         const workspaces = getWorkspaceService();
         return workspaces.list().flatMap((item) => workspaces.get(item.id) ?? []);
       },
+      channel: getChannelHost,
       uiStore,
     },
     dataRoot,
@@ -106,6 +108,10 @@ function appPlugins() {
     root: appPluginRoot,
     dataRoot,
     onChanged,
+    // shortcut: 渠道宿主接线前删除的插件不会清归属；实际删除都在启动完成后，出问题再改成启动时对账
+    onRemoved: async (id) => {
+      await getChannelHost()?.removePlugin(id);
+    },
   });
   instance = { service, runtime, uiStore };
   // 启动前先登记已有密钥，日志脱敏与出站过滤从一开始就生效

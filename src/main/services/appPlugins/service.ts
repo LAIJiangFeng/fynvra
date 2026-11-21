@@ -104,8 +104,10 @@ export function createAppPluginService(deps: {
   /** `userData/fynvra-plugin-data` */
   dataRoot: string;
   onChanged: () => void;
+  /** 删除时清掉插件在核心里的归属（渠道会话与 PR note；会话本身保留） */
+  onRemoved?: (id: string) => Promise<void>;
 }): AppPluginService {
-  const { registry, runtime, secrets, root, dataRoot, onChanged } = deps;
+  const { registry, runtime, secrets, root, dataRoot, onChanged, onRemoved } = deps;
   const invalid = (error: string) => ({ ok: false as const, code: 'invalid' as const, error });
   const failed = (error: string) => ({ ok: false as const, code: 'failed' as const, error });
   const manifestError = (code: string) =>
@@ -143,6 +145,7 @@ export function createAppPluginService(deps: {
         if (dir) await removeCopyDir(root(), dir);
         await removeCopyDir(dataRoot, join(dataRoot, id));
         await secrets.removePlugin(id);
+        await onRemoved?.(id);
         await registry.remove(id);
       } catch (error) {
         onChanged();

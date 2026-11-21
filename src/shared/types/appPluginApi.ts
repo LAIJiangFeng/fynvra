@@ -21,6 +21,56 @@ export interface PluginProxyEnv {
 
 export type Unsubscribe = () => void;
 
+/** 渠道会话的档位：只读分诊 triage，或受限值班 restricted（规则同内置 Telegram） */
+export type ChannelProfile = 'triage' | 'restricted';
+
+/** 会话状态；已归档为 archived，会话已被用户删掉为 missing */
+export type ChannelSessionStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting-approval'
+  | 'error'
+  | 'archived'
+  | 'missing';
+
+/** channel.snapshot() 的结果：只有协调者会话属于本插件的 run 与其下的 task */
+export interface ChannelSnapshot {
+  runs: { id: string; coordinatorSessionId: string }[];
+  tasks: {
+    id: string;
+    runId: string;
+    title: string;
+    status: 'todo' | 'in-progress' | 'in-review' | 'completed' | 'failed' | 'abandoned';
+    pullRequest?: { url: string };
+  }[];
+}
+
+/** channel.filterOutbound() 的结果：本机信息已替换；命中密钥时整条拒绝 */
+export type ChannelFilterResult = { ok: true; text: string } | { ok: false; reason: 'secret' };
+
+/** 事件 `channel.session`：本插件会话的状态变化 */
+export interface ChannelSessionEvent {
+  sessionId: string;
+  status: ChannelSessionStatus;
+}
+
+/** 事件 `channel.orchestrationChanged`：该工作区有本插件的 run 时才发 */
+export interface ChannelOrchestrationEvent {
+  workspaceId: string;
+}
+
+/** 宿主调插件 `channel.report` 的入参：本插件 triage 会话里的 triage_report 等调用（input 未收窄） */
+export interface ChannelReportCall {
+  sessionId: string;
+  method: string;
+  input: unknown;
+}
+
+/** `channel.report` 处理函数的返回值（同 host-invoke 的 HostCallResult） */
+export type ChannelReportResult =
+  | ({ ok: true } & Record<string, unknown>)
+  | { ok: false; error: string };
+
 export interface FynvraPluginApi {
   /** 本插件 id（市场 id） */
   readonly pluginId: string;
@@ -45,6 +95,25 @@ export interface FynvraPluginApi {
   workspaces: {
     /** 已挂入的工作区（需要 workspaces 权限），不含路径 */
     list(): Promise<PluginWorkspace[]>;
+  };
+  /** 渠道 API（全部需要 channel 权限，只能作用于本插件拥有的会话 / 工作区 / 任务） */
+  channel: {
+    /** 在工作区的干净检出里建档位会话（须是有默认分支与远端的 git 工作区），归属本插件 */
+    createSession(input: {
+      workspaceId: string;
+      profile: ChannelProfile;
+      title: string;
+    }): Promise<{ sessionId: string }>;
+    /** 把干净检出切到 origin 默认分支最新提交（本插件该工作区有会话在跑时拒绝） */
+    refreshCheckout(input: { workspaceId: string }): Promise<void>;
+    originCommit(input: { workspaceId: string }): Promise<{ commit: string }>;
+    /** 空闲则投递，忙时排队；text ≤ 64 KB */
+    prompt(input: { sessionId: string; text: string }): Promise<{ delivered: boolean }>;
+    sessionStatus(input: { sessionId: string }): Promise<{ status: ChannelSessionStatus }>;
+    snapshot(input: { workspaceId: string }): Promise<ChannelSnapshot>;
+    filterOutbound(input: { text: string }): Promise<ChannelFilterResult>;
+    /** 只对本插件 run 下的任务；先过滤再存，命中密钥时拒绝；null 清除 */
+    setPullRequestNote(input: { taskId: string; text: string | null }): Promise<void>;
   };
   ui: {
     /**

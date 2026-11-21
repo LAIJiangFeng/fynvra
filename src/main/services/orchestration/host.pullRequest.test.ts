@@ -88,7 +88,9 @@ beforeEach(() => {
   host = makeHost();
 });
 afterEach(() => {
-  setPullRequestBodyExtension(undefined);
+  setPullRequestBodyExtension('telegram', undefined);
+  setPullRequestBodyExtension('plugin:a', undefined);
+  setPullRequestBodyExtension('plugin:b', undefined);
 });
 
 type Dispatched = DispatchTaskOutput & { dispatch: NonNullable<DispatchTaskOutput['dispatch']> };
@@ -118,9 +120,14 @@ describe('openPullRequest', () => {
   it('成功：push 与 gh 的 argv、正文文件、任务状态与 mergedDiff / pullRequest', async () => {
     const first = await reported();
     scriptRepo();
-    setPullRequestBodyExtension((taskId) =>
+    // 多个来源按登记顺序拼接，空的不加
+    setPullRequestBodyExtension('telegram', (taskId) =>
       taskId === first.task.id ? '## 来源\n\n卡片 #1' : undefined
     );
+    setPullRequestBodyExtension('plugin:a', (taskId) =>
+      taskId === first.task.id ? '## 插件\n\nnote' : undefined
+    );
+    setPullRequestBodyExtension('plugin:b', () => '  ');
     await host.runChecks({ dispatchId: first.dispatch.id, command: 'pnpm test' });
     const start = fake.calls.length;
     const result = await host.openPullRequest({ ...input(first.dispatch.id), draft: true });
@@ -150,7 +157,7 @@ describe('openPullRequest', () => {
       fake.calls.filter((call) => call.cmd === 'gh').every((call) => call.cwd === '/repo')
     ).toBe(true);
     expect(bodies).toEqual([
-      '## 改动\n\nAdds it.\n\n## 文件\n\n- `src/a.ts`\n\n## 验证\n\n- `pnpm test`\n\n## 来源\n\n卡片 #1\n',
+      '## 改动\n\nAdds it.\n\n## 文件\n\n- `src/a.ts`\n\n## 验证\n\n- `pnpm test`\n\n## 来源\n\n卡片 #1\n\n## 插件\n\nnote\n',
     ]);
     expect(store.tasks.get(first.task.id)).toMatchObject({
       status: 'completed',

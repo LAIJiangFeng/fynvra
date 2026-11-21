@@ -7,7 +7,7 @@ import { app, BrowserWindow, dialog, session } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
-import { shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
+import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
@@ -18,6 +18,10 @@ import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/worksp
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { installSessionWatchdog } from './services/agentHost/watchdog';
+import { createCleanCheckout } from './services/channels/cleanCheckout';
+import { createChannelHost } from './services/channels/host';
+import { setChannelHost } from './services/channels/instance';
+import { createChannelStore } from './services/channels/store';
 import { freshCommandEnvironment, savedCommandEnvironment } from './services/commandNetwork';
 import { showDesktopNotification } from './services/notifications/desktop';
 import { setPullRequestBodyExtension } from './services/orchestration/pullRequest';
@@ -29,7 +33,6 @@ import { collectAppSecrets } from './services/secrets';
 import { loadLoginShellPath } from './services/shellEnv';
 import { createSystemProxyResolver, setSystemProxy } from './services/systemProxy';
 import { createHttpsPost, createTelegramApi } from './services/telegram/api';
-import { createCleanCheckout } from './services/telegram/cleanCheckout';
 import {
   collectLocalInfo,
   getTelegramService,
@@ -170,22 +173,44 @@ if (!app.requestSingleInstanceLock()) {
       agentHost.setWorktreesRootLookup(worktreesRoot);
       // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
       installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
+      // 内置 Telegram 与渠道插件共用的核心能力
+      const snapshot = async (workspaceId: string) =>
+        getOrchestrationRegistry().serviceFor(workspaceId)?.snapshot();
+      const cleanCheckout = createCleanCheckout({
+        worktreesRoot,
+        commandEnv: savedCommandEnvironment,
+      });
+      const localInfo = () =>
+        collectLocalInfo({
+          userDataPath: app.getPath('userData'),
+          workspaces: listWorkspaces(),
+          worktreesRoot,
+        });
+      // 渠道宿主：Fynvra 插件经 channel API 用这些能力，只能碰自己拥有的会话 / 工作区 / 任务
+      const channelHost = createChannelHost({
+        store: createChannelStore({
+          filePath: join(app.getPath('userData'), 'fynvra-plugin-sessions.json'),
+        }),
+        agentHost,
+        workspaces: getWorkspaceService(),
+        snapshot,
+        cleanCheckout,
+        knownSecrets: collectAppSecrets,
+        localInfo,
+        call: (pluginId, name, args) => getAppPluginRuntime().call(pluginId, name, args),
+        emit: (pluginId, event, payload) => getAppPluginRuntime().emit(pluginId, event, payload),
+      });
+      setChannelHost(channelHost);
       // Telegram 群反馈值班：启用且有 token 时开始长轮询
       const telegram = createTelegramService({
         store: createTelegramStore(join(app.getPath('userData'), 'telegram.json')),
         api: createTelegramApi({ http: createHttpsPost(freshCommandEnvironment) }),
         agentHost,
         workspaces: getWorkspaceService(),
-        snapshot: async (workspaceId) =>
-          getOrchestrationRegistry().serviceFor(workspaceId)?.snapshot(),
-        cleanCheckout: createCleanCheckout({ worktreesRoot, commandEnv: savedCommandEnvironment }),
+        snapshot,
+        cleanCheckout,
         knownSecrets: collectAppSecrets,
-        localInfo: () =>
-          collectLocalInfo({
-            userDataPath: app.getPath('userData'),
-            workspaces: listWorkspaces(),
-            worktreesRoot,
-          }),
+        localInfo,
         notify: (title, body) => {
           // 沿用通知偏好的总开关与提示音
           const preferences = notificationPreferencesOf(getSettingsFile().read().preferences);
@@ -196,7 +221,10 @@ if (!app.requestSingleInstanceLock()) {
       });
       setTelegramService(telegram);
       connectTelegramChanged(telegram);
-      setPullRequestBodyExtension((taskId) => telegram.pullRequestBodyExtension(taskId));
+      setPullRequestBodyExtension('telegram', (taskId) =>
+        telegram.pullRequestBodyExtension(taskId)
+      );
+      setPullRequestBodyExtension('channel', (taskId) => channelHost.pullRequestNote(taskId));
 
       // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复
       installSessionWatchdog({
@@ -207,6 +235,10 @@ if (!app.requestSingleInstanceLock()) {
           (await getRoleStore().get(session.roleId))?.tools === 'orchestrator',
       });
       await systemProxyReady;
+      // 会话启动前读入归属，triage_report 的路由从一开始就准
+      await channelHost
+        .start()
+        .catch((error: unknown) => console.error('[fynvra] 渠道宿主启动失败', error));
       agentHost.start();
       // Fynvra 插件：每个启用的插件一个后台进程
       void startAppPlugins().catch((error: unknown) =>
