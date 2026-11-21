@@ -1398,7 +1398,7 @@ export const zhCN = {
       installing: '正在安装…',
       installHint: '需要本机有 npm 或 git，不影响 ~/.pi',
       empty: '还没有插件',
-      kinds: { local: '本地', npm: 'npm', git: 'git' },
+      kinds: { local: '本地', npm: 'npm', git: 'git', market: '市场' },
       removeConsequence: '会从使用它的角色中移除，并卸载该包',
       removeConsequenceLink: '会从使用它的角色中移除；只删登记，不动原文件',
       removeConsequenceCopy: '会从使用它的角色中移除，并删除副本',

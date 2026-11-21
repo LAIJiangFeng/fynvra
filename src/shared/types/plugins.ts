@@ -1,5 +1,17 @@
-/** 插件来源类型：本地目录 / 扩展文件，或经 pi 包管理器安装的 npm / git 包 */
-export type PluginKind = 'local' | 'npm' | 'git';
+/** 插件来源类型：本地目录 / 扩展文件、经 pi 包管理器安装的 npm / git 包，或从插件市场安装 */
+export type PluginKind = 'local' | 'npm' | 'git' | 'market';
+
+/** 市场插件的登记信息（仅 kind 为 market） */
+export interface PluginMarketInfo {
+  /** 市场里的插件 id（如 `fynvra.telegram`） */
+  id: string;
+  version: string;
+  /** 已装包的 sha256 */
+  sha256: string;
+  tier: 'official' | 'reviewed';
+  /** 已装版本被远程撤回时的原因 */
+  revokedReason?: string;
+}
 
 /** 本地插件的形态：copy 复制到 Fynvra 的副本目录后加载；link 直接加载原路径（开发模式） */
 export type PluginMode = 'copy' | 'link';
@@ -36,6 +48,8 @@ export interface PluginEntry {
   scanStamp?: string;
   /** 用户手动添加的服务名；最多 {@link MAX_REQUESTED_PROVIDERS} 个 */
   manualProviders?: string[];
+  /** 仅市场插件 */
+  market?: PluginMarketInfo;
 }
 
 /** 每个插件最多记录的服务名个数 */

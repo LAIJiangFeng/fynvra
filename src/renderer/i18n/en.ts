@@ -1458,7 +1458,7 @@ export const en: MessagesShape<typeof zhCN> = {
       installing: 'Installing…',
       installHint: 'Requires npm or git; ~/.pi is left untouched',
       empty: 'No plugins yet',
-      kinds: { local: 'Local', npm: 'npm', git: 'git' },
+      kinds: { local: 'Local', npm: 'npm', git: 'git', market: 'Market' },
       removeConsequence: 'Removes it from roles that use it and uninstalls the package',
       removeConsequenceLink: 'Removes it from roles that use it; the original files stay',
       removeConsequenceCopy: 'Removes it from roles that use it and deletes the copy',
