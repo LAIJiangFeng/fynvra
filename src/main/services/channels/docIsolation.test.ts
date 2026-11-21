@@ -186,8 +186,12 @@ describe('附件解析隔离层', () => {
 
 describe('压缩炸弹预检', () => {
   it('声明解压后超过 64 MB 的 docx / xlsx 在解析前就记为 size', async () => {
-    const bomb = zipSync({ 'word/document.xml': new Uint8Array(65 * 1024 * 1024) }, { level: 9 });
-    expect(bomb.length).toBeLessThan(1024 * 1024);
+    // 小 zip，只把中央目录里声明的解压后大小改成 65 MB（checkZipBomb 读的就是声明值）
+    const bomb = zipSync({ 'word/document.xml': new Uint8Array(16) });
+    const view = new DataView(bomb.buffer);
+    const central = bomb.findIndex((_, i) => view.getUint32(i, true) === 0x02014b50);
+    view.setUint32(central + 24, 65 * 1024 * 1024, true);
+    expect(() => checkZipBomb(zipSync({ 'word/document.xml': new Uint8Array(16) }))).not.toThrow();
     expect(() => checkZipBomb(bomb)).toThrow(ChatFileTooLargeError);
 
     const dataDir = mkdtempSync(join(tmpdir(), 'fynvra-bomb-'));
