@@ -62,9 +62,10 @@ export function startPluginHost(options: PluginHostOptions): void {
     });
   }
 
-  function createApi(pluginId: string): FynvraPluginApi {
+  function createApi(pluginId: string, dataDir: string): FynvraPluginApi {
     return {
       pluginId,
+      dataDir,
       log: (level, message) => {
         request('log', { level, message }).catch(() => undefined);
       },
@@ -127,7 +128,7 @@ export function startPluginHost(options: PluginHostOptions): void {
     };
   }
 
-  async function init(pluginId: string, entryPath: string): Promise<void> {
+  async function init(pluginId: string, entryPath: string, dataDir: string): Promise<void> {
     try {
       const loaded = (await importModule(pathToFileURL(entryPath).href)) as Partial<
         FynvraPluginModule & { default: Partial<FynvraPluginModule> }
@@ -138,7 +139,7 @@ export function startPluginHost(options: PluginHostOptions): void {
         throw new Error('plugin entry does not export activate(api)');
       }
       plugin = candidate as FynvraPluginModule;
-      await plugin.activate(createApi(pluginId));
+      await plugin.activate(createApi(pluginId, dataDir));
       post({ type: 'activated' });
     } catch (error) {
       post({ type: 'activate-failed', error: messageOf(error) });
@@ -178,7 +179,7 @@ export function startPluginHost(options: PluginHostOptions): void {
       case 'init':
         if (initialized) return;
         initialized = true;
-        void init(message.pluginId, message.entryPath);
+        void init(message.pluginId, message.entryPath, message.dataDir);
         return;
       case 'deactivate':
         void deactivate();

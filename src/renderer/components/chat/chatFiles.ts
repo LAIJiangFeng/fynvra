@@ -2,38 +2,22 @@ import {
   type ChatFileRejection,
   decodeText,
   extractChatFileText,
+  pdfDocumentText,
   type ReadChatFileResult,
   repackXlsx,
   sheetsToText,
   type XlsxSheet,
 } from '@shared/chatFileText';
-import { MAX_CHAT_FILE_BYTES, MAX_CHAT_FILES_TOTAL_CHARS } from '@shared/types/chat';
+import { MAX_CHAT_FILE_BYTES } from '@shared/types/chat';
 
 export type { ChatFileRejection, ReadChatFileResult };
 export { decodeText, sheetsToText };
 
-/** PDF 逐页抽文字：hasEOL 换行，页之间空一行；超过字数上限就提前停 */
 async function extractPdfText(data: Uint8Array): Promise<string> {
   const { openPdf } = await import('../files/pdfjs');
   const task = await openPdf(data);
   try {
-    const doc = await task.promise;
-    const pages: string[] = [];
-    let total = 0;
-    for (let n = 1; n <= doc.numPages && total <= MAX_CHAT_FILES_TOTAL_CHARS; n++) {
-      const page = await doc.getPage(n);
-      const content = await page.getTextContent();
-      let text = '';
-      for (const item of content.items) {
-        if (!('str' in item)) continue;
-        text += item.str;
-        if (item.hasEOL) text += '\n';
-      }
-      page.cleanup();
-      pages.push(text);
-      total += text.length + 2;
-    }
-    return pages.join('\n\n');
+    return await pdfDocumentText(await task.promise);
   } finally {
     // 销毁 loading task 会连同文档与 worker 一起释放
     void task.destroy();

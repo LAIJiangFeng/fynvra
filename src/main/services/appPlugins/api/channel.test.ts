@@ -82,7 +82,7 @@ describe('channel API', () => {
       profile: 'triage',
       title: 't',
     });
-    expect(rpc.host?.prompt).toHaveBeenCalledWith('p.a', 's1', 'hi');
+    expect(rpc.host?.prompt).toHaveBeenCalledWith('p.a', 's1', 'hi', undefined);
     expect(rpc.host?.setPullRequestNote).toHaveBeenCalledWith('p.a', 't1', null);
   });
 
@@ -101,6 +101,50 @@ describe('channel API', () => {
       });
     }
     expect(rpc.host?.createSession).not.toHaveBeenCalled();
+    expect(rpc.host?.prompt).not.toHaveBeenCalled();
+  });
+
+  it('附件：带上插件数据目录转给宿主，name 去路径与控制字符，只发附件时正文可空', async () => {
+    const rpc = connect(['channel']);
+    const params = {
+      sessionId: 's1',
+      text: '',
+      attachments: [{ file: 'a_1.pdf', name: 'C:\\Users\\x\\报\u0007告.pdf' }],
+    };
+    expect(await rpc.request('channel.prompt', params)).toMatchObject({ ok: true });
+    expect(rpc.host?.prompt).toHaveBeenCalledWith('p.a', 's1', '', {
+      dataDir: '/data',
+      items: [{ file: 'a_1.pdf', name: '报告.pdf' }],
+    });
+  });
+
+  it('附件：非法文件名、超长 name、超过 20 个、多余键整次拒绝', async () => {
+    const rpc = connect(['channel']);
+    const att = (file: string, name = 'n') => ({
+      sessionId: 's1',
+      text: 'hi',
+      attachments: [{ file, name }],
+    });
+    for (const params of [
+      att('../x'),
+      att('a/b'),
+      att('a\\b'),
+      att('..'),
+      att('a..b'),
+      att(''),
+      att('x'.repeat(129)),
+      att('中.txt'),
+      att('a.txt', 'n'.repeat(201)),
+      { sessionId: 's1', text: 'hi', attachments: [{ file: 'a', name: 'a', path: '/' }] },
+      { sessionId: 's1', text: 'hi', attachments: Array(21).fill({ file: 'a', name: 'a' }) },
+      { sessionId: 's1', text: 'hi', attachments: 'a' },
+      { sessionId: 's1', text: ' ', attachments: [] },
+    ]) {
+      expect(await rpc.request('channel.prompt', params)).toMatchObject({
+        ok: false,
+        error: 'invalid params: channel.prompt',
+      });
+    }
     expect(rpc.host?.prompt).not.toHaveBeenCalled();
   });
 

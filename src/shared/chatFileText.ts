@@ -159,6 +159,35 @@ export function repackXlsx(
   return fflate.zipSync(entries, { level: 0 });
 }
 
+/** pdf.js 文档的最小结构（Renderer 与 Main 用的 pdf.js 构建不同，只按形状对接） */
+export interface PdfTextDocument {
+  numPages: number;
+  getPage(n: number): Promise<{
+    getTextContent(): Promise<{ items: readonly object[] }>;
+    cleanup(): unknown;
+  }>;
+}
+
+/** PDF 逐页抽文字：hasEOL 换行，页之间空一行；超过字数上限就提前停 */
+export async function pdfDocumentText(doc: PdfTextDocument): Promise<string> {
+  const pages: string[] = [];
+  let total = 0;
+  for (let n = 1; n <= doc.numPages && total <= MAX_CHAT_FILES_TOTAL_CHARS; n++) {
+    const page = await doc.getPage(n);
+    const content = await page.getTextContent();
+    let text = '';
+    for (const item of content.items) {
+      if (!('str' in item) || typeof item.str !== 'string') continue;
+      text += item.str;
+      if ('hasEOL' in item && item.hasEOL) text += '\n';
+    }
+    page.cleanup();
+    pages.push(text);
+    total += text.length + 2;
+  }
+  return pages.join('\n\n');
+}
+
 async function extract(
   run: () => Promise<string>
 ): Promise<string | { reason: ChatFileRejection }> {

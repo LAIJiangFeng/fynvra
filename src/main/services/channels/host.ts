@@ -3,15 +3,19 @@
 import { errorMessage } from '@shared/guards';
 import type { HostCallResult } from '@shared/types/agent';
 import type {
+  ChannelAttachment,
   ChannelFilterResult,
   ChannelProfile,
+  ChannelPromptResult,
   ChannelSessionStatus,
   ChannelSnapshot,
 } from '@shared/types/appPluginApi';
+import { appendChatFiles } from '@shared/types/chat';
 import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
 import type { Workspace } from '@shared/types/workspace';
 import type { AgentHostService } from '../agentHost/agentHost';
 import { type LocalInfoContext, sanitizeLocalInfo, scanSecrets } from '../secrets';
+import { loadAttachments } from './attachments';
 import type { CleanCheckout } from './cleanCheckout';
 import type { ChannelStore } from './store';
 
@@ -44,7 +48,13 @@ export interface ChannelHost {
   ): Promise<{ sessionId: string }>;
   refreshCheckout(pluginId: string, workspaceId: string): Promise<void>;
   originCommit(pluginId: string, workspaceId: string): Promise<{ commit: string }>;
-  prompt(pluginId: string, sessionId: string, text: string): Promise<{ delivered: boolean }>;
+  /** attachments 从 `<dataDir>/attachments/` 读取，规则同聊天输入框（见 attachments.ts） */
+  prompt(
+    pluginId: string,
+    sessionId: string,
+    text: string,
+    attachments?: { dataDir: string; items: readonly ChannelAttachment[] }
+  ): Promise<ChannelPromptResult>;
   sessionStatus(pluginId: string, sessionId: string): { status: ChannelSessionStatus };
   snapshot(pluginId: string, workspaceId: string): Promise<ChannelSnapshot>;
   filterOutbound(text: string): Promise<ChannelFilterResult>;
@@ -61,6 +71,20 @@ export interface ChannelHost {
   /** 编排变化：只推给在该工作区有 run 的插件 */
   orchestrationChanged(workspaceId: string): void;
   removePlugin(pluginId: string): Promise<void>;
+}
+
+/**
+ * 文档块是外部输入：按 appendChatFiles 的块格式拼好，整段包进 untrusted 标签接在正文之后；
+ * 块内伪造的闭合标签转成 `<\/untrusted-content`（同 `</file>` 的转义方式）。
+ */
+export function withAttachmentBlocks(text: string, files: Parameters<typeof appendChatFiles>[1]) {
+  if (files.length === 0) return text;
+  const blocks = appendChatFiles('', files).replace(
+    /<\/untrusted-content/gi,
+    '<\\/untrusted-content'
+  );
+  const wrapped = `<untrusted-content source="attachment">\n${blocks}\n</untrusted-content>`;
+  return text ? `${text}\n\n${wrapped}` : wrapped;
 }
 
 /** 插件 channel.report 的返回值收窄成 HostCallResult */
@@ -204,10 +228,20 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
       const origin = await deps.cleanCheckout.originCommit(ownWorkspace(pluginId, workspaceId));
       return origin.ok ? { commit: origin.commit } : fail(origin.error);
     },
-    async prompt(pluginId, sessionId, text) {
+    async prompt(pluginId, sessionId, text, attachments) {
       ownSession(pluginId, sessionId);
-      const sent = await agentHost.promptWhenIdle(sessionId, text);
-      return sent.ok ? { delivered: sent.delivered } : fail(sent.error);
+      const { files, images, rejected } = attachments
+        ? await loadAttachments(attachments.dataDir, attachments.items)
+        : { files: [], images: [], rejected: [] };
+      const finalText = withAttachmentBlocks(text, files);
+      // 正文为空且附件全被拒：没有可发的内容
+      if (!finalText.trim() && images.length === 0) return { delivered: false, rejected };
+      const sent = await agentHost.promptWhenIdle(
+        sessionId,
+        finalText,
+        images.length > 0 ? images : undefined
+      );
+      return sent.ok ? { delivered: sent.delivered, rejected } : fail(sent.error);
     },
     sessionStatus(pluginId, sessionId) {
       ownSession(pluginId, sessionId);
