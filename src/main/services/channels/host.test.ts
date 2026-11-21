@@ -7,6 +7,7 @@ import type { SessionObserver } from '../agentHost/agentHost';
 import { createPluginSecretStore } from '../appPlugins/secrets';
 import { collectKnownSecrets } from '../secrets';
 import type { CleanCheckout } from './cleanCheckout';
+import { MAIN_EXTRACTORS } from './extractors';
 import { type ChannelHostDeps, createChannelHost } from './host';
 import { routeChannelReport } from './instance';
 import { createChannelStore } from './store';
@@ -71,6 +72,7 @@ function harness(patch: Partial<ChannelHostDeps> = {}) {
     localInfo: async () => ({ paths: ['C:/Users/alice'], userName: 'alice', hostName: 'box' }),
     call: vi.fn(async () => ({ ok: true })),
     emit: (pluginId, event, payload) => emitted.push([pluginId, event, payload]),
+    attachmentExtractors: MAIN_EXTRACTORS,
     ...patch,
   };
   const host = createChannelHost(deps);

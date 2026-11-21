@@ -130,7 +130,8 @@ beforeAll(async () => {
 afterAll(async () => {
   const { getOrchestrationRegistry } = await import('./orchestration');
   await getOrchestrationRegistry().flushAll();
-  rmSync(mocks.userData, { recursive: true, force: true });
+  // Windows 上编排状态的异步写盘与删除竞争会报 ENOTEMPTY，加重试
+  rmSync(mocks.userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe('orchestration IPC', () => {

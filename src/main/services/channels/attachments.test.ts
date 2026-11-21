@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { MAX_CHAT_FILES_TOTAL_CHARS, MAX_CHAT_IMAGES } from '@shared/types/chat';
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadAttachments, MAIN_EXTRACTORS, sniffImage } from './attachments';
+import { loadAttachments, sniffImage } from './attachments';
+import { MAIN_EXTRACTORS } from './extractors';
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
@@ -116,12 +117,16 @@ describe('loadAttachments', () => {
     writeFileSync(join(dir, 'a.txt'), '日志内容');
     writeFileSync(join(dir, 'b.pdf'), minimalPdf('Report'));
     writeFileSync(join(dir, 'c.bin'), new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
-    const loaded = await loadAttachments(dataDir, [
-      { file: 'p.bin', name: 'photo.jpg' },
-      { file: 'a.txt', name: 'a.txt' },
-      { file: 'b.pdf', name: 'b.pdf' },
-      { file: 'c.bin', name: 'c.exe' },
-    ]);
+    const loaded = await loadAttachments(
+      dataDir,
+      [
+        { file: 'p.bin', name: 'photo.jpg' },
+        { file: 'a.txt', name: 'a.txt' },
+        { file: 'b.pdf', name: 'b.pdf' },
+        { file: 'c.bin', name: 'c.exe' },
+      ],
+      MAIN_EXTRACTORS
+    );
     expect(loaded.images).toEqual([
       { data: Buffer.from(PNG).toString('base64'), mimeType: 'image/png' },
     ]);
@@ -176,10 +181,14 @@ describe('loadAttachments', () => {
 
     writeFileSync(join(dir, 'big.txt'), 'a'.repeat(MAX_CHAT_FILES_TOTAL_CHARS - 10));
     writeFileSync(join(dir, 'small.txt'), 'b'.repeat(20));
-    const text = await loadAttachments(dataDir, [
-      { file: 'big.txt', name: 'big.txt' },
-      { file: 'small.txt', name: 'small.txt' },
-    ]);
+    const text = await loadAttachments(
+      dataDir,
+      [
+        { file: 'big.txt', name: 'big.txt' },
+        { file: 'small.txt', name: 'small.txt' },
+      ],
+      MAIN_EXTRACTORS
+    );
     expect(text.files.map((f) => f.name)).toEqual(['big.txt']);
     expect(text.rejected).toEqual([{ name: 'small.txt', reason: 'size' }]);
   });
