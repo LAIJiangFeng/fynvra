@@ -1,4 +1,9 @@
-import type { MarketCategory, MarketPluginView, MarketStateView } from '@shared/types/pluginMarket';
+import type {
+  MarketCategory,
+  MarketPluginView,
+  MarketStateView,
+  PluginKind,
+} from '@shared/types/pluginMarket';
 
 /** 市场卡片上的主按钮 */
 export type MarketAction = 'install' | 'installed' | 'update' | 'incompatible';
@@ -37,10 +42,13 @@ export function marketNeedsRefresh(state: MarketStateView, now: number): boolean
   );
 }
 
-/** plugins.json 里的已装插件 id → 市场视图 */
+/** 已装插件 id（pi → plugins.json，fynvra → fynvra-plugins.json）→ 市场视图 */
 export function marketViewOf(
   state: MarketStateView | null,
-  pluginId: string
+  pluginId: string,
+  kind: PluginKind = 'pi'
 ): MarketPluginView | undefined {
-  return state?.plugins.find((plugin) => plugin.installed?.pluginId === pluginId);
+  return state?.plugins.find(
+    (plugin) => plugin.kind === kind && plugin.installed?.pluginId === pluginId
+  );
 }

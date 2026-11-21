@@ -1433,8 +1433,26 @@ export const en: MessagesShape<typeof zhCN> = {
       imported: 'Imported {count} MCP {count|server|servers}',
     },
     plugins: {
-      title: 'Plugins',
+      title: 'PI plugins',
       subtitle: 'pi extensions or packages; attach to a role to use in new sessions',
+      app: {
+        title: 'Fynvra plugins',
+        subtitle:
+          'Add features to Fynvra itself; they run in the background and are not attached to roles',
+        empty: 'No Fynvra plugins yet. Install one from the marketplace',
+        addLocalDev: 'Add local Fynvra plugin (dev)',
+        recopy: 'Copy again from source folder',
+        removeConfirm: 'Delete "{name}"?',
+        removeDetail: 'Stops the plugin process and deletes its files, private data and secrets',
+        status: {
+          starting: 'Starting',
+          running: 'Running',
+          stopped: 'Stopped',
+          crashed: 'Crashed',
+        },
+        noUi: 'This plugin has not provided a settings page (it is not shown while the plugin is not running)',
+        emptyList: 'Nothing here yet',
+      },
       official: {
         title: 'Official plugins',
         badge: 'Official',
@@ -1522,6 +1540,7 @@ export const en: MessagesShape<typeof zhCN> = {
           other: 'Other',
         },
         tiers: { official: 'Official', reviewed: 'Reviewed' },
+        kinds: { fynvra: 'Fynvra plugin', pi: 'PI plugin' },
         by: 'By {author}',
         latest: 'Latest {version}',
         install: 'Install',
@@ -1552,15 +1571,17 @@ export const en: MessagesShape<typeof zhCN> = {
           env: 'Read environment variables',
           'model-keys': 'Use your model services and keys',
           notifications: 'Show desktop notifications',
-          workspaces: 'List workspaces (without paths)',
-          channel: 'Create and drive sessions as a message channel',
-          ui: 'Show its own settings page',
+          workspaces: 'Read the workspace list',
+          channel: 'Create restricted triage / on-duty sessions and reply to external messages',
+          ui: 'Settings page',
         },
         updateAvailable: 'Update {version} available',
         revoked: 'Revoked: {reason}. Disabled automatically',
         installTitle: 'Install "{name}" {version}',
         installRisk:
           'Plugins run code on this computer with your permissions, and Fynvra cannot limit what they do. Only install plugins you trust',
+        installRiskApp:
+          'Fynvra plugins keep running in the background and execute code with your permissions; Fynvra cannot limit them. Only official plugins are available for now',
         tierHint:
           'Official: published by Fynvra maintainers. Reviewed: built by a third-party author; maintainers reviewed the code of this version',
         attachRoles: 'Attach to these roles after installing',

@@ -1,4 +1,5 @@
 import type { AppPluginView } from '@shared/types/appPlugins';
+import type { PluginUi, UiActionInput, UiActionResult } from '@shared/types/appPluginUi';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 
 export type AppPluginListResult = IpcResult<{ plugins: AppPluginView[] }>;
@@ -9,6 +10,8 @@ export type AppPluginActionResult =
 export type AppPluginRemoveResult =
   | { ok: true }
   | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+export type AppPluginUiResult = IpcResult<{ ui: PluginUi | null }>;
+export type AppPluginUiActionResult = UiActionResult;
 
 /** Fynvra 插件（后台进程 + 宿主 API）；Renderer 只传 id */
 export interface AppPluginsApi {
@@ -24,6 +27,14 @@ export interface AppPluginsApi {
   /** 仅 local 来源：从源目录重新复制并重启 */
   recopy(input: { id: string }): Promise<AppPluginActionResult>;
   onChanged(callback: () => void): () => void;
+  /** 插件最新的一份设置页描述；没有时 ui 为 null */
+  uiGet(input: { id: string }): Promise<AppPluginUiResult>;
+  /** 用户操作：Main 转给插件的 ui.action，带回插件的处理结果 */
+  uiAction(input: UiActionInput): Promise<AppPluginUiActionResult>;
+  /** 设置页里的 https 链接，在系统浏览器打开 */
+  openLink(input: { id: string; url: string }): Promise<IpcResult>;
+  /** 某个插件的设置页描述变了（含被清掉） */
+  onUiChanged(callback: (id: string) => void): () => void;
 }
 
 type Invoker = { invoke<T>(channel: string, ...args: unknown[]): Promise<T> };
@@ -39,5 +50,13 @@ export function createAppPluginsApi(ipc: Invoker, subscribe: Subscribe): AppPlug
     addLocalDev: () => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_ADD_LOCAL_DEV),
     recopy: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_RECOPY, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.APP_PLUGINS_CHANGED, () => callback()),
+    uiGet: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_UI_GET, input),
+    uiAction: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, input),
+    openLink: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_OPEN_LINK, input),
+    onUiChanged: (callback) =>
+      subscribe(IPC_CHANNELS.APP_PLUGINS_UI_CHANGED, (payload) => {
+        const id = (payload as { id?: unknown } | null)?.id;
+        if (typeof id === 'string') callback(id);
+      }),
   };
 }

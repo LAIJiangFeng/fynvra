@@ -8,15 +8,27 @@ import {
   parseAppPluginIdInput,
   parseAppPluginToggleInput,
 } from '@shared/types/appPlugins';
-import { IPC_CHANNELS } from '@shared/types/ipc';
+import {
+  normalizeUiActionResult,
+  parseOpenLinkInput,
+  parseUiActionInput,
+} from '@shared/types/appPluginUi';
+import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import { notificationPreferencesOf } from '@shared/types/settings';
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from 'electron';
 import type {
   AppPluginActionResult,
   AppPluginListResult,
   AppPluginRemoveResult,
+  AppPluginUiActionResult,
+  AppPluginUiResult,
 } from '../../preload/domains/appPlugins';
 import { translate } from '../i18n';
+import {
+  clearUiOnExit,
+  createPluginUiStore,
+  type PluginUiStore,
+} from '../services/appPlugins/api/ui';
 import { createPluginLogger } from '../services/appPlugins/logger';
 import { createAppPluginRegistry } from '../services/appPlugins/registry';
 import { type AppPluginRuntime, createAppPluginRuntime } from '../services/appPlugins/runtime';
@@ -34,7 +46,11 @@ import { busyResult, exclusive, getPluginMarket, pluginCopyRoot } from './plugin
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
-let instance: { service: AppPluginService; runtime: AppPluginRuntime } | null = null;
+let instance: {
+  service: AppPluginService;
+  runtime: AppPluginRuntime;
+  uiStore: PluginUiStore;
+} | null = null;
 
 function appPlugins() {
   if (instance) return instance;
@@ -46,11 +62,17 @@ function appPlugins() {
   });
   const logger = createPluginLogger({ secrets: (id) => secrets.values(id) });
   const onChanged = () => sendToAllWindows(IPC_CHANNELS.APP_PLUGINS_CHANGED);
+  const uiStore = createPluginUiStore((id) =>
+    sendToAllWindows(IPC_CHANNELS.APP_PLUGINS_UI_CHANGED, { id })
+  );
   const runtime = createAppPluginRuntime({
     registry,
     // 动态 import：electronProcess 引用 `?modulePath`，只在真正启动插件时加载
-    fork: async (options) =>
-      (await import('../services/appPlugins/electronProcess')).forkAppPluginHost(options),
+    fork: clearUiOnExit(
+      async (options) =>
+        (await import('../services/appPlugins/electronProcess')).forkAppPluginHost(options),
+      uiStore
+    ),
     apiDeps: {
       log: (id, level, message) => logger.write(id, level, message),
       secrets,
@@ -66,6 +88,7 @@ function appPlugins() {
         return workspaces.list().flatMap((item) => workspaces.get(item.id) ?? []);
       },
       channel: getChannelHost,
+      uiStore,
     },
     dataRoot,
     ensureDir: async (dir) => {
@@ -90,7 +113,7 @@ function appPlugins() {
       await getChannelHost()?.removePlugin(id);
     },
   });
-  instance = { service, runtime };
+  instance = { service, runtime, uiStore };
   // 启动前先登记已有密钥，日志脱敏与出站过滤从一开始就生效
   void secrets.load().catch(() => undefined);
   return instance;
@@ -128,6 +151,10 @@ export interface AppPluginHandlerDeps {
   isPackaged: () => boolean;
   pickDirectory: (sender: Electron.WebContents) => Promise<string | null>;
   exclusive: <T>(onBusy: () => T, task: () => Promise<T>) => Promise<T>;
+  uiStore: () => PluginUiStore;
+  /** 调插件 handle 注册的方法；不在运行或超时（RPC 默认 30 秒）时 reject */
+  callPlugin: (id: string, name: string, args: unknown) => Promise<unknown>;
+  openExternal: (url: string) => Promise<void>;
 }
 
 /** handler 表（channel → handler），依赖可注入便于测试 */
@@ -201,6 +228,38 @@ export function createAppPluginHandlers(deps: AppPluginHandlerDeps): Record<stri
       if (!input) return invalid();
       return guarded(() => deps.service().recopy(input.id), failed);
     },
+    [IPC_CHANNELS.APP_PLUGINS_UI_GET]: async (_sender, raw): Promise<AppPluginUiResult> => {
+      const input = parseAppPluginIdInput(raw);
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
+      return { ok: true, ui: deps.uiStore().get(input.id) };
+    },
+    [IPC_CHANNELS.APP_PLUGINS_UI_ACTION]: async (
+      _sender,
+      raw
+    ): Promise<AppPluginUiActionResult> => {
+      const input = parseUiActionInput(raw);
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        const result = await deps.callPlugin(input.id, 'ui.action', {
+          action: input.action,
+          ...(input.itemKey !== undefined ? { itemKey: input.itemKey } : {}),
+          values: input.values ?? {},
+        });
+        return normalizeUiActionResult(result);
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
+    },
+    [IPC_CHANNELS.APP_PLUGINS_OPEN_LINK]: async (_sender, raw): Promise<IpcResult> => {
+      const input = parseOpenLinkInput(raw);
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        await deps.openExternal(input.url);
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
+      }
+    },
   };
 }
 
@@ -224,6 +283,9 @@ export function registerAppPluginHandlers(): void {
     isPackaged: () => app.isPackaged,
     pickDirectory,
     exclusive,
+    uiStore: () => appPlugins().uiStore,
+    callPlugin: (id, name, args) => getAppPluginRuntime().call(id, name, args),
+    openExternal: (url) => shell.openExternal(url),
   });
   for (const [channel, handler] of Object.entries(handlers)) {
     ipcMain.handle(channel, (event, raw: unknown) => handler(event.sender, raw));

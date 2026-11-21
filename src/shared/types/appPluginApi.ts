@@ -115,6 +115,14 @@ export interface FynvraPluginApi {
     /** 只对本插件 run 下的任务；先过滤再存，命中密钥时拒绝；null 清除 */
     setPullRequestNote(input: { taskId: string; text: string | null }): Promise<void>;
   };
+  ui: {
+    /**
+     * 声明式设置页（需要 ui 权限）：整份替换本插件的设置页，Main 校验不通过时 reject。
+     * 形状见 UI 描述 v1（`src/shared/types/appPluginUi.ts` 的 PluginUi）。用户操作经
+     * `handle('ui.action', ({ action, itemKey?, values }) => ...)` 送达，返回 `{ ok: false, error }` 表示失败
+     */
+    render(schema: unknown): Promise<void>;
+  };
   /** 订阅宿主事件（如 H3 的 channel.session）；返回取消订阅 */
   on(event: string, handler: (payload: unknown) => void): Unsubscribe;
   /** 处理宿主发来的调用（如 H2 的 ui.action）；同名再注册覆盖；处理函数抛错时只把 message 传回 */

@@ -99,6 +99,11 @@ export function startPluginHost(options: PluginHostOptions): void {
           await request('channel.setPullRequestNote', input);
         },
       },
+      ui: {
+        render: async (schema) => {
+          await request('ui.render', { schema });
+        },
+      },
       on: (event, handler) => {
         const set = listeners.get(event) ?? new Set();
         listeners.set(event, set);
