@@ -103,10 +103,9 @@ export function MarketUpdateButton({ id, kind = 'pi' }: { id: string; kind?: Plu
 }
 
 /**
- * 「市场」标签页：内置官方插件（official，由插件页传入，复用已安装页的启停与设置）在最上面，
- * 下面是市场插件的搜索、筛选和卡片；点卡片在页内切到详情。
+ * 「市场」标签页：市场插件的搜索、筛选和卡片；点卡片在页内切到详情。
  */
-export function PluginMarketTab({ official }: { official: ReactNode }) {
+export function PluginMarketTab() {
   const market = usePluginsStore((state) => state.market);
   const marketError = usePluginsStore((state) => state.marketError);
   const refreshing = usePluginsStore((state) => state.marketRefreshing);
@@ -171,7 +170,6 @@ export function PluginMarketTab({ official }: { official: ReactNode }) {
 
   return (
     <div className="grid gap-8">
-      {official}
       <section>
         <SectionHeader title={t('settings.plugins.tabs.market')}>
           {market?.configured && (

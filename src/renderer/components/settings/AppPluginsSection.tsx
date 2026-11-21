@@ -164,7 +164,7 @@ function AppPluginRow({
       {hasAppPluginUi(plugin) && (
         <Button size="sm" variant="outline" onClick={() => onOpen(plugin.id)}>
           <Settings2 />
-          {t('settings.plugins.official.settings')}
+          {t('settings.plugins.app.settings')}
         </Button>
       )}
       {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}

@@ -1,4 +1,3 @@
-import { errorMessage } from '@shared/guards';
 import { findCatalogProvider, providerApiLabel, resolveBaseUrl } from '@shared/modelCatalog';
 import type { ModelProviderView } from '@shared/types/llm';
 import {
@@ -26,7 +25,6 @@ import {
   Plus,
   Puzzle,
   RefreshCw,
-  Settings2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -63,7 +61,6 @@ import { AppPluginSettings } from './AppPluginSettings';
 import { AppPluginsSection, hasAppPluginUi } from './AppPluginsSection';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
-import { OFFICIAL_PLUGINS, type OfficialPluginId, useTelegramEnabled } from './officialPlugins';
 import { PluginImportDialog } from './PluginImportDialog';
 import {
   MarketRevokedNote,
@@ -74,7 +71,6 @@ import {
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
-import { TelegramSettings } from './TelegramSettings';
 
 type Status = { tone: 'error' | 'success'; text: string };
 /** 添加目标：本地（Main 弹框选择并复制）或远程来源 */
@@ -82,14 +78,11 @@ type Target = { kind: 'local' } | { kind: 'remote'; source: string };
 
 type PluginsTab = 'installed' | 'market';
 
-/** 设置 → 插件：「已安装」「市场」两个标签；官方插件的设置在插件页内打开，返回后回到原来的标签。 */
+/** 设置 → 插件：「已安装」「市场」两个标签；Fynvra 插件的设置在插件页内打开，返回后回到原来的标签。 */
 export function PluginsSettings() {
   const t = useT();
-  const telegramEnabled = useTelegramEnabled();
   const loadMarket = usePluginsStore((state) => state.loadMarket);
   const [tab, setTab] = useState<PluginsTab>('installed');
-  // 正在看哪个官方插件的设置；只在插件页内部保存
-  const [openPlugin, setOpenPlugin] = useState<OfficialPluginId | null>(null);
   // 正在看哪个 Fynvra 插件的设置页（id）
   const [openApp, setOpenApp] = useState<string | null>(null);
   const appPlugin = useAppPluginsStore((state) =>
@@ -102,29 +95,10 @@ export function PluginsSettings() {
     if (openApp && appLoaded && !(appPlugin && hasAppPluginUi(appPlugin))) setOpenApp(null);
   }, [openApp, appLoaded, appPlugin]);
 
-  // 看设置时被停用（或读取失败），回到插件列表；读取中（null）不动
-  useEffect(() => {
-    if (telegramEnabled === false) setOpenPlugin(null);
-  }, [telegramEnabled]);
-
   // 已安装页也要市场视图来显示「有更新」；只读缓存，不联网
   useEffect(() => {
     void loadMarket();
   }, [loadMarket]);
-
-  if (openPlugin === 'telegram') {
-    return (
-      <div className="grid gap-4">
-        <div>
-          <Button size="sm" variant="ghost" onClick={() => setOpenPlugin(null)}>
-            <ArrowLeft />
-            {t('settings.plugins.official.back')}
-          </Button>
-        </div>
-        <TelegramSettings />
-      </div>
-    );
-  }
 
   if (openApp && appPlugin) {
     return (
@@ -132,7 +106,7 @@ export function PluginsSettings() {
         <div>
           <Button size="sm" variant="ghost" onClick={() => setOpenApp(null)}>
             <ArrowLeft />
-            {t('settings.plugins.official.back')}
+            {t('settings.plugins.back')}
           </Button>
         </div>
         <h3 className="font-medium">{appPlugin.name}</h3>
@@ -158,37 +132,17 @@ export function PluginsSettings() {
         </TabsTrigger>
       </TabsList>
       <TabsContent value="installed">
-        <InstalledPlugins
-          telegramEnabled={telegramEnabled}
-          onOpenOfficial={setOpenPlugin}
-          onOpenApp={setOpenApp}
-        />
+        <InstalledPlugins onOpenApp={setOpenApp} />
       </TabsContent>
       <TabsContent value="market">
-        <PluginMarketTab
-          official={
-            <OfficialPluginsSection
-              telegramEnabled={telegramEnabled}
-              onOpen={setOpenPlugin}
-              builtin
-            />
-          }
-        />
+        <PluginMarketTab />
       </TabsContent>
     </Tabs>
   );
 }
 
-/** 「已安装」：添加本地插件（一律复制）、从 npm / git 安装，启用 / 停用 / 移除。 */
-function InstalledPlugins({
-  telegramEnabled,
-  onOpenOfficial,
-  onOpenApp,
-}: {
-  telegramEnabled: boolean | null;
-  onOpenOfficial: (id: OfficialPluginId) => void;
-  onOpenApp: (id: string) => void;
-}) {
+/** 「已安装」：上面是 Fynvra 插件，下面是 PI 插件（添加本地插件、从 npm / git 安装，启用 / 停用 / 移除）。 */
+function InstalledPlugins({ onOpenApp }: { onOpenApp: (id: string) => void }) {
   const plugins = usePluginsStore((state) => state.plugins);
   const loaded = usePluginsStore((state) => state.loaded);
   const error = usePluginsStore((state) => state.error);
@@ -229,7 +183,6 @@ function InstalledPlugins({
   return (
     <div className="grid gap-8">
       <AppPluginsSection onOpen={onOpenApp} />
-      <OfficialPluginsSection telegramEnabled={telegramEnabled} onOpen={onOpenOfficial} />
       <section>
         <SectionHeader title={t('settings.plugins.title')}>
           <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
@@ -303,93 +256,6 @@ function InstalledPlugins({
         />
       </section>
     </div>
-  );
-}
-
-/** 「官方插件」区：随应用发布的可选功能，启用后卡片上出现「设置」，在插件页内打开。目前只有 Telegram。 */
-function OfficialPluginsSection({
-  telegramEnabled,
-  onOpen,
-  builtin = false,
-}: {
-  telegramEnabled: boolean | null;
-  onOpen: (id: OfficialPluginId) => void;
-  /** 市场页里标「官方 · 内置」 */
-  builtin?: boolean;
-}) {
-  const t = useT();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // 启用状态以 telegram.json 的 enabled 为准；成功后 Main 广播 telegram:changed，hook 自行刷新
-  const setEnabled = async (enabled: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await window.fynvra.telegram.setEnabled({ enabled });
-      if (!result.ok) setError(result.error);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section>
-      <SectionHeader title={t('settings.plugins.official.title')} />
-      {error && (
-        <InlineMessage tone="error" className="mb-3 break-all">
-          {error}
-        </InlineMessage>
-      )}
-      <ul className="divide-y rounded-lg border">
-        {OFFICIAL_PLUGINS.map(({ id, icon: Icon, nameKey, descriptionKey }) => {
-          const enabled = id === 'telegram' && telegramEnabled === true;
-          return (
-            <li key={id} className="flex items-start gap-3 px-4 py-3">
-              <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-sm">{t(nameKey)}</span>
-                  <Badge variant="outline">
-                    {t(
-                      builtin
-                        ? 'settings.plugins.market.builtinBadge'
-                        : 'settings.plugins.official.badge'
-                    )}
-                  </Badge>
-                  <Badge variant={enabled ? 'outline' : 'secondary'}>
-                    {t(enabled ? 'settings.plugins.official.on' : 'settings.plugins.official.off')}
-                  </Badge>
-                </div>
-                <p className="mt-0.5 text-muted-foreground text-sm">{t(descriptionKey)}</p>
-                <p className="mt-0.5 text-muted-foreground text-xs">
-                  {t('settings.plugins.official.keepHint')}
-                </p>
-              </div>
-              {enabled && (
-                <Button size="sm" variant="outline" onClick={() => onOpen(id)}>
-                  <Settings2 />
-                  {t('settings.plugins.official.settings')}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant={enabled ? 'outline' : 'default'}
-                disabled={busy || telegramEnabled === null}
-                onClick={() => void setEnabled(!enabled)}
-              >
-                {busy && <Loader2 className="animate-spin" />}
-                {t(
-                  enabled ? 'settings.plugins.official.disable' : 'settings.plugins.official.enable'
-                )}
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }
 

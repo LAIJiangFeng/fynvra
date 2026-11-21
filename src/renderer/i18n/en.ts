@@ -498,7 +498,7 @@ export const en: MessagesShape<typeof zhCN> = {
     statusHint: 'Approval mode (Shift+Tab to switch)',
     ruleGated: 'Automatic (rule-gated)',
     ruleGatedHint:
-      'Telegram sessions never ask for approval: fixed rules allow or deny every action directly, so nothing waits on you',
+      'Channel sessions never ask for approval: fixed rules allow or deny every action directly, so nothing waits on you',
     profileBadge: { triage: 'Triage', restricted: 'Restricted' },
     kinds: {
       command: 'Command',
@@ -790,83 +790,6 @@ export const en: MessagesShape<typeof zhCN> = {
     hoursMinutes: '{h}h {m}m',
   },
   settings: {
-    telegram: {
-      connection: 'Connection',
-      disableHint:
-        'To disable: click “Back to plugins” above, then “Disable” on the official plugin card',
-      token: 'Bot token',
-      tokenSaved: 'Saved: {masked}',
-      tokenPlaceholder: 'Paste the token from @BotFather',
-      clearToken: 'Clear',
-      status: 'Status',
-      bot: 'Bot',
-      connectionStatus: {
-        disabled: 'Disabled',
-        'no-token': 'No token yet',
-        connecting: 'Connecting…',
-        connected: 'Connected',
-        'network-error': 'Network error, retrying',
-        unauthorized: 'Invalid token, please enter it again',
-        conflict: 'Another program is polling with this token; stop it first',
-        'api-error': 'Telegram API error, retrying',
-      },
-      networkHint:
-        'Cannot reach api.telegram.org. Make sure your VPN or proxy is on. The network proxy follows the system proxy by default; you can also switch to a manual proxy in Settings → General → Network proxy',
-      groups: 'Groups',
-      candidates: 'Candidate groups',
-      candidatesEmpty:
-        'No candidates yet: add the bot to a group, then @mention the bot in that group and it will show up here',
-      workspace: 'Workspace',
-      chooseWorkspace: 'Choose a workspace',
-      allow: 'Allow',
-      allowed: 'Allowed groups',
-      allowedEmpty: 'No allowed groups yet',
-      unknownWorkspace: 'Workspace removed',
-      active: 'In group',
-      inactive: 'Removed from group',
-      remove: 'Remove',
-      rateLimit: 'Rate limit',
-      rateLimitLabel: 'Max messages handled per person per hour',
-      rateLimitHint:
-        'Beyond this, the bot replies once with “you’re sending a bit fast” and stops calling the model (1–1000, default 5)',
-      pending: 'Pending feature requests',
-      pendingEmpty: 'No feature requests waiting for you',
-      from: 'From {group}',
-      assessmentIncomplete: 'The three-question assessment is incomplete; use your own judgment',
-      approve: 'Approve',
-      reject: 'Reject',
-      recent: 'Recent activity',
-      recentEmpty: 'Nothing yet',
-      followUps: 'Follow-ups {count}/2',
-      openPr: 'Open PR',
-      kinds: { bug: 'Bug', feature: 'Feature', question: 'Question / chat', invalid: 'Invalid' },
-      statuses: {
-        asking: 'Asking for details',
-        answered: 'Answered',
-        invalid: 'Invalid',
-        fixing: 'Fixing',
-        'pending-approval': 'Pending approval',
-        declined: 'Did not pass assessment',
-        rejected: 'Rejected',
-        unconfirmed: 'Unconfirmed',
-        'pr-opened': 'PR opened',
-        'needs-maintainer': 'Needs a maintainer',
-        unreported: 'Triage incomplete',
-      },
-      guide: 'How to use',
-      guideSteps: {
-        token:
-          'In Telegram, send /newbot to @BotFather to get a token, then add the bot to your group',
-        feedback:
-          "Group members can @mention the bot to ask questions, chat or report problems, or reply to the bot's message",
-        privacy:
-          'If the bot does not respond to @mentions: send /setprivacy to @BotFather to turn off privacy mode, then remove the bot from the group and add it back. With privacy mode off the bot receives every group message, but Fynvra only handles @mentions of the bot, /bug and replies to the bot; everything else is dropped without being saved',
-        gh: 'Run gh auth login on this computer first so PRs can be opened',
-        proxy:
-          'Follows the system proxy by default (same as your browser). If it cannot connect, check your VPN or switch to a manual proxy in General → Network proxy',
-        offline: 'Messages are not handled while Fynvra is closed',
-      },
-    },
     usage: {
       subtitle:
         'Explore the cost and outcomes of local multi-agent work; costs estimated at recorded model rates',
@@ -979,7 +902,7 @@ export const en: MessagesShape<typeof zhCN> = {
       manual: 'Manual proxy',
       address: 'HTTP / HTTPS proxy address',
       scope:
-        'Used by Git, gh, agent commands, new terminals, web_fetch and Telegram. Model API, MCP and app updates are not affected',
+        'Used by Git, gh, agent commands, new terminals, web_fetch and Fynvra plugins. Model API, MCP and app updates are not affected',
       environmentHint: 'Uses inherited proxy environment variables, not the Windows system proxy',
       manualHint:
         'HTTP/HTTPS proxies without credentials only. Inherited ALL_PROXY and NO_PROXY are ignored',
@@ -1452,24 +1375,9 @@ export const en: MessagesShape<typeof zhCN> = {
         },
         noUi: 'This plugin has not provided a settings page (it is not shown while the plugin is not running)',
         emptyList: 'Nothing here yet',
-      },
-      official: {
-        title: 'Official plugins',
-        badge: 'Official',
-        on: 'Enabled',
-        off: 'Not enabled',
-        enable: 'Enable',
-        disable: 'Disable',
         settings: 'Settings',
-        back: 'Back to plugins',
-        keepHint:
-          'Disabling only stops receiving group messages; the token, groups and history are kept, so you can pick up where you left off when you enable it again',
-        telegram: {
-          name: 'Telegram group feedback duty',
-          description:
-            'Group members @ the bot in Telegram to report issues; Fynvra triages, fixes and opens PRs on your computer',
-        },
       },
+      back: 'Back to plugins',
       addLocal: 'Add local plugin',
       installPlaceholder: 'npm:<name>, git:<host>/<path> or an https:// repository URL',
       install: 'Install',
@@ -1527,8 +1435,7 @@ export const en: MessagesShape<typeof zhCN> = {
         neverUpdated: 'Plugin list not fetched yet',
         notConfigured: 'The plugin marketplace is not configured yet',
         notConfiguredHint:
-          'This build has no signing key for the marketplace index, so the plugin list cannot be verified and is not fetched. Built-in official plugins are not affected',
-        builtinBadge: 'Official · Built-in',
+          'This build has no signing key for the marketplace index, so the plugin list cannot be verified and is not fetched',
         searchPlaceholder: 'Search name, description or tags',
         category: 'Category',
         categories: {
