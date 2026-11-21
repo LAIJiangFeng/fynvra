@@ -8,6 +8,7 @@ import type {
 import { parseWorkspaceId, type Workspace } from '@shared/types/workspace';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
+import { channelOrchestrationChanged } from '../services/channels/instance';
 import {
   createOrchestrationRegistry,
   type OrchestrationRegistry,
@@ -50,6 +51,8 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId);
         // Telegram 卡片据此检查 PR 结果
         telegramOrchestrationChanged(workspaceId);
+        // 渠道插件：只推给在该工作区有 run 的插件
+        channelOrchestrationChanged(workspaceId);
       },
       // 会话摘要的 awaitingWorkers 翻转：让会话列表重拉
       activeWorkChanged: (workspaceId) =>

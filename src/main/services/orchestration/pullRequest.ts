@@ -13,13 +13,18 @@ export interface PullRequestGateDeps {
   localInfo(): Promise<LocalInfoContext>;
 }
 
-let bodyExtension: (taskId: string) => string | undefined = () => undefined;
+const bodyExtensions = new Map<string, (taskId: string) => string | undefined>();
 
-/** 注入 PR 正文附加段（如 Telegram 的「问题 / 来源」）；返回 undefined 或空串时不加。 */
+/**
+ * 按来源注入 PR 正文附加段（如内置 Telegram 的「问题 / 来源」、渠道插件的 note）；undefined 注销该来源。
+ * 多个来源按登记顺序拼接，返回 undefined 或空串的不加。
+ */
 export function setPullRequestBodyExtension(
+  source: string,
   extension: ((taskId: string) => string | undefined) | undefined
 ): void {
-  bodyExtension = extension ?? (() => undefined);
+  if (extension) bodyExtensions.set(source, extension);
+  else bodyExtensions.delete(source);
 }
 
 /** 合法分支名：不含空白与控制字符、`..`、git 禁用字符，不以 `-` 或 `/` 开头。 */
@@ -72,8 +77,10 @@ export function buildPullRequestBody(input: {
     `## 文件\n\n${listed.length > 0 ? listed.join('\n') : '（无）'}`,
     `## 验证\n\n${checks.length > 0 ? checks.map((command) => `- \`${command}\``).join('\n') : '见 CI'}`,
   ];
-  const extension = bodyExtension(input.taskId)?.trim();
-  if (extension) sections.push(extension);
+  for (const extension of bodyExtensions.values()) {
+    const text = extension(input.taskId)?.trim();
+    if (text) sections.push(text);
+  }
   return `${sections.join('\n\n')}\n`;
 }
 

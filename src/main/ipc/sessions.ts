@@ -36,6 +36,7 @@ import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { writeMagicContextConfig } from '../services/agentHost/magicContextHost';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
+import { channelReportHost } from '../services/channels/instance';
 import { savedNetworkProxy } from '../services/commandNetwork';
 import { createConfigHost } from '../services/configHost/configHost';
 import { toProviderView } from '../services/providers/providerStore';
@@ -53,7 +54,6 @@ import {
   parseSessionId,
   type SessionStore,
 } from '../services/sessions/sessionStore';
-import { telegramHost } from '../services/telegram/instance';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
@@ -190,8 +190,8 @@ function createAppAgentHost(): AgentHostService {
       broadcast: (channel) => sendToAllWindows(channel),
       skillsDir: join(userData, 'skills'),
     }),
-    // triage_report 交给 Telegram 服务（服务启动前一律失败）
-    telegram: telegramHost,
+    // triage_report：会话归属渠道插件时交给该插件的 channel.report，否则交给内置 Telegram 服务（服务启动前一律失败）
+    telegram: channelReportHost,
     removeWorktree: async (session, force) => {
       // 工作区已移除：没有编排状态可对照，只删记录（同以前）
       const service = getOrchestrationRegistry().serviceFor(session.workspaceId);

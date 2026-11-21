@@ -85,6 +85,20 @@ export function startPluginHost(options: PluginHostOptions): void {
       },
       net: { proxyEnv: () => request('net.proxyEnv') as Promise<never> },
       workspaces: { list: () => request('workspaces.list') as Promise<never> },
+      channel: {
+        createSession: (input) => request('channel.createSession', input) as Promise<never>,
+        refreshCheckout: async (input) => {
+          await request('channel.refreshCheckout', input);
+        },
+        originCommit: (input) => request('channel.originCommit', input) as Promise<never>,
+        prompt: (input) => request('channel.prompt', input) as Promise<never>,
+        sessionStatus: (input) => request('channel.sessionStatus', input) as Promise<never>,
+        snapshot: (input) => request('channel.snapshot', input) as Promise<never>,
+        filterOutbound: (input) => request('channel.filterOutbound', input) as Promise<never>,
+        setPullRequestNote: async (input) => {
+          await request('channel.setPullRequestNote', input);
+        },
+      },
       on: (event, handler) => {
         const set = listeners.get(event) ?? new Set();
         listeners.set(event, set);
