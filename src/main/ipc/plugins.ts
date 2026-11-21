@@ -30,6 +30,7 @@ import type {
   PluginAddResult,
   PluginImportResult,
   PluginListResult,
+  PluginMarketInstallResult,
   PluginMarketReadmeResult,
   PluginMarketStateResult,
   PluginOpenAsWorkspaceResult,
@@ -76,6 +77,7 @@ import { scanPluginProviders } from '../services/plugins/providerScan';
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { showAppMessageBox } from './appDialog';
+import { getAppPluginService } from './appPlugins';
 import { getProviderStore } from './providers';
 import { getRoleStore } from './roles';
 import { getSettingsFile } from './settings';
@@ -110,6 +112,7 @@ export function getPluginMarket(): PluginMarket {
     },
     onChanged: () => sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED),
     afterInstall: scanAfterChange,
+    appPlugins: getAppPluginService(),
   });
   return market;
 }
@@ -139,7 +142,8 @@ function agentDir(): string {
 /** 安装 / 卸载（以及登记本地插件）同一时刻只跑一个；进行中再来的请求直接返回 busy */
 let busy = false;
 
-async function exclusive<T>(onBusy: () => T, task: () => Promise<T>): Promise<T> {
+/** Fynvra 插件（ipc/appPlugins.ts）的安装 / 更新 / 删除也走这把锁 */
+export async function exclusive<T>(onBusy: () => T, task: () => Promise<T>): Promise<T> {
   if (busy) return onBusy();
   busy = true;
   try {
@@ -445,10 +449,10 @@ function registerMarketHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.PLUGINS_MARKET_INSTALL,
-    async (_event, raw: unknown): Promise<PluginActionResult> => {
+    async (_event, raw: unknown): Promise<PluginMarketInstallResult> => {
       const input = parseMarketVersionInput(raw);
       if (!input) return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
-      return exclusive<PluginActionResult>(busyResult, async () => {
+      return exclusive<PluginMarketInstallResult>(busyResult, async () => {
         try {
           return await getPluginMarket().install(input);
         } catch (error) {
@@ -727,7 +731,7 @@ async function expectedId(name: string): Promise<string> {
   return uniqueId(toSlug(name.trim() || 'plugin', 'plugin'), ids);
 }
 
-function busyResult(): { ok: false; code: 'busy'; error: string } {
+export function busyResult(): { ok: false; code: 'busy'; error: string } {
   return { ok: false, code: 'busy', error: translate('plugins.busy') };
 }
 

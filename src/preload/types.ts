@@ -72,6 +72,7 @@ export interface FynvraApi {
   instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
   plugins: import('./domains/plugins').PluginsApi;
+  appPlugins: import('./domains/appPlugins').AppPluginsApi;
   notifications: import('./domains/notifications').NotificationsApi;
   usage: import('./domains/usage').UsageApi;
   telegram: import('./domains/telegram').TelegramApi;

@@ -1,4 +1,5 @@
 import { registerAppDialogHandlers } from './appDialog';
+import { registerAppPluginHandlers } from './appPlugins';
 import { registerFilesHandlers } from './files';
 import { registerInstructionHandlers } from './instructions';
 import { registerMcpHandlers } from './mcp';
@@ -38,6 +39,7 @@ export function registerIpcHandlers(): void {
   registerInstructionHandlers();
   registerMcpHandlers();
   registerPluginHandlers();
+  registerAppPluginHandlers();
   registerNotificationHandlers();
   registerUsageHandlers();
   registerTelegramHandlers();
