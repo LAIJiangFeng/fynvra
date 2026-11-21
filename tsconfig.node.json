@@ -15,6 +15,7 @@
     "vitest.config.ts",
     "src/main/**/*",
     "src/agent/**/*",
+    "src/appPluginHost/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
     "src/renderer/**/*.test.ts",

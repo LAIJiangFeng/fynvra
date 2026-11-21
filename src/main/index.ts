@@ -7,6 +7,7 @@ import { app, BrowserWindow, dialog, session } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
+import { shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
@@ -115,6 +116,9 @@ if (!app.requestSingleInstanceLock()) {
       // 先停 Telegram 轮询并等它落盘
       (getTelegramService()?.stop() ?? Promise.resolve())
         .catch((error: unknown) => console.error('[fynvra] 停止 Telegram 服务失败', error))
+        // Fynvra 插件：逐个 deactivate，5 秒后强杀
+        .then(() => shutdownAppPlugins())
+        .catch((error: unknown) => console.error('[fynvra] 停止 Fynvra 插件失败', error))
         .then(() => getAgentHost().shutdown(AGENT_SHUTDOWN_TIMEOUT_MS))
         // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
         .then(() => getOrchestrationRegistry().flushAll())
@@ -204,6 +208,10 @@ if (!app.requestSingleInstanceLock()) {
       });
       await systemProxyReady;
       agentHost.start();
+      // Fynvra 插件：每个启用的插件一个后台进程
+      void startAppPlugins().catch((error: unknown) =>
+        console.error('[fynvra] Fynvra 插件启动失败', error)
+      );
       // 会话 worker 起来后再开始收群消息
       void telegram
         .start()

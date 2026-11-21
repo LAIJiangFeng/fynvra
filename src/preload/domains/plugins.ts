@@ -28,6 +28,10 @@ export type PluginToggleResult = IpcResult<{ plugin: PluginEntry }>;
 export type PluginActionResult =
   | { ok: true; plugin: PluginEntry }
   | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+/** 市场安装：PI 插件返回 plugin（plugins.json 条目），Fynvra 插件返回 appPlugin */
+export type PluginMarketInstallResult =
+  | PluginActionResult
+  | { ok: true; appPlugin: import('@shared/types/appPlugins').AppPluginView };
 /** 插件市场状态（market-state / market-refresh） */
 export type PluginMarketStateResult = IpcResult<{ state: MarketStateView }>;
 export type PluginMarketReadmeResult = IpcResult<{ text: string }>;
@@ -75,7 +79,7 @@ export interface PluginsApi {
   /** 拉取并验签索引；force 为 false 时 1 小时内直接返回缓存 */
   marketRefresh(input?: { force?: boolean }): Promise<PluginMarketStateResult>;
   /** 从市场安装；pluginId 是市场 id（如 `fynvra.example`） */
-  marketInstall(input: { pluginId: string; version: string }): Promise<PluginActionResult>;
+  marketInstall(input: { pluginId: string; version: string }): Promise<PluginMarketInstallResult>;
   /** 把已装的市场插件更新到最新的兼容版本；id 是 plugins.json 里的 id */
   marketUpdate(input: { id: string }): Promise<PluginActionResult>;
   marketReadme(input: { pluginId: string; version: string }): Promise<PluginMarketReadmeResult>;

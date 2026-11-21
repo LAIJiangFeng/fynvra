@@ -636,10 +636,11 @@ function InstallContent({
       setError(result.error);
       return;
     }
-    const pluginId = result.plugin.id;
+    // Fynvra 插件不挂角色（安装确认由 H2 处理）
+    const pluginId = 'plugin' in result ? result.plugin.id : '';
     // 取最新的角色数据再改，逐个保存；某个失败不影响其他
     const failures: string[] = [];
-    for (const roleId of selected) {
+    for (const roleId of pluginId ? selected : []) {
       const role = useRolesStore.getState().roles.find((item) => item.id === roleId);
       if (!role || role.pluginIds?.includes(pluginId)) continue;
       const saved = await saveRole({ ...role, pluginIds: [...(role.pluginIds ?? []), pluginId] });

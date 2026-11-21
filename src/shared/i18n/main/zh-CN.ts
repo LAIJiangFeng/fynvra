@@ -263,6 +263,18 @@ export const mainZhCN = {
     marketRevokedTitle: '插件已被撤回并停用',
     marketRevokedBody: '「{name}」：{reason}',
   },
+  appPlugins: {
+    notFound: 'Fynvra 插件不存在',
+    officialOnly: 'Fynvra 插件目前只支持官方插件',
+    alreadyInstalled: '已安装「{name}」',
+    invalidManifest: '不是有效的 Fynvra 插件：{error}',
+    installFailed: '安装 Fynvra 插件失败：{error}',
+    removeFailed: '移除 Fynvra 插件失败：{error}',
+    devOnly: '只有开发版可以从本地目录添加 Fynvra 插件',
+    notLocal: '只有从本地目录添加的 Fynvra 插件能重新复制',
+    pickTitle: '选择 Fynvra 插件目录',
+    readFailed: '读取 Fynvra 插件失败：{error}',
+  },
   providers: {
     readFailed: '读取模型服务失败：{error}',
     saveFailed: '保存模型服务失败：{error}',

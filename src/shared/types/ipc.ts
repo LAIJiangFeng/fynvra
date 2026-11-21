@@ -232,6 +232,22 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 
+  // --- appPlugins（Fynvra 插件；id 为 fynvra-plugins.json 里的 id） ---
+  /** 无参数或 `{}` → `{ plugins: AppPluginView[] }` */
+  APP_PLUGINS_LIST: 'appplugins:list',
+  /** `{ id, enabled }`：立即启停进程 */
+  APP_PLUGINS_TOGGLE: 'appplugins:toggle',
+  /** `{ id }`：停进程，删包目录、私有数据与密钥，删登记 */
+  APP_PLUGINS_REMOVE: 'appplugins:remove',
+  /** `{ id }`：走市场更新（仅 market 来源） */
+  APP_PLUGINS_UPDATE: 'appplugins:update',
+  /** 无参数或 `{}`：仅开发版，Main 弹框选目录后复制安装 */
+  APP_PLUGINS_ADD_LOCAL_DEV: 'appplugins:add-local-dev',
+  /** `{ id }`：仅 local 来源，从源目录重新复制 */
+  APP_PLUGINS_RECOPY: 'appplugins:recopy',
+  /** Main → Renderer：登记或运行状态变化 */
+  APP_PLUGINS_CHANGED: 'appplugins:changed',
+
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',
   INSTRUCTIONS_READ: 'instructions:read',

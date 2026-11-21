@@ -7,6 +7,7 @@ import type {
   PluginActionResult,
   PluginAddResult,
   PluginImportResult,
+  PluginMarketInstallResult,
   PluginMarketReadmeResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
@@ -53,7 +54,7 @@ export interface PluginsState {
   loadMarket(): Promise<void>;
   /** 拉取索引；force 为 false 时 1 小时内 Main 直接返回缓存 */
   refreshMarket(force: boolean): Promise<void>;
-  marketInstall(pluginId: string, version: string): Promise<PluginActionResult>;
+  marketInstall(pluginId: string, version: string): Promise<PluginMarketInstallResult>;
   /** id 是 plugins.json 里的 id */
   marketUpdate(id: string): Promise<PluginActionResult>;
   marketReadme(pluginId: string, version: string): Promise<PluginMarketReadmeResult>;
@@ -68,7 +69,9 @@ async function safely<T>(call: () => Promise<T>): Promise<T | { ok: false; error
   }
 }
 
-async function safeAction(call: () => Promise<PluginActionResult>): Promise<PluginActionResult> {
+async function safeAction<T>(
+  call: () => Promise<T>
+): Promise<T | { ok: false; code: 'failed'; error: string }> {
   try {
     return await call();
   } catch (error) {

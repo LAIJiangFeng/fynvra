@@ -1,9 +1,15 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { translate } from '../../i18n';
+import { createAppPluginRegistry } from '../appPlugins/registry';
+import { createAppPluginRuntime } from '../appPlugins/runtime';
+import { createPluginSecretStore } from '../appPlugins/secrets';
+import { createAppPluginService, readAppPluginManifest } from '../appPlugins/service';
+import { createFakeFork } from '../appPlugins/testing';
 import { createPluginMarket, type PluginMarketDeps, verifyIndexSignature } from './market';
 import { MarketHttpError, type MarketHttpGet } from './marketHttp';
 import { createPluginRegistry, type PluginRegistry } from './pluginRegistry';
@@ -63,7 +69,14 @@ interface VersionSpec {
 /** 发布一份签过名的索引；revoked 同契约 */
 function publish(
   versions: VersionSpec[],
-  options: { sequence?: number; revoked?: unknown[]; signWith?: (b: Uint8Array) => string } = {}
+  options: {
+    sequence?: number;
+    revoked?: unknown[];
+    signWith?: (b: Uint8Array) => string;
+    kind?: string;
+    tier?: string;
+    permissions?: string[];
+  } = {}
 ) {
   const entries = versions.map((spec) => {
     const bytes = spec.zip ?? pluginZip(spec.version);
@@ -72,7 +85,7 @@ function publish(
     const entry: Record<string, unknown> = {
       version: spec.version,
       commit: 'c'.repeat(40),
-      permissions: ['network'],
+      permissions: options.permissions ?? ['network'],
       changelog: 'notes',
       publishedAt: '2026-01-01T00:00:00Z',
       package: { path, sha256: spec.sha256 ?? sha(bytes), size: spec.size ?? bytes.length },
@@ -100,7 +113,8 @@ function publish(
         license: 'MIT',
         category: 'tools',
         tags: [],
-        tier: 'reviewed',
+        tier: options.tier ?? 'reviewed',
+        ...(options.kind ? { kind: options.kind } : {}),
         versions: entries,
       },
     ],
@@ -236,7 +250,7 @@ describe('安装', () => {
     await market.refresh();
     const result = await market.install({ pluginId: ID, version: '1.0.0' });
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    if (!result.ok || !('plugin' in result)) throw new Error('expected a PI plugin');
     expect(result.plugin).toMatchObject({
       kind: 'market',
       name: 'Demo Plugin',
@@ -336,6 +350,7 @@ describe('更新与撤回', () => {
     await market.refresh();
     const result = await market.install({ pluginId: ID, version: '1.0.0' });
     if (!result.ok) throw new Error(result.error);
+    if (!('plugin' in result)) throw new Error('expected a PI plugin');
     await registry.setEnabled(result.plugin.id, false);
     onChanged.mockClear();
     return { market, plugin: result.plugin };
@@ -410,5 +425,200 @@ describe('README', () => {
     http.mockClear();
     await market.readme({ pluginId: ID, version: '1.0.0' });
     expect(http).not.toHaveBeenCalled();
+  });
+});
+
+/** Fynvra 插件包：清单 kind fynvra + host.main */
+function appZip(
+  version: string,
+  manifest: Record<string, unknown> = {},
+  extra: Record<string, string> = { 'dist/host.js': `export function activate() {} // ${version}` }
+) {
+  return zip({
+    'fynvra-plugin.json': JSON.stringify({
+      schemaVersion: 1,
+      id: ID,
+      name: 'Demo',
+      version,
+      kind: 'fynvra',
+      host: { main: 'dist/host.js' },
+      ...manifest,
+    }),
+    ...extra,
+  });
+}
+
+/** 真实的登记 / 服务 + 假进程 */
+function appStack() {
+  const dataRoot = join(dir, 'fynvra-plugin-data');
+  const appRegistry = createAppPluginRegistry({ filePath: join(dir, 'fynvra-plugins.json') });
+  const { fork, processes } = createFakeFork();
+  const secrets = createPluginSecretStore({
+    filePath: join(dir, 'fynvra-plugin-secrets.json'),
+    register: () => () => undefined,
+  });
+  const runtime = createAppPluginRuntime({
+    registry: appRegistry,
+    fork,
+    apiDeps: {
+      log: () => undefined,
+      secrets,
+      notify: () => undefined,
+      commandEnv: async () => ({}),
+      listWorkspaces: () => [],
+    },
+    dataRoot,
+    ensureDir: async (path) => {
+      await mkdir(path, { recursive: true });
+    },
+    entryPathOf: (record, main) => join(record.path, main),
+    readMain: async (record) => {
+      const checked = await readAppPluginManifest(record.path);
+      return checked.ok ? checked.manifest.host.main : null;
+    },
+    onChanged: () => undefined,
+  });
+  const service = createAppPluginService({
+    registry: appRegistry,
+    runtime,
+    secrets,
+    root: () => join(dir, 'fynvra-plugins'),
+    dataRoot,
+    onChanged: () => undefined,
+  });
+  return { appRegistry, processes, service, runtime };
+}
+
+describe('Fynvra 插件分流', () => {
+  it('官方 Fynvra 插件装进 fynvra-plugins/、登记并立即启动；PI 登记不受影响', async () => {
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], {
+      kind: 'fynvra',
+      tier: 'official',
+      permissions: ['notifications', 'network', 'shell'],
+    });
+    const app = appStack();
+    const market = makeMarket({ appPlugins: app.service });
+    await market.refresh();
+    const result = await market.install({ pluginId: ID, version: '1.0.0' });
+    if (!result.ok || !('appPlugin' in result)) throw new Error('expected a Fynvra plugin');
+    expect(result.appPlugin).toMatchObject({
+      id: ID,
+      source: 'market',
+      tier: 'official',
+      enabled: true,
+      // 按 fynvra 词表过滤
+      permissions: ['notifications', 'network'],
+    });
+    expect(await readdir(join(dir, 'fynvra-plugins'))).toEqual([ID]);
+    expect(await registry.list()).toEqual([]);
+    expect(app.processes).toHaveLength(1);
+    expect(app.processes[0]?.sent[0]).toMatchObject({
+      type: 'init',
+      pluginId: ID,
+      entryPath: join(dir, 'fynvra-plugins', ID, 'dist/host.js'),
+    });
+    await vi.waitFor(() => expect(app.runtime.status(ID)).toBe('running'));
+    const view = await market.state();
+    expect(view.plugins[0]).toMatchObject({
+      kind: 'fynvra',
+      installed: { pluginId: ID, version: '1.0.0', enabled: true },
+    });
+  });
+
+  it('Fynvra 插件但 tier 为 reviewed：拒绝且不下载', async () => {
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier: 'reviewed' });
+    const app = appStack();
+    const market = makeMarket({ appPlugins: app.service });
+    await market.refresh();
+    http.mockClear();
+    const result = await market.install({ pluginId: ID, version: '1.0.0' });
+    expect(result).toEqual({
+      ok: false,
+      code: 'invalid',
+      error: translate('appPlugins.officialOnly'),
+    });
+    expect(http).not.toHaveBeenCalled();
+    expect(await app.appRegistry.list()).toEqual([]);
+  });
+
+  const badPackages: [string, string, Uint8Array, string][] = [
+    ['清单 kind 不是 fynvra', 'manifest-kind', appZip('1.0.0', { kind: 'pi' }), 'fynvra'],
+    ['清单缺 host.main', 'manifest-invalid', appZip('1.0.0', { host: {} }), 'fynvra'],
+    [
+      'host.main 越界',
+      'manifest-invalid',
+      appZip('1.0.0', { host: { main: '../x.js' } }),
+      'fynvra',
+    ],
+    ['host.main 不是文件', 'host-main-missing', appZip('1.0.0', {}, { 'other.js': '' }), 'fynvra'],
+    ['PI 索引里放了 Fynvra 清单', 'manifest-kind', appZip('1.0.0'), 'pi'],
+  ];
+  for (const [name, code, bytes, kind] of badPackages) {
+    it(`${name}：拒绝且不留目录和登记`, async () => {
+      publish([{ version: '1.0.0', zip: bytes }], { kind, tier: 'official' });
+      const app = appStack();
+      const market = makeMarket({ appPlugins: app.service });
+      await market.refresh();
+      const result = await market.install({ pluginId: ID, version: '1.0.0' });
+      expect(result.ok ? '' : result.error).toContain(code);
+      expect(await app.appRegistry.list()).toEqual([]);
+      expect(await registry.list()).toEqual([]);
+      expect(await readdir(join(dir, 'fynvra-plugins')).catch(() => [])).toEqual([]);
+      expect(await copyRootEntries()).toEqual([]);
+    });
+  }
+
+  async function installedApp() {
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier: 'official' });
+    const app = appStack();
+    const market = makeMarket({ appPlugins: app.service });
+    await market.refresh();
+    const result = await market.install({ pluginId: ID, version: '1.0.0' });
+    if (!result.ok) throw new Error(result.error);
+    await vi.waitFor(() => expect(app.runtime.status(ID)).toBe('running'));
+    return { app, market };
+  }
+
+  it('更新：停进程、换目录、更新登记并重启', async () => {
+    const { app, market } = await installedApp();
+    publish(
+      [
+        { version: '1.0.0', zip: appZip('1.0.0') },
+        { version: '1.1.0', zip: appZip('1.1.0') },
+      ],
+      { kind: 'fynvra', tier: 'official', sequence: 2 }
+    );
+    const state = await market.refresh({ force: true });
+    expect(state.plugins[0]?.updateAvailable).toBe(true);
+    const result = await market.updateApp({ id: ID });
+    expect(result).toMatchObject({ ok: true, plugin: { version: '1.1.0' } });
+    expect(app.processes[0]?.sent.at(-1)).toEqual({ type: 'deactivate' });
+    expect(app.processes).toHaveLength(2);
+    expect(await readFile(join(dir, 'fynvra-plugins', ID, 'dist', 'host.js'), 'utf8')).toContain(
+      '1.1.0'
+    );
+    expect(await readdir(join(dir, 'fynvra-plugins'))).toEqual([ID]);
+    expect((await app.appRegistry.get(ID))?.version).toBe('1.1.0');
+  });
+
+  it('撤回：停用、停进程、写原因、发通知', async () => {
+    const { app, market } = await installedApp();
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], {
+      kind: 'fynvra',
+      tier: 'official',
+      sequence: 2,
+      revoked: [{ id: ID, versions: ['1.0.0'], reason: 'broken' }],
+    });
+    await market.refresh({ force: true });
+    expect(await app.appRegistry.get(ID)).toMatchObject({
+      enabled: false,
+      revokedReason: 'broken',
+    });
+    expect(app.processes[0]?.sent.at(-1)).toEqual({ type: 'deactivate' });
+    expect(app.runtime.status(ID)).toBe('stopped');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]?.[1]).toContain('broken');
+    await market.refresh({ force: true });
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 });

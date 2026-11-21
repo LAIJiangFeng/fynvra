@@ -210,3 +210,33 @@ describe('IPC 入参收窄', () => {
     expect(parseMarketVersionInput('fynvra.demo')).toBeNull();
   });
 });
+
+describe('插件类别 kind', () => {
+  it('缺省为 pi；未知 kind 的插件条目作废；权限按类别词表过滤', () => {
+    const perms = ['network', 'shell', 'notifications', 'ui', 'bogus'];
+    const parsed = parseMarketIndex(
+      index({
+        plugins: [
+          plugin({ versions: [version('1.0.0', { permissions: perms })] }),
+          plugin({
+            id: 'fynvra.app',
+            kind: 'fynvra',
+            versions: [version('1.0.0', { permissions: perms })],
+          }),
+          plugin({ id: 'fynvra.bad', kind: 'theme' }),
+        ],
+      }),
+      '1.0.0'
+    );
+    expect(parsed?.plugins.map((item) => [item.id, item.kind])).toEqual([
+      ['fynvra.demo', 'pi'],
+      ['fynvra.app', 'fynvra'],
+    ]);
+    expect(parsed?.plugins[0]?.versions[0]?.permissions).toEqual(['network', 'shell']);
+    expect(parsed?.plugins[1]?.versions[0]?.permissions).toEqual([
+      'notifications',
+      'network',
+      'ui',
+    ]);
+  });
+});

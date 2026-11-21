@@ -27,6 +27,7 @@ function view(patch: Partial<MarketPluginView> = {}): MarketPluginView {
     category: 'tools',
     tags: ['Search'],
     tier: 'reviewed',
+    kind: 'pi',
     latest,
     updateAvailable: false,
     ...patch,

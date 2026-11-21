@@ -1,10 +1,12 @@
 // 插件市场（ARCHITECTURE §7.12「插件市场」）：拉取并验签索引、防回滚、缓存；安装 / 更新 / 撤回；定时检查。
 // 绝不执行插件包里的任何代码或脚本；日志只记错误码，不带路径。
 import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { asRecord } from '@shared/guards';
+import { type AppPluginView, parseAppPluginManifest } from '@shared/types/appPlugins';
 import {
+  type AppPluginPermission,
   compareSemver,
   latestUsableVersion,
   type MarketIndex,
@@ -12,6 +14,7 @@ import {
   type MarketPluginView,
   type MarketStateView,
   type MarketVersion,
+  type PluginKind,
   parseMarketIndex,
   revocationOf,
 } from '@shared/types/pluginMarket';
@@ -19,6 +22,8 @@ import type { PluginEntry } from '@shared/types/plugins';
 // 不能用 'fflate'：Main 构建按 node 条件解析到其 node 版，内含 `var require`，与 electron-vite 注入的 require shim 重名导致启动崩溃
 import { type UnzipFileInfo, unzipSync } from 'fflate/browser';
 import { translate } from '../../i18n';
+import type { AppPluginRecord } from '../appPlugins/registry';
+import type { AppPluginActionResult, AppPluginMarketHost } from '../appPlugins/service';
 import { toSlug, uniqueId, writeJsonAtomic } from '../providers/jsonRegistry';
 import { MARKET_BASE_URL } from './marketConfig';
 import { MarketHttpError, type MarketHttpGet } from './marketHttp';
@@ -46,6 +51,8 @@ const MANIFEST = 'fynvra-plugin.json';
 export type MarketActionResult =
   | { ok: true; plugin: PluginEntry }
   | { ok: false; code: 'invalid' | 'failed'; error: string };
+/** 安装：PI 插件返回 plugin，Fynvra 插件返回 appPlugin */
+export type MarketInstallResult = MarketActionResult | { ok: true; appPlugin: AppPluginView };
 export type MarketReadmeResult = { ok: true; text: string } | { ok: false; error: string };
 
 export interface PluginMarketDeps {
@@ -64,6 +71,8 @@ export interface PluginMarketDeps {
   onChanged: () => void;
   /** 安装 / 更新后扫描模型服务名，返回最新条目 */
   afterInstall?: (plugin: PluginEntry) => Promise<PluginEntry>;
+  /** Fynvra 插件的登记与运行时；缺省时拒绝安装 Fynvra 插件 */
+  appPlugins?: AppPluginMarketHost;
   baseUrl?: string;
   now?: () => number;
   platform?: NodeJS.Platform;
@@ -73,14 +82,18 @@ export interface PluginMarket {
   /** 缓存里的状态，不发网络请求 */
   state(): Promise<MarketStateView>;
   refresh(options?: { force?: boolean }): Promise<MarketStateView>;
-  install(input: { pluginId: string; version: string }): Promise<MarketActionResult>;
+  install(input: { pluginId: string; version: string }): Promise<MarketInstallResult>;
   /** id 为 plugins.json 里的插件 id */
   update(input: { id: string }): Promise<MarketActionResult>;
+  /** id 为 fynvra-plugins.json 里的插件 id：换目录后重启进程 */
+  updateApp(input: { id: string }): Promise<AppPluginActionResult>;
   readme(input: { pluginId: string; version: string }): Promise<MarketReadmeResult>;
   /** 启动 60 秒后强制刷新一次，之后每 24 小时一次；未配置公钥时什么也不做 */
   start(): void;
   stop(): void;
 }
+
+type InstalledApp = AppPluginRecord;
 
 interface MarketCache {
   version: 1;
@@ -225,6 +238,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     notify,
     onChanged,
     afterInstall = async (plugin) => plugin,
+    appPlugins,
     baseUrl = MARKET_BASE_URL,
     now = Date.now,
     platform = process.platform,
@@ -327,6 +341,20 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
   /** 已装版本被撤回且还没记原因的：停用、写原因、通知；撤回被取消的只清原因，不自动启用 */
   async function checkRevocations(): Promise<void> {
     if (!index) return;
+    // Fynvra 插件：规则同下，停用与广播由 appPlugins 负责
+    for (const entry of (await appPlugins?.list()) ?? []) {
+      if (entry.source !== 'market') continue;
+      const reason = revocationOf(index, entry.id, entry.version);
+      if (reason !== null && entry.revokedReason === undefined) {
+        await appPlugins?.setRevoked(entry.id, reason);
+        notify(
+          translate('plugins.marketRevokedTitle'),
+          translate('plugins.marketRevokedBody', { name: entry.name, reason })
+        );
+      } else if (reason === null && entry.revokedReason !== undefined) {
+        await appPlugins?.setRevoked(entry.id, null);
+      }
+    }
     let changed = false;
     for (const entry of await registry.list()) {
       if (entry.kind !== 'market' || !entry.market) continue;
@@ -354,9 +382,11 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     await ensureLoaded();
     if (!configured) return { configured: false, plugins: [] };
     let entries: PluginEntry[] = [];
+    let apps: InstalledApp[] = [];
     if (index) {
       try {
         entries = await registry.list();
+        apps = (await appPlugins?.list()) ?? [];
       } catch (error) {
         console.warn(`[plugins] market view: plugin list failed: ${errorCode(error)}`);
       }
@@ -367,18 +397,30 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
       ...(fetchedAt !== undefined ? { fetchedAt } : {}),
       ...(lastError ? { error: lastError } : {}),
       ...(current ? { sequence: current.sequence } : {}),
-      plugins: current ? current.plugins.map((plugin) => toView(current, plugin, entries)) : [],
+      plugins: current
+        ? current.plugins.map((plugin) => toView(current, plugin, entries, apps))
+        : [],
     };
   }
 
   function toView(
     current: MarketIndex,
     plugin: MarketPlugin,
-    entries: readonly PluginEntry[]
+    entries: readonly PluginEntry[],
+    apps: readonly InstalledApp[]
   ): MarketPluginView {
     const latest = latestUsableVersion(current, plugin);
-    const installed = entries.find((entry) => entry.market?.id === plugin.id);
-    const installedVersion = installed?.market?.version;
+    // installed.pluginId 是 kind 对应登记里的 id
+    const installed: { id: string; version: string; enabled: boolean } | undefined =
+      plugin.kind === 'fynvra'
+        ? apps.find((app) => app.source === 'market' && app.id === plugin.id)
+        : (() => {
+            const entry = entries.find((item) => item.market?.id === plugin.id);
+            return entry?.market
+              ? { id: entry.id, version: entry.market.version, enabled: entry.enabled }
+              : undefined;
+          })();
+    const installedVersion = installed?.version;
     const reason =
       installedVersion === undefined ? null : revocationOf(current, plugin.id, installedVersion);
     return {
@@ -392,6 +434,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
       category: plugin.category,
       tags: [...plugin.tags],
       tier: plugin.tier,
+      kind: plugin.kind,
       ...(latest
         ? {
             latest: {
@@ -449,7 +492,8 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
   async function stagePackage(
     root: string,
     pluginId: string,
-    version: MarketVersion
+    version: MarketVersion,
+    kind: PluginKind = 'pi'
   ): Promise<{ ok: true; tmp: string } | { ok: false; code: 'failed'; error: string }> {
     let bytes: Uint8Array;
     try {
@@ -491,6 +535,10 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     ) {
       return verifyFailed('manifest-mismatch');
     }
+    // 清单的 kind（缺省 pi）须与索引一致；Fynvra 插件另要 host.main 合法
+    if ((record.kind ?? 'pi') !== kind) return verifyFailed('manifest-kind');
+    const appManifest = kind === 'fynvra' ? parseAppPluginManifest(record) : null;
+    if (kind === 'fynvra' && !appManifest) return verifyFailed('manifest-invalid');
     const tmp = join(root, `.tmp-${randomUUID()}`);
     try {
       await mkdir(tmp, { recursive: true });
@@ -513,13 +561,112 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
         error: translate('plugins.installFailed', { error: errorCode(error) }),
       };
     }
+    if (appManifest) {
+      const main = join(tmp, ...appManifest.host.main.split('/'));
+      const isFile = await stat(main).then(
+        (info) => info.isFile(),
+        () => false
+      );
+      if (!isFile || !isStrictlyInside(tmp, main)) {
+        await removeQuietly(root, tmp);
+        return verifyFailed('host-main-missing');
+      }
+    }
     return { ok: true, tmp };
+  }
+
+  /** Fynvra 插件安装：只装官方插件，装进 fynvra-plugins/，登记并立即启用 */
+  async function installApp(
+    plugin: MarketPlugin,
+    version: MarketVersion
+  ): Promise<MarketInstallResult> {
+    if (plugin.tier !== 'official') {
+      return { ok: false, code: 'invalid', error: translate('appPlugins.officialOnly') };
+    }
+    if (!appPlugins) {
+      return { ok: false, code: 'invalid', error: translate('appPlugins.officialOnly') };
+    }
+    const existing = (await appPlugins.list()).find((entry) => entry.id === plugin.id);
+    if (existing) {
+      return {
+        ok: false,
+        code: 'invalid',
+        error: translate('plugins.marketAlreadyInstalled', { name: existing.name }),
+      };
+    }
+    const root = appPlugins.root();
+    await mkdir(root, { recursive: true });
+    const staged = await stagePackage(root, plugin.id, version, 'fynvra');
+    if (!staged.ok) return staged;
+    let target: string;
+    try {
+      target = join(root, await freeCopyDirName(root, plugin.id));
+      await renameWithRetry(staged.tmp, target);
+    } catch (error) {
+      await removeQuietly(root, staged.tmp);
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.installFailed', { error: errorCode(error) }),
+      };
+    }
+    try {
+      const appPlugin = await appPlugins.registerMarket({
+        id: plugin.id,
+        name: plugin.name,
+        version: version.version,
+        sha256: version.package.sha256,
+        tier: plugin.tier,
+        permissions: version.permissions as AppPluginPermission[],
+        path: target,
+      });
+      // 市场视图里的「已安装」也要刷新
+      onChanged();
+      return { ok: true, appPlugin };
+    } catch (error) {
+      await removeQuietly(root, target);
+      return {
+        ok: false,
+        code: 'failed',
+        error: translate('plugins.installFailed', { error: errorCode(error) }),
+      };
+    }
+  }
+
+  async function updateApp(input: { id: string }): Promise<AppPluginActionResult> {
+    const ready = await requireIndex();
+    if (!ready.ok) return ready;
+    const entry = (await appPlugins?.list())?.find((item) => item.id === input.id);
+    if (!appPlugins || !entry) {
+      return { ok: false, code: 'invalid', error: translate('appPlugins.notFound') };
+    }
+    if (entry.source !== 'market') {
+      return { ok: false, code: 'invalid', error: translate('plugins.marketNotMarket') };
+    }
+    const plugin = ready.index.plugins.find((item) => item.id === entry.id);
+    const latest = plugin && latestUsableVersion(ready.index, plugin);
+    if (plugin?.kind !== 'fynvra' || plugin.tier !== 'official') {
+      return { ok: false, code: 'invalid', error: translate('plugins.marketNoUpdate') };
+    }
+    if (!latest || compareSemver(latest.version, entry.version) <= 0) {
+      return { ok: false, code: 'invalid', error: translate('plugins.marketNoUpdate') };
+    }
+    const root = appPlugins.root();
+    const staged = await stagePackage(root, plugin.id, latest, 'fynvra');
+    if (!staged.ok) return staged;
+    return appPlugins.replaceMarket(entry.id, staged.tmp, {
+      name: plugin.name,
+      version: latest.version,
+      sha256: latest.package.sha256,
+      tier: plugin.tier,
+      permissions: latest.permissions as AppPluginPermission[],
+    });
   }
 
   async function install(input: {
     pluginId: string;
     version: string;
-  }): Promise<MarketActionResult> {
+  }): Promise<MarketInstallResult> {
     const ready = await requireIndex();
     if (!ready.ok) return ready;
     const found = findVersion(ready.index, input.pluginId, input.version);
@@ -537,6 +684,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
         }),
       };
     }
+    if (found.plugin.kind === 'fynvra') return installApp(found.plugin, found.version);
     const existing = (await registry.list()).find((entry) => entry.market?.id === input.pluginId);
     if (existing) {
       return {
@@ -547,7 +695,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     }
     const root = copyRoot();
     await mkdir(root, { recursive: true });
-    const staged = await stagePackage(root, input.pluginId, found.version);
+    const staged = await stagePackage(root, input.pluginId, found.version, 'pi');
     if (!staged.ok) return staged;
     let target: string;
     try {
@@ -599,7 +747,12 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     }
     const plugin = ready.index.plugins.find((item) => item.id === entry.market?.id);
     const latest = plugin && latestUsableVersion(ready.index, plugin);
-    if (!plugin || !latest || compareSemver(latest.version, entry.market.version) <= 0) {
+    // 索引里同一 id 变成了 Fynvra 插件时不走 PI 更新
+    if (
+      plugin?.kind !== 'pi' ||
+      !latest ||
+      compareSemver(latest.version, entry.market.version) <= 0
+    ) {
       return { ok: false, code: 'invalid', error: translate('plugins.marketNoUpdate') };
     }
     const root = copyRoot();
@@ -607,7 +760,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     if (!copyDir) {
       return { ok: false, code: 'invalid', error: translate('plugins.outsideCopyRoot') };
     }
-    const staged = await stagePackage(root, plugin.id, latest);
+    const staged = await stagePackage(root, plugin.id, latest, 'pi');
     if (!staged.ok) return staged;
     const swapped = await swapCopyDir(root, copyDir, staged.tmp);
     if (!swapped.ok) return { ok: false, code: 'failed', error: swapped.error };
@@ -674,6 +827,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     refresh,
     install,
     update,
+    updateApp,
     readme,
     start() {
       if (!configured || firstTimer || intervalTimer) return;
