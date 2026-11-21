@@ -8,8 +8,29 @@ export type MarketCategory = (typeof MARKET_CATEGORIES)[number];
 export const MARKET_TIERS = ['official', 'reviewed'] as const;
 export type MarketTier = (typeof MARKET_TIERS)[number];
 
+/** 插件类别：pi = PI 插件（挂角色）；fynvra = Fynvra 插件（后台进程 + 宿主 API） */
+export const PLUGIN_KINDS = ['pi', 'fynvra'] as const;
+export type PluginKind = (typeof PLUGIN_KINDS)[number];
+
+/** PI 插件的权限词表 */
 export const MARKET_PERMISSIONS = ['network', 'filesystem', 'shell', 'env', 'model-keys'] as const;
-export type MarketPermission = (typeof MARKET_PERMISSIONS)[number];
+/** Fynvra 插件的权限词表（只约束宿主 API） */
+export const APP_PLUGIN_PERMISSIONS = [
+  'notifications',
+  'network',
+  'workspaces',
+  'channel',
+  'ui',
+] as const;
+export type AppPluginPermission = (typeof APP_PLUGIN_PERMISSIONS)[number];
+export type MarketPermission = (typeof MARKET_PERMISSIONS)[number] | AppPluginPermission;
+
+/** 按类别过滤权限：未知值丢弃、去重，按词表顺序 */
+export function filterPermissions(kind: PluginKind, raw: readonly unknown[]): MarketPermission[] {
+  const vocabulary: readonly MarketPermission[] =
+    kind === 'fynvra' ? APP_PLUGIN_PERMISSIONS : MARKET_PERMISSIONS;
+  return vocabulary.filter((permission) => raw.includes(permission));
+}
 
 /** 包大小上限 50 MB；README 上限 256 KB */
 export const MAX_MARKET_PACKAGE_BYTES = 50 * 1024 * 1024;
@@ -47,6 +68,7 @@ export interface MarketPlugin {
   category: MarketCategory;
   tags: string[];
   tier: MarketTier;
+  kind: PluginKind;
   /** 按版本号从新到旧排序 */
   versions: MarketVersion[];
 }
@@ -77,6 +99,7 @@ export interface MarketPluginView {
   category: MarketCategory;
   tags: string[];
   tier: MarketTier;
+  kind: PluginKind;
   /** 最新的兼容且未撤回的版本；没有可用版本时缺省 */
   latest?: {
     version: string;
@@ -86,7 +109,7 @@ export interface MarketPluginView {
     size: number;
     hasReadme: boolean;
   };
-  /** 已安装时：plugins.json 里的 id、已装版本、是否启用 */
+  /** 已安装时：kind 对应登记里的 id（pi → plugins.json，fynvra → fynvra-plugins.json）、已装版本、是否启用 */
   installed?: { pluginId: string; version: string; enabled: boolean };
   /** 已安装且 latest 比已装版本新 */
   updateAvailable: boolean;
@@ -244,7 +267,7 @@ function parseFile(raw: unknown, maxSize: number): MarketFile | null {
   return { path, sha256, size };
 }
 
-function parseVersion(raw: unknown, hostVersion: string): MarketVersion | null {
+function parseVersion(raw: unknown, hostVersion: string, kind: PluginKind): MarketVersion | null {
   const record = asRecord(raw);
   if (!record) return null;
   const { version, engines, commit, permissions, changelog, publishedAt } = record;
@@ -268,8 +291,8 @@ function parseVersion(raw: unknown, hostVersion: string): MarketVersion | null {
     ...(range ? { engines: { fynvra: range } } : {}),
     compatible: range ? satisfiesEngine(range, hostVersion) : true,
     commit,
-    // 未知权限丢弃，去重
-    permissions: MARKET_PERMISSIONS.filter((permission) => permissions.includes(permission)),
+    // 未知权限丢弃，去重；词表按插件类别
+    permissions: filterPermissions(kind, permissions),
     changelog,
     publishedAt,
     package: pkg,
@@ -287,13 +310,15 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
   if (homepage !== undefined && !isHttpsUrl(homepage)) return null;
   if (!MARKET_CATEGORIES.includes(category as MarketCategory)) return null;
   if (!MARKET_TIERS.includes(tier as MarketTier)) return null;
+  const kind = record.kind ?? 'pi';
+  if (!PLUGIN_KINDS.includes(kind as PluginKind)) return null;
   if (!Array.isArray(tags) || tags.length > 10 || !tags.every((tag) => isText(tag, 1, 32))) {
     return null;
   }
   if (!Array.isArray(record.versions)) return null;
   const versions: MarketVersion[] = [];
   for (const item of record.versions) {
-    const version = parseVersion(item, hostVersion);
+    const version = parseVersion(item, hostVersion, kind as PluginKind);
     if (version && !versions.some((existing) => existing.version === version.version)) {
       versions.push(version);
     }
@@ -311,6 +336,7 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
     category: category as MarketCategory,
     tags: tags as string[],
     tier: tier as MarketTier,
+    kind: kind as PluginKind,
     versions,
   };
 }

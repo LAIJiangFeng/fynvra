@@ -90,7 +90,7 @@
       }
     },
     {
-      "includes": ["src/agent/**"],
+      "includes": ["src/agent/**", "src/appPluginHost/**"],
       "linter": {
         "rules": {
           "style": {
