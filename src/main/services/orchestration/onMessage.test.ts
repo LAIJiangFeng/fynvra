@@ -51,7 +51,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  // Windows 上编排状态的异步写盘与删除竞争会报 ENOTEMPTY，加重试
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe('registry.onMessage', () => {
