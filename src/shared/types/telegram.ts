@@ -80,6 +80,20 @@ export interface TelegramStateView {
   groups: TelegramGroupView[];
   /** 新的在前 */
   cards: TelegramCardView[];
+  /** 每人每小时最多处理几条 */
+  rateLimitPerHour: number;
+}
+
+/** 每人每小时限额：默认 5，可配 1–1000 */
+export const TELEGRAM_RATE_LIMIT_DEFAULT = 5;
+export const TELEGRAM_RATE_LIMIT_MAX = 1000;
+
+export function isTelegramRateLimit(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) >= 1 &&
+    (value as number) <= TELEGRAM_RATE_LIMIT_MAX
+  );
 }
 
 export type TelegramCardAction = 'approve' | 'reject';

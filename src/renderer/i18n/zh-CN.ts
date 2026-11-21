@@ -759,7 +759,7 @@ export const zhCN = {
   settings: {
     telegram: {
       connection: '连接',
-      disableHint: '在「插件 → 官方插件」里停用',
+      disableHint: '要停用：点上方「返回插件」，在官方插件卡片上点「停用」',
       token: 'Bot Token',
       tokenSaved: '已设置：{masked}',
       tokenPlaceholder: '粘贴 @BotFather 给的 token',
@@ -790,6 +790,9 @@ export const zhCN = {
       active: '在群里',
       inactive: '已被移出群',
       remove: '移除',
+      rateLimit: '限流',
+      rateLimitLabel: '每人每小时最多处理几条',
+      rateLimitHint: '超出后会提示一次「你发得有点快」，不再调用模型（1–1000，默认 5）',
       pending: '待确认需求',
       pendingEmpty: '没有待确认的需求',
       from: '来自 {group}',
@@ -891,7 +894,6 @@ export const zhCN = {
       appearance: '外观',
       keybindings: '快捷键',
       usage: '用量',
-      telegram: 'Telegram',
     },
     dangerousActions: {
       title: '安全',
@@ -1383,6 +1385,7 @@ export const zhCN = {
         enable: '启用',
         disable: '停用',
         settings: '设置',
+        back: '返回插件',
         keepHint: '停用只是不再接收群消息，token、群和记录都保留，再次启用即可接着用',
         telegram: {
           name: 'Telegram 群反馈值班',

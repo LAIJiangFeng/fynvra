@@ -2,7 +2,12 @@
 // 字段非法时只丢弃那个字段或那条记录，文件本身读不了才报错。
 import { readFile, rename } from 'node:fs/promises';
 import { asRecord } from '@shared/guards';
-import type { TelegramCardKind, TelegramCardStatus } from '@shared/types/telegram';
+import {
+  isTelegramRateLimit,
+  TELEGRAM_RATE_LIMIT_DEFAULT,
+  type TelegramCardKind,
+  type TelegramCardStatus,
+} from '@shared/types/telegram';
 import { writeJsonAtomic } from '../providers/jsonRegistry';
 import { TELEGRAM_TOKEN_PATTERN } from './api';
 
@@ -69,10 +74,20 @@ export interface TelegramData {
   workspaces: Record<string, StoredWorkspace>;
   cards: StoredCard[];
   pollOffset: number;
+  /** 每人每小时最多处理几条（1–1000） */
+  rateLimitPerHour: number;
 }
 
 export function emptyTelegramData(): TelegramData {
-  return { enabled: false, candidates: [], groups: [], workspaces: {}, cards: [], pollOffset: 0 };
+  return {
+    enabled: false,
+    candidates: [],
+    groups: [],
+    workspaces: {},
+    cards: [],
+    pollOffset: 0,
+    rateLimitPerHour: TELEGRAM_RATE_LIMIT_DEFAULT,
+  };
 }
 
 const CARD_KINDS: readonly string[] = ['bug', 'feature', 'question', 'invalid'];
@@ -203,6 +218,7 @@ export function parseTelegramData(raw: unknown): TelegramData {
     })
     .slice(-MAX_CARDS);
   if (isNonNegative(r.pollOffset)) data.pollOffset = r.pollOffset;
+  if (isTelegramRateLimit(r.rateLimitPerHour)) data.rateLimitPerHour = r.rateLimitPerHour;
   return data;
 }
 

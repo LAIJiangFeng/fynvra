@@ -10,6 +10,7 @@ import {
 } from '@shared/types/plugins';
 import {
   AppWindow,
+  ArrowLeft,
   CircleAlert,
   CircleCheck,
   Code,
@@ -57,11 +58,12 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
-import { OFFICIAL_PLUGINS, useTelegramEnabled } from './officialPlugins';
+import { OFFICIAL_PLUGINS, type OfficialPluginId, useTelegramEnabled } from './officialPlugins';
 import { PluginImportDialog } from './PluginImportDialog';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
+import { TelegramSettings } from './TelegramSettings';
 
 type Status = { tone: 'error' | 'success'; text: string };
 /** 添加目标：本地（Main 弹框选择并复制）或远程来源 */
@@ -80,6 +82,14 @@ export function PluginsSettings() {
   const [importSession, setImportSession] = useState<number | null>(null);
   const importSessions = useRef(0);
   const t = useT();
+  const telegramEnabled = useTelegramEnabled();
+  // 正在看哪个官方插件的设置；只在插件页内部保存
+  const [openPlugin, setOpenPlugin] = useState<OfficialPluginId | null>(null);
+
+  // 看设置时被停用（或读取失败），回到插件列表；读取中（null）不动
+  useEffect(() => {
+    if (telegramEnabled === false) setOpenPlugin(null);
+  }, [telegramEnabled]);
 
   const openImport = () => {
     importSessions.current += 1;
@@ -106,9 +116,23 @@ export function PluginsSettings() {
 
   const trimmed = source.trim();
 
+  if (openPlugin === 'telegram') {
+    return (
+      <div className="grid gap-4">
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => setOpenPlugin(null)}>
+            <ArrowLeft />
+            {t('settings.plugins.official.back')}
+          </Button>
+        </div>
+        <TelegramSettings />
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-8">
-      <OfficialPluginsSection />
+      <OfficialPluginsSection telegramEnabled={telegramEnabled} onOpen={setOpenPlugin} />
       <section>
         <SectionHeader title={t('settings.plugins.title')}>
           <Button size="sm" variant="outline" disabled={working !== null} onClick={openImport}>
@@ -185,11 +209,15 @@ export function PluginsSettings() {
   );
 }
 
-/** 「官方插件」区：随应用发布的可选功能，启用后设置侧边栏才出现同名入口。目前只有 Telegram。 */
-function OfficialPluginsSection() {
+/** 「官方插件」区：随应用发布的可选功能，启用后卡片上出现「设置」，在插件页内打开。目前只有 Telegram。 */
+function OfficialPluginsSection({
+  telegramEnabled,
+  onOpen,
+}: {
+  telegramEnabled: boolean | null;
+  onOpen: (id: OfficialPluginId) => void;
+}) {
   const t = useT();
-  const telegramEnabled = useTelegramEnabled();
-  const setSection = useSettingsViewStore((state) => state.setSection);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,7 +263,7 @@ function OfficialPluginsSection() {
                 </p>
               </div>
               {enabled && (
-                <Button size="sm" variant="outline" onClick={() => setSection(id)}>
+                <Button size="sm" variant="outline" onClick={() => onOpen(id)}>
                   <Settings2 />
                   {t('settings.plugins.official.settings')}
                 </Button>
