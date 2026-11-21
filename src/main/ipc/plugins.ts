@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, rename, stat } from 'node:fs/promises';
+import { lstat, mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { asRecord, errorMessage } from '@shared/guards';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import { parseMarketRefreshInput, parseMarketVersionInput } from '@shared/types/pluginMarket';
 import {
   isPluginProviderName,
   localPluginMode,
@@ -14,6 +15,7 @@ import {
   type SetPluginManualProvidersInput,
   type SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
+import { notificationPreferencesOf } from '@shared/types/settings';
 import {
   app,
   BrowserWindow,
@@ -28,6 +30,8 @@ import type {
   PluginAddResult,
   PluginImportResult,
   PluginListResult,
+  PluginMarketReadmeResult,
+  PluginMarketStateResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
   PluginScanImportsResult,
@@ -36,7 +40,12 @@ import type {
   PluginToggleResult,
 } from '../../preload/domains/plugins';
 import { translate } from '../i18n';
+import { freshCommandEnvironment } from '../services/commandNetwork';
+import { showDesktopNotification } from '../services/notifications/desktop';
 import { detectVsCode, launchApplication, validCustomAppPath } from '../services/openWith';
+import { createPluginMarket, type PluginMarket } from '../services/plugins/market';
+import { MARKET_PUBLIC_KEYS } from '../services/plugins/marketConfig';
+import { createMarketHttpGet } from '../services/plugins/marketHttp';
 import { type PiImportCandidate, scanPiPlugins } from '../services/plugins/piImport';
 import {
   copyDirOf,
@@ -44,6 +53,7 @@ import {
   freeCopyDirName,
   isStrictlyInside,
   removeCopyDir,
+  renameWithRetry,
   replaceCopy,
 } from '../services/plugins/pluginCopies';
 import { createPluginRegistry, type PluginRegistry } from '../services/plugins/pluginRegistry';
@@ -80,6 +90,28 @@ export function getPluginRegistry(): PluginRegistry {
     isPendingDeleteAllowed: (path) => ownedPluginDir(pluginRoots(), path) !== null,
   });
   return registry;
+}
+
+let market: PluginMarket | null = null;
+
+/** Main 唯一的插件市场单例（缓存在 userData/plugin-market.json） */
+export function getPluginMarket(): PluginMarket {
+  market ??= createPluginMarket({
+    http: createMarketHttpGet({ env: freshCommandEnvironment }),
+    publicKeys: MARKET_PUBLIC_KEYS,
+    registry: getPluginRegistry(),
+    copyRoot: pluginCopyRoot,
+    cachePath: join(app.getPath('userData'), 'plugin-market.json'),
+    hostVersion: app.getVersion(),
+    notify: (title, body) => {
+      // 同 Telegram：沿用通知偏好的总开关与提示音
+      const preferences = notificationPreferencesOf(getSettingsFile().read().preferences);
+      if (preferences.enabled) showDesktopNotification({ title, body, silent: !preferences.sound });
+    },
+    onChanged: () => sendToAllWindows(IPC_CHANNELS.PLUGINS_CHANGED),
+    afterInstall: scanAfterChange,
+  });
+  return market;
 }
 
 /** 允许删除插件目录的受管根目录（副本根目录 + 旧版 agent/git、agent/npm/node_modules） */
@@ -123,6 +155,9 @@ export function registerPluginHandlers(): void {
     () => undefined,
     () => cleanPendingDeletes()
   );
+  // 插件市场：启动 60 秒后检查一次，之后每 24 小时（未配置公钥时不启动）
+  getPluginMarket().start();
+  registerMarketHandlers();
 
   ipcMain.handle(IPC_CHANNELS.PLUGINS_LIST, async (): Promise<PluginListResult> => {
     try {
@@ -381,7 +416,80 @@ export function registerPluginHandlers(): void {
   );
 }
 
-/** 日志只带错误码，不带 fs 错误里的路径 */
+/** 插件市场的 IPC：Renderer 只传市场 id、版本号或已装插件 id；安装 / 更新与其他安装删除共用串行锁 */
+function registerMarketHandlers(): void {
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_MARKET_STATE,
+    async (_event, raw: unknown): Promise<PluginMarketStateResult> => {
+      if (!isEmptyArgs(raw)) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        return { ok: true, state: await getPluginMarket().state() };
+      } catch (error) {
+        return { ok: false, error: scanWarning(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_MARKET_REFRESH,
+    async (_event, raw: unknown): Promise<PluginMarketStateResult> => {
+      const input = parseMarketRefreshInput(raw);
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        return { ok: true, state: await getPluginMarket().refresh(input) };
+      } catch (error) {
+        return { ok: false, error: scanWarning(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_MARKET_INSTALL,
+    async (_event, raw: unknown): Promise<PluginActionResult> => {
+      const input = parseMarketVersionInput(raw);
+      if (!input) return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
+      return exclusive<PluginActionResult>(busyResult, async () => {
+        try {
+          return await getPluginMarket().install(input);
+        } catch (error) {
+          return { ok: false, code: 'failed', error: scanWarning(error) };
+        }
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_MARKET_UPDATE,
+    async (_event, raw: unknown): Promise<PluginActionResult> => {
+      const record = asRecord(raw);
+      if (!record || Object.keys(record).some((key) => key !== 'id') || !isRegistryId(record.id)) {
+        return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
+      }
+      const id = record.id;
+      return exclusive<PluginActionResult>(busyResult, async () => {
+        try {
+          return await getPluginMarket().update({ id });
+        } catch (error) {
+          return { ok: false, code: 'failed', error: scanWarning(error) };
+        }
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_MARKET_README,
+    async (_event, raw: unknown): Promise<PluginMarketReadmeResult> => {
+      const input = parseMarketVersionInput(raw);
+      if (!input) return { ok: false, error: translate('common.invalidArgs') };
+      try {
+        return await getPluginMarket().readme(input);
+      } catch (error) {
+        return { ok: false, error: scanWarning(error) };
+      }
+    }
+  );
+}
+
 /** 启用 / 停用插件并广播（plugins:toggle 与 fynvra_config 共用） */
 export async function setPluginEnabled(id: string, enabled: boolean): Promise<PluginToggleResult> {
   try {
@@ -797,20 +905,6 @@ async function registerRemote(source: string, kind: 'npm' | 'git'): Promise<Plug
   }
 }
 
-/** Windows 上杀毒 / 索引偶尔短暂占用刚写入的文件，rename 遇到 EPERM / EBUSY 时稍等重试 */
-async function renameWithRetry(from: string, to: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await rename(from, to);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
-      await new Promise((done) => setTimeout(done, 200));
-    }
-  }
-}
-
 /** 尽力删除受管目录；删不掉就放进待清理列表，下次启动再删 */
 async function discardDir(dir: string): Promise<void> {
   if (await tryRemoveDir(dir)) return;
@@ -868,7 +962,9 @@ function ownDirOf(roots: ManagedRoots, plugin: PluginEntry): string | null {
   if (plugin.kind === 'local' && localPluginMode(plugin) !== 'copy') return null;
   const copyDir = copyDirOf(roots.copyRoot, plugin.path);
   if (copyDir) return copyDir;
-  return plugin.kind === 'local' ? null : legacyPluginDir(roots, plugin.kind, plugin.path);
+  return plugin.kind === 'npm' || plugin.kind === 'git'
+    ? legacyPluginDir(roots, plugin.kind, plugin.path)
+    : null;
 }
 
 /**
@@ -889,8 +985,8 @@ async function removePlugin(id: string): Promise<PluginRemoveResult> {
       : null;
   if (managedDir) {
     if (!(await tryRemoveDir(managedDir))) leftover = managedDir;
-  } else if (plugin.kind !== 'local') {
-    // pi remove 会在 agentDir 下删文件：它或登记路径落在原生 pi 目录内时一律不删
+  } else if (plugin.kind === 'npm' || plugin.kind === 'git') {
+    // 市场插件不在副本根目录内时只删登记；pi remove 会在 agentDir 下删文件：它或登记路径落在原生 pi 目录内时一律不删
     if (refusePiProtectedDelete(agentDir()) || refusePiProtectedDelete(plugin.path)) {
       return {
         ok: false,

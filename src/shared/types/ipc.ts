@@ -219,6 +219,16 @@ export const IPC_CHANNELS = {
   PLUGINS_SET_PROVIDER_MAPPING: 'plugins:set-provider-mapping',
   /** `{ id, names: string[] }`：整组替换某插件手动添加的服务名（合法、去重、最多 20 个） */
   PLUGINS_SET_MANUAL_PROVIDERS: 'plugins:set-manual-providers',
+  /** 无参数（或 `{}`）：缓存的插件市场状态 `{ state }`，不发网络请求 */
+  PLUGINS_MARKET_STATE: 'plugins:market-state',
+  /** `{ force?: boolean }`：拉取并验签索引（非强制时 1 小时内直接用缓存）→ `{ state }` */
+  PLUGINS_MARKET_REFRESH: 'plugins:market-refresh',
+  /** `{ pluginId, version }`：从市场安装指定版本 */
+  PLUGINS_MARKET_INSTALL: 'plugins:market-install',
+  /** `{ id }`（plugins.json 里的 id）：更新到最新的兼容、未撤回版本 */
+  PLUGINS_MARKET_UPDATE: 'plugins:market-update',
+  /** `{ pluginId, version }`：该版本的 README 文本 `{ text }` */
+  PLUGINS_MARKET_README: 'plugins:market-readme',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 

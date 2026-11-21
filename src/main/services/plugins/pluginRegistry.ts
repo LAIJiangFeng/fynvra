@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { asRecord } from '@shared/guards';
+import { isMarketPluginId, isMarketVersion, isSha256 } from '@shared/types/pluginMarket';
 import {
   isPluginMode,
   isPluginProviderName,
@@ -9,6 +10,7 @@ import {
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
   type PluginKind,
+  type PluginMarketInfo,
   type PluginProviderMap,
 } from '@shared/types/plugins';
 import { translate } from '../../i18n';
@@ -37,6 +39,13 @@ export interface PluginRegistry {
   updateLocal(
     id: string,
     patch: { path: string; mode: 'copy'; sourcePath: string }
+  ): Promise<PluginEntry | undefined>;
+  /**
+   * 只改市场插件的来源 / 市场信息 / 启用状态（更新、撤回用）；id 不存在或不是市场插件时返回 undefined。
+   */
+  updateMarket(
+    id: string,
+    patch: { market: PluginMarketInfo; source?: string; enabled?: boolean }
   ): Promise<PluginEntry | undefined>;
   /**
    * 把插件运行时找过的服务名记进 requestedProviders（去重，最多 20 个，按首次出现排序）；
@@ -167,6 +176,7 @@ export function createPluginRegistry(options: {
           ...(plugin.kind === 'local' && plugin.mode === 'copy' && plugin.sourcePath
             ? { sourcePath: plugin.sourcePath }
             : {}),
+          ...(plugin.kind === 'market' && plugin.market ? { market: plugin.market } : {}),
         };
         return { next: [...entries, entry], result: { ok: true, plugin: entry } };
       }),
@@ -191,6 +201,16 @@ export function createPluginRegistry(options: {
         const current = entries[index];
         if (current?.kind !== 'local') return { result: undefined };
         const updated: PluginEntry = { ...current, ...patch };
+        return { next: entries.with(index, updated), result: updated };
+      }),
+    updateMarket: (id, patch) =>
+      transact((entries) => {
+        const index = entries.findIndex((entry) => entry.id === id);
+        const current = entries[index];
+        if (current?.kind !== 'market') return { result: undefined };
+        const updated: PluginEntry = { ...current, market: { ...patch.market } };
+        if (patch.source !== undefined) updated.source = patch.source;
+        if (patch.enabled !== undefined) updated.enabled = patch.enabled;
         return { next: entries.with(index, updated), result: updated };
       }),
     recordRequestedProvider: (id, name) =>
@@ -361,7 +381,23 @@ export function parseProviderMap(raw: unknown): PluginProviderMap {
   return map;
 }
 
-const KINDS: readonly PluginKind[] = ['local', 'npm', 'git'];
+const KINDS: readonly PluginKind[] = ['local', 'npm', 'git', 'market'];
+
+/** 市场登记信息；任一字段不合法返回 null */
+function parseMarketInfo(raw: unknown): PluginMarketInfo | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const { id, version, sha256, tier, revokedReason } = record;
+  if (!isMarketPluginId(id) || !isMarketVersion(version) || !isSha256(sha256)) return null;
+  if (tier !== 'official' && tier !== 'reviewed') return null;
+  return {
+    id,
+    version,
+    sha256,
+    tier,
+    ...(typeof revokedReason === 'string' && revokedReason.length <= 200 ? { revokedReason } : {}),
+  };
+}
 
 export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   const record = asRecord(raw);
@@ -375,6 +411,9 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   if (typeof source !== 'string' || !source.trim()) return null;
   if (typeof kind !== 'string' || !KINDS.includes(kind as PluginKind)) return null;
   if (typeof path !== 'string' || !path.trim()) return null;
+  // 市场插件必须带合法的 market 字段，否则整条丢弃
+  const market = kind === 'market' ? parseMarketInfo(record.market) : null;
+  if (kind === 'market' && !market) return null;
   return {
     id,
     name: name.trim(),
@@ -392,6 +431,7 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
     ...(scannedProviders.length > 0 ? { scannedProviders } : {}),
     ...(typeof scanStamp === 'string' && /^[0-9a-f]{1,64}$/.test(scanStamp) ? { scanStamp } : {}),
     ...(manualProviders.length > 0 ? { manualProviders } : {}),
+    ...(market ? { market } : {}),
   };
 }
 

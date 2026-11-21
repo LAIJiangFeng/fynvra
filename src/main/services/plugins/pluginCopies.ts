@@ -73,22 +73,50 @@ export async function replaceCopy(
 ): Promise<CopyOutcome> {
   const staged = await stage(root, source);
   if (!staged.ok) return staged;
+  const swapped = await swapCopyDir(root, copyDir, staged.tmp);
+  if (!swapped.ok) return swapped;
+  return { ok: true, path: staged.fileName ? join(copyDir, staged.fileName) : copyDir };
+}
+
+/**
+ * 用已写好的临时目录 `tmp` 替换副本目录 `copyDir`（须已经过 copyDirOf 校验）：旧目录改名为 `.old-<uuid>`，
+ * 新目录换入后删旧目录；任何一步失败都还原旧目录并删掉 tmp。
+ */
+export async function swapCopyDir(
+  root: string,
+  copyDir: string,
+  tmp: string
+): Promise<CopyOutcome> {
   const old = join(root, `.old-${randomUUID()}`);
   try {
-    await rename(copyDir, old);
+    await renameWithRetry(copyDir, old);
   } catch (error) {
-    await rmTree(staged.tmp);
+    await rmTree(tmp).catch(() => undefined);
     return { ok: false, error: copyFailed(error) };
   }
   try {
-    await rename(staged.tmp, copyDir);
+    await renameWithRetry(tmp, copyDir);
   } catch (error) {
     await rename(old, copyDir).catch(() => undefined);
-    await rmTree(staged.tmp);
+    await rmTree(tmp).catch(() => undefined);
     return { ok: false, error: copyFailed(error) };
   }
   await rmTree(old).catch(() => undefined);
-  return { ok: true, path: staged.fileName ? join(copyDir, staged.fileName) : copyDir };
+  return { ok: true, path: copyDir };
+}
+
+/** Windows 上杀毒 / 索引偶尔短暂占用刚写入的文件，rename 遇到 EPERM / EBUSY 时稍等重试 */
+export async function renameWithRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw error;
+      await new Promise((done) => setTimeout(done, 200));
+    }
+  }
 }
 
 /** 删除副本目录；调用方须先用 copyDirOf 取得目录（保证在副本根目录内） */
