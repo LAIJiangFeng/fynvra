@@ -248,8 +248,15 @@ export interface AgentHostService extends AgentHost {
    * 编排侧（任务书、打回反馈）只发文本。还没有标题的会话取这条的文本作标题，只有图片的消息不占用这次机会
    */
   prompt(sessionId: string, text: string, images?: ChatImage[]): Promise<IpcResult>;
-  /** Automatic continuation: never queues behind a user turn or revives an archived session. */
-  promptWhenIdle(sessionId: string, text: string): Promise<IpcResult<{ delivered: boolean }>>;
+  /**
+   * Automatic continuation: never queues behind a user turn or revives an archived session.
+   * images（渠道插件附件）与 prompt 走同一条投递路径。
+   */
+  promptWhenIdle(
+    sessionId: string,
+    text: string,
+    images?: ChatImage[]
+  ): Promise<IpcResult<{ delivered: boolean }>>;
   /**
    * 会话守护的自动恢复：只接受 `error`（`fromIdle` 时也接受被守护自己中止的 `idle`）；
    * 已归档、运行中、等审批、需要上下文恢复的一律不发，用户的操作优先。发出后通知 `resume` 活动
@@ -1429,7 +1436,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   async function promptWhenIdle(
     sessionId: string,
-    text: string
+    text: string,
+    images?: ChatImage[]
   ): Promise<Result<{ delivered: boolean }>> {
     const stored = deps.store.get(sessionId);
     if (!stored) return fail(translate('common.sessionNotFound'));
@@ -1460,7 +1468,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       ) {
         return { ok: true, delivered: false };
       }
-      if (!send({ type: 'prompt', identity: identityOf(sessionId, state), text })) {
+      const identity = identityOf(sessionId, state);
+      if (!send({ type: 'prompt', identity, text, ...(images?.length ? { images } : {}) })) {
         return fail(translate('agent.workerUnavailable'));
       }
       state.running = true;

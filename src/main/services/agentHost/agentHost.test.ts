@@ -1031,6 +1031,22 @@ describe('automatic coordinator continuation delivery', () => {
     expect(env.sent('prompt')).toHaveLength(2);
   });
 
+  it('带图片时随 prompt 投递，忙时不发', async () => {
+    const env = setup();
+    const session = await createSession(env, 'orchestrator');
+    const images = [{ data: 'aGk=', mimeType: 'image/png' as const }];
+    expect(await env.host.promptWhenIdle(session.id, 'look', images)).toEqual({
+      ok: true,
+      delivered: true,
+    });
+    expect(env.sent('prompt')).toEqual([expect.objectContaining({ text: 'look', images })]);
+    expect(await env.host.promptWhenIdle(session.id, 'again', images)).toEqual({
+      ok: true,
+      delivered: false,
+    });
+    expect(env.sent('prompt')).toHaveLength(1);
+  });
+
   it.each(['prompt', 'steer'] as const)(
     'lets a user %s during spawn supersede automatic delivery',
     async (method) => {

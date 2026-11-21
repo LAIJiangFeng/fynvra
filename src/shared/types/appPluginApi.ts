@@ -48,6 +48,27 @@ export interface ChannelSnapshot {
 /** channel.filterOutbound() 的结果：本机信息已替换；命中密钥时整条拒绝 */
 export type ChannelFilterResult = { ok: true; text: string } | { ok: false; reason: 'secret' };
 
+/**
+ * channel.prompt 的一个附件：插件先把文件写到 `${api.dataDir}/attachments/<file>`。
+ * file 只允许 `[A-Za-z0-9._-]`、≤ 128 字符、不含 `..`；name 是显示用的原始文件名（≤ 200 字符，核心去掉路径与控制字符，取它的扩展名判断文档格式）
+ */
+export interface ChannelAttachment {
+  file: string;
+  name: string;
+}
+
+/** 被拒的附件：不支持的格式 / 没有文字 / 读不了（含不存在、符号链接、目录）/ 超过输入框的上限 */
+export interface ChannelAttachmentRejection {
+  name: string;
+  reason: 'unsupported' | 'empty' | 'unreadable' | 'size';
+}
+
+/** channel.prompt() 的结果 */
+export interface ChannelPromptResult {
+  delivered: boolean;
+  rejected: ChannelAttachmentRejection[];
+}
+
 /** 事件 `channel.session`：本插件会话的状态变化 */
 export interface ChannelSessionEvent {
   sessionId: string;
@@ -74,6 +95,8 @@ export type ChannelReportResult =
 export interface FynvraPluginApi {
   /** 本插件 id（市场 id） */
   readonly pluginId: string;
+  /** 本插件私有数据目录的绝对路径；channel.prompt 的附件写在其下的 `attachments/`（插件自建、自己清理） */
+  readonly dataDir: string;
   /** 写进 Fynvra 日志（前缀 `[plugin:<id>]`，每秒最多 100 行，输出前抹掉本插件的密钥）；不等待结果 */
   log(level: PluginLogLevel, message: string): void;
   /** 私有 JSON 存储（≤ 5 MB，原子写）；没写过时 read 返回 null */
@@ -107,8 +130,16 @@ export interface FynvraPluginApi {
     /** 把干净检出切到 origin 默认分支最新提交（本插件该工作区有会话在跑时拒绝） */
     refreshCheckout(input: { workspaceId: string }): Promise<void>;
     originCommit(input: { workspaceId: string }): Promise<{ commit: string }>;
-    /** 空闲则投递，忙时排队；text ≤ 64 KB */
-    prompt(input: { sessionId: string; text: string }): Promise<{ delivered: boolean }>;
+    /**
+     * 会话空闲则投递，忙或已归档时不发（delivered: false）；text ≤ 64 KB，没有附件时须非空。
+     * attachments 最多 20 个，格式与上限同聊天输入框：图片原样发给模型，文档抽成文字包在
+     * `<untrusted-content source="attachment">` 里接在 text 之后；不合格的列在 rejected。核心不删附件文件。
+     */
+    prompt(input: {
+      sessionId: string;
+      text: string;
+      attachments?: ChannelAttachment[];
+    }): Promise<ChannelPromptResult>;
     sessionStatus(input: { sessionId: string }): Promise<{ status: ChannelSessionStatus }>;
     snapshot(input: { workspaceId: string }): Promise<ChannelSnapshot>;
     filterOutbound(input: { text: string }): Promise<ChannelFilterResult>;

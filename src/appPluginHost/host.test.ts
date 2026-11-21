@@ -40,6 +40,7 @@ describe('插件宿主', () => {
     await vi.waitFor(() => expect(sent).toContainEqual({ type: 'activated' }));
     expect(importModule.mock.calls[0]?.[0]).toMatch(/^file:\/\/.*host\.js$/);
     expect(api?.pluginId).toBe('fynvra.demo');
+    expect(api?.dataDir).toBe('/d');
   });
 
   it('activate 抛错：回 activate-failed 并以非 0 退出', async () => {
