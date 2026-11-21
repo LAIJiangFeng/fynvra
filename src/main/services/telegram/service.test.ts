@@ -1,8 +1,8 @@
 import type { Run, Task } from '@fynvra/core';
 import type { Workspace } from '@shared/types/workspace';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { CleanCheckout } from '../channels/cleanCheckout';
 import { TelegramApiError, type TgMessage, type TgUpdate } from './api';
-import type { CleanCheckout } from './cleanCheckout';
 import { TEMPLATES } from './content';
 import { createTelegramService, DUTY_IDLE_MS, FOLLOW_UP_TIMEOUT_MS } from './service';
 import { emptyTelegramData, type StoredGroup, type TelegramData } from './store';

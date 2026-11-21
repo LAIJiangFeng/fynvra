@@ -29,7 +29,7 @@ import { collectAppSecrets } from './services/secrets';
 import { loadLoginShellPath } from './services/shellEnv';
 import { createSystemProxyResolver, setSystemProxy } from './services/systemProxy';
 import { createHttpsPost, createTelegramApi } from './services/telegram/api';
-import { createCleanCheckout } from './services/telegram/cleanCheckout';
+import { createCleanCheckout } from './services/channels/cleanCheckout';
 import {
   collectLocalInfo,
   getTelegramService,

@@ -14,6 +14,7 @@ import {
 } from '@shared/types/telegram';
 import type { Workspace } from '@shared/types/workspace';
 import type { AgentHostService } from '../agentHost/agentHost';
+import type { CleanCheckout } from '../channels/cleanCheckout';
 import {
   type LocalInfoContext,
   registerSecretSource,
@@ -29,7 +30,6 @@ import {
   type TgMessage,
   type TgUpdate,
 } from './api';
-import type { CleanCheckout } from './cleanCheckout';
 import {
   dutyPrompt,
   MAX_FOLLOW_UPS,
