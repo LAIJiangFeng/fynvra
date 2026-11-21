@@ -1,56 +1,76 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Worker, type WorkerOptions } from 'node:worker_threads';
 import { ChatFileTooLargeError } from '@shared/chatFileText';
 import { zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ENV_WHITELIST } from '../appPlugins/runtime';
 import { loadAttachments } from './attachments';
 import {
   checkZipBomb,
-  DOC_WORKER_MEMORY_MB,
+  type ForkParser,
+  type IsolationOptions,
   isolatedExtractor,
   MAX_ZIP_ENTRIES,
-  type SpawnDocWorker,
+  type MemoryOfPid,
 } from './docIsolation';
 
-// 假 worker 的脚本（eval 方式，CommonJS）
-const ECHO = `require('worker_threads').parentPort.once('message', ({ name }) =>
-  require('worker_threads').parentPort.postMessage({ ok: true, file: { name, text: 'ok' } }))`;
-const SLOW_ECHO = `require('worker_threads').parentPort.once('message', ({ name }) =>
-  setTimeout(() => require('worker_threads').parentPort.postMessage({ ok: true, file: { name, text: 'ok' } }), 50))`;
-const HANG = `setInterval(() => {}, 1000)`;
-const BUSY = `require('worker_threads').parentPort.once('message', () => { for (;;) {} })`;
-const EXIT = `process.exit(3)`;
-const THROW = `throw new Error('boom')`;
-const OOM = `const keep = []; for (;;) keep.push(new Array(1e6).fill(Math.random()))`;
-const SIZE = `require('worker_threads').parentPort.once('message', () =>
-  require('worker_threads').parentPort.postMessage({ ok: false, reason: 'size' }))`;
+type Behavior = 'echo' | 'slowEcho' | 'hang' | 'exit' | 'size' | 'garbage';
 
-/** 按顺序取脚本起假 worker；记录起过几个、是否有并发、是否都已终止 */
-function fakeSpawn(scripts: string[]) {
-  const state = { spawned: 0, active: 0, maxActive: 0, options: [] as WorkerOptions[] };
-  const spawn: SpawnDocWorker = (options) => {
-    const code = scripts[Math.min(state.spawned, scripts.length - 1)];
-    state.spawned++;
-    state.options.push(options);
+/** 按顺序取行为的假子进程；记录 fork 次数、并发数、kill 次数和 env */
+function fakeFork(behaviors: Behavior[]) {
+  const state = {
+    forked: 0,
+    active: 0,
+    maxActive: 0,
+    killed: 0,
+    envs: [] as Record<string, string>[],
+  };
+  const fork: ForkParser = ({ env }) => {
+    const behavior = behaviors[Math.min(state.forked, behaviors.length - 1)];
+    const pid = 1000 + state.forked;
+    state.forked++;
+    state.envs.push(env);
     state.active++;
     state.maxActive = Math.max(state.maxActive, state.active);
-    // 真实上限 512 MB 太慢，测试里压到 32 MB
-    const worker = new Worker(code, {
-      eval: true,
-      ...options,
-      resourceLimits: { maxOldGenerationSizeMb: 32 },
-    });
-    worker.once('exit', () => state.active--);
-    return worker;
+    const messageListeners: ((message: unknown) => void)[] = [];
+    const exitListeners: ((code: number) => void)[] = [];
+    let alive = true;
+    const exit = (code: number) => {
+      if (!alive) return;
+      alive = false;
+      state.active--;
+      for (const listener of exitListeners) listener(code);
+    };
+    const reply = (message: unknown, ms = 0) =>
+      setTimeout(() => {
+        if (alive) for (const listener of messageListeners) listener(message);
+      }, ms);
+    return {
+      pid,
+      postMessage(message) {
+        const { name } = message as { name: string };
+        if (behavior === 'echo') reply({ ok: true, file: { name, text: 'ok' } });
+        if (behavior === 'slowEcho') reply({ ok: true, file: { name, text: 'ok' } }, 50);
+        if (behavior === 'exit') setTimeout(() => exit(3), 0);
+        if (behavior === 'size') reply({ ok: false, reason: 'size' });
+        if (behavior === 'garbage') reply({ ok: true, file: { text: 1 } });
+      },
+      onMessage: (listener) => messageListeners.push(listener),
+      onExit: (listener) => exitListeners.push(listener),
+      kill() {
+        state.killed++;
+        setTimeout(() => exit(-1), 0);
+      },
+    };
   };
-  return { spawn, state };
+  return { fork, state };
 }
 
+const quietMemory: MemoryOfPid = () => 10 * 1024;
 const PDF = new TextEncoder().encode('%PDF-1.4 fake');
 
-describe('文档解析隔离层', () => {
+describe('附件解析隔离层', () => {
   let dataDir: string;
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'fynvra-iso-'));
@@ -62,85 +82,105 @@ describe('文档解析隔离层', () => {
   afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
 
   const items = (...names: string[]) => names.map((name) => ({ file: name, name }));
+  const using =
+    (fork: ForkParser, options: IsolationOptions = {}) =>
+    (deadline: number) =>
+      isolatedExtractor(deadline, { fork, memoryOf: quietMemory, ...options });
 
-  it('超时就终止 worker、记为 unreadable，下一个文件用新 worker 正常解析', async () => {
-    const { spawn, state } = fakeSpawn([BUSY, ECHO]);
-    const loaded = await loadAttachments(dataDir, items('a.pdf', 'b.pdf'), (deadline) =>
-      isolatedExtractor(deadline, spawn, 300)
+  it('超时就 kill 子进程、记为 unreadable，下一个文件用新进程正常解析', async () => {
+    const { fork, state } = fakeFork(['hang', 'echo']);
+    const loaded = await loadAttachments(
+      dataDir,
+      items('a.pdf', 'b.pdf'),
+      using(fork, { fileTimeoutMs: 200 })
     );
     expect(loaded.rejected).toEqual([{ name: 'a.pdf', reason: 'unreadable' }]);
     expect(loaded.files).toEqual([{ name: 'b.pdf', text: 'ok' }]);
-    expect(state.spawned).toBe(2);
+    expect(state.forked).toBe(2);
+    expect(state.killed).toBe(2);
     expect(state.active).toBe(0);
-    expect(state.options[0].resourceLimits?.maxOldGenerationSizeMb).toBe(DOC_WORKER_MEMORY_MB);
   });
 
-  it('worker 崩溃、抛错、内存超限、自行退出都记为 unreadable；抽取器报 size 记为 size', async () => {
-    const { spawn, state } = fakeSpawn([EXIT, THROW, OOM, HANG, SIZE]);
+  it('子进程退出、回传形状不对都记为 unreadable；解析器报 size 记为 size', async () => {
+    const { fork, state } = fakeFork(['exit', 'garbage', 'size']);
+    const loaded = await loadAttachments(dataDir, items('a.pdf', 'b.pdf', 'c.pdf'), using(fork));
+    expect(loaded.rejected.map((r) => r.reason)).toEqual(['unreadable', 'unreadable', 'size']);
+    expect(state.active).toBe(0);
+  });
+
+  it('内存看门狗：超过上限立即 kill，记为 unreadable，下一个文件正常', async () => {
+    const { fork, state } = fakeFork(['hang', 'echo']);
+    const memoryOf: MemoryOfPid = (pid) => (pid === 1000 ? 2 * 1024 * 1024 : 10 * 1024);
+    const started = Date.now();
     const loaded = await loadAttachments(
       dataDir,
-      items('a.pdf', 'b.pdf', 'c.pdf', 'd.pdf', 'a.pdf'),
-      (deadline) => isolatedExtractor(deadline, spawn, 2_000)
+      items('a.pdf', 'b.pdf'),
+      using(fork, { memoryOf, fileTimeoutMs: 10_000 })
     );
-    expect(loaded.rejected.map((r) => r.reason)).toEqual([
-      'unreadable',
-      'unreadable',
-      'unreadable',
-      'unreadable',
-      'size',
-    ]);
-    expect(state.active).toBe(0);
-  }, 20_000);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(loaded.rejected).toEqual([{ name: 'a.pdf', reason: 'unreadable' }]);
+    expect(loaded.files).toEqual([{ name: 'b.pdf', text: 'ok' }]);
+    expect(state.killed).toBe(2);
+  });
+
+  it('fork 时 env 只有白名单变量，不带 Main 的令牌', async () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_fake_should_not_leak');
+    try {
+      const { fork, state } = fakeFork(['echo']);
+      await loadAttachments(dataDir, items('a.pdf'), using(fork));
+      const env = state.envs[0];
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(JSON.stringify(env)).not.toContain('ghp_fake_should_not_leak');
+      for (const key of Object.keys(env)) {
+        expect(ENV_WHITELIST.map((k) => k.toLowerCase())).toContain(key.toLowerCase());
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it('总预算用完后剩余附件全部 unreadable，且在预算附近返回', async () => {
-    const { spawn, state } = fakeSpawn([BUSY]);
+    const { fork, state } = fakeFork(['hang']);
     const started = Date.now();
     const loaded = await loadAttachments(
       dataDir,
       items('a.pdf', 'b.pdf', 'c.pdf'),
-      (deadline) => isolatedExtractor(deadline, spawn, 15_000),
+      using(fork, { fileTimeoutMs: 15_000 }),
       400
     );
     const elapsed = Date.now() - started;
     expect(loaded.rejected).toEqual(
       ['a.pdf', 'b.pdf', 'c.pdf'].map((name) => ({ name, reason: 'unreadable' }))
     );
-    expect(state.spawned).toBe(1);
+    expect(state.forked).toBe(1);
     expect(elapsed).toBeGreaterThanOrEqual(350);
     expect(elapsed).toBeLessThan(2_000);
   });
 
-  it('并发调用全局串行：同一时刻最多一个 worker', async () => {
-    const { spawn, state } = fakeSpawn([SLOW_ECHO]);
-    const make = (deadline: number) => isolatedExtractor(deadline, spawn);
+  it('并发调用全局串行：同一时刻最多一个子进程', async () => {
+    const { fork, state } = fakeFork(['slowEcho']);
+    const make = using(fork);
     const results = await Promise.all([
       loadAttachments(dataDir, items('a.pdf', 'b.pdf'), make),
       loadAttachments(dataDir, items('c.pdf', 'd.pdf'), make),
       loadAttachments(dataDir, items('a.pdf'), make),
     ]);
     expect(results.flatMap((r) => r.files)).toHaveLength(5);
-    expect(state.spawned).toBe(5);
+    expect(state.forked).toBe(5);
     expect(state.maxActive).toBe(1);
   });
 
   it('排队等不到轮次的调用在自己的预算内返回，不阻塞队列', async () => {
-    const { spawn, state } = fakeSpawn([BUSY, ECHO]);
-    const slow = loadAttachments(dataDir, items('a.pdf'), (d) => isolatedExtractor(d, spawn, 600));
+    const { fork, state } = fakeFork(['hang', 'echo']);
+    const slow = loadAttachments(dataDir, items('a.pdf'), using(fork, { fileTimeoutMs: 600 }));
     // 等慢任务占住队列再发第二次调用，避免两次调用抢先后
-    await vi.waitFor(() => expect(state.spawned).toBe(1));
-    const waiting = await loadAttachments(
-      dataDir,
-      items('b.pdf'),
-      (d) => isolatedExtractor(d, spawn),
-      200
-    );
+    await vi.waitFor(() => expect(state.forked).toBe(1));
+    const waiting = await loadAttachments(dataDir, items('b.pdf'), using(fork), 200);
     expect(waiting.rejected).toEqual([{ name: 'b.pdf', reason: 'unreadable' }]);
     expect((await slow).rejected).toEqual([{ name: 'a.pdf', reason: 'unreadable' }]);
-    const after = await loadAttachments(dataDir, items('c.pdf'), (d) =>
-      isolatedExtractor(d, spawn)
-    );
+    const after = await loadAttachments(dataDir, items('c.pdf'), using(fork));
     expect(after.files).toEqual([{ name: 'c.pdf', text: 'ok' }]);
-    expect(state.spawned).toBe(2);
+    expect(state.forked).toBe(2);
   });
 });
 
@@ -155,17 +195,17 @@ describe('压缩炸弹预检', () => {
       mkdirSync(join(dataDir, 'attachments'));
       writeFileSync(join(dataDir, 'attachments', 'x.docx'), bomb);
       writeFileSync(join(dataDir, 'attachments', 'x.xlsx'), bomb);
-      const { spawn, state } = fakeSpawn([ECHO]);
+      const { fork, state } = fakeFork(['echo']);
       const loaded = await loadAttachments(
         dataDir,
         [
           { file: 'x.docx', name: 'x.docx' },
           { file: 'x.xlsx', name: 'x.xlsx' },
         ],
-        (deadline) => isolatedExtractor(deadline, spawn)
+        (deadline) => isolatedExtractor(deadline, { fork, memoryOf: quietMemory })
       );
       expect(loaded.rejected.map((r) => r.reason)).toEqual(['size', 'size']);
-      expect(state.spawned).toBe(0);
+      expect(state.forked).toBe(0);
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
     }
