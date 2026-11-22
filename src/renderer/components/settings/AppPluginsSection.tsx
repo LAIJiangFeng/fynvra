@@ -1,5 +1,14 @@
 import type { AppPluginStatus, AppPluginView } from '@shared/types/appPlugins';
-import { Blocks, Ellipsis, FolderPlus, Loader2, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Blocks,
+  Ellipsis,
+  FolderPlus,
+  Loader2,
+  RefreshCw,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,10 +24,12 @@ import { useT } from '@/i18n/I18nProvider';
 import { confirmDialog } from '@/lib/appDialog';
 import { useAppPluginsStore } from '@/stores/appPlugins';
 import { usePluginsStore } from '@/stores/plugins';
+import { AppPluginSettings } from './AppPluginSettings';
 import { InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
-import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
+import { PluginAuthor, PluginCard, PluginGrid, PluginHeader } from './PluginCard';
 import { MarketRevokedNote, MarketTierBadge, MarketUpdateButton } from './PluginMarket';
+import { InstalledReadme, PluginDetailTabs } from './PluginReadme';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -33,8 +44,11 @@ const STATUS_CLASS: Record<AppPluginStatus, string> = {
 export const hasAppPluginUi = (plugin: AppPluginView) =>
   plugin.enabled && plugin.permissions.includes('ui');
 
-/** 「已安装」最上面的「Fynvra 插件」区：后台常驻的插件，启停、更新、删除、打开设置页 */
-export function AppPluginsSection({ onOpen }: { onOpen: (id: string) => void }) {
+/** 打开详情页；settings 为 true 时直接打开「设置」标签 */
+type OpenAppPlugin = (id: string, settings?: boolean) => void;
+
+/** 「已安装」最上面的「Fynvra 插件」区：后台常驻的插件，启停、更新、删除、打开详情页 */
+export function AppPluginsSection({ onOpen }: { onOpen: OpenAppPlugin }) {
   const plugins = useAppPluginsStore((state) => state.plugins);
   const loaded = useAppPluginsStore((state) => state.loaded);
   const error = useAppPluginsStore((state) => state.error);
@@ -86,7 +100,13 @@ export function AppPluginsSection({ onOpen }: { onOpen: (id: string) => void }) 
       ) : (
         <PluginGrid>
           {plugins.map((plugin) => (
-            <AppPluginCard key={plugin.id} plugin={plugin} onOpen={onOpen} onStatus={setStatus} />
+            <AppPluginFace
+              key={plugin.id}
+              variant="card"
+              plugin={plugin}
+              onOpen={onOpen}
+              onStatus={setStatus}
+            />
           ))}
         </PluginGrid>
       )}
@@ -94,13 +114,60 @@ export function AppPluginsSection({ onOpen }: { onOpen: (id: string) => void }) 
   );
 }
 
-function AppPluginCard({
+/** Fynvra 插件详情：标题区 + 「使用说明」「设置」标签（设置放插件声明的设置页） */
+export function AppPluginDetail({
+  plugin,
+  settingsRequest,
+  onOpen,
+  onBack,
+}: {
+  plugin: AppPluginView;
+  settingsRequest: number;
+  onOpen: OpenAppPlugin;
+  onBack: () => void;
+}) {
+  const [status, setStatus] = useState<Status | null>(null);
+  const t = useT();
+  return (
+    <div className="grid gap-5">
+      <div>
+        <Button size="sm" variant="ghost" onClick={onBack}>
+          <ArrowLeft />
+          {t('settings.plugins.back')}
+        </Button>
+      </div>
+      <AppPluginFace variant="header" plugin={plugin} onOpen={onOpen} onStatus={setStatus} />
+      {status && (
+        <InlineMessage tone={status.tone} className="break-all">
+          {status.text}
+        </InlineMessage>
+      )}
+      <PluginDetailTabs
+        tabKey={`fynvra:${plugin.id}`}
+        settingsRequest={settingsRequest}
+        readme={<InstalledReadme kind="fynvra" id={plugin.id} description={plugin.description} />}
+        settings={
+          hasAppPluginUi(plugin) ? (
+            <AppPluginSettings key={plugin.id} id={plugin.id} />
+          ) : (
+            <p className="text-muted-foreground text-sm">{t('settings.plugins.app.noUi')}</p>
+          )
+        }
+      />
+    </div>
+  );
+}
+
+/** 卡片与详情页标题区共用：同一组徽标、简介、开关和「…」菜单，只换布局 */
+function AppPluginFace({
+  variant,
   plugin,
   onOpen,
   onStatus,
 }: {
+  variant: 'card' | 'header';
   plugin: AppPluginView;
-  onOpen: (id: string) => void;
+  onOpen: OpenAppPlugin;
   onStatus: (status: Status) => void;
 }) {
   const toggle = useAppPluginsStore((state) => state.toggle);
@@ -150,97 +217,94 @@ function AppPluginCard({
         ? t('settings.plugins.app.localDev')
         : (marketView?.author ?? t('settings.plugins.kinds.market'));
 
-  return (
-    <PluginCard
-      icon={Blocks}
-      name={plugin.name}
-      onOpen={hasUi ? () => onOpen(plugin.id) : undefined}
-      badges={
-        <>
-          {plugin.tier ? (
-            <MarketTierBadge tier={plugin.tier} />
-          ) : (
-            <Badge variant="outline">{t('settings.plugins.kinds.local')}</Badge>
-          )}
-          <span className={`text-xs ${STATUS_CLASS[plugin.status]}`}>
-            {t(`settings.plugins.app.status.${plugin.status}`)}
+  const face = {
+    icon: Blocks,
+    name: plugin.name,
+    badges: (
+      <>
+        {plugin.tier ? (
+          <MarketTierBadge tier={plugin.tier} />
+        ) : (
+          <Badge variant="outline">{t('settings.plugins.kinds.local')}</Badge>
+        )}
+        <span className={`text-xs ${STATUS_CLASS[plugin.status]}`}>
+          {t(`settings.plugins.app.status.${plugin.status}`)}
+        </span>
+        {newVersion && (
+          <span className="text-primary text-xs">
+            {t('settings.plugins.market.updateAvailable', { version: newVersion })}
           </span>
-          {newVersion && (
-            <span className="text-primary text-xs">
-              {t('settings.plugins.market.updateAvailable', { version: newVersion })}
-            </span>
-          )}
-        </>
-      }
-      description={
-        plugin.description ??
-        marketView?.description ??
-        t('settings.plugins.app.fallbackDescription', { version: plugin.version })
-      }
-      extra={
-        (plugin.lastError || plugin.revokedReason !== undefined) && (
-          <>
-            {plugin.lastError && (
-              <InlineMessage tone="error" className="break-all">
-                {plugin.lastError}
-              </InlineMessage>
-            )}
-            {plugin.revokedReason !== undefined && (
-              <MarketRevokedNote reason={plugin.revokedReason} />
-            )}
-          </>
-        )
-      }
-      author={<PluginAuthor name={authorName} note={plugin.version} />}
-      actions={
-        <>
-          {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}
-          <Switch
-            checked={plugin.enabled}
+        )}
+      </>
+    ),
+    description:
+      plugin.description ??
+      marketView?.description ??
+      t('settings.plugins.app.fallbackDescription', { version: plugin.version }),
+    extra: (plugin.lastError || plugin.revokedReason !== undefined) && (
+      <>
+        {plugin.lastError && (
+          <InlineMessage tone="error" className="break-all">
+            {plugin.lastError}
+          </InlineMessage>
+        )}
+        {plugin.revokedReason !== undefined && <MarketRevokedNote reason={plugin.revokedReason} />}
+      </>
+    ),
+    author: <PluginAuthor name={authorName} note={plugin.version} />,
+    actions: (
+      <>
+        {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}
+        <Switch
+          checked={plugin.enabled}
+          disabled={busy}
+          aria-label={t('common.enableItem', { name: plugin.name })}
+          onCheckedChange={async (enabled) => {
+            setBusy(true);
+            const result = await toggle(plugin.id, enabled);
+            setBusy(false);
+            if (!result.ok) onError(result.error);
+          }}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
             disabled={busy}
-            aria-label={t('common.enableItem', { name: plugin.name })}
-            onCheckedChange={async (enabled) => {
-              setBusy(true);
-              const result = await toggle(plugin.id, enabled);
-              setBusy(false);
-              if (!result.ok) onError(result.error);
-            }}
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={busy}
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t('settings.plugins.moreActions', { name: plugin.name })}
-                />
-              }
-            >
-              {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {hasUi && (
-                <DropdownMenuItem onClick={() => onOpen(plugin.id)}>
-                  <Settings2 />
-                  {t('settings.plugins.app.settings')}
-                </DropdownMenuItem>
-              )}
-              {plugin.source === 'local' && (
-                <DropdownMenuItem onClick={() => void runRecopy()}>
-                  <RefreshCw />
-                  {t('settings.plugins.app.recopy')}
-                </DropdownMenuItem>
-              )}
-              {(hasUi || plugin.source === 'local') && <DropdownMenuSeparator />}
-              <DropdownMenuItem variant="destructive" onClick={() => void runRemove()}>
-                <Trash2 />
-                {t('common.delete')}
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t('settings.plugins.moreActions', { name: plugin.name })}
+              />
+            }
+          >
+            {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {hasUi && (
+              <DropdownMenuItem onClick={() => onOpen(plugin.id, true)}>
+                <Settings2 />
+                {t('settings.plugins.app.settings')}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </>
-      }
-    />
+            )}
+            {plugin.source === 'local' && (
+              <DropdownMenuItem onClick={() => void runRecopy()}>
+                <RefreshCw />
+                {t('settings.plugins.app.recopy')}
+              </DropdownMenuItem>
+            )}
+            {(hasUi || plugin.source === 'local') && <DropdownMenuSeparator />}
+            <DropdownMenuItem variant="destructive" onClick={() => void runRemove()}>
+              <Trash2 />
+              {t('common.delete')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </>
+    ),
+  };
+  return variant === 'card' ? (
+    <PluginCard {...face} onOpen={() => onOpen(plugin.id)} />
+  ) : (
+    <PluginHeader {...face} />
   );
 }

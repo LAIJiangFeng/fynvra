@@ -4,6 +4,7 @@ import type {
   PluginEntry,
   PluginImportCandidateView,
   PluginProviderMap,
+  PluginReadmeResult,
   SetPluginManualProvidersInput,
   SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
@@ -83,6 +84,8 @@ export interface PluginsApi {
   /** 把已装的市场插件更新到最新的兼容版本；id 是 plugins.json 里的 id */
   marketUpdate(input: { id: string }): Promise<PluginActionResult>;
   marketReadme(input: { pluginId: string; version: string }): Promise<PluginMarketReadmeResult>;
+  /** 只读已装插件目录里的 README.md；单文件插件或没有 README 时 code 为 none */
+  readme(input: { id: string }): Promise<PluginReadmeResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -111,6 +114,7 @@ export function createPluginsApi(ipc: Invoker, subscribe: Subscribe): PluginsApi
     marketInstall: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_INSTALL, input),
     marketUpdate: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_UPDATE, input),
     marketReadme: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_README, input),
+    readme: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_README, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PLUGINS_CHANGED, () => callback()),
   };
 }

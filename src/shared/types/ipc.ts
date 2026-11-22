@@ -229,6 +229,8 @@ export const IPC_CHANNELS = {
   PLUGINS_MARKET_UPDATE: 'plugins:market-update',
   /** `{ pluginId, version }`：该版本的 README 文本 `{ text }` */
   PLUGINS_MARKET_README: 'plugins:market-readme',
+  /** `{ id }`（plugins.json 里的 id）：只读插件目录里的 README.md → `PluginReadmeResult` */
+  PLUGINS_README: 'plugins:readme',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 
@@ -255,6 +257,8 @@ export const IPC_CHANNELS = {
   APP_PLUGINS_OPEN_LINK: 'appplugins:open-link',
   /** Main → Renderer `{ id }`：该插件的设置页描述变了（含清掉） */
   APP_PLUGINS_UI_CHANGED: 'appplugins:ui-changed',
+  /** `{ id }`：只读插件包目录里的 README.md → `PluginReadmeResult` */
+  APP_PLUGINS_README: 'appplugins:readme',
 
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',

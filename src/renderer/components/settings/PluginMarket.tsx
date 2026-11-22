@@ -17,8 +17,6 @@ import {
   Store,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
-import type { Components } from 'react-markdown';
-import { Markdown } from '@/components/chat/Markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -46,6 +44,7 @@ import { useRolesStore } from '@/stores/roles';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { filterMarketPlugins, marketAction, marketNeedsRefresh } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
+import { ReadmeLoading, ReadmeView } from './PluginReadme';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -517,36 +516,10 @@ function MarketDetail({
   );
 }
 
-/**
- * README 用聊天的 Markdown 组件渲染。它的默认 img 会直接加载远程地址，这里把图片换成链接文字，
- * 不发起任何图片请求；原始 HTML 本来就不渲染。
- */
+/** 市场版本的 README：这里只负责加载，渲染交给 ReadmeView（图片不加载、只有 http(s) 链接可点） */
 function MarketReadme({ pluginId, version }: { pluginId: string; version: string }) {
   const marketReadme = usePluginsStore((state) => state.marketReadme);
   const [result, setResult] = useState<{ text: string } | { error: string } | null>(null);
-  const t = useT();
-  const components = useMemo<Components>(
-    () => ({
-      img: ({ src, alt }) => {
-        const label = t('settings.plugins.market.image', {
-          alt: alt || (typeof src === 'string' ? src : ''),
-        });
-        return typeof src === 'string' && src ? (
-          <a
-            href={src}
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-primary underline underline-offset-4"
-          >
-            {label}
-          </a>
-        ) : (
-          <span>{label}</span>
-        );
-      },
-    }),
-    [t]
-  );
 
   useEffect(() => {
     let active = true;
@@ -558,14 +531,7 @@ function MarketReadme({ pluginId, version }: { pluginId: string; version: string
     };
   }, [marketReadme, pluginId, version]);
 
-  if (!result) {
-    return (
-      <p className="flex items-center gap-2 text-muted-foreground text-sm">
-        <Loader2 className="size-4 animate-spin" />
-        {t('settings.plugins.market.readmeLoading')}
-      </p>
-    );
-  }
+  if (!result) return <ReadmeLoading />;
   if ('error' in result) {
     return (
       <InlineMessage tone="error" className="break-all">
@@ -573,11 +539,7 @@ function MarketReadme({ pluginId, version }: { pluginId: string; version: string
       </InlineMessage>
     );
   }
-  return (
-    <div className="rounded-lg border px-4 py-3">
-      <Markdown text={result.text} components={components} />
-    </div>
-  );
+  return <ReadmeView text={result.text} />;
 }
 
 /**

@@ -39,6 +39,21 @@ beforeAll(async () => {
   registerPluginHandlers();
 });
 
+describe('plugins:readme', () => {
+  it('入参收窄：只接受 { id }；未知 id 返回 not-found', async () => {
+    for (const raw of [undefined, 'demo', { id: '../x' }, { id: 'demo', path: '/etc' }]) {
+      expect(await call(IPC_CHANNELS.PLUGINS_README, raw)).toMatchObject({
+        ok: false,
+        code: 'invalid',
+      });
+    }
+    expect(await call(IPC_CHANNELS.PLUGINS_README, { id: 'missing-plugin' })).toMatchObject({
+      ok: false,
+      code: 'not-found',
+    });
+  });
+});
+
 describe('plugins 市场 IPC', () => {
   it('公钥为空时状态为 configured: false，且不发请求', async () => {
     expect(await call(IPC_CHANNELS.PLUGINS_MARKET_STATE)).toEqual({
