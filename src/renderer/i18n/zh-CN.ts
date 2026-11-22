@@ -1373,9 +1373,8 @@ export const zhCN = {
         refresh: '刷新',
         lastUpdated: '上次更新：{time}',
         neverUpdated: '尚未获取插件列表',
-        notConfigured: '插件市场尚未配置',
-        notConfiguredHint:
-          '这个版本还没有内置市场索引的签名公钥，无法验证插件列表的真伪，所以不会联网获取',
+        notConfigured: '插件市场暂未开放',
+        notConfiguredHint: '后续版本开放后，可以在这里浏览和安装插件',
         searchPlaceholder: '搜索名称、简介或标签',
         category: '分类',
         categories: {
