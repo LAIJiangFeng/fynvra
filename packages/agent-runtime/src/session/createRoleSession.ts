@@ -19,7 +19,12 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import type { Role, SessionProfile, ThinkingLevel } from '@fynvra/core';
+import {
+  pickRestrictedEnv,
+  type Role,
+  type SessionProfile,
+  type ThinkingLevel,
+} from '@fynvra/core';
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
 import { filterSensitiveResults } from '../approval/profilePolicy';
 import { type ExecFn, nodeExec } from '../exec';
@@ -311,7 +316,13 @@ function selectTools(
   settings: SettingsManager,
   writePlan: boolean
 ): { customTools: ToolDefinition[]; noTools?: 'builtin' } {
-  const { role, cwd, commandEnv } = options;
+  const { role, cwd } = options;
+  // 受限会话：所有命令子进程先经过宿主的 commandEnv（如有），再只留白名单变量，去掉密钥
+  const commandEnv =
+    options.profile === 'restricted'
+      ? (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+          pickRestrictedEnv(options.commandEnv ? options.commandEnv(env) : env)
+      : options.commandEnv;
   const exec =
     options.exec ??
     (commandEnv
@@ -329,7 +340,7 @@ function selectTools(
   const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
   // 所有工具策略都有 web_fetch；代理与命令一致，取会话加载时的 commandEnv 快照
   const webFetch = createWebFetchTool({
-    proxyEnv: () => (commandEnv ? commandEnv(process.env) : process.env),
+    proxyEnv: () => (options.commandEnv ? options.commandEnv(process.env) : process.env),
     ...(options.webFetch?.allowLoopback === true ? { allowLoopback: true } : {}),
   });
   // triage 优先于角色的工具策略：只读文件（不含 git_readonly）与 triage_report

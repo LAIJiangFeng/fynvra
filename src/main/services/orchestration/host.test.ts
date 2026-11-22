@@ -608,6 +608,15 @@ describe('reviewDiff 与 runChecks', () => {
     );
   });
 
+  it('runChecks：受限协调者把 restricted 传给执行器，普通协调者不传', async () => {
+    host = makeHost({ restricted: true });
+    const first = await dispatch();
+    await host.runChecks({ dispatchId: first.dispatch.id, command: 'pnpm lint' });
+    expect(runChecks).toHaveBeenLastCalledWith(WORKTREE_PATH, 'pnpm lint', undefined, {
+      restricted: true,
+    });
+  });
+
   it('runChecks 抛异常时返回错误结果', async () => {
     const first = await dispatch();
     runChecks.mockRejectedValueOnce(new Error('spawn failed'));

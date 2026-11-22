@@ -569,6 +569,55 @@ describe('command environment injection through real pi tools', () => {
       });
     }
   );
+  it.each(shellTools)(
+    'strips secrets from %s subprocess env in a restricted session only',
+    async (name) => {
+      const fixture = await localBashFixture();
+      await writeFile(
+        path.join(workdir, 'package.json'),
+        JSON.stringify({ name: 'probe', private: true, scripts: { lint: 'node probe.cjs' } })
+      );
+      await writeFile(
+        path.join(workdir, 'probe.cjs'),
+        "console.log('token=' + (process.env.GITHUB_TOKEN ?? 'none'));"
+      );
+      vi.stubEnv('GITHUB_TOKEN', 'fake-token');
+      try {
+        for (const profile of ['restricted', undefined] as const) {
+          const { session } = await open({
+            role: role({ approvalMode: 'full' }),
+            ...(profile ? { profile } : {}),
+            settingsManager: SettingsManager.inMemory({
+              shellPath: fixture.shellPath,
+              retry: { enabled: false },
+              compaction: { enabled: false },
+            }),
+          });
+          session.setActiveToolsByName(['bash', 'powershell']);
+          const events: FynvraSessionEvent[] = [];
+          const subscription = subscribeNormalized(session, (event) => events.push(event));
+          faux.setResponses([
+            fauxAssistantMessage(fauxToolCall(name, { command: 'pnpm lint' }), {
+              stopReason: 'toolUse',
+            }),
+            fauxAssistantMessage('done'),
+          ]);
+          await session.prompt('Run lint.');
+          subscription.unsubscribe();
+          const end = events.find((event) => event.type === 'tool_end');
+          // 只比较探针输出的那一行，不打印完整环境变量
+          const line = (end?.type === 'tool_end' ? String(end.output) : '').match(/token=\S+/)?.[0];
+          expect(line).toBe(profile ? 'token=none' : 'token=fake-token');
+        }
+      } finally {
+        vi.unstubAllEnvs();
+        // workdir 在用例间共用：其他用例断言 package.json 不存在
+        await rm(path.join(workdir, 'package.json'), { force: true });
+        await rm(path.join(workdir, 'probe.cjs'), { force: true });
+      }
+    },
+    60_000
+  );
   it.each(['readonly', 'orchestrator'] as const)(
     'keeps %s permissions and injects git_readonly env',
     async (tools) => {
@@ -1011,8 +1060,11 @@ describe('createRoleSession restricted coordinator', () => {
     }
     const [restricted, normal] = prompts;
     expect(restricted).toContain(RESTRICTED_COORDINATOR_PROMPT.trim());
+    // pnpm test 每个任务最多申请一次，被拒或超时不重试，直接用 open_pull_request 交付
+    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/request `pnpm test`.*at most once per task/);
+    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/do not retry; deliver with open_pull_request/);
     expect(RESTRICTED_COORDINATOR_PROMPT).toContain(
-      "unit tests and the build run in the pull request's CI checks"
+      "the pull request's CI checks run the tests and the build"
     );
     expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
     expect(normal).not.toContain('# Restricted session');

@@ -74,11 +74,12 @@ import type { WorkflowEngine } from './workflowEngine';
 import { cleanupStatus, mergedCleanupBlocker, worktreeGone } from './worktreeCleanup';
 import { isInsideDirectory } from './worktreesRoot';
 
-/** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。 */
+/** 在 worktree 里执行检查命令（经 shell）；非零退出码照常返回。`restricted` 时命令只带白名单环境变量。 */
 export type RunChecksFn = (
   cwd: string,
   command: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: { restricted?: boolean }
 ) => Promise<{ exitCode: number; output: string; durationMs: number }>;
 
 /**
@@ -791,7 +792,10 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (cwd === undefined) return fail(cleanedUp(found.dispatch));
     const verdict = checkCommand(input.command, policy);
     if (!verdict.ok) return fail(verdict.error);
-    const result = await deps.runChecks(cwd, verdict.command, signal);
+    // 值班协调者的检查命令只带白名单环境变量；普通协调者不变
+    const result = deps.restricted
+      ? await deps.runChecks(cwd, verdict.command, signal, { restricted: true })
+      : await deps.runChecks(cwd, verdict.command, signal);
     if (result.exitCode === 0) {
       const passed = passedChecks.get(found.dispatch.id) ?? [];
       if (!passed.includes(verdict.command)) passed.push(verdict.command);

@@ -65,18 +65,22 @@ export function pullRequestInputError(input: {
 
 export const PR_BODY_CI_NOTE =
   '- 单元测试与构建未在本机运行，由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果';
+/** 值班任务经维护者批准在本机跑过 `pnpm test` 时的说明 */
+export const PR_BODY_BUILD_CI_NOTE = '- 构建由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果';
 
 export function buildPullRequestBody(input: {
   taskId: string;
   summary: string;
   files: readonly string[];
   checks: readonly string[];
-  /** 受限协调者（值班）派出的任务：本机只跑 typecheck / lint，测试与构建交给 PR 的 Checks。 */
+  /** 受限协调者（值班）派出的任务：本机只跑 typecheck / lint（维护者批准时加 pnpm test），其余交给 PR 的 Checks。 */
   restricted?: boolean;
 }): string {
   const { files, checks } = input;
   const verified = checks.map((command) => `- \`${command}\``);
-  if (input.restricted) verified.push(PR_BODY_CI_NOTE);
+  if (input.restricted) {
+    verified.push(checks.includes('pnpm test') ? PR_BODY_BUILD_CI_NOTE : PR_BODY_CI_NOTE);
+  }
   const listed = files.slice(0, PR_BODY_MAX_FILES).map((file) => `- \`${file}\``);
   if (files.length > PR_BODY_MAX_FILES) listed.push(`…另有 ${files.length - PR_BODY_MAX_FILES} 个`);
   const sections = [

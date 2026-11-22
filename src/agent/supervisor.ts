@@ -264,7 +264,7 @@ export class SessionSupervisor {
     );
     const withdraw = () => this.#approvals.cancel(requestId);
     signal?.addEventListener('abort', withdraw, { once: true });
-    const { toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } = request;
+    const { toolCallId, toolName, kind, title, detail, protectedAction, note, expiresAt } = request;
     try {
       this.#post({
         type: 'approval-request',
@@ -277,6 +277,7 @@ export class SessionSupervisor {
           title,
           detail,
           ...(protectedAction ? { protectedAction } : {}),
+          ...(note ? { note } : {}),
           expiresAt,
         },
       });

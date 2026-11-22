@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPullRequestBody,
   linkOrSubmodulePaths,
+  PR_BODY_BUILD_CI_NOTE,
   PR_BODY_CI_NOTE,
   pushGateError,
 } from './pullRequest';
@@ -26,6 +27,14 @@ describe('buildPullRequestBody 的「验证」段', () => {
     expect(verify(buildPullRequestBody({ ...base, checks: [], restricted: true }))).toBe(
       `${PR_BODY_CI_NOTE}\n`
     );
+  });
+
+  it('受限任务经批准跑过 pnpm test：只说构建由 Checks 负责', () => {
+    const checks = ['pnpm typecheck && pnpm lint', 'pnpm test'];
+    expect(verify(buildPullRequestBody({ ...base, checks, restricted: true }))).toBe(
+      `- \`pnpm typecheck && pnpm lint\`\n- \`pnpm test\`\n${PR_BODY_BUILD_CI_NOTE}\n`
+    );
+    expect(PR_BODY_BUILD_CI_NOTE).toBe('- 构建由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果');
   });
 });
 

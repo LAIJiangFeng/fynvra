@@ -1,6 +1,9 @@
 import { isProtectedPath, isSensitivePath, matchesSensitiveName, normalizeRepoPath } from './paths';
 
-export type RestrictedCommandResult = { ok: true } | { ok: false; reason: string };
+/** `needsApproval`：白名单放行，但必须由维护者在桌面上批准（目前只有 checks 模式的 `pnpm test`） */
+export type RestrictedCommandResult =
+  | { ok: true; needsApproval?: true }
+  | { ok: false; reason: string };
 export interface RestrictedCommandOptions {
   mode: 'worker' | 'checks';
 }
@@ -103,7 +106,10 @@ const ADD_FORBIDDEN_LONG = ['--edit', '--interactive', '--patch'];
 // commit 中这些选项的下一个词是提交信息，不能当作 -n 之类的开关或路径
 const COMMIT_MESSAGE_OPTIONS = new Set(['-m', '--message']);
 
-const CHECKS_HINT = 'Only "pnpm typecheck" and "pnpm lint" (no extra arguments) are allowed.';
+const CHECKS_HINT =
+  'Only "pnpm typecheck" and "pnpm lint" (no extra arguments) are allowed, plus "pnpm test" on its own with maintainer approval.';
+const TEST_ALONE =
+  '"pnpm test" must be run on its own, without arguments, and needs the maintainer\'s approval.';
 const WORKER_HINT =
   'Allowed: pnpm typecheck, pnpm lint, pnpm install --frozen-lockfile --offline --ignore-scripts, ' +
   'git status|diff|log|show|add|commit|rm|mv.';
@@ -113,6 +119,8 @@ function checkPnpm(
   mode: RestrictedCommandOptions['mode']
 ): RestrictedCommandResult {
   if (args.length === 1 && CHECK_SCRIPTS.has(args[0] as string)) return { ok: true };
+  // 测试代码由 AI 改过，在本机跑等于执行任意代码：只给协调者，单独运行并由维护者批准
+  if (mode === 'checks' && args[0] === 'test') return deny(TEST_ALONE);
   if (mode === 'worker' && args[0] === 'install') {
     const flags = args.slice(1);
     if (flags.length === INSTALL_FLAGS.length && INSTALL_FLAGS.every((f) => flags.includes(f))) {
@@ -272,6 +280,10 @@ export function checkRestrictedCommand(
 ): RestrictedCommandResult {
   const tokenized = tokenize(command);
   if (!tokenized.ok) return tokenized;
+  const [only, ...others] = tokenized.segments;
+  if (options.mode === 'checks' && others.length === 0 && only?.join(' ') === 'pnpm test') {
+    return { ok: true, needsApproval: true };
+  }
   for (const [program, ...args] of tokenized.segments) {
     let result: RestrictedCommandResult;
     if (program === 'pnpm') result = checkPnpm(args, options.mode);

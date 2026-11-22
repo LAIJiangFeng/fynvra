@@ -11,6 +11,7 @@ export * from './roles/JsonFileRoleStore';
 export * from './roles/parseRole';
 export * from './security/paths';
 export * from './security/restrictedCommand';
+export * from './security/restrictedEnv';
 export type * from './types';
 export * from './workflows/graph';
 export * from './workflows/taskWorkflow';

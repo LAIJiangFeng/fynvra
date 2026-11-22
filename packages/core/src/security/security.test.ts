@@ -254,8 +254,31 @@ describe('checkRestrictedCommand', () => {
     'git status',
     'pnpm install --frozen-lockfile --offline --ignore-scripts',
     'pnpm lint --fix',
-    'pnpm test',
   ])('checks 拒绝 %s', (command) => {
     expect(checkRestrictedCommand(command, { mode: 'checks' }).ok).toBe(false);
+  });
+
+  it('checks 里单独的 pnpm test 放行但需要维护者批准', () => {
+    expect(checkRestrictedCommand('pnpm test', { mode: 'checks' })).toEqual({
+      ok: true,
+      needsApproval: true,
+    });
+  });
+
+  it.each([
+    'pnpm test --run',
+    'pnpm test src/a.test.ts',
+    'pnpm typecheck && pnpm test',
+    'pnpm test && pnpm lint',
+    'pnpm test && pnpm test',
+  ])('checks 拒绝带参数或串联的 %s', (command) => {
+    expect(checkRestrictedCommand(command, { mode: 'checks' })).toEqual({
+      ok: false,
+      reason: expect.stringContaining('on its own, without arguments'),
+    });
+  });
+
+  it('worker 始终不能跑测试', () => {
+    expect(checkRestrictedCommand('pnpm test', { mode: 'worker' }).ok).toBe(false);
   });
 });
