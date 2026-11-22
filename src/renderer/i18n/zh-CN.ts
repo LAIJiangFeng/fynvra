@@ -10,6 +10,16 @@ export const zhCN = {
     limits: '标签存储已达上限（64 个标签；草稿最多 256 KiB），请关闭标签或缩小草稿，文本未被截断',
     corrupt: '损坏的标签快照已隔离，原文件保留在 workspace-ui 目录',
     removeDrafts: '移除此工作区及保存的标签和未保存草稿？磁盘文件会保留',
+    close: '关闭',
+    closeOthers: '关闭其他',
+    closeLeft: '关闭左侧',
+    closeRight: '关闭右侧',
+    bulkCloseTitle: '关闭标签',
+    bulkCloseHint:
+      '还有 {files} 个文件没保存、{terminals} 个终端正在运行。放弃未保存的修改并全部关闭？',
+    bulkCloseFilesHint: '还有 {files} 个文件没保存。放弃修改并关闭？',
+    bulkCloseTerminalsHint: '还有 {terminals} 个终端正在运行。结束它们并关闭？',
+    closeAll: '全部关闭',
   },
   terminals: {
     restored: '已恢复历史，新终端会话',

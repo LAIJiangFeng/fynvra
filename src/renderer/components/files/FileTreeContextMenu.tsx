@@ -76,11 +76,7 @@ export function TreeContextMenu({
       candidates[(position + delta + candidates.length * 2) % candidates.length] ?? candidates[0];
     setActive(next);
     requestAnimationFrame(() =>
-      (
-        menuRef.current?.querySelectorAll('[role="menuitem"]')[candidates.indexOf(next)] as
-          | HTMLElement
-          | undefined
-      )?.focus()
+      menuRef.current?.querySelector<HTMLElement>(`[data-index="${next}"]`)?.focus()
     );
   };
 
@@ -115,8 +111,11 @@ export function TreeContextMenu({
             key={item.id}
             type="button"
             role="menuitem"
+            data-index={index}
+            disabled={!item.onSelect}
+            aria-disabled={!item.onSelect || undefined}
             className={cn(
-              'flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent',
+              'flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs outline-none hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50',
               item.danger && 'text-destructive'
             )}
             onClick={() => {
