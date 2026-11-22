@@ -215,7 +215,8 @@ describe('压缩炸弹预检', () => {
     }
   });
 
-  it('条目数超过上限的拒绝，正常 zip 放行', () => {
+  // 构造超上限条目数的 zip 在全量并行负载下可能超过默认 5 秒
+  it('条目数超过上限的拒绝，正常 zip 放行', { timeout: 30_000 }, () => {
     const many: Record<string, Uint8Array> = {};
     for (let i = 0; i <= MAX_ZIP_ENTRIES; i++) many[`f${i}.xml`] = new Uint8Array(0);
     expect(() => checkZipBomb(zipSync(many))).toThrow(ChatFileTooLargeError);
