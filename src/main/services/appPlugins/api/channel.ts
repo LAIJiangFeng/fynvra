@@ -1,4 +1,5 @@
 // 渠道宿主 API（ARCHITECTURE §7.12「渠道 API」）：全部需要 channel 权限；归属核对与安全规则在 channels/host.ts。
+import { isThinkingLevel } from '@fynvra/core';
 import { asRecord } from '@shared/guards';
 import type {
   ChannelAttachment,
@@ -59,11 +60,17 @@ function parseAttachments(raw: unknown): ChannelAttachment[] | null {
   return items;
 }
 
-/** 模型引用：只含非空且不超过 200 字符的 providerId 与 modelId */
+/** 模型引用：非空且不超过 200 字符的 providerId 与 modelId，可选合法的 thinking（模型是否支持由宿主校验） */
 function parseModelRef(raw: unknown): ChannelModelRef | null {
-  const record = only(raw, ['providerId', 'modelId']);
+  const record = only(raw, ['providerId', 'modelId', 'thinking']);
   if (!record || !isId(record.providerId) || !isId(record.modelId)) return null;
-  return { providerId: record.providerId, modelId: record.modelId };
+  const { thinking } = record;
+  if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
+  return {
+    providerId: record.providerId,
+    modelId: record.modelId,
+    ...(thinking !== undefined ? { thinking } : {}),
+  };
 }
 
 /** 只有一个 id 字段的入参 */

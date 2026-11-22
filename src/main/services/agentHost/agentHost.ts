@@ -239,6 +239,8 @@ export interface AgentHostService extends AgentHost {
   ): Promise<IpcResult<{ session: SessionSummary }>>;
   /** 档位会话的默认模型（同 createProfileSession 不指定模型时）：角色配的模型，没配用解析器默认 */
   profileDefaultModel(profile: SessionProfile): Promise<IpcResult<{ model: SessionModelRef }>>;
+  /** 模型是否支持该思考档位（不支持推理的模型只接受 off）；渠道 API 指定档位前校验用 */
+  checkThinking(ref: ModelRef, thinking: ThinkingLevel): Promise<IpcResult<object>>;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -2322,6 +2324,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     },
     setModel,
     modelOptions,
+    checkThinking,
     setApprovalMode,
     setPlanMode,
     setConfirmDangerousActions,

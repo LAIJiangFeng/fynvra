@@ -24,16 +24,29 @@ export type Unsubscribe = () => void;
 /** 渠道会话的档位：只读分诊 triage，或受限值班 restricted */
 export type ChannelProfile = 'triage' | 'restricted';
 
-/** 渠道会话用的模型引用：设置里的服务 id 与模型 id（各为 1–200 字符） */
+/** 思考档位；须与 @fynvra/core 的 ThinkingLevel 保持一致（本文件可被插件整份照抄，不 import core） */
+export type ChannelThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
+ * 渠道会话用的模型引用：设置里的服务 id 与模型 id（各为 1–200 字符）。
+ * thinking 可选：须在该模型的 thinkingLevels 里（不支持推理的模型只接受 off），否则报错；缺省用模型或角色的默认档位。
+ */
 export interface ChannelModelRef {
   providerId: string;
   modelId: string;
+  thinking?: ChannelThinkingLevel;
 }
 
 /** channel.models() 的一项：只有显示用字段，不含 key、baseUrl 等配置；label 是显示名，没有时为 modelId */
-export interface ChannelModel extends ChannelModelRef {
+export interface ChannelModel {
+  providerId: string;
+  modelId: string;
   providerName: string;
   label: string;
+  /** 模型支持的思考档位；空数组表示不支持推理（只能 off） */
+  thinkingLevels: ChannelThinkingLevel[];
+  /** 模型的默认档位，thinkingLevels 非空时才有 */
+  defaultThinking?: ChannelThinkingLevel;
 }
 
 /** 会话状态；已归档为 archived，会话已被用户删掉为 missing */

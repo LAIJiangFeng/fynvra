@@ -3,7 +3,13 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OrchestrationHost, WorkerHost } from '@fynvra/agent-runtime';
-import { BUILTIN_ROLES, getBuiltinRole, JsonFileRoleStore, type Role } from '@fynvra/core';
+import {
+  BUILTIN_ROLES,
+  getBuiltinRole,
+  JsonFileRoleStore,
+  type Role,
+  type ThinkingLevel,
+} from '@fynvra/core';
 import type {
   AgentApprovalRequest,
   AgentCommand,
@@ -2701,6 +2707,38 @@ describe('createAgentHost model choice', () => {
         model: plain.session.model,
       });
     }
+  });
+
+  it('档位会话：带思考档位时记录里有它；checkThinking 只放行模型支持的档位', async () => {
+    const env = modelEnv();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const ref = { providerId: 'openai', modelId: 'gpt-5.5' };
+    // 假 worker 要回答 describe-models（做法同 modelOptions）
+    const check = async (thinking: ThinkingLevel) => {
+      const pending = env.host.checkThinking(ref, thinking);
+      await flush();
+      const command = env.sent('describe-models').at(-1);
+      if (command?.type === 'describe-models') {
+        env.worker().emit({
+          type: 'models-described',
+          requestId: command.requestId,
+          result: { ok: true, models: command.models.map(describeLikePi) },
+        });
+      }
+      return pending;
+    };
+    expect(await check('high')).toEqual({ ok: true });
+    expect((await check('max')).ok).toBe(false);
+    const created = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'triage',
+      cwd: env.workspace.repoPath,
+      model: { ...ref, thinking: 'high' },
+    });
+    if (!created.ok) throw new Error(created.error);
+    expect(env.store.get(created.session.id)?.model).toMatchObject({ ...ref, thinking: 'high' });
+    await env.host.setModel({ sessionId: created.session.id, model: { ...ref, thinking: 'low' } });
+    expect(env.store.get(created.session.id)?.model).toMatchObject({ ...ref, thinking: 'low' });
   });
 
   it('restricted 协调者派出的 worker 跟主会话模型，普通协调者仍优先角色模型', async () => {

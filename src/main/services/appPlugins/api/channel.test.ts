@@ -101,6 +101,19 @@ describe('channel API', () => {
       ok: true,
     });
     expect(rpc.host?.setSessionModel).toHaveBeenCalledWith('p.a', 's1', model);
+
+    const withThinking = { ...model, thinking: 'high' };
+    expect(
+      await rpc.request('channel.createSession', { ...create, model: withThinking })
+    ).toMatchObject({ ok: true });
+    expect(rpc.host?.createSession).toHaveBeenLastCalledWith('p.a', {
+      ...create,
+      model: withThinking,
+    });
+    expect(
+      await rpc.request('channel.setSessionModel', { sessionId: 's1', model: withThinking })
+    ).toMatchObject({ ok: true });
+    expect(rpc.host?.setSessionModel).toHaveBeenLastCalledWith('p.a', 's1', withThinking);
   });
 
   it('model 不合法、入参有多余键时拒绝', async () => {
@@ -110,7 +123,9 @@ describe('channel API', () => {
       { providerId: '', modelId: 'm' },
       { providerId: 'p', modelId: 'x'.repeat(201) },
       { providerId: 'p' },
-      { providerId: 'p', modelId: 'm', thinking: 'high' },
+      { providerId: 'p', modelId: 'm', thinking: 'turbo' },
+      { providerId: 'p', modelId: 'm', thinking: null },
+      { providerId: 'p', modelId: 'm', thinking: 'high', extra: 1 },
       'p/m',
       null,
     ];

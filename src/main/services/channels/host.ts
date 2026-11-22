@@ -36,6 +36,7 @@ export interface ChannelHostDeps {
     | 'modelOptions'
     | 'setModel'
     | 'profileDefaultModel'
+    | 'checkThinking'
   >;
   workspaces: { get(id: string): Workspace | undefined };
   snapshot(
@@ -195,6 +196,20 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
       : { ok: true, text: sanitized };
   };
 
+  /** 插件指定了思考档位时先核对模型支持它；不支持就报错，不静默去掉 */
+  const checkModelThinking = async (model?: ChannelModelRef) => {
+    if (!model?.thinking) return;
+    const checked = await agentHost.checkThinking(model, model.thinking);
+    if (!checked.ok) await fail(checked.error);
+  };
+
+  /** 只取服务、模型与可选档位交给 agentHost */
+  const modelRefOf = ({ providerId, modelId, thinking }: ChannelModelRef) => ({
+    providerId,
+    modelId,
+    ...(thinking ? { thinking } : {}),
+  });
+
   const pushStatus = (sessionId: string) => {
     const owner = store.ownerOf(sessionId);
     if (!owner) return;
@@ -220,6 +235,7 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
       const workspace = deps.workspaces.get(workspaceId);
       if (!workspace) throw new Error('workspace not found');
       if (workspace.vcs !== 'git') throw new Error('workspace is not a git repository');
+      await checkModelThinking(model);
       const ensured = await deps.cleanCheckout.ensure(workspace);
       if (!ensured.ok) return fail(`clean checkout failed: ${ensured.error}`);
       const created = await agentHost.createProfileSession({
@@ -227,8 +243,8 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
         profile,
         cwd: ensured.path,
         title,
-        // 只带服务与模型，思考档位用默认；不可用时报错，退回由插件决定
-        ...(model ? { model: { providerId: model.providerId, modelId: model.modelId } } : {}),
+        // 不带 thinking 时用模型默认档位；不可用时报错，退回由插件决定
+        ...(model ? { model: modelRefOf(model) } : {}),
       });
       if (!created.ok) return fail(created.error);
       const sessionId = created.session.id;
@@ -247,6 +263,8 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
             providerName: provider.name,
             modelId: entry.id,
             label: entry.name || entry.id,
+            thinkingLevels: entry.thinkingLevels,
+            ...(entry.defaultThinking ? { defaultThinking: entry.defaultThinking } : {}),
           }))
         ),
       };
@@ -255,7 +273,8 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
       ownSession(pluginId, sessionId);
       const session = agentHost.get(sessionId);
       if (!session) throw new Error('session not found');
-      let target = model ? { providerId: model.providerId, modelId: model.modelId } : undefined;
+      await checkModelThinking(model ?? undefined);
+      let target = model ? modelRefOf(model) : undefined;
       if (!target) {
         // 渠道会话都有档位；万一没有按 restricted 取默认
         const fallback = await agentHost.profileDefaultModel(session.profile ?? 'restricted');
