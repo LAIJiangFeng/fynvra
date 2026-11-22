@@ -18,6 +18,8 @@ export const en: MessagesShape<typeof zhCN> = {
     bulkCloseTitle: 'Close tabs',
     bulkCloseHint:
       '{files} file(s) have unsaved changes and {terminals} terminal(s) are still running. Discard unsaved changes and close them all?',
+    bulkCloseFilesHint: '{files} file(s) have unsaved changes. Discard the changes and close?',
+    bulkCloseTerminalsHint: '{terminals} terminal(s) are still running. End them and close?',
     closeAll: 'Close all',
   },
   terminals: {

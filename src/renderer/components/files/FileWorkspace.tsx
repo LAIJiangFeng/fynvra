@@ -384,10 +384,17 @@ export function FileWorkspace({
           <DialogHeader>
             <DialogTitle>{t('workspaceTabs.bulkCloseTitle')}</DialogTitle>
             <DialogDescription>
-              {t('workspaceTabs.bulkCloseHint', {
-                files: bulk?.files.length ?? 0,
-                terminals: bulk?.terminals.length ?? 0,
-              })}
+              {t(
+                !bulk?.terminals.length
+                  ? 'workspaceTabs.bulkCloseFilesHint'
+                  : !bulk.files.length
+                    ? 'workspaceTabs.bulkCloseTerminalsHint'
+                    : 'workspaceTabs.bulkCloseHint',
+                {
+                  files: bulk?.files.length ?? 0,
+                  terminals: bulk?.terminals.length ?? 0,
+                }
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

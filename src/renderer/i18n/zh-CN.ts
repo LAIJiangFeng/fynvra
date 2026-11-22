@@ -17,6 +17,8 @@ export const zhCN = {
     bulkCloseTitle: '关闭标签',
     bulkCloseHint:
       '还有 {files} 个文件没保存、{terminals} 个终端正在运行。放弃未保存的修改并全部关闭？',
+    bulkCloseFilesHint: '还有 {files} 个文件没保存。放弃修改并关闭？',
+    bulkCloseTerminalsHint: '还有 {terminals} 个终端正在运行。结束它们并关闭？',
     closeAll: '全部关闭',
   },
   terminals: {
