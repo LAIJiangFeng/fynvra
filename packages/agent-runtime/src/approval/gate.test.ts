@@ -520,6 +520,23 @@ describe('fynvra_config', () => {
     expect(supervised.request).not.toHaveBeenCalled();
   });
 
+  it('shows role id, name, tools and approval mode for role_upsert', async () => {
+    const env = setup('supervised');
+    await env.gate.check({
+      toolCallId: 'c-role-config',
+      toolName: 'fynvra_config',
+      input: {
+        action: 'role_upsert',
+        role_config: { id: 'qa', name: 'QA', tools: 'readonly', approvalMode: 'full' },
+      },
+    });
+    expect(env.requests[0]).toMatchObject({
+      kind: 'command',
+      title: 'Change Fynvra settings',
+      detail: 'Save role qa "QA" (tools: readonly, approval: full)',
+    });
+  });
+
   it('never puts MCP env values into the approval detail', async () => {
     const env = setup('supervised', 'deny');
     const block = await env.gate.check({
