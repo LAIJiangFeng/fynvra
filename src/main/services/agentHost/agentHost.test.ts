@@ -2672,6 +2672,69 @@ describe('createAgentHost model choice', () => {
     expect(env.remembered).toHaveLength(remembered);
   });
 
+  it('档位会话：指定模型生效、不可用时报错；默认模型同不指定时', async () => {
+    const env = modelEnv();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const create = (model?: SessionModelRef) =>
+      env.host.createProfileSession({
+        workspaceId: 'ws-1',
+        profile: 'triage',
+        cwd: env.workspace.repoPath,
+        ...(model ? { model } : {}),
+      });
+    expect(await create({ providerId: 'openai', modelId: 'gpt-5.5' })).toMatchObject({
+      ok: true,
+      session: { model: { providerId: 'openai', modelId: 'gpt-5.5' } },
+    });
+    for (const model of [
+      { providerId: 'old-openai', modelId: 'gpt-5.5' },
+      { providerId: 'keyless', modelId: 'gpt-5.5' },
+      { providerId: 'openai', modelId: 'nope' },
+    ]) {
+      expect((await create(model)).ok).toBe(false);
+    }
+    const plain = await create();
+    if (!plain.ok) throw new Error(plain.error);
+    for (const profile of ['triage', 'restricted'] as const) {
+      expect(await env.host.profileDefaultModel(profile)).toEqual({
+        ok: true,
+        model: plain.session.model,
+      });
+    }
+  });
+
+  it('restricted 协调者派出的 worker 跟主会话模型，普通协调者仍优先角色模型', async () => {
+    const env = modelEnv();
+    mkdirSync(env.workspace.repoPath, { recursive: true });
+    const duty = await env.host.createProfileSession({
+      workspaceId: 'ws-1',
+      profile: 'restricted',
+      cwd: env.workspace.repoPath,
+      model: { providerId: 'openai', modelId: 'gpt-5.5' },
+    });
+    if (!duty.ok) throw new Error(duty.error);
+    const plain = await env.host.create({ workspaceId: 'ws-1', roleId: 'orchestrator' });
+    if (!plain.ok) throw new Error(plain.error);
+    let parent = duty.session.id;
+    env.host.setCoordinatorLookup(() => parent);
+    const launcher = env.host.implementsLauncher();
+    const dispatch = async (dispatchId: string) => {
+      const created = await launcher.createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId,
+        roleId: 'architect',
+        cwd: '/worktrees/ws-1/a',
+        brief: '# A',
+      });
+      if (!created.ok) throw new Error(created.error);
+      return env.store.get(created.sessionId)?.model;
+    };
+    expect(await dispatch('dsp_1')).toEqual({ providerId: 'openai', modelId: 'gpt-5.5' });
+    parent = plain.session.id;
+    expect(await dispatch('dsp_2')).toEqual(architect.model);
+  });
+
   it('lets dispatch_task pick the model and thinking level over the role and the coordinator', async () => {
     const astra: StoredProvider = {
       ...openai,

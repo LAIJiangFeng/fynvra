@@ -87,7 +87,11 @@ export function startPluginHost(options: PluginHostOptions): void {
       net: { proxyEnv: () => request('net.proxyEnv') as Promise<never> },
       workspaces: { list: () => request('workspaces.list') as Promise<never> },
       channel: {
+        models: () => request('channel.models') as Promise<never>,
         createSession: (input) => request('channel.createSession', input) as Promise<never>,
+        setSessionModel: async (input) => {
+          await request('channel.setSessionModel', input);
+        },
         refreshCheckout: async (input) => {
           await request('channel.refreshCheckout', input);
         },

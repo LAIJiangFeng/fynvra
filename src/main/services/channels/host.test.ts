@@ -32,7 +32,7 @@ const WS_GIT: Workspace = {
 } as Workspace;
 const WS_DIR: Workspace = { id: 'ws2', name: 'Dir', repoPath: 'C:/dir', vcs: 'none' } as Workspace;
 
-type FakeSession = { id: string; status: string; archivedAt?: number };
+type FakeSession = { id: string; status: string; archivedAt?: number; profile?: string };
 
 function harness(patch: Partial<ChannelHostDeps> = {}) {
   const sessions = new Map<string, FakeSession>();
@@ -44,10 +44,36 @@ function harness(patch: Partial<ChannelHostDeps> = {}) {
     createProfileSession: vi.fn(async (input: unknown) => {
       created.push(input);
       const id = `s${nextId++}`;
-      sessions.set(id, { id, status: 'idle' });
+      sessions.set(id, { id, status: 'idle', profile: (input as { profile: string }).profile });
       return { ok: true as const, session: { id } };
     }),
     promptWhenIdle: vi.fn(async () => ({ ok: true as const, delivered: true })),
+    modelOptions: vi.fn(async () => ({
+      ok: true as const,
+      providers: [
+        {
+          providerId: 'p1',
+          name: 'Prov',
+          api: 'openai-completions',
+          apiKey: 'sk-secret',
+          baseUrl: 'https://x',
+          models: [
+            { id: 'm1', name: 'Model One', thinkingLevels: ['low'] },
+            { id: 'm2', name: '', thinkingLevels: [] },
+          ],
+        },
+      ],
+    })),
+    // 模拟 agentHost.setModel：会话在跑时拒绝
+    setModel: vi.fn(async ({ sessionId }: { sessionId: string }) =>
+      sessions.get(sessionId)?.status === 'running'
+        ? { ok: false as const, error: 'cannot switch while running' }
+        : { ok: true as const, session: { id: sessionId } }
+    ),
+    profileDefaultModel: vi.fn(async (profile: string) => ({
+      ok: true as const,
+      model: { providerId: 'p1', modelId: profile === 'triage' ? 'default' : 'orch' },
+    })),
     get: (id: string) => sessions.get(id),
     observe: (observer: SessionObserver) => {
       observers.push(observer);
@@ -424,5 +450,75 @@ describe('事件', () => {
       ['p.a', 'channel.orchestrationChanged', { workspaceId: 'ws1' }],
       ['p.b', 'channel.orchestrationChanged', { workspaceId: 'ws1' }],
     ]);
+  });
+});
+
+describe('模型', () => {
+  it('models 只给服务 id、服务名、模型 id 与显示名，不带 key 与 baseUrl', async () => {
+    const h = harness();
+    const result = await h.host.models();
+    expect(result).toEqual({
+      models: [
+        { providerId: 'p1', providerName: 'Prov', modelId: 'm1', label: 'Model One' },
+        { providerId: 'p1', providerName: 'Prov', modelId: 'm2', label: 'm2' },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/sk-secret|https:\/\/x/);
+  });
+
+  it('createSession 带 model 时只把服务与模型交给 createProfileSession；失败时报错', async () => {
+    const h = harness();
+    await h.host.start();
+    await h.host.createSession('p.a', {
+      workspaceId: 'ws1',
+      profile: 'triage',
+      title: 't',
+      model: { providerId: 'p1', modelId: 'm1' },
+    });
+    expect(h.created[0]).toMatchObject({ model: { providerId: 'p1', modelId: 'm1' } });
+    h.agentHost.createProfileSession.mockResolvedValueOnce({
+      ok: false,
+      error: 'model missing',
+    } as never);
+    await expect(
+      h.host.createSession('p.a', {
+        workspaceId: 'ws1',
+        profile: 'triage',
+        title: 't',
+        model: { providerId: 'p1', modelId: 'nope' },
+      })
+    ).rejects.toThrow('model missing');
+  });
+
+  it('setSessionModel：只能改自己的会话；null 回到档位默认；运行中原样报错', async () => {
+    const h = harness();
+    await h.host.start();
+    const { sessionId } = await h.host.createSession('p.a', {
+      workspaceId: 'ws1',
+      profile: 'restricted',
+      title: 't',
+    });
+    await expect(
+      h.host.setSessionModel('p.b', sessionId, { providerId: 'p1', modelId: 'm1' })
+    ).rejects.toThrow('session not found');
+    await expect(h.host.setSessionModel('p.a', 'nope', null)).rejects.toThrow('session not found');
+    expect(h.agentHost.setModel).not.toHaveBeenCalled();
+
+    await h.host.setSessionModel('p.a', sessionId, { providerId: 'p1', modelId: 'm1' });
+    expect(h.agentHost.setModel).toHaveBeenLastCalledWith({
+      sessionId,
+      model: { providerId: 'p1', modelId: 'm1' },
+    });
+    await h.host.setSessionModel('p.a', sessionId, null);
+    expect(h.agentHost.profileDefaultModel).toHaveBeenCalledWith('restricted');
+    expect(h.agentHost.setModel).toHaveBeenLastCalledWith({
+      sessionId,
+      model: { providerId: 'p1', modelId: 'orch' },
+    });
+
+    h.setSession(sessionId, { status: 'running' });
+    await expect(
+      h.host.setSessionModel('p.a', sessionId, { providerId: 'p1', modelId: 'm1' })
+    ).rejects.toThrow('cannot switch while running');
   });
 });
