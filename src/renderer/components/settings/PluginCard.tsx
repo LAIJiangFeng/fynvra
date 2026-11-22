@@ -1,6 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { PluginSourceIcon } from './PluginSourceIcon';
+import type { PluginSourceIconKind } from './pluginSource';
 
 /** 插件卡片网格：宽屏三列，窄屏自动两列、一列（「已安装」与「市场」共用） */
 export function PluginGrid({ children }: { children: ReactNode }) {
@@ -11,16 +13,19 @@ export function PluginGrid({ children }: { children: ReactNode }) {
   );
 }
 
-/** 卡片底部左侧的作者：字母圆形小头像 + 名字，可带小号附注（版本号等） */
-export function PluginAuthor({ name, note }: { name: string; note?: ReactNode }) {
+/** 卡片底部左侧的作者：来源图标 + 名字，可带小号附注（版本号等） */
+export function PluginAuthor({
+  icon,
+  name,
+  note,
+}: {
+  icon: PluginSourceIconKind;
+  name: string;
+  note?: ReactNode;
+}) {
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-      <span
-        aria-hidden
-        className="grid size-5 shrink-0 place-items-center rounded-full bg-muted font-medium text-[10px] uppercase"
-      >
-        {name.trim().charAt(0)}
-      </span>
+      <PluginSourceIcon kind={icon} />
       <span className="truncate">{name}</span>
       {note && <span className="shrink-0 opacity-80">{note}</span>}
     </span>
