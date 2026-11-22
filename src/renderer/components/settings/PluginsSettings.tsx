@@ -406,12 +406,13 @@ function PluginCardItem({
       onOpen={() => onOpen(plugin.id)}
       badges={<PluginBadges plugin={plugin} newVersion={newVersion} />}
       description={
-        marketView?.description ?? (
-          <span
-            className="block truncate font-mono text-xs"
-            title={plugin.kind === 'local' ? plugin.path : `${plugin.path}\n${plugin.source}`}
-          >
-            {plugin.path}
+        marketView?.description ??
+        plugin.description ?? (
+          <span className="block truncate text-xs">
+            {t('settings.plugins.noDescription')} ·{' '}
+            <span className="font-mono">
+              {plugin.path.split(/[\\/]/).filter(Boolean).at(-1) ?? plugin.path}
+            </span>
           </span>
         )
       }
@@ -491,8 +492,10 @@ function PluginDetail({
           />
         </div>
       </div>
-      {marketView?.description && (
-        <p className="text-muted-foreground text-sm">{marketView.description}</p>
+      {(marketView?.description ?? plugin.description) && (
+        <p className="text-muted-foreground text-sm">
+          {marketView?.description ?? plugin.description}
+        </p>
       )}
       {status && (
         <InlineMessage tone={status.tone} className="break-all">

@@ -238,6 +238,34 @@ describe('视图', () => {
     const reloaded = createAppPluginRegistry({ filePath: join(dir, 'fynvra-plugins.json') });
     expect((await reloaded.get(ID))?.description).toBe('演示插件');
   });
+
+  it('启动时给没有简介的旧登记从清单补上', async () => {
+    const t = await setup({ enabled: false });
+    const manifest = {
+      schemaVersion: 1,
+      id: ID,
+      name: 'Demo',
+      version: '1.0.0',
+      kind: 'fynvra',
+      host: { main: 'dist/host.js' },
+      permissions: [],
+      description: '  桥接 Telegram  ',
+    };
+    await writeFile(
+      join(dir, 'fynvra-plugins', ID, 'fynvra-plugin.json'),
+      JSON.stringify(manifest)
+    );
+    await t.runtime.startAll();
+    expect((await t.registry.get(ID))?.description).toBe('桥接 Telegram');
+  });
+
+  it('清单读不到时只记错误码（不记路径），不影响启动', async () => {
+    const t = await setup();
+    await t.runtime.startAll();
+    expect(t.processes).toHaveLength(1);
+    expect(t.log).toHaveBeenCalledWith(ID, 'warn', 'description backfill skipped: ENOENT');
+    expect(await t.registry.get(ID)).not.toHaveProperty('description');
+  });
 });
 
 describe('pickPluginEnv', () => {

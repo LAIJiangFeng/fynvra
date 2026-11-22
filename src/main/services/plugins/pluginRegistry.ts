@@ -12,6 +12,7 @@ import {
   type PluginKind,
   type PluginMarketInfo,
   type PluginProviderMap,
+  parsePluginDescription,
 } from '@shared/types/plugins';
 import { translate } from '../../i18n';
 import { samePath } from '../gitRepository';
@@ -59,7 +60,7 @@ export interface PluginRegistry {
   updateScan(
     id: string,
     path: string,
-    scan: { providers: string[]; stamp: string }
+    scan: { providers: string[]; stamp: string; description?: string }
   ): Promise<PluginEntry | undefined>;
   /** 整组替换手动添加的服务名（非法、重复的丢弃，最多 20 个）；只有内容变了才写盘 */
   setManualProviders(
@@ -232,12 +233,17 @@ export function createPluginRegistry(options: {
         if (!current) return { result: undefined };
         if (current.path !== path) return { result: current };
         const providers = parseRequestedProviders(scan.providers);
+        const description = parsePluginDescription(scan.description);
         const same =
-          current.scanStamp === scan.stamp && sameNames(current.scannedProviders ?? [], providers);
+          current.scanStamp === scan.stamp &&
+          sameNames(current.scannedProviders ?? [], providers) &&
+          current.description === description;
         if (same) return { result: current };
         const updated: PluginEntry = { ...current, scanStamp: scan.stamp };
         if (providers.length > 0) updated.scannedProviders = providers;
         else delete updated.scannedProviders;
+        if (description !== undefined) updated.description = description;
+        else delete updated.description;
         return { next: entries.with(index, updated), result: updated };
       }),
     setManualProviders: (id, names) =>
@@ -407,6 +413,7 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
   const scannedProviders = parseRequestedProviders(record.scannedProviders);
   const manualProviders = parseRequestedProviders(record.manualProviders);
   const { scanStamp } = record;
+  const description = parsePluginDescription(record.description);
   if (!isRegistryId(id) || typeof name !== 'string' || !name.trim()) return null;
   if (typeof source !== 'string' || !source.trim()) return null;
   if (typeof kind !== 'string' || !KINDS.includes(kind as PluginKind)) return null;
@@ -431,6 +438,7 @@ export function parseStoredPlugin(raw: unknown): PluginEntry | null {
     ...(scannedProviders.length > 0 ? { scannedProviders } : {}),
     ...(typeof scanStamp === 'string' && /^[0-9a-f]{1,64}$/.test(scanStamp) ? { scanStamp } : {}),
     ...(manualProviders.length > 0 ? { manualProviders } : {}),
+    ...(description !== undefined ? { description } : {}),
     ...(market ? { market } : {}),
   };
 }

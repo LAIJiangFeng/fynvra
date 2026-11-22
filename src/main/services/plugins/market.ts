@@ -494,7 +494,9 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     pluginId: string,
     version: MarketVersion,
     kind: PluginKind = 'pi'
-  ): Promise<{ ok: true; tmp: string } | { ok: false; code: 'failed'; error: string }> {
+  ): Promise<
+    { ok: true; tmp: string; description?: string } | { ok: false; code: 'failed'; error: string }
+  > {
     let bytes: Uint8Array;
     try {
       bytes = await http(`${baseUrl}${version.package.path}`, { maxBytes: version.package.size });
@@ -572,7 +574,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
         return verifyFailed('host-main-missing');
       }
     }
-    return { ok: true, tmp };
+    return { ok: true, tmp, description: appManifest?.description };
   }
 
   /** Fynvra 插件安装：只装官方插件，装进 fynvra-plugins/，登记并立即启用 */
@@ -619,6 +621,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
         tier: plugin.tier,
         permissions: version.permissions as AppPluginPermission[],
         path: target,
+        description: staged.description,
       });
       // 市场视图里的「已安装」也要刷新
       onChanged();
@@ -660,6 +663,8 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
       sha256: latest.package.sha256,
       tier: plugin.tier,
       permissions: latest.permissions as AppPluginPermission[],
+      // 新清单删了简介时 undefined 会把旧值清掉
+      description: staged.description,
     });
   }
 

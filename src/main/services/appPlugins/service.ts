@@ -20,6 +20,7 @@ import {
   replaceCopy,
   swapCopyDir,
 } from '../plugins/pluginCopies';
+import { MAX_MANIFEST_BYTES, readSmallTextFile } from '../plugins/providerScan';
 import type { AppPluginRecord, AppPluginRegistry } from './registry';
 import type { AppPluginRuntime } from './runtime';
 import type { PluginSecretStore } from './secrets';
@@ -52,6 +53,22 @@ export async function readAppPluginManifest(dir: string): Promise<ManifestCheck>
   return { ok: true, manifest };
 }
 
+/**
+ * 只取清单的简介（给旧登记补字段）：清单必须是普通文件（不跟随符号链接）、不超过 64 KB。
+ * 不是普通文件、超长、解析失败或没有简介返回 undefined；读取失败时 reject（错误可能带路径）
+ */
+export async function readManifestDescription(dir: string): Promise<string | undefined> {
+  const text = await readSmallTextFile(join(dir, MANIFEST), MAX_MANIFEST_BYTES);
+  if (text === undefined) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  return parseAppPluginManifest(raw)?.description;
+}
+
 /** 市场调用的入口（market.ts 只认这个接口） */
 export interface AppPluginMarketHost {
   /** 包根目录 `fynvra-plugins/` */
@@ -66,6 +83,8 @@ export interface AppPluginMarketHost {
     tier: MarketTier;
     permissions: AppPluginPermission[];
     path: string;
+    /** 清单简介 */
+    description?: string;
   }): Promise<AppPluginView>;
   /** 用已校验的临时目录替换包目录：停进程 → 换目录 → 更新登记（清撤回原因）→ 启用的重新启动 */
   replaceMarket(
@@ -77,6 +96,8 @@ export interface AppPluginMarketHost {
       sha256: string;
       tier: MarketTier;
       permissions: AppPluginPermission[];
+      /** 清单简介；undefined 会清掉旧值 */
+      description?: string;
     }
   ): Promise<AppPluginActionResult>;
   /** reason 非 null：停用、写原因；null：只清原因 */
@@ -225,7 +246,13 @@ export function createAppPluginService(deps: {
       return view ? { ok: true, plugin: view } : failed(translate('appPlugins.notFound'));
     },
     async registerMarket(input) {
-      await registry.add({ ...input, source: 'market', enabled: true });
+      const { description, ...rest } = input;
+      await registry.add({
+        ...rest,
+        ...(description !== undefined ? { description } : {}),
+        source: 'market',
+        enabled: true,
+      });
       await runtime.start(input.id);
       onChanged();
       const view = await viewOf(input.id);

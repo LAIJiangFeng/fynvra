@@ -10,6 +10,7 @@ import {
 import { API_METHODS, type ApiDeps, type ApiMethod } from './api';
 import { createPluginConnection, messageSize, type PluginConnection } from './connection';
 import type { AppPluginRecord, AppPluginRegistry } from './registry';
+import { readManifestDescription } from './service';
 
 export const DEACTIVATE_TIMEOUT_MS = 5_000;
 export const RESTART_BASE_MS = 2_000;
@@ -285,6 +286,16 @@ export function createAppPluginRuntime(deps: AppPluginRuntimeDeps): AppPluginRun
   return {
     async startAll() {
       for (const record of await registry.list()) {
+        // 支持简介之前写入的旧登记没有 description：从清单补上；失败只记错误码，不影响启动
+        if (record.description === undefined) {
+          try {
+            const description = await readManifestDescription(record.path);
+            if (description !== undefined) await registry.update(record.id, { description });
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException | undefined)?.code;
+            log(record.id, 'warn', `description backfill skipped: ${code ?? 'unknown'}`);
+          }
+        }
         if (record.enabled) {
           await start(record.id).catch((error: unknown) =>
             log(record.id, 'error', `start failed: ${String(error)}`)
