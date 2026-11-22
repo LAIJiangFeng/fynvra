@@ -9,7 +9,12 @@ describe('fileKindOf', () => {
     expect(fileKindOf('b.xlsx')).toBe('sheet');
     expect(fileKindOf('c.csv')).toBe('sheet');
     expect(fileKindOf('d.tsv')).toBe('sheet');
-    expect(fileKindOf('readme.md')).toBe('other');
+    expect(fileKindOf('readme.md')).toBe('text');
+    expect(fileKindOf('cs.TXT')).toBe('text');
+    expect(fileKindOf('a.log')).toBe('text');
+    expect(fileKindOf('x.ts')).toBe('code');
+    expect(fileKindOf('y.py')).toBe('code');
+    expect(fileKindOf('z.json')).toBe('code');
     expect(fileKindOf('Makefile')).toBe('other');
   });
 
