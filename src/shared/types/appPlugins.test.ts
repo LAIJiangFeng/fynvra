@@ -47,6 +47,20 @@ describe('parseAppPluginManifest', () => {
       'a/b.mjs'
     );
   });
+
+  it('description trim 后 1–300 字才保留，否则丢弃但不影响整份清单', () => {
+    expect(
+      parseAppPluginManifest(manifest({ description: '  桥接 Telegram  ' }))?.description
+    ).toBe('桥接 Telegram');
+    for (const description of ['   ', 'x'.repeat(301), 42, null]) {
+      const parsed = parseAppPluginManifest(manifest({ description }));
+      expect(parsed).not.toBeNull();
+      expect(parsed).not.toHaveProperty('description');
+    }
+    expect(
+      parseAppPluginManifest(manifest({ description: 'x'.repeat(300) }))?.description
+    ).toHaveLength(300);
+  });
 });
 
 describe('RPC 消息与 IPC 入参', () => {

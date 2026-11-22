@@ -17,6 +17,8 @@ export interface AppPluginRecord {
   id: string;
   name: string;
   version: string;
+  /** 清单简介（本地来源从清单带出） */
+  description?: string;
   sha256?: string;
   /** 只有市场来源 */
   tier?: MarketTier;
@@ -58,10 +60,12 @@ function parseRecord(raw: unknown): AppPluginRecord | null {
   const revokedReason = text(record.revokedReason);
   const lastError = text(record.lastError);
   const sourcePath = text(record.sourcePath);
+  const description = text(record.description);
   return {
     id,
     name,
     version,
+    ...(description !== undefined ? { description } : {}),
     ...(sha256 !== undefined ? { sha256 } : {}),
     ...(tier !== undefined ? { tier: tier as MarketTier } : {}),
     source,

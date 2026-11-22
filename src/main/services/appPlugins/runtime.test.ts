@@ -229,6 +229,17 @@ describe('移除', () => {
   });
 });
 
+describe('视图', () => {
+  it('登记里的简介带到视图，重新读取登记后仍在', async () => {
+    const t = await setup({ enabled: false });
+    expect((await t.service.views())[0]).not.toHaveProperty('description');
+    await t.registry.update(ID, { description: '演示插件' });
+    expect((await t.service.views())[0]?.description).toBe('演示插件');
+    const reloaded = createAppPluginRegistry({ filePath: join(dir, 'fynvra-plugins.json') });
+    expect((await reloaded.get(ID))?.description).toBe('演示插件');
+  });
+});
+
 describe('pickPluginEnv', () => {
   it('Windows 风格大小写也能取到，其他一律不带', () => {
     expect(pickPluginEnv({ Path: 'C:/bin', SYSTEMROOT: 'C:/Windows', GITHUB_TOKEN: 'x' })).toEqual({

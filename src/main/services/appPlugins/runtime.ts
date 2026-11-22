@@ -320,6 +320,7 @@ export function createAppPluginRuntime(deps: AppPluginRuntimeDeps): AppPluginRun
         id: record.id,
         name: record.name,
         version: record.version,
+        ...(record.description !== undefined ? { description: record.description } : {}),
         tier: record.tier ?? null,
         source: record.source,
         enabled: record.enabled,
