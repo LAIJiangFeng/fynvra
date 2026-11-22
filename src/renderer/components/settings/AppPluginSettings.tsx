@@ -332,19 +332,21 @@ function FieldRow({
   );
 }
 
-/** 字段的控件本身。compact：列表项里的紧凑写法，不显示标签，标签作 aria-label */
+/** 字段的控件本身。compact：列表项里的紧凑写法，不显示标签，标签作 aria-label；wide：输入框占满整行 */
 function FieldControl({
   id,
   field,
   at,
   form,
   compact,
+  wide,
 }: {
   id?: string;
   field: UiField;
   at: Scope;
   form: Form;
   compact?: boolean;
+  wide?: boolean;
 }) {
   const key = draftKey(at.scope, field.id);
   const draft = form.drafts[key];
@@ -417,7 +419,9 @@ function FieldControl({
       autoComplete="off"
       spellCheck={false}
       disabled={disabled}
-      className={compact ? 'h-8 w-48' : field.kind === 'number' ? 'w-28' : 'w-64'}
+      className={
+        compact ? (wide ? 'h-8 w-full' : 'h-8 w-48') : field.kind === 'number' ? 'w-28' : 'w-64'
+      }
       onChange={(event) => edit(event.target.value)}
       onBlur={() => {
         if (commitOn(field) === 'blur') commitText();
@@ -492,6 +496,13 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
             itemKey: item.key,
           };
           const error = form.errors[at.scope];
+          // 文字输入框单独占一整行，其余控件留在右侧一列
+          const textFields = controls.filter(
+            (control) => control.type === 'field' && control.kind === 'text'
+          );
+          const sideControls = controls.filter(
+            (control) => !(control.type === 'field' && control.kind === 'text')
+          );
           return (
             <li key={item.key} className="grid gap-2 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -529,9 +540,9 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
                     </button>
                   )}
                 </div>
-                {controls.length > 0 && (
+                {sideControls.length > 0 && (
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                    {controls.map((control, index) =>
+                    {sideControls.map((control, index) =>
                       control.type === 'field' ? (
                         <FieldControl
                           key={`f:${control.id}`}
@@ -548,6 +559,19 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
                   </div>
                 )}
               </div>
+              {textFields.map(
+                (control) =>
+                  control.type === 'field' && (
+                    <FieldControl
+                      key={`f:${control.id}`}
+                      field={control}
+                      at={at}
+                      form={form}
+                      compact
+                      wide
+                    />
+                  )
+              )}
               {error && (
                 <InlineMessage tone="error" className="break-all">
                   {error}
