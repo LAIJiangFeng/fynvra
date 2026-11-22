@@ -548,6 +548,7 @@ async function scanAfterChange(plugin: PluginEntry): Promise<PluginEntry> {
     const updated = await getPluginRegistry().updateScan(plugin.id, plugin.path, {
       providers: scan.names ?? [],
       stamp: scan.stamp,
+      description: scan.description,
     });
     return updated ?? plugin;
   } catch (error) {
@@ -570,6 +571,7 @@ async function refreshScans(plugins: PluginRegistry): Promise<PluginEntry[]> {
         await plugins.updateScan(entry.id, entry.path, {
           providers: scan.names,
           stamp: scan.stamp,
+          description: scan.description,
         });
         return true;
       } catch (error) {

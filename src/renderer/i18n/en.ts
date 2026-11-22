@@ -1382,6 +1382,7 @@ export const en: MessagesShape<typeof zhCN> = {
       },
       back: 'Back to plugins',
       usesProviders: 'Uses {count} model services; open the card to configure',
+      noDescription: 'No description',
       detailPath: 'Path',
       detailSource: 'Source',
       removeConfirm: 'Delete "{name}"?',

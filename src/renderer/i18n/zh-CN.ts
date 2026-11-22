@@ -1323,6 +1323,7 @@ export const zhCN = {
       },
       back: '返回插件',
       usesProviders: '用到 {count} 个模型服务，点开卡片配置',
+      noDescription: '暂无简介',
       detailPath: '路径',
       detailSource: '来源',
       removeConfirm: '删除「{name}」？',

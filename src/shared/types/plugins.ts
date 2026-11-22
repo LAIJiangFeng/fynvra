@@ -48,8 +48,20 @@ export interface PluginEntry {
   scanStamp?: string;
   /** 用户手动添加的服务名；最多 {@link MAX_REQUESTED_PROVIDERS} 个 */
   manualProviders?: string[];
+  /** 静态扫描得到的简介（package.json 的 description 或单文件开头的注释）；1–300 字 */
+  description?: string;
   /** 仅市场插件 */
   market?: PluginMarketInfo;
+}
+
+/** 插件简介的最大长度 */
+export const MAX_PLUGIN_DESCRIPTION_LENGTH = 300;
+
+/** 插件简介：字符串 trim 后 1–300 字才保留，否则 undefined */
+export function parsePluginDescription(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const text = raw.trim();
+  return text.length > 0 && text.length <= MAX_PLUGIN_DESCRIPTION_LENGTH ? text : undefined;
 }
 
 /** 每个插件最多记录的服务名个数 */

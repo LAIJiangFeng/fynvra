@@ -62,6 +62,8 @@ export function PluginCard({
         <button
           type="button"
           aria-label={name}
+          // 透明按钮盖住了内层元素，title 放这里才看得到：简介被两行截断时悬停看全文
+          title={typeof description === 'string' ? description : name}
           className="absolute inset-0 rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           onClick={onOpen}
         />
