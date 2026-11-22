@@ -13,7 +13,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DispatchTaskInput } from '@fynvra/agent-runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOrchestrationService, type OrchestrationServiceOptions } from './service';
+import {
+  createOrchestrationService,
+  type OrchestrationService,
+  type OrchestrationServiceOptions,
+} from './service';
 import {
   createFakeExec,
   createFakeLauncher,
@@ -37,8 +41,11 @@ let fake: FakeExec;
 let launcher: FakeLauncher;
 let notifyChanged: ReturnType<typeof vi.fn<(workspaceId: string) => void>>;
 
+/** 本用例建出的所有服务，afterEach 删目录前统一等它们写盘完成 */
+let services: OrchestrationService[] = [];
+
 function make(overrides: Partial<OrchestrationServiceOptions> = {}) {
-  return createOrchestrationService({
+  const service = createOrchestrationService({
     workspace: WORKSPACE,
     statePath,
     resolveWorktreesRoot: async () => join(dir, 'worktrees'),
@@ -51,6 +58,8 @@ function make(overrides: Partial<OrchestrationServiceOptions> = {}) {
     log: () => {},
     ...overrides,
   });
+  services.push(service);
+  return service;
 }
 
 async function dispatchOn(service: ReturnType<typeof make>) {
@@ -65,10 +74,12 @@ beforeEach(() => {
   fake = createFakeExec();
   launcher = createFakeLauncher();
   notifyChanged = vi.fn<(workspaceId: string) => void>();
+  services = [];
 });
 
-afterEach(() => {
-  // Windows 上编排状态的异步写盘与删除竞争会报 ENOTEMPTY，加重试
+afterEach(async () => {
+  // 先等所有服务写盘完成，再删目录；重试只用于 Windows 句柄延迟释放
+  await Promise.all(services.map((service) => service.flush()));
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 

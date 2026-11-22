@@ -19,7 +19,7 @@ import type { SessionEventEnvelope } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenSession } from '../../../agent/supervisor';
-import { createOrchestrationRegistry } from '../orchestration/registry';
+import { createOrchestrationRegistry, type OrchestrationRegistry } from '../orchestration/registry';
 import { createModelResolver } from '../providers/resolveModel';
 import { createSessionStore } from '../sessions/sessionStore';
 import { type AgentHostService, createAgentHost } from './agentHost';
@@ -60,6 +60,7 @@ describe.skipIf(!hasGit)('agent host ⇄ orchestration（真实 git）', () => {
   let repo: string;
   let userData: string;
   let agentHost: AgentHostService | undefined;
+  let registry: OrchestrationRegistry | undefined;
 
   beforeEach(() => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'fynvra-wiring-it-')));
@@ -79,6 +80,9 @@ describe.skipIf(!hasGit)('agent host ⇄ orchestration（真实 git）', () => {
   afterEach(async () => {
     await agentHost?.shutdown(1_000);
     agentHost = undefined;
+    // 先等编排状态写盘完成，再删目录
+    await registry?.flushAll();
+    registry = undefined;
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   });
 
@@ -151,7 +155,7 @@ describe.skipIf(!hasGit)('agent host ⇄ orchestration（真实 git）', () => {
       log: () => {},
     });
     agentHost = host;
-    const registry = createOrchestrationRegistry({
+    registry = createOrchestrationRegistry({
       userDataPath: userData,
       listWorkspaces: () => [workspace],
       roles,
