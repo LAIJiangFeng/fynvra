@@ -1433,9 +1433,9 @@ export const en: MessagesShape<typeof zhCN> = {
         refresh: 'Refresh',
         lastUpdated: 'Last updated: {time}',
         neverUpdated: 'Plugin list not fetched yet',
-        notConfigured: 'The plugin marketplace is not configured yet',
+        notConfigured: 'The plugin marketplace is not open yet',
         notConfiguredHint:
-          'This build has no signing key for the marketplace index, so the plugin list cannot be verified and is not fetched',
+          'Once it opens in a future version, you can browse and install plugins here',
         searchPlaceholder: 'Search name, description or tags',
         category: 'Category',
         categories: {
