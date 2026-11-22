@@ -40,6 +40,20 @@ function omit(result: object, ...keys: string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(result).filter(([key]) => !keys.includes(key)));
 }
 
+/** 用例里建出的所有服务，afterEach 删目录前统一等它们写盘完成 */
+const opened: OrchestrationService[] = [];
+
+function track(service: OrchestrationService): OrchestrationService {
+  opened.push(service);
+  return service;
+}
+
+/** 先等所有服务写盘完成，再删目录；重试只用于 Windows 句柄延迟释放 */
+async function flushAndRemove(root: string): Promise<void> {
+  await Promise.all(opened.splice(0).map((service) => service.flush()));
+  rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+}
+
 describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   let root: string;
   let repo: string;
@@ -50,18 +64,20 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   let host: OrchestrationHost;
 
   function openService(): OrchestrationService {
-    return createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
-      statePath,
-      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
-      launcher,
-      roles: createFakeRoles(),
-      exec,
-      runChecks: createShellRunner(),
-      fs,
-      notifyChanged: () => {},
-      log: () => {},
-    });
+    return track(
+      createOrchestrationService({
+        workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
+        statePath,
+        resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
+        launcher,
+        roles: createFakeRoles(),
+        exec,
+        runChecks: createShellRunner(),
+        fs,
+        notifyChanged: () => {},
+        log: () => {},
+      })
+    );
   }
 
   beforeEach(() => {
@@ -82,9 +98,7 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
     host = service.hostFor('session_coord');
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
-  });
+  afterEach(() => flushAndRemove(root));
 
   async function dispatch(title: string) {
     const result = await host.dispatchTask({
@@ -560,23 +574,25 @@ describe.skipIf(!hasGit)('编排全流程（真实 git）', () => {
   });
 
   it('默认位置：worktree 建在仓库同级的 <仓库目录名>-worktrees 下，cleanup 照记录的路径删除', async () => {
-    const sibling = createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
-      statePath: join(root, 'userData', 'orchestration', 'sibling.json'),
-      resolveWorktreesRoot: createWorktreesRootResolver({
-        fallbackRoot: join(root, 'userData', 'worktrees'),
-        configured: () => undefined,
-        repoPaths: () => [repo],
+    const sibling = track(
+      createOrchestrationService({
+        workspace: { id: 'ws_1', name: 'repo', repoPath: repo, vcs: 'git', defaultBranch: 'main' },
+        statePath: join(root, 'userData', 'orchestration', 'sibling.json'),
+        resolveWorktreesRoot: createWorktreesRootResolver({
+          fallbackRoot: join(root, 'userData', 'worktrees'),
+          configured: () => undefined,
+          repoPaths: () => [repo],
+          log: () => {},
+        }),
+        launcher,
+        roles: createFakeRoles(),
+        exec: nodeExec,
+        runChecks: createShellRunner(),
+        fs,
+        notifyChanged: () => {},
         log: () => {},
-      }),
-      launcher,
-      roles: createFakeRoles(),
-      exec: nodeExec,
-      runChecks: createShellRunner(),
-      fs,
-      notifyChanged: () => {},
-      log: () => {},
-    });
+      })
+    );
     const coordinator = sibling.hostFor('session_sibling');
     const result = await coordinator.dispatchTask({
       title: 'Next to repo',
@@ -624,9 +640,7 @@ describe('编排全流程（普通目录，没有 git）', () => {
     execCalls = [];
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
-  });
+  afterEach(() => flushAndRemove(root));
 
   function plainService(): OrchestrationService {
     // 记下 Host / Service 经 exec 跑的每一条命令（git 都走它）
@@ -634,20 +648,22 @@ describe('编排全流程（普通目录，没有 git）', () => {
       execCalls.push(`${cmd} ${args.join(' ')}`);
       return nodeExec(cmd, args, cwd);
     };
-    return createOrchestrationService({
-      workspace: { id: 'ws_plain', name: 'notes', repoPath: notes, vcs: 'none' },
-      statePath,
-      resolveWorktreesRoot: async () => {
-        throw new Error('a plain directory has no worktrees');
-      },
-      launcher,
-      roles: createFakeRoles(),
-      exec,
-      runChecks: createShellRunner(),
-      fs,
-      notifyChanged: () => {},
-      log: () => {},
-    });
+    return track(
+      createOrchestrationService({
+        workspace: { id: 'ws_plain', name: 'notes', repoPath: notes, vcs: 'none' },
+        statePath,
+        resolveWorktreesRoot: async () => {
+          throw new Error('a plain directory has no worktrees');
+        },
+        launcher,
+        roles: createFakeRoles(),
+        exec,
+        runChecks: createShellRunner(),
+        fs,
+        notifyChanged: () => {},
+        log: () => {},
+      })
+    );
   }
 
   it('派发 → worker 在目录里写文件 → report_done → review / run_checks → 验收 completed → cleanup，全程没有调用 git', async () => {
@@ -729,19 +745,21 @@ describe.skipIf(!hasGit)('受限协调者从公开基线切出（真实 git）',
     workspace: { vcs: 'git' | 'none'; defaultBranch?: string },
     restricted: boolean
   ): OrchestrationService {
-    return createOrchestrationService({
-      workspace: { id: 'ws_1', name: 'repo', repoPath: repo, ...workspace },
-      statePath: join(root, 'userData', 'orchestration', 'ws_1.json'),
-      resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
-      launcher: createFakeLauncher(),
-      roles: createFakeRoles(),
-      exec: nodeExec,
-      runChecks: createShellRunner(),
-      fs,
-      notifyChanged: () => {},
-      log: () => {},
-      isRestrictedCoordinator: (sessionId) => restricted && sessionId === 'session_coord',
-    });
+    return track(
+      createOrchestrationService({
+        workspace: { id: 'ws_1', name: 'repo', repoPath: repo, ...workspace },
+        statePath: join(root, 'userData', 'orchestration', 'ws_1.json'),
+        resolveWorktreesRoot: async () => join(root, 'userData', 'worktrees'),
+        launcher: createFakeLauncher(),
+        roles: createFakeRoles(),
+        exec: nodeExec,
+        runChecks: createShellRunner(),
+        fs,
+        notifyChanged: () => {},
+        log: () => {},
+        isRestrictedCoordinator: (sessionId) => restricted && sessionId === 'session_coord',
+      })
+    );
   }
 
   const dispatchWith = (service: OrchestrationService) =>
@@ -779,9 +797,7 @@ describe.skipIf(!hasGit)('受限协调者从公开基线切出（真实 git）',
     privateCommit = git(repo, 'rev-parse', 'HEAD');
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
-  });
+  afterEach(() => flushAndRemove(root));
 
   it('受限协调者：worktree HEAD 等于 origin/main，不含未推送的提交', async () => {
     const path = await dispatchedPath(serviceFor({ vcs: 'git', defaultBranch: 'main' }, true));
