@@ -114,4 +114,42 @@ describe('Main command proxy wiring', () => {
       FORCE_COLOR: '0',
     });
   });
+  it('restricted run_checks keeps only whitelisted env: no tokens or proxy', async () => {
+    configureCommandNetwork(() => ({
+      mode: 'manual',
+      url: 'http://127.0.0.1:7890',
+      gitCompatibility: true,
+    }));
+    vi.stubEnv('GITHUB_TOKEN', 'fake-token');
+    const stream = () =>
+      Object.assign(new EventEmitter(), {
+        setEncoding() {
+          return this;
+        },
+      });
+    try {
+      const keys = ['GITHUB_TOKEN', 'HTTP_PROXY', 'NO_COLOR', 'FORCE_COLOR'];
+      for (const restricted of [true, false]) {
+        const child = Object.assign(new EventEmitter(), { stdout: stream(), stderr: stream() });
+        mocks.spawn.mockReturnValueOnce(child);
+        const pending = createShellRunner()('/repo', 'pnpm test', undefined, { restricted });
+        child.emit('close', 0);
+        await pending;
+        const env = mocks.spawn.mock.calls.at(-1)?.[1].env;
+        expect(pick(env, keys)).toEqual(
+          restricted
+            ? { GITHUB_TOKEN: undefined, HTTP_PROXY: undefined, NO_COLOR: '1', FORCE_COLOR: '0' }
+            : {
+                GITHUB_TOKEN: 'fake-token',
+                HTTP_PROXY: 'http://127.0.0.1:7890',
+                NO_COLOR: '1',
+                FORCE_COLOR: '0',
+              }
+        );
+        if (restricted) expect(typeof env.PATH).toBe('string');
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
