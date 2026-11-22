@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { asRecord } from '@shared/guards';
+import { parseMaxOutputLimit } from '@shared/maxOutputLimit';
 import type { ModelEntry } from '@shared/types/llm';
 import { writeJsonAtomic } from './jsonRegistry';
 import type { ProviderStore, StoredProvider } from './providerStore';
@@ -16,8 +17,21 @@ const MODELS_DEV_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** 拉取失败后这段时间内不再重试（离线时不让每个模型都等一次超时） */
 const MODELS_DEV_RETRY_MS = 10 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
-/** 同一 id 在多家都有时，以官方厂商的值为准 */
-const OFFICIAL_PROVIDERS = new Set(['openai', 'anthropic', 'google']);
+/**
+ * 同一 id 在多家都有时，以官方厂商的值为准：models.dev 的 provider 键 → 该厂商自家模型的 id。
+ * 中转、云平台报的最大输出可能比厂商端点允许的大（如 GLM 端点只接受 max_tokens ≤ 131072）。
+ */
+const OFFICIAL_VENDORS: readonly (readonly [readonly string[], RegExp])[] = [
+  [['openai'], /^(?:gpt-|o\d|chatgpt-|codex-)/],
+  [['anthropic'], /^claude-/],
+  [['google'], /^(?:gemini-|gemma-)/],
+  [['zhipuai', 'zhipuai-coding-plan'], /^glm-/],
+  [['deepseek'], /^deepseek-/],
+  [['moonshotai', 'moonshotai-cn'], /^(?:kimi-|moonshot-)/],
+  [['alibaba', 'alibaba-cn'], /^(?:qwen|qwq-)/],
+  [['xai'], /^grok-/],
+  [['mistral'], /^(?:mistral-|codestral-|devstral-|magistral-|ministral-|pixtral-)/],
+];
 /** 比这还小的「上限」不是窗口（报错里的其他数字） */
 const MIN_WINDOW = 1024;
 
@@ -28,27 +42,46 @@ export function normalizeModelId(id: string): string {
   return id.trim().toLowerCase().replace(/^.*\//, '');
 }
 
-/** models.dev 的 `{ [provider]: { models: { [id]: { limit: { context, output } } } } }` → 规范化 id → 上限 */
+function isOfficialVendor(providerKey: string, id: string): boolean {
+  return OFFICIAL_VENDORS.some(([keys, ids]) => keys.includes(providerKey) && ids.test(id));
+}
+
+/** 同一 id 的多条：窗口取第一条，最大输出取最小（端点不接受比它大的 max_tokens） */
+function mergeLimits(current: ModelLimits | undefined, next: ModelLimits): ModelLimits {
+  if (!current) return next;
+  const outputs = [current.maxOutput, next.maxOutput].filter(isPositiveInt);
+  return {
+    contextWindow: current.contextWindow,
+    ...(outputs.length ? { maxOutput: Math.min(...outputs) } : {}),
+  };
+}
+
+/**
+ * models.dev 的 `{ [provider]: { models: { [id]: { limit: { context, output } } } } }` → 规范化 id → 上限。
+ * 厂商自己列出的条目优先；没有厂商条目时窗口取第一家，最大输出取各家的最小值。
+ */
 export function parseModelsDev(body: unknown): Map<string, ModelLimits> {
-  const result = new Map<string, ModelLimits>();
-  const official = new Set<string>();
+  const official = new Map<string, ModelLimits>();
+  const others = new Map<string, ModelLimits>();
   for (const [providerKey, rawProvider] of Object.entries(asRecord(body) ?? {})) {
-    const isOfficial = OFFICIAL_PROVIDERS.has(providerKey);
     for (const [modelKey, rawModel] of Object.entries(
       asRecord(asRecord(rawProvider)?.models) ?? {}
     )) {
       const limit = asRecord(asRecord(rawModel)?.limit);
       if (!limit || !isPositiveInt(limit.context)) continue;
       const id = normalizeModelId(modelKey);
-      if (official.has(id) || (result.has(id) && !isOfficial)) continue;
-      result.set(id, {
-        contextWindow: limit.context,
-        ...(isPositiveInt(limit.output) ? { maxOutput: limit.output } : {}),
-      });
-      if (isOfficial) official.add(id);
+      const target = isOfficialVendor(providerKey, id) ? official : others;
+      target.set(
+        id,
+        mergeLimits(target.get(id), {
+          contextWindow: limit.context,
+          ...(isPositiveInt(limit.output) ? { maxOutput: limit.output } : {}),
+        })
+      );
     }
   }
-  return result;
+  for (const [id, limits] of official) others.set(id, limits);
+  return others;
 }
 
 export interface ModelsDevCatalog {
@@ -166,14 +199,25 @@ export function parseOverflowLimit(message: string): number | undefined {
   return undefined;
 }
 
+export { parseMaxOutputLimit };
+
 export interface ModelLimitsProber {
   /**
-   * 设置条目缺 contextWindow 时探测（服务端列表 → models.dev，取第一个查到的）并只补缺失的字段。
+   * 设置条目缺 contextWindow 或 maxOutput 时探测（服务端列表 → models.dev）并只补缺失的字段，
+   * 不覆盖已有值（包括 learn 从端点报错里学到的）。
    * 同一服务 + 模型在一次运行里只探测一次，并发调用共用一次。写回了返回 true；从不 reject。
    */
   ensure(providerId: string, modelId: string): Promise<boolean>;
-  /** 溢出报错里有上限时写回（覆盖已有值：端点自己报的最可信）。写回了返回 true；从不 reject。 */
+  /**
+   * 溢出报错里有窗口上限时写回（覆盖已有值：端点自己报的最可信）；max_tokens 超范围报错里有最大输出上限时
+   * 按 learnMaxOutput 写回。写回了返回 true；从不 reject。
+   */
   learn(providerId: string, modelId: string, message: string): Promise<boolean>;
+  /**
+   * 端点报的最大输出（worker 静默重试后报来的，或从报错里解析的）：比已有值小（或没有值）才写回，
+   * 且不超过窗口。写回了返回 true；从不 reject。
+   */
+  learnMaxOutput(providerId: string, modelId: string, maxOutput: number): Promise<boolean>;
 }
 
 export function createModelLimitsProber(options: {
@@ -213,13 +257,37 @@ export function createModelLimitsProber(options: {
   async function probe(providerId: string, modelId: string): Promise<boolean> {
     const provider = await store.get(providerId);
     const entry = provider?.models.find((model) => model.id === modelId);
-    if (!provider || !entry || entry.contextWindow) return false;
-    const limits = (await fromServer(provider, modelId)) ?? (await catalog.lookup(modelId));
-    if (!limits?.contextWindow) {
-      log('info', `model ${modelId}: context window not found on the service or models.dev`);
+    if (!provider || !entry || (entry.contextWindow && entry.maxOutput)) return false;
+    const server = await fromServer(provider, modelId);
+    // 服务端列表常只带窗口：缺的最大输出再从 models.dev 补
+    const listed = server?.maxOutput ? undefined : await catalog.lookup(modelId);
+    const contextWindow = server?.contextWindow ?? listed?.contextWindow;
+    const maxOutput = server?.maxOutput ?? listed?.maxOutput;
+    if (!contextWindow && !maxOutput) {
+      log('info', `model ${modelId}: limits not found on the service or models.dev`);
       return false;
     }
-    return store.updateModelLimits(providerId, modelId, limits);
+    return store.updateModelLimits(providerId, modelId, {
+      ...(contextWindow ? { contextWindow } : {}),
+      ...(maxOutput ? { maxOutput } : {}),
+    });
+  }
+
+  async function learnMaxOutput(
+    providerId: string,
+    modelId: string,
+    maxOutput: number
+  ): Promise<boolean> {
+    if (!isPositiveInt(maxOutput)) return false;
+    try {
+      const entry = (await store.get(providerId))?.models.find((model) => model.id === modelId);
+      const limit = Math.min(maxOutput, entry?.contextWindow ?? maxOutput);
+      if (!entry || (entry.maxOutput !== undefined && limit >= entry.maxOutput)) return false;
+      return await store.updateModelLimits(providerId, modelId, { maxOutput: limit }, true);
+    } catch {
+      log('warn', `model ${modelId}: saving the max output from a max_tokens error failed`);
+      return false;
+    }
   }
 
   return {
@@ -238,14 +306,19 @@ export function createModelLimitsProber(options: {
     },
     async learn(providerId, modelId, message) {
       const contextWindow = parseOverflowLimit(message);
-      if (!contextWindow) return false;
-      try {
-        return await store.updateModelLimits(providerId, modelId, { contextWindow }, true);
-      } catch {
-        log('warn', `model ${modelId}: saving the context window from an overflow error failed`);
-        return false;
+      const maxOutput = parseMaxOutputLimit(message);
+      let updated = false;
+      if (contextWindow) {
+        try {
+          updated = await store.updateModelLimits(providerId, modelId, { contextWindow }, true);
+        } catch {
+          log('warn', `model ${modelId}: saving the context window from an overflow error failed`);
+        }
       }
+      if (maxOutput) updated = (await learnMaxOutput(providerId, modelId, maxOutput)) || updated;
+      return updated;
     },
+    learnMaxOutput,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   createModelsDevCatalog,
   MODELS_DEV_URL,
   normalizeModelId,
+  parseMaxOutputLimit,
   parseModelsDev,
   parseOverflowLimit,
 } from './modelLimits';
@@ -51,6 +52,24 @@ describe('parseModelsDev', () => {
     expect(models.get('only-here')).toEqual({ contextWindow: 64_000 });
     expect(models.has('nolimit')).toBe(false);
     expect(models.has('zero')).toBe(false);
+  });
+
+  it('厂商自己的条目优先，如 zhipuai 的 glm-*', () => {
+    const models = parseModelsDev({
+      relay: { models: { 'glm-x': { limit: { context: 1_000_000, output: 200_000 } } } },
+      zhipuai: { models: { 'glm-x': { limit: { context: 200_000, output: 131_072 } } } },
+      other: { models: { 'z-ai/glm-x': { limit: { context: 200_000, output: 64_000 } } } },
+    });
+    expect(models.get('glm-x')).toEqual({ contextWindow: 200_000, maxOutput: 131_072 });
+  });
+
+  it('没有厂商条目时最大输出取各家最小值，窗口取第一家', () => {
+    const models = parseModelsDev({
+      first: { models: { 'glm-x': { limit: { context: 1_000_000, output: 200_000 } } } },
+      second: { models: { 'glm-x': { limit: { context: 200_000, output: 98_304 } } } },
+      third: { models: { 'glm-x': { limit: { context: 128_000 } } } },
+    });
+    expect(models.get('glm-x')).toEqual({ contextWindow: 1_000_000, maxOutput: 98_304 });
   });
 
   it('不分大小写、去掉 vendor/ 前缀', () => {
@@ -132,7 +151,9 @@ describe('parseOverflowLimit', () => {
 describe('createModelLimitsProber', () => {
   const RELAY = 'https://relay.example.com';
 
-  async function setup(models: { id: string; name: string; contextWindow?: number }[]) {
+  async function setup(
+    models: { id: string; name: string; contextWindow?: number; maxOutput?: number }[]
+  ) {
     const store = createProviderStore({ filePath: join(dir, 'providers.json') });
     const saved = await store.upsert({
       name: 'Relay',
@@ -146,20 +167,41 @@ describe('createModelLimitsProber', () => {
     return { store, providerId: saved.provider.id };
   }
 
-  it('服务端值优先于公开目录，只补缺失的字段并保留其他字段', async () => {
+  it('服务端值优先于公开目录，缺的最大输出从公开目录补，保留其他字段', async () => {
     const { store, providerId } = await setup([{ id: 'gpt-6-astra', name: 'Astra' }]);
     const fetch = fakeFetch({
       [`${RELAY}/v1/models`]: { data: [{ id: 'gpt-6-astra', context_length: 2_000_000 }] },
     });
-    const catalog = { lookup: vi.fn(async () => ({ contextWindow: 1_000_000 })) };
+    const catalog = {
+      lookup: vi.fn(async () => ({ contextWindow: 1_000_000, maxOutput: 64_000 })),
+    };
     const prober = createModelLimitsProber({ store, fetch, catalog });
     expect(await prober.ensure(providerId, 'gpt-6-astra')).toBe(true);
     expect((await store.get(providerId))?.models[0]).toEqual({
       id: 'gpt-6-astra',
       name: 'Astra',
       contextWindow: 2_000_000,
+      maxOutput: 64_000,
     });
-    expect(catalog.lookup).not.toHaveBeenCalled();
+  });
+
+  it('已有窗口、缺最大输出时只补最大输出；不覆盖 learn 写回的值', async () => {
+    const { store, providerId } = await setup([
+      { id: 'glm-x', name: 'GLM', contextWindow: 1_000_000 },
+      { id: 'glm-y', name: 'GLM Y', contextWindow: 200_000 },
+    ]);
+    const catalog = {
+      lookup: vi.fn(async () => ({ contextWindow: 200_000, maxOutput: 131_072 })),
+    };
+    const prober = createModelLimitsProber({ store, fetch: fakeFetch({}), catalog });
+    expect(await prober.ensure(providerId, 'glm-x')).toBe(true);
+    expect((await store.get(providerId))?.models[0]).toMatchObject({
+      contextWindow: 1_000_000,
+      maxOutput: 131_072,
+    });
+    expect(await prober.learnMaxOutput(providerId, 'glm-y', 98_304)).toBe(true);
+    expect(await prober.ensure(providerId, 'glm-y')).toBe(false);
+    expect((await store.get(providerId))?.models[1]?.maxOutput).toBe(98_304);
   });
 
   it('服务端不给时用公开目录；同一模型只探测一次（并发去重）', async () => {
@@ -183,9 +225,9 @@ describe('createModelLimitsProber', () => {
     });
   });
 
-  it('已有窗口时不探测，查不到时静默', async () => {
+  it('窗口与最大输出都有时不探测，查不到时静默', async () => {
     const { store, providerId } = await setup([
-      { id: 'known', name: 'Known', contextWindow: 200_000 },
+      { id: 'known', name: 'Known', contextWindow: 200_000, maxOutput: 64_000 },
       { id: 'mystery', name: 'Mystery' },
     ]);
     const fetch = fakeFetch({});
@@ -217,5 +259,70 @@ describe('createModelLimitsProber', () => {
     expect((await store.get(providerId))?.models[0]?.contextWindow).toBe(272_000);
     expect(await prober.learn(providerId, 'gpt-6-astra', message)).toBe(false);
     expect(await prober.learn(providerId, 'gpt-6-astra', 'rate limited')).toBe(false);
+  });
+
+  it('max_tokens 超范围时写回最大输出，窗口不动，只降不升', async () => {
+    const store = createProviderStore({ filePath: join(dir, 'providers.json') });
+    const saved = await store.upsert({
+      name: 'GLM',
+      api: 'openai-completions',
+      baseUrl: 'https://glm.example.com',
+      enabled: true,
+      models: [{ id: 'glm-x', name: 'GLM', contextWindow: 200_000, maxOutput: 200_000 }],
+      apiKey: 'sk-glm-secret',
+    });
+    if (!saved.ok) throw new Error(saved.error);
+    const providerId = saved.provider.id;
+    const prober = createModelLimitsProber({
+      store,
+      fetch: fakeFetch({}),
+      catalog: { lookup: async () => undefined },
+    });
+    expect(await prober.learn(providerId, 'glm-x', ZHIPU_MAX_TOKENS)).toBe(true);
+    expect((await store.get(providerId))?.models[0]).toMatchObject({
+      contextWindow: 200_000,
+      maxOutput: 131_072,
+    });
+    expect(await prober.learn(providerId, 'glm-x', ZHIPU_MAX_TOKENS)).toBe(false);
+    const larger = 'max_tokens must be less than or equal to 150000';
+    expect(await prober.learn(providerId, 'glm-x', larger)).toBe(false);
+    expect(await prober.learnMaxOutput(providerId, 'glm-x', 150_000)).toBe(false);
+    expect(await prober.learnMaxOutput(providerId, 'glm-x', 0)).toBe(false);
+    expect((await store.get(providerId))?.models[0]?.maxOutput).toBe(131_072);
+    expect(await prober.learnMaxOutput(providerId, 'glm-x', 65_536)).toBe(true);
+    expect((await store.get(providerId))?.models[0]?.maxOutput).toBe(65_536);
+  });
+});
+
+const ZHIPU_MAX_TOKENS =
+  '400 {"error":{"message":"[1210][max_tokens参数非法：限制数值范围[1,131072]]","type":"invalid_request_error"},"type":"error"}';
+
+describe('parseMaxOutputLimit', () => {
+  it.each([
+    [ZHIPU_MAX_TOKENS, 131_072],
+    [
+      'max_tokens: 200000 > 64000, which is the maximum allowed number of output tokens for this model',
+      64_000,
+    ],
+    [
+      'max_tokens is too large: 200000. This model supports at most 128000 completion tokens, whereas you provided 200000.',
+      128_000,
+    ],
+    ['max_tokens must be less than or equal to `8192`', 8_192],
+  ])('%s', (message, limit) => {
+    expect(parseMaxOutputLimit(message)).toBe(limit);
+  });
+
+  it.each([
+    "This model's maximum context length is 128000 tokens.",
+    'prompt is too long: 210345 tokens > 200000 maximum',
+    'context_length_exceeded: max_tokens 32000',
+    'Rate limit reached: limit 30000 tokens per minute',
+  ])('不是最大输出报错：%s', (message) => {
+    expect(parseMaxOutputLimit(message)).toBeUndefined();
+  });
+
+  it('max_tokens 报错不当作窗口', () => {
+    expect(parseOverflowLimit(ZHIPU_MAX_TOKENS)).toBeUndefined();
   });
 });
