@@ -1,15 +1,26 @@
-import { File, FileSpreadsheet, FileText, FileType, type LucideIcon } from 'lucide-react';
+import { File, FileCode, FileSpreadsheet, FileText, FileType, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type FileKind = 'pdf' | 'word' | 'sheet' | 'other';
+type FileKind = 'pdf' | 'word' | 'sheet' | 'text' | 'code' | 'other';
+
+/** 扩展名（小写）到附件类型的映射，未列出的归 other */
+const EXT_KIND = new Map<string, FileKind>();
+const KIND_EXTS: Record<Exclude<FileKind, 'other'>, string> = {
+  pdf: 'pdf',
+  word: 'doc docx',
+  sheet: 'xls xlsx csv tsv',
+  text: 'txt text log md markdown rst',
+  code:
+    'js jsx mjs cjs ts tsx py java kt go rs c h cpp hpp cc cs rb php swift dart lua sh bash ps1 bat cmd sql ' +
+    'html htm css scss less vue svelte json jsonc yaml yml toml xml ini conf cfg properties gradle',
+};
+for (const [kind, exts] of Object.entries(KIND_EXTS)) {
+  for (const ext of exts.split(' ')) EXT_KIND.set(ext, kind as FileKind);
+}
 
 /** 按扩展名（不区分大小写）判断附件类型，只决定图标和颜色 */
 export function fileKindOf(name: string): FileKind {
-  const ext = fileExtOf(name).toLowerCase();
-  if (ext === 'pdf') return 'pdf';
-  if (ext === 'doc' || ext === 'docx') return 'word';
-  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv' || ext === 'tsv') return 'sheet';
-  return 'other';
+  return EXT_KIND.get(fileExtOf(name).toLowerCase()) ?? 'other';
 }
 
 /** 文件扩展名（不含点）；没有扩展名或以点开头的隐藏文件返回空串 */
@@ -22,6 +33,8 @@ const KIND_STYLE: Record<FileKind, { icon: LucideIcon; className: string }> = {
   pdf: { icon: FileText, className: 'bg-red-500 text-white' },
   word: { icon: FileType, className: 'bg-blue-500 text-white' },
   sheet: { icon: FileSpreadsheet, className: 'bg-emerald-600 text-white' },
+  text: { icon: FileText, className: 'bg-slate-500 text-white' },
+  code: { icon: FileCode, className: 'bg-violet-500 text-white' },
   other: { icon: File, className: 'bg-muted text-muted-foreground' },
 };
 
