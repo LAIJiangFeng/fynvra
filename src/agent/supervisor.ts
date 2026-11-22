@@ -94,6 +94,8 @@ export interface OpenSessionInput {
   triageHost?: TriageHost | null;
   /** 审批门的人工审批通道；supervisor 提供，缺失时需审批的工具调用一律拒绝。 */
   approval?: ApprovalPolicyHooks;
+  /** 端点拒绝 max_tokens 后会话已降到它报的上限并静默重发：报给 Main 写回设置，不在界面上显示 */
+  onMaxOutputLearned?(modelId: string, maxOutput: number): void;
 }
 
 export type OpenSession = (input: OpenSessionInput) => Promise<SupervisedSession>;
@@ -363,6 +365,10 @@ export class SessionSupervisor {
         approval: {
           request: (request, signal) => this.requestApproval(identity, request, signal),
           timeoutMs: this.#approvalTimeoutMs,
+        },
+        onMaxOutputLearned: (modelId, maxOutput) => {
+          if (managed.closed || this.#current(identity) !== managed) return;
+          this.#post({ type: 'model-limits-learned', identity, modelId, maxOutput });
         },
       });
     } catch (error) {
