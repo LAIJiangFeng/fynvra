@@ -1,7 +1,15 @@
-import type { PluginReadmeResult } from '@shared/types/plugins';
+import { type PluginReadmeResult, type ReadmeSource, readmeSourceKey } from '@shared/types/plugins';
 import { Loader2 } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import type { Components } from 'react-markdown';
+import {
+  type CSSProperties,
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { type Components, defaultUrlTransform, type UrlTransform } from 'react-markdown';
 import { Markdown } from '@/components/chat/Markdown';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '@/i18n/I18nProvider';
@@ -14,40 +22,212 @@ const isHttp = (url: unknown): url is string =>
 
 const LINK_CLASS = 'font-medium text-primary underline underline-offset-4';
 
-/**
- * README 渲染（市场详情与已装插件共用）。图片一律不加载，换成「[图片：alt]」文字，http(s) 地址可点开；
- * 链接只有 http(s) 可点（target=_blank 由 Main 交给系统浏览器），相对链接和其他协议只显示文字；原始 HTML 不渲染。
- */
-export function ReadmeView({ text }: { text: string }) {
+/** CSP 允许的 data: 图片（只认这四种位图） */
+const DATA_IMAGE = /^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]*$/i;
+/** 同一份 README 最多加载的图片数、同时进行的请求数、缓存条数 */
+export const MAX_README_IMAGES = 40;
+const MAX_CONCURRENT = 4;
+const MAX_CACHED = 100;
+
+/** src 怎么处理：data 直接显示，remote / local 交给 Main，其余当作加载失败 */
+export function classifyImageSrc(
+  src: string,
+  source: ReadmeSource
+): 'data' | 'remote' | 'local' | 'none' {
+  if (DATA_IMAGE.test(src)) return 'data';
+  if (/^https:\/\//i.test(src)) return 'remote';
+  if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || /^[/\\~]/.test(src)) return 'none';
+  return source.kind === 'market' ? 'none' : 'local';
+}
+
+/** 结果按「source + src」缓存（失败为 null），翻页回来不用重新请求 */
+const imageCache = new Map<string, Promise<string | null>>();
+const settled = new Map<string, string | null>();
+let active = 0;
+const waiting: (() => void)[] = [];
+
+async function limited<T>(task: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
+  active++;
+  try {
+    return await task();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
+function loadImage(source: ReadmeSource, src: string): Promise<string | null> {
+  const key = `${readmeSourceKey(source)}\u0000${src}`;
+  let pending = imageCache.get(key);
+  if (!pending) {
+    if (imageCache.size >= MAX_CACHED) {
+      const oldest = imageCache.keys().next().value;
+      if (oldest !== undefined) {
+        imageCache.delete(oldest);
+        settled.delete(oldest);
+      }
+    }
+    pending = limited(() => usePluginsStore.getState().readmeImage(source, src)).then((result) => {
+      const value = result.ok ? result.dataUrl : null;
+      if (imageCache.has(key)) settled.set(key, value);
+      return value;
+    });
+    imageCache.set(key, pending);
+  }
+  return pending;
+}
+
+function dimension(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 4096 ? parsed : undefined;
+}
+
+/** img 的 align：left / right 浮动，top / middle / bottom 是垂直对齐 */
+function imageAlign(value: unknown): CSSProperties | undefined {
+  if (value === 'left') return { float: 'left', marginRight: '0.5rem' };
+  if (value === 'right') return { float: 'right', marginLeft: '0.5rem' };
+  if (value === 'top' || value === 'middle' || value === 'bottom') return { verticalAlign: value };
+  return undefined;
+}
+
+/** 图片已在链接里时，失败标签不再套一层链接 */
+const InLink = createContext(false);
+
+function ReadmeImage({
+  source,
+  src,
+  alt,
+  width,
+  height,
+  align,
+  allowed,
+}: {
+  source: ReadmeSource;
+  src: string;
+  alt: string;
+  width?: number;
+  height?: number;
+  align: CSSProperties | undefined;
+  allowed: boolean;
+}) {
   const t = useT();
-  const components = useMemo<Components>(
-    () => ({
-      img: ({ src, alt }) => {
-        const label = t('settings.plugins.market.image', {
-          alt: alt || (typeof src === 'string' ? src : ''),
-        });
-        return isHttp(src) ? (
-          <a href={src} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-            {label}
-          </a>
-        ) : (
-          <span>{label}</span>
+  const inLink = useContext(InLink);
+  const kind = classifyImageSrc(src, source);
+  const loadable = allowed && (kind === 'remote' || kind === 'local');
+  const key = `${readmeSourceKey(source)}\u0000${src}`;
+  const [loaded, setLoaded] = useState<{ key: string; value: string | null } | null>(null);
+  useEffect(() => {
+    if (!loadable || settled.has(key)) return;
+    let current = true;
+    void loadImage(source, src).then((value) => {
+      if (current) setLoaded({ key, value });
+    });
+    return () => {
+      current = false;
+    };
+  }, [loadable, key, source, src]);
+
+  const dataUrl =
+    kind === 'data'
+      ? src
+      : !loadable
+        ? null
+        : settled.has(key)
+          ? settled.get(key)
+          : loaded?.key === key
+            ? loaded.value
+            : undefined;
+
+  if (dataUrl === undefined) {
+    // 加载中：有尺寸就占同样大的位置，没有就显示小号 alt 文字，布局不跳动
+    return width || height ? (
+      <span
+        role="img"
+        aria-label={alt}
+        className="inline-block max-w-full animate-pulse rounded bg-muted align-middle"
+        style={{ width: width ?? height, height: height ?? width, ...align }}
+      />
+    ) : (
+      <span className="text-muted-foreground text-xs">{alt}</span>
+    );
+  }
+  if (dataUrl === null) {
+    const label = (
+      <span
+        style={align}
+        className="inline-block rounded bg-muted px-1.5 py-0.5 align-middle text-muted-foreground text-xs"
+      >
+        {alt || t('settings.plugins.readme.image')}
+      </span>
+    );
+    return isHttp(src) && !inLink ? (
+      <a href={src} target="_blank" rel="noreferrer">
+        {label}
+      </a>
+    ) : (
+      label
+    );
+  }
+  return (
+    <img
+      src={dataUrl}
+      alt={alt}
+      width={width}
+      height={height}
+      style={align}
+      className="inline h-auto max-w-full"
+    />
+  );
+}
+
+/** 只放行 CSP 允许的 data: 图片，其余按 react-markdown 默认规则 */
+const readmeUrlTransform: UrlTransform = (url, key) =>
+  key === 'src' && DATA_IMAGE.test(url) ? url : defaultUrlTransform(url);
+
+/**
+ * README 渲染（市场详情与已装插件共用）。内嵌 HTML 按 GitHub 规则过滤后渲染；
+ * 图片：data:（四种位图）直接显示，https 与插件目录里的相对路径由 Main 转成 data URL，其余显示 alt 标签；
+ * 链接只有 http(s) 可点（target=_blank 由 Main 交给系统浏览器），相对链接和其他协议只显示文字。
+ */
+export function ReadmeView({ text, source }: { text: string; source: ReadmeSource }) {
+  const sourceKey = readmeSourceKey(source);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 按 source 的键与正文重建，source 对象每次渲染可能是新的
+  const components = useMemo<Components>(() => {
+    // 本份 README 已分配名额的地址；超过 40 张的按加载失败处理
+    const budget = new Set<string>();
+    return {
+      img: ({ src, alt, width, height, node }) => {
+        const url = typeof src === 'string' ? src : '';
+        const kind = classifyImageSrc(url, source);
+        if ((kind === 'remote' || kind === 'local') && budget.size < MAX_README_IMAGES) {
+          budget.add(url);
+        }
+        return (
+          <ReadmeImage
+            source={source}
+            src={url}
+            alt={alt ?? ''}
+            width={dimension(width)}
+            height={dimension(height)}
+            align={imageAlign(node?.properties.align)}
+            allowed={budget.has(url)}
+          />
         );
       },
       a: ({ href, children }) =>
         isHttp(href) ? (
           <a href={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-            {children}
+            <InLink.Provider value={true}>{children}</InLink.Provider>
           </a>
         ) : (
           <span>{children}</span>
         ),
-    }),
-    [t]
-  );
+    };
+  }, [sourceKey, text]);
   return (
     <div className="rounded-lg border px-4 py-3">
-      <Markdown text={text} components={components} />
+      <Markdown text={text} html components={components} urlTransform={readmeUrlTransform} />
     </div>
   );
 }
@@ -107,7 +287,7 @@ export function InstalledReadme({
   }, [kind, id, readFynvra, readPi, t]);
 
   if (!loaded) return <ReadmeLoading />;
-  if ('text' in loaded) return <ReadmeView text={loaded.text} />;
+  if ('text' in loaded) return <ReadmeView text={loaded.text} source={{ kind, id }} />;
   if ('error' in loaded) {
     return (
       <InlineMessage tone="error" className="break-all">

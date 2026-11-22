@@ -8,6 +8,8 @@ import {
   useMemo,
 } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps, type Options } from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
@@ -15,6 +17,37 @@ import { CharLru } from './highlighter';
 import { MermaidBlock } from './MermaidBlock';
 
 const REMARK_PLUGINS = [remarkGfm];
+
+/**
+ * README 的 HTML 白名单：以 GitHub 规则（defaultSchema）为基础。
+ * 去掉 source（srcset 会绕过图片控制）；src 额外允许 data:（是否显示由 README 的 img 组件再判断）；
+ * 脚本、样式、内嵌框、表单等连内容一起删掉。style 与事件属性不在白名单里，id / name 保留默认前缀。
+ */
+export const README_SCHEMA: SanitizeOptions = {
+  ...defaultSchema,
+  tagNames: (defaultSchema.tagNames ?? []).filter((tag) => tag !== 'source'),
+  attributes: Object.fromEntries(
+    Object.entries(defaultSchema.attributes ?? {}).filter(([tag]) => tag !== 'source')
+  ),
+  protocols: { ...defaultSchema.protocols, src: ['http', 'https', 'data'] },
+  strip: [
+    'script',
+    'style',
+    'iframe',
+    'object',
+    'embed',
+    'form',
+    'svg',
+    'math',
+    'template',
+    'noscript',
+    'textarea',
+    'select',
+    'button',
+  ],
+};
+// 顺序不可交换：先解析 HTML，再过滤整棵 HAST
+const README_PLUGINS: Options['rehypePlugins'] = [rehypeRaw, [rehypeSanitize, README_SCHEMA]];
 /** 已完成消息的渲染结果：虚拟列表把行卸载后再滚回来不用重新解析 Markdown */
 const rendered = new CharLru<ReactElement>(1_000_000);
 
@@ -32,6 +65,14 @@ function alignment(node: ExtraProps['node']): CSSProperties | undefined {
   return value === 'left' || value === 'center' || value === 'right'
     ? { textAlign: value }
     : undefined;
+}
+
+/** GFM 表格列对齐给的是 style，HTML 表格给的是 align */
+function cellAlignment(
+  style: CSSProperties | undefined,
+  node: ExtraProps['node']
+): CSSProperties | undefined {
+  return style?.textAlign ? { textAlign: style.textAlign } : alignment(node);
 }
 
 /** 默认不渲染原始 HTML，链接交给系统浏览器（Main 拦截新窗口）。 */
@@ -90,6 +131,29 @@ function componentsFor(streaming: boolean): Components {
         {children}
       </h4>
     ),
+    h5: ({ children, node }) => (
+      <h5 style={alignment(node)} className="mt-3 mb-1.5 font-semibold text-sm">
+        {children}
+      </h5>
+    ),
+    h6: ({ children, node }) => (
+      <h6
+        style={alignment(node)}
+        className="mt-3 mb-1.5 font-semibold text-muted-foreground text-sm"
+      >
+        {children}
+      </h6>
+    ),
+    div: ({ children, node }) => <div style={alignment(node)}>{children}</div>,
+    sub: ({ children }) => <sub className="text-[0.75em]">{children}</sub>,
+    sup: ({ children }) => <sup className="text-[0.75em]">{children}</sup>,
+    br: () => <br />,
+    details: ({ children, open }) => (
+      <details open={open} className="my-2 rounded-md border px-3 py-2">
+        {children}
+      </details>
+    ),
+    summary: ({ children }) => <summary className="cursor-pointer font-medium">{children}</summary>,
     blockquote: ({ children }) => (
       <blockquote className="my-3 border-l-2 pl-4 text-muted-foreground">{children}</blockquote>
     ),
@@ -99,13 +163,23 @@ function componentsFor(streaming: boolean): Components {
         <table className="w-full border-collapse text-sm">{children}</table>
       </div>
     ),
-    th: ({ children, style }) => (
-      <th style={style} className="border bg-muted/50 px-3 py-1.5 text-left font-medium">
+    th: ({ children, style, node, colSpan, rowSpan }) => (
+      <th
+        style={cellAlignment(style, node)}
+        colSpan={colSpan}
+        rowSpan={rowSpan}
+        className="border bg-muted/50 px-3 py-1.5 text-left font-medium"
+      >
         {children}
       </th>
     ),
-    td: ({ children, style }) => (
-      <td style={style} className="border px-3 py-1.5">
+    td: ({ children, style, node, colSpan, rowSpan }) => (
+      <td
+        style={cellAlignment(style, node)}
+        colSpan={colSpan}
+        rowSpan={rowSpan}
+        className="border px-3 py-1.5"
+      >
         {children}
       </td>
     ),
@@ -124,6 +198,7 @@ export const Markdown = memo(function Markdown({
   components,
   urlTransform,
   cacheKey,
+  html = false,
 }: {
   text: string;
   streaming?: boolean;
@@ -138,18 +213,23 @@ export const Markdown = memo(function Markdown({
    * 下 components / rehypePlugins / urlTransform 的行为不变。
    */
   cacheKey?: string;
+  /** 只有 README 传 true：按 README_SCHEMA 过滤后渲染内嵌 HTML（会取代 rehypePlugins）；聊天保持 false */
+  html?: boolean;
 }) {
   const renderers = useMemo(
     () => ({ ...(streaming ? STREAMING_COMPONENTS : STATIC_COMPONENTS), ...components }),
     [streaming, components]
   );
-  const key = !streaming && cacheKey !== undefined ? `${cacheKey}\u0000${text}` : null;
+  const key =
+    !streaming && cacheKey !== undefined
+      ? `${html ? 'h' : 't'}\u0000${cacheKey}\u0000${text}`
+      : null;
   let content = key ? rendered.get(key) : undefined;
   if (!content) {
     // react-markdown 是同步、无 hook 的函数，直接调用拿到元素树才能缓存
     content = ReactMarkdown({
       remarkPlugins: REMARK_PLUGINS,
-      rehypePlugins,
+      rehypePlugins: html ? README_PLUGINS : rehypePlugins,
       components: renderers,
       urlTransform,
       children: text,

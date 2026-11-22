@@ -54,6 +54,28 @@ describe('plugins:readme', () => {
   });
 });
 
+describe('plugins:readme-image', () => {
+  it('入参收窄；没读过的 README 里的地址拒绝', async () => {
+    for (const raw of [
+      undefined,
+      { src: 'a.png' },
+      { source: { kind: 'pi', id: 'demo' }, src: 'a.png', extra: 1 },
+      { source: { kind: 'pi', id: 'demo' }, src: 'x'.repeat(2049) },
+    ]) {
+      expect(await call(IPC_CHANNELS.PLUGINS_README_IMAGE, raw)).toEqual({
+        ok: false,
+        code: 'invalid',
+      });
+    }
+    expect(
+      await call(IPC_CHANNELS.PLUGINS_README_IMAGE, {
+        source: { kind: 'market', pluginId: 'fynvra.demo', version: '1.0.0' },
+        src: 'https://img.test/a.png',
+      })
+    ).toEqual({ ok: false, code: 'not-in-readme' });
+  });
+});
+
 describe('plugins 市场 IPC', () => {
   it('公钥为空时状态为 configured: false，且不发请求', async () => {
     expect(await call(IPC_CHANNELS.PLUGINS_MARKET_STATE)).toEqual({

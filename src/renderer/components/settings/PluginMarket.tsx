@@ -518,7 +518,7 @@ function MarketDetail({
   );
 }
 
-/** 市场版本的 README：这里只负责加载，渲染交给 ReadmeView（图片不加载、只有 http(s) 链接可点） */
+/** 市场版本的 README：这里只负责加载，渲染交给 ReadmeView（没有本地目录，相对路径图片不显示） */
 function MarketReadme({ pluginId, version }: { pluginId: string; version: string }) {
   const marketReadme = usePluginsStore((state) => state.marketReadme);
   const [result, setResult] = useState<{ text: string } | { error: string } | null>(null);
@@ -541,7 +541,7 @@ function MarketReadme({ pluginId, version }: { pluginId: string; version: string
       </InlineMessage>
     );
   }
-  return <ReadmeView text={result.text} />;
+  return <ReadmeView text={result.text} source={{ kind: 'market', pluginId, version }} />;
 }
 
 /**

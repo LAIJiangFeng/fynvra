@@ -1,7 +1,13 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
 import type { MarketStateView } from '@shared/types/pluginMarket';
-import type { PluginEntry, PluginProviderMap, PluginReadmeResult } from '@shared/types/plugins';
+import type {
+  PluginEntry,
+  PluginProviderMap,
+  PluginReadmeImageResult,
+  PluginReadmeResult,
+  ReadmeSource,
+} from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   PluginActionResult,
@@ -60,6 +66,8 @@ export interface PluginsState {
   marketReadme(pluginId: string, version: string): Promise<PluginMarketReadmeResult>;
   /** 只读已装插件目录里的 README.md */
   readme(id: string): Promise<PluginReadmeResult>;
+  /** README 里的一张图片 → data URL（Main 读插件目录或下载 https） */
+  readmeImage(source: ReadmeSource, src: string): Promise<PluginReadmeImageResult>;
 }
 
 /** IPC 调用本身失败（极少见）也折成 { ok: false } */
@@ -223,6 +231,8 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
     api
       .readme({ id })
       .catch((error) => ({ ok: false, code: 'failed', error: errorMessage(error) }) as const),
+  readmeImage: (source, src) =>
+    api.readmeImage({ source, src }).catch(() => ({ ok: false, code: 'failed' }) as const),
 }));
 
 api.onChanged(() => {

@@ -11,7 +11,9 @@ import {
   MAX_PLUGIN_IMPORT_IDS,
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
+  type PluginReadmeImageResult,
   type PluginReadmeResult,
+  parseReadmeImageInput,
   parseRemotePluginSource,
   type SetPluginManualProvidersInput,
   type SetPluginProviderMappingInput,
@@ -26,6 +28,8 @@ import {
   type OpenDialogOptions,
   shell,
 } from 'electron';
+// 直接引用传输模块：经包入口导入会把 pi SDK 与工具定义一起打进 Main
+import { fetchPage } from '../../../packages/agent-runtime/src/tools/web/transport';
 import type {
   PluginActionResult,
   PluginAddResult,
@@ -76,6 +80,12 @@ import {
 } from '../services/plugins/pluginSources';
 import { refusePiProtectedDelete } from '../services/plugins/protectedPaths';
 import { scanPluginProviders } from '../services/plugins/providerScan';
+import {
+  loadReadmeImage,
+  README_IMAGE_MAX_BYTES,
+  type ReadmeImageDeps,
+  rememberReadme,
+} from '../services/plugins/readmeImages';
 import { isRegistryId, toSlug, uniqueId } from '../services/providers/jsonRegistry';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { showAppMessageBox } from './appDialog';
@@ -335,10 +345,21 @@ export function registerPluginHandlers(): void {
       try {
         const plugin = await getPluginRegistry().get(input.id);
         if (!plugin) return { ok: false, code: 'not-found', error: translate('plugins.notFound') };
-        return await readPluginReadme(plugin.path);
+        const result = await readPluginReadme(plugin.path);
+        if (result.ok) rememberReadme({ kind: 'pi', id: input.id }, result.text);
+        return result;
       } catch (error) {
         return { ok: false, code: 'failed', error: errorMessage(error) };
       }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_README_IMAGE,
+    async (_event, raw: unknown): Promise<PluginReadmeImageResult> => {
+      const input = parseReadmeImageInput(raw);
+      if (!input) return { ok: false, code: 'invalid' };
+      return loadReadmeImage(input, readmeImageDeps);
     }
   );
 
@@ -505,13 +526,37 @@ function registerMarketHandlers(): void {
       const input = parseMarketVersionInput(raw);
       if (!input) return { ok: false, error: translate('common.invalidArgs') };
       try {
-        return await getPluginMarket().readme(input);
+        const result = await getPluginMarket().readme(input);
+        if (result.ok) rememberReadme({ kind: 'market', ...input }, result.text);
+        return result;
       } catch (error) {
         return { ok: false, error: scanWarning(error) };
       }
     }
   );
 }
+
+/** README 图片：插件目录只按 id 从登记里取；https 走 agent-runtime 的安全传输，代理与其他网络请求一致 */
+const readmeImageDeps: ReadmeImageDeps = {
+  pluginDir: async (source) => {
+    if (source.kind === 'pi') return (await getPluginRegistry().get(source.id))?.path ?? null;
+    const record = (await getAppPluginService().list()).find((item) => item.id === source.id);
+    return record?.path ?? null;
+  },
+  marketOf: async (source) => {
+    if (source.kind !== 'pi') return null;
+    const market = (await getPluginRegistry().get(source.id))?.market;
+    return market ? { kind: 'market', pluginId: market.id, version: market.version } : null;
+  },
+  fetchImage: async (url) =>
+    fetchPage(url, await freshCommandEnvironment(), undefined, {
+      httpsOnly: true,
+      maxRedirects: 3,
+      timeoutMs: 10_000,
+      maxBytes: README_IMAGE_MAX_BYTES,
+      accept: 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml;q=0.8',
+    }),
+};
 
 /** 启用 / 停用插件并广播（plugins:toggle 与 fynvra_config 共用） */
 export async function setPluginEnabled(id: string, enabled: boolean): Promise<PluginToggleResult> {
