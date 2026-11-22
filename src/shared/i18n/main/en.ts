@@ -100,6 +100,8 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidApproval: 'Invalid approval decision',
     invalidModel: 'Invalid model arguments',
     invalidApprovalMode: 'Invalid approval mode',
+    profileApprovalLocked:
+      'Approval for channel sessions is set by profile rules and cannot be changed',
     invalidPlanMode: 'Invalid plan mode arguments',
     archiveBusy: 'Session is running; archive it after it finishes',
     removeBusy: 'The session or its task is still in progress; delete it after it finishes',
@@ -123,6 +125,9 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     describeTimeout:
       'Timed out reading thinking levels: the agent worker did not answer; try again shortly',
     protectedTitle: '{title} (protected: {action})',
+    restrictedTestsTitle: 'On-call asks to run the tests on this computer',
+    restrictedTestsNote:
+      "The test code was changed by AI based on chat messages and will run on your computer: secrets are removed from the environment variables, but it can still read and write your files and access the network. If in doubt, deny; the tests still run in the pull request's GitHub Checks. No answer within 10 minutes counts as deny.",
     describeCrashed:
       'Agent worker exited unexpectedly (code {code}) before reading thinking levels; try again',
     crashedRestarting:
@@ -263,6 +268,32 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
       "{count} package sources in pi's settings.json are not supported; skipped",
     importTooMany: 'Too many items; only the first page of {max} is listed',
     importUnknown: 'This item is no longer available; scan again',
+    marketNotConfigured: 'The plugin marketplace is not open yet',
+    marketUnavailable: 'The plugin list has not loaded yet. Click Refresh first',
+    marketRefreshFailed: 'Failed to refresh the plugin market: {error}',
+    marketNotFound: 'This plugin or version is not in the market',
+    marketRevoked: 'This version has been revoked: {reason}',
+    marketIncompatible: 'This version needs a newer Fynvra ({range})',
+    marketAlreadyInstalled: '"{name}" is already installed; update it instead',
+    marketDownloadFailed: 'Download failed: {error}',
+    marketVerifyFailed: 'Plugin package verification failed: {error}',
+    marketNotMarket: 'Only plugins installed from the market can be updated',
+    marketNoUpdate: 'No newer version is available',
+    marketNoReadme: 'This version has no README',
+    marketRevokedTitle: 'Plugin revoked and disabled',
+    marketRevokedBody: '"{name}": {reason}',
+  },
+  appPlugins: {
+    notFound: 'Fynvra plugin not found',
+    unavailable: 'Fynvra plugins are unavailable right now',
+    alreadyInstalled: '"{name}" is already installed',
+    invalidManifest: 'Not a valid Fynvra plugin: {error}',
+    installFailed: 'Failed to install the Fynvra plugin: {error}',
+    removeFailed: 'Failed to remove the Fynvra plugin: {error}',
+    devOnly: 'Only development builds can add Fynvra plugins from a local folder',
+    notLocal: 'Only Fynvra plugins added from a local folder can be re-copied',
+    pickTitle: 'Choose a Fynvra plugin folder',
+    readFailed: 'Failed to read Fynvra plugins: {error}',
   },
   providers: {
     readFailed: 'Failed to read providers: {error}',

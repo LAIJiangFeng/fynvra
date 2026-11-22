@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -26,6 +26,8 @@ import {
   ORCHESTRATOR_PROMPT,
   WORKER_CONTRACT_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { profileLanguagePrompt } from '../prompts/profileLanguagePrompt';
+import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import {
   type CreateRoleSessionOptions,
   createRoleSession,
@@ -58,6 +60,7 @@ function orchestrationHost(): OrchestrationHost {
     reviewDiff: unused,
     runChecks: unused,
     mergeWorktree: unused,
+    openPullRequest: unused,
     rejectWork: unused,
     cleanupWorktree: unused,
   };
@@ -567,6 +570,55 @@ describe('command environment injection through real pi tools', () => {
       });
     }
   );
+  it.each(shellTools)(
+    'strips secrets from %s subprocess env in a restricted session only',
+    async (name) => {
+      const fixture = await localBashFixture();
+      await writeFile(
+        path.join(workdir, 'package.json'),
+        JSON.stringify({ name: 'probe', private: true, scripts: { lint: 'node probe.cjs' } })
+      );
+      await writeFile(
+        path.join(workdir, 'probe.cjs'),
+        "console.log('token=' + (process.env.GITHUB_TOKEN ?? 'none'));"
+      );
+      vi.stubEnv('GITHUB_TOKEN', 'fake-token');
+      try {
+        for (const profile of ['restricted', undefined] as const) {
+          const { session } = await open({
+            role: role({ approvalMode: 'full' }),
+            ...(profile ? { profile } : {}),
+            settingsManager: SettingsManager.inMemory({
+              shellPath: fixture.shellPath,
+              retry: { enabled: false },
+              compaction: { enabled: false },
+            }),
+          });
+          session.setActiveToolsByName(['bash', 'powershell']);
+          const events: FynvraSessionEvent[] = [];
+          const subscription = subscribeNormalized(session, (event) => events.push(event));
+          faux.setResponses([
+            fauxAssistantMessage(fauxToolCall(name, { command: 'pnpm lint' }), {
+              stopReason: 'toolUse',
+            }),
+            fauxAssistantMessage('done'),
+          ]);
+          await session.prompt('Run lint.');
+          subscription.unsubscribe();
+          const end = events.find((event) => event.type === 'tool_end');
+          // 只比较探针输出的那一行，不打印完整环境变量
+          const line = (end?.type === 'tool_end' ? String(end.output) : '').match(/token=\S+/)?.[0];
+          expect(line).toBe(profile ? 'token=none' : 'token=fake-token');
+        }
+      } finally {
+        vi.unstubAllEnvs();
+        // workdir 在用例间共用：其他用例断言 package.json 不存在
+        await rm(path.join(workdir, 'package.json'), { force: true });
+        await rm(path.join(workdir, 'probe.cjs'), { force: true });
+      }
+    },
+    60_000
+  );
   it.each(['readonly', 'orchestrator'] as const)(
     'keeps %s permissions and injects git_readonly env',
     async (tools) => {
@@ -792,5 +844,364 @@ describe('createRoleSession approval gate', () => {
 
     expect(approval.requests.map((request) => request.protectedAction)).toEqual(['git push']);
     expect(runChecks.mock.calls.map(([input]) => input.command)).toEqual(['pnpm test']);
+  });
+});
+
+describe('createRoleSession profiles', () => {
+  const configHost = { configure: async () => ({ ok: true as const }) };
+
+  function triageHost() {
+    return { triageReport: vi.fn(async () => ({ ok: true as const })) };
+  }
+
+  it('keeps fynvra_config for a session without a profile', async () => {
+    const { session } = await open({ role: role({ tools: 'readonly' }), configHost });
+    expect(session.getActiveToolNames()).toContain('fynvra_config');
+  });
+
+  it('gives triage only read / grep / find / ls and triage_report, whatever the role says', async () => {
+    const { session } = await open({
+      role: role({ tools: 'all', approvalMode: 'full' }),
+      profile: 'triage',
+      triageHost: triageHost(),
+      configHost,
+      workerHost: workerHost(),
+      planMode: () => true,
+    });
+    expect(session.getActiveToolNames().sort()).toEqual(
+      ['read', 'grep', 'find', 'ls', 'triage_report'].sort()
+    );
+  });
+
+  describe('context files', () => {
+    let base = '';
+    let cwd = '';
+    let profileAgentDir = '';
+    let linked = false;
+
+    beforeAll(async () => {
+      base = path.join(tmp, 'context-files');
+      cwd = path.join(base, 'repo');
+      profileAgentDir = path.join(base, 'agent');
+      await mkdir(path.join(base, 'outside'), { recursive: true });
+      await mkdir(cwd, { recursive: true });
+      await mkdir(profileAgentDir, { recursive: true });
+      await writeFile(path.join(base, 'AGENTS.md'), 'PARENT_AGENTS_MARKER');
+      await writeFile(path.join(profileAgentDir, 'AGENTS.md'), 'GLOBAL_AGENTS_MARKER');
+      await writeFile(path.join(cwd, 'AGENTS.md'), 'REPO_AGENTS_MARKER');
+      await writeFile(path.join(base, 'outside', 'CLAUDE.md'), 'LINKED_AGENTS_MARKER');
+      await mkdir(path.join(base, 'linked-repo'));
+      try {
+        // Windows 上没有权限时建不了符号链接，相关用例跳过
+        await symlink(
+          path.join(base, 'outside', 'CLAUDE.md'),
+          path.join(base, 'linked-repo', 'CLAUDE.md'),
+          'file'
+        );
+        linked = true;
+      } catch {
+        linked = false;
+      }
+    });
+
+    async function promptOf(sessionCwd: string, profiled: boolean): Promise<string> {
+      const { session } = await open({
+        cwd: sessionCwd,
+        agentDir: profileAgentDir,
+        role: role({}),
+        ...(profiled ? { profile: 'triage' as const, triageHost: triageHost() } : {}),
+      });
+      let prompt = '';
+      faux.setResponses([
+        (context: TranscriptContext) => {
+          prompt = systemText(context);
+          return fauxAssistantMessage('ok');
+        },
+      ]);
+      await session.prompt('hi');
+      return prompt;
+    }
+
+    it('loads only the repository AGENTS.md for a profile session', async () => {
+      const prompt = await promptOf(cwd, true);
+      expect(prompt).toContain('REPO_AGENTS_MARKER');
+      expect(prompt).not.toContain('PARENT_AGENTS_MARKER');
+      expect(prompt).not.toContain('GLOBAL_AGENTS_MARKER');
+    });
+
+    it('still loads parent and global AGENTS.md for a session without a profile', async () => {
+      const prompt = await promptOf(cwd, false);
+      expect(prompt).toContain('REPO_AGENTS_MARKER');
+      expect(prompt).toContain('PARENT_AGENTS_MARKER');
+      expect(prompt).toContain('GLOBAL_AGENTS_MARKER');
+    });
+
+    it('drops a context file reached through a link pointing outside the working directory', async (ctx) => {
+      if (!linked) ctx.skip(); // 本机不允许创建符号链接 / junction
+      // 仓库里的 CLAUDE.md 是指向仓库外的符号链接
+      const linkedCwd = path.join(base, 'linked-repo');
+      expect(await promptOf(linkedCwd, false)).toContain('LINKED_AGENTS_MARKER');
+      const prompt = await promptOf(linkedCwd, true);
+      expect(prompt).not.toContain('LINKED_AGENTS_MARKER');
+    });
+  });
+
+  it('refuses a triage session without a triage host', async () => {
+    await expect(open({ role: role({}), profile: 'triage' })).rejects.toThrow('TriageHost');
+  });
+
+  it('gives triage the fixed prompt only and hands triage_report to the host', async () => {
+    const host = triageHost();
+    const { session } = await open({
+      role: role({ systemPrompt: 'ROLE PROMPT MARKER' }),
+      profile: 'triage',
+      triageHost: host,
+      resourcePaths: {
+        skills: [],
+        mcpServers: [],
+        instructionFile: { name: 'AGENTS.md', content: 'USER INSTRUCTIONS MARKER' },
+      },
+    });
+    const report = { kind: 'question', title: 't', summary: 's', reply: 'r' };
+    const contexts: TranscriptContext[] = [];
+    faux.setResponses([
+      (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage(fauxToolCall('triage_report', report, { id: 'call-0' }), {
+          stopReason: 'toolUse',
+        });
+      },
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('<untrusted-content>how do I start?</untrusted-content>');
+    const prompt = systemText(contexts[0] as TranscriptContext);
+    expect(prompt).toContain('# Fynvra triage');
+    expect(prompt).not.toContain('ROLE PROMPT MARKER');
+    expect(prompt).not.toContain('USER INSTRUCTIONS MARKER');
+    expect(host.triageReport).toHaveBeenCalledWith(report, expect.anything());
+  });
+
+  it('gives a restricted session no fynvra_config and blocks protected writes without asking', async () => {
+    const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
+    const { session } = await open({
+      role: role({ tools: 'all', approvalMode: 'supervised' }),
+      profile: 'restricted',
+      configHost,
+      approval: { request },
+    });
+    expect(session.getActiveToolNames()).not.toContain('fynvra_config');
+    faux.setResponses([
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall('write', { path: 'package.json', content: '{}' }, { id: 'call-0' }),
+          { stopReason: 'toolUse' }
+        ),
+      () =>
+        fauxAssistantMessage(
+          fauxToolCall('write', { path: 'src/ok.ts', content: 'ok' }, { id: 'call-1' }),
+          { stopReason: 'toolUse' }
+        ),
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('Edit the files.');
+    expect(existsSync(path.join(workdir, 'package.json'))).toBe(false);
+    expect(await readFile(path.join(workdir, 'src', 'ok.ts'), 'utf8')).toBe('ok');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('gives a restricted orchestrator a merge_worktree that refuses without calling the host', async () => {
+    const host = orchestrationHost();
+    const merge = vi.spyOn(host, 'mergeWorktree');
+    const { session } = await open({
+      role: role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' }),
+      host,
+      profile: 'restricted',
+      configHost,
+    });
+    expect(session.getActiveToolNames()).not.toContain('fynvra_config');
+    faux.setResponses([
+      () =>
+        fauxAssistantMessage(fauxToolCall('merge_worktree', { dispatch_id: 'd1' }, { id: 'c' }), {
+          stopReason: 'toolUse',
+        }),
+      () => fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('Merge it.');
+    expect(merge).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRoleSession profile language', () => {
+  async function promptOf(options: Partial<CreateRoleSessionOptions> & { role: Role }) {
+    const { session } = await open(options);
+    let prompt = '';
+    faux.setResponses([
+      (context: TranscriptContext) => {
+        prompt = systemText(context);
+        return fauxAssistantMessage('ok');
+      },
+    ]);
+    await session.prompt('hi');
+    return prompt;
+  }
+
+  it('appends the language rule to triage and restricted sessions, without the instruction file', async () => {
+    const resourcePaths = {
+      skills: [],
+      mcpServers: [],
+      instructionFile: { name: 'AGENTS.md', content: 'USER INSTRUCTIONS MARKER' },
+    };
+    for (const language of ['Simplified Chinese', 'English']) {
+      const prompts = [
+        await promptOf({
+          role: role({}),
+          profile: 'triage',
+          triageHost: { triageReport: async () => ({ ok: true }) },
+          profileLanguage: language,
+          resourcePaths,
+        }),
+        await promptOf({
+          role: builtinRole(ORCHESTRATOR_ROLE_ID),
+          host: orchestrationHost(),
+          profile: 'restricted',
+          profileLanguage: language,
+          resourcePaths,
+        }),
+        await promptOf({
+          role: role({ tools: 'all' }),
+          workerHost: workerHost(),
+          profile: 'restricted',
+          profileLanguage: language,
+          resourcePaths,
+        }),
+      ];
+      for (const prompt of prompts) {
+        expect(prompt).toContain(profileLanguagePrompt(language));
+        expect(prompt).not.toContain('USER INSTRUCTIONS MARKER');
+      }
+    }
+  });
+
+  it('ignores the language for a session without a profile', async () => {
+    const prompt = await promptOf({
+      role: builtinRole(ORCHESTRATOR_ROLE_ID),
+      host: orchestrationHost(),
+      profileLanguage: 'English',
+    });
+    expect(prompt).not.toContain('# Output language');
+  });
+});
+
+describe('createRoleSession profile search results', () => {
+  function lastToolText(context: TranscriptContext | undefined): string {
+    const result = context?.messages.filter((message) => message.role === 'toolResult').at(-1);
+    if (result?.role !== 'toolResult') throw new Error('no tool result in the context');
+    return result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+  }
+
+  async function search(options: Partial<CreateRoleSessionOptions> & { role: Role }) {
+    await writeFile(path.join(workdir, '.env'), 'PASSWORD=hunter2\n');
+    await mkdir(path.join(workdir, 'src'), { recursive: true });
+    await writeFile(path.join(workdir, 'src', 'login.ts'), 'const PASSWORD_FIELD = 1;\n');
+    const { session } = await open(options);
+    const contexts: TranscriptContext[] = [];
+    const calls: { name: string; args: ToolCall['arguments'] }[] = [
+      { name: 'grep', args: { pattern: 'PASSWORD' } },
+      { name: 'ls', args: {} },
+    ];
+    faux.setResponses([
+      ...calls.map((call, index) => (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage(fauxToolCall(call.name, call.args, { id: `call-${index}` }), {
+          stopReason: 'toolUse',
+        });
+      }),
+      (context: TranscriptContext) => {
+        contexts.push(context);
+        return fauxAssistantMessage('done');
+      },
+    ]);
+    await session.prompt('Search.');
+    await rm(path.join(workdir, '.env'), { force: true });
+    return { grep: lastToolText(contexts[1]), ls: lastToolText(contexts[2]) };
+  }
+
+  it('hides committed sensitive files from triage grep and ls results', async () => {
+    const { grep, ls } = await search({
+      role: role({}),
+      profile: 'triage',
+      triageHost: { triageReport: async () => ({ ok: true }) },
+    });
+    expect(grep).toContain('src/login.ts');
+    expect(grep).not.toContain('hunter2');
+    expect(ls).toContain('src/');
+    expect(ls).not.toContain('.env');
+  });
+
+  it('hides them for a restricted session too', async () => {
+    const { grep, ls } = await search({
+      role: role({ tools: 'readonly', approvalMode: 'full' }),
+      profile: 'restricted',
+    });
+    expect(grep).toContain('src/login.ts');
+    expect(ls).toContain('src/');
+    expect(grep).not.toContain('hunter2');
+    expect(ls).not.toContain('.env');
+  });
+});
+
+describe('createRoleSession restricted coordinator', () => {
+  const coordinator = () =>
+    role({ id: 'orchestrator', tools: 'orchestrator', approvalMode: 'full' });
+
+  it('drops git_readonly, web_fetch, write_plan and write_doc, which a normal coordinator keeps', async () => {
+    const excluded = ['git_readonly', 'web_fetch', 'write_plan', 'write_doc'];
+    const normal = await open({ role: coordinator(), host: orchestrationHost() });
+    expect(normal.session.getActiveToolNames()).toEqual(expect.arrayContaining(excluded));
+    const restricted = await open({
+      role: coordinator(),
+      host: orchestrationHost(),
+      profile: 'restricted',
+    });
+    const active = restricted.session.getActiveToolNames();
+    for (const name of excluded) expect(active).not.toContain(name);
+    // open_pull_request 是受限会话唯一的交付方式
+    expect(active).toEqual(
+      expect.arrayContaining([
+        'read',
+        'dispatch_task',
+        'review_diff',
+        'open_pull_request',
+        'merge_worktree',
+      ])
+    );
+  });
+
+  it('appends the restricted section to the coordinator prompt only for restricted sessions', async () => {
+    const prompts: string[] = [];
+    for (const profile of ['restricted', undefined] as const) {
+      const { session } = await open({
+        role: builtinRole(ORCHESTRATOR_ROLE_ID),
+        host: orchestrationHost(),
+        ...(profile ? { profile } : {}),
+      });
+      faux.setResponses([
+        (context: TranscriptContext) => {
+          prompts.push(systemText(context));
+          return fauxAssistantMessage('ok');
+        },
+      ]);
+      await session.prompt('hi');
+    }
+    const [restricted, normal] = prompts;
+    expect(restricted).toContain(RESTRICTED_COORDINATOR_PROMPT.trim());
+    // pnpm test 每个任务最多申请一次，被拒或超时不重试，直接用 open_pull_request 交付
+    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/request `pnpm test`.*at most once per task/);
+    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/do not retry; deliver with open_pull_request/);
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain(
+      "the pull request's CI checks run the tests and the build"
+    );
+    expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
+    expect(normal).not.toContain('# Restricted session');
   });
 });

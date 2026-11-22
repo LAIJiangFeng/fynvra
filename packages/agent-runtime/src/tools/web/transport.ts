@@ -42,6 +42,18 @@ export interface FetchedPage {
   truncated: boolean;
 }
 
+/** fetchPage 的可选限制；不给时沿用 web_fetch 的默认值 */
+export interface FetchOptions {
+  allowLoopback?: boolean;
+  /** 起始地址与每一跳重定向都必须是 https */
+  httpsOnly?: boolean;
+  maxRedirects?: number;
+  timeoutMs?: number;
+  /** 正文上限；超过即停止读取并把 truncated 置为 true */
+  maxBytes?: number;
+  accept?: string;
+}
+
 /**
  * GET 一个页面：手动跟随重定向（每一跳重新校验地址），总超时 30 秒，响应 signal。
  * 直连时用自定义 lookup 只连接校验通过的地址；按 proxyEnv 走代理时先在本地解析目标做预检。
@@ -55,24 +67,29 @@ export async function fetchPage(
   startUrl: URL,
   env: NodeJS.ProcessEnv,
   signal?: AbortSignal,
-  options: { allowLoopback?: boolean } = {}
+  options: FetchOptions = {}
 ): Promise<FetchedPage> {
-  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS;
+  const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const start = checkUrl(startUrl.href, { allowLoopback: options.allowLoopback === true });
   if (!start.ok) throw new FetchError(start.error);
+  if (options.httpsOnly && start.url.protocol !== 'https:') {
+    throw new FetchError('only https URLs are allowed');
+  }
   let url = startUrl;
   let loopback = start.loopback;
   try {
     for (let hop = 0; ; hop++) {
-      const response = await requestOnce(url, env, combined, loopback);
+      const response = await requestOnce(url, env, combined, loopback, options.accept);
       const status = response.statusCode ?? 0;
       const location = response.headers.location;
       if (status >= 300 && status < 400 && status !== 304) {
         response.destroy();
         if (!location) throw new FetchError(`HTTP ${status} redirect without a Location header`);
-        if (hop >= MAX_REDIRECTS) {
-          throw new FetchError(`too many redirects (more than ${MAX_REDIRECTS})`);
+        if (hop >= maxRedirects) {
+          throw new FetchError(`too many redirects (more than ${maxRedirects})`);
         }
         let next: string;
         try {
@@ -90,6 +107,9 @@ export async function fetchPage(
           }
           throw new FetchError(`redirect to ${next} refused: ${check.error}`);
         }
+        if (options.httpsOnly && check.url.protocol !== 'https:') {
+          throw new FetchError(`redirect to ${next} refused: only https URLs are allowed`);
+        }
         url = check.url;
         loopback = check.loopback;
         continue;
@@ -104,7 +124,7 @@ export async function fetchPage(
           contentType
         );
       }
-      const { body, truncated } = await readBody(response, MAX_BODY_BYTES);
+      const { body, truncated } = await readBody(response, options.maxBytes ?? MAX_BODY_BYTES);
       return {
         url: url.href,
         ...(url.href !== startUrl.href ? { redirectedFrom: startUrl.href } : {}),
@@ -117,7 +137,7 @@ export async function fetchPage(
   } catch (error) {
     if (signal?.aborted) throw new FetchError('the request was cancelled');
     if (timeout.aborted) {
-      throw new FetchError(`the request timed out after ${FETCH_TIMEOUT_MS / 1000} seconds`);
+      throw new FetchError(`the request timed out after ${timeoutMs / 1000} seconds`);
     }
     throw toFetchError(error);
   }
@@ -130,14 +150,15 @@ async function requestOnce(
   url: URL,
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
-  loopback: boolean
+  loopback: boolean,
+  accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5'
 ): Promise<http.IncomingMessage> {
   const secure = url.protocol === 'https:';
   // 回环目标始终直连：走代理会发到代理机器自己的 localhost
   const mode: ProxyMode = loopback ? { proxied: false } : proxyMode(url, env);
   const headers = {
     'User-Agent': USER_AGENT,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
+    Accept: accept,
     'Accept-Encoding': 'gzip, deflate, br',
     'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8',
   };

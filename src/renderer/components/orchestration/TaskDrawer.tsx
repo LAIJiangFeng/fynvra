@@ -1,5 +1,12 @@
 import type { Dispatch, Task, TaskWorkflow } from '@fynvra/core';
-import { ArrowLeft, ChevronRight, GitBranch, GitCompareArrows, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronRight,
+  GitBranch,
+  GitCompareArrows,
+  GitPullRequest,
+  Loader2,
+} from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +27,7 @@ import {
 import { formatClock, formatDuration, splitSummary } from './format';
 import { useNow } from './hooks';
 import { MessageStream } from './MessageStream';
+import { pullRequestLabel } from './TasksView';
 import { WorkerOutput } from './WorkerOutput';
 import { WorkflowRunGraph } from './WorkflowRunGraph';
 
@@ -127,6 +135,18 @@ export function TaskDrawer({
                 <GitBranch className="size-3 shrink-0" />
                 <span className="truncate">{latest.branch}</span>
               </span>
+            )}
+            {task.pullRequest && (
+              <a
+                href={task.pullRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                title={t('orchestration.openPullRequest', { url: task.pullRequest.url })}
+                className="flex items-center gap-1 text-[11px] text-sky-700 hover:underline dark:text-sky-300"
+              >
+                <GitPullRequest className="size-3 shrink-0" />
+                {pullRequestLabel(task.pullRequest.url, t('orchestration.pullRequest'))}
+              </a>
             )}
           </div>
           {task.workflow && <WorkflowProgress workflow={task.workflow} className="mt-1.5" />}

@@ -1,4 +1,4 @@
-import { parseNetworkProxy } from '@shared/networkProxy';
+import { parseNetworkProxy, type SystemProxyStatus } from '@shared/networkProxy';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,10 +20,25 @@ export function NetworkProxySettings() {
   const t = useT();
   const id = useId();
   useEffect(() => state.connect(), [state.connect]);
+  // 页面打开时查一次系统代理检测结果
+  const [system, setSystem] = useState<SystemProxyStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    window.fynvra.settings
+      .systemProxy()
+      .then((response) => {
+        if (alive && response.ok) setSystem(response.status);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const { draft, edit } = state;
   const valid = parseNetworkProxy(draft) !== null;
   const disabled = !state.loaded || state.saving;
   const modes = [
+    { value: 'system', label: t('settings.network.system') },
     { value: 'environment', label: t('settings.network.environment') },
     { value: 'manual', label: t('settings.network.manual') },
   ];
@@ -37,7 +52,8 @@ export function NetworkProxySettings() {
           value={draft.mode}
           disabled={disabled}
           onValueChange={(mode) => {
-            if (mode === 'environment') edit({ mode, gitCompatibility: draft.gitCompatibility });
+            if (mode === 'system' || mode === 'environment')
+              edit({ mode, gitCompatibility: draft.gitCompatibility });
             if (mode === 'manual')
               edit({ mode, url: '', gitCompatibility: draft.gitCompatibility });
           }}
@@ -53,6 +69,13 @@ export function NetworkProxySettings() {
             ))}
           </SelectContent>
         </Select>
+        {draft.mode === 'system' && system && (
+          <InlineMessage tone={system.kind === 'unsupported' ? 'error' : 'muted'}>
+            {system.kind === 'proxy'
+              ? t('settings.network.systemStatus.proxy', { url: system.url })
+              : t(`settings.network.systemStatus.${system.kind}`)}
+          </InlineMessage>
+        )}
         {draft.mode === 'environment' && (
           <p className="text-muted-foreground text-xs">{t('settings.network.environmentHint')}</p>
         )}

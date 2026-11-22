@@ -368,6 +368,27 @@ describe('parseOrchestrationSnapshot', () => {
     }
   );
 
+  it('保留 pullRequest，非法值丢弃而不是整份快照报错', () => {
+    const pullRequest = {
+      url: 'https://github.com/o/r/pull/1',
+      branch: 'b',
+      base: 'main',
+      headCommit: 'c',
+    };
+    const opened = { ...task, status: 'completed', pullRequest };
+    expect(parseOrchestrationSnapshot({ version: 1, tasks: [opened] })).toMatchObject({
+      ok: true,
+      snapshot: { tasks: [opened] },
+    });
+    for (const bad of [null, 'x', { url: 'u', branch: 'b' }]) {
+      const parsed = parseOrchestrationSnapshot({
+        version: 1,
+        tasks: [{ ...task, pullRequest: bad }],
+      });
+      expect(parsed.ok && parsed.snapshot.tasks[0]).toEqual(task);
+    }
+  });
+
   it('普通目录的尝试保留 mode: in-place（worktreeId / branch 为空串）', () => {
     const inPlace = { ...dispatch, worktreeId: '', branch: '', mode: 'in-place' as const };
     expect(parseOrchestrationSnapshot({ version: 1, dispatches: [inPlace] })).toMatchObject({

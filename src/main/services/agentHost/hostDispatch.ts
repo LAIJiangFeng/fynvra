@@ -16,6 +16,7 @@ export const ORCHESTRATION_HOST_METHODS: Record<keyof OrchestrationHost, true> =
   reviewDiff: true,
   runChecks: true,
   mergeWorktree: true,
+  openPullRequest: true,
   rejectWork: true,
   cleanupWorktree: true,
 };

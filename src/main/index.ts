@@ -3,19 +3,34 @@ import { optimizer } from '@electron-toolkit/utils';
 import { ORCHESTRATOR_ROLE_ID } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { watchdogPreferencesOf } from '@shared/types/settings';
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, session } from 'electron';
 import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
+import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
+import { getWorkspaceService } from './ipc/workspaces';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
 import { connectOrchestration } from './services/agentHost/connectOrchestration';
 import { installCoordinatorWake } from './services/agentHost/coordinatorWake';
 import { installSessionWatchdog } from './services/agentHost/watchdog';
+import { createCleanCheckout } from './services/channels/cleanCheckout';
+import { createChannelHost } from './services/channels/host';
+import { setChannelHost } from './services/channels/instance';
+import { collectLocalInfo } from './services/channels/localInfo';
+import { createChannelStore } from './services/channels/store';
+import { savedCommandEnvironment } from './services/commandNetwork';
+import { setPullRequestBodyExtension } from './services/orchestration/pullRequest';
+import {
+  createWorktreesRootResolver,
+  fallbackWorktreesRoot,
+} from './services/orchestration/worktreesRoot';
+import { collectAppSecrets } from './services/secrets';
 import { loadLoginShellPath } from './services/shellEnv';
+import { createSystemProxyResolver, setSystemProxy } from './services/systemProxy';
 import { getUpdateService } from './services/updates';
 import { registerCloseBehavior } from './windows/closeBehavior';
 import { createAppWindow } from './windows/createAppWindow';
@@ -92,8 +107,10 @@ if (!app.requestSingleInstanceLock()) {
       }
     },
     shutdown: () =>
-      getAgentHost()
-        .shutdown(AGENT_SHUTDOWN_TIMEOUT_MS)
+      // Fynvra 插件：逐个 deactivate，5 秒后强杀
+      shutdownAppPlugins()
+        .catch((error: unknown) => console.error('[fynvra] 停止 Fynvra 插件失败', error))
+        .then(() => getAgentHost().shutdown(AGENT_SHUTDOWN_TIMEOUT_MS))
         // 编排状态每次变更都已在一个微任务里写盘，这里等最后一次写完
         .then(() => getOrchestrationRegistry().flushAll())
         .catch((error: unknown) => console.error('[fynvra] 退出前收尾失败', error)),
@@ -119,13 +136,61 @@ if (!app.requestSingleInstanceLock()) {
         warnMissing: !app.isPackaged,
       });
       registerIpcHandlers();
+      // 跟随系统代理：Chromium 按系统代理 / PAC 解析，后台定期刷新；会话启动前最多等 3 秒
+      const systemProxy = createSystemProxyResolver({
+        resolve: (url) => session.defaultSession.resolveProxy(url),
+        log: (message) => console.warn(`[fynvra] ${message}`),
+      });
+      setSystemProxy(systemProxy);
+      const systemProxyReady = systemProxy.start();
       const agentHost = getAgentHost();
       await shellPathReady;
       // worker 会话由 agent host 启动，编排 / worker 工具经注册表找到 Host；
       // 启动或恢复任何会话之前先加载全部工作区的编排快照
       await connectOrchestration(agentHost, getOrchestrationRegistry());
+      // 档位会话的 cwd 校验、编排建 worktree 与渠道干净检出用同一套根目录规则
+      const listWorkspaces = () => {
+        const workspaces = getWorkspaceService();
+        return workspaces.list().flatMap((item) => workspaces.get(item.id) ?? []);
+      };
+      const worktreesRoot = createWorktreesRootResolver({
+        fallbackRoot: fallbackWorktreesRoot(app.getPath('userData')),
+        configured: () => getSettingsFile().read().preferences.worktreesRoot,
+        repoPaths: () => listWorkspaces().map((workspace) => workspace.repoPath),
+      });
+      agentHost.setWorktreesRootLookup(worktreesRoot);
       // 主 agent 派发后不阻塞等待：worker 汇报到达且主 agent 空闲时自动唤醒它
       installCoordinatorWake({ agentHost, registry: getOrchestrationRegistry() });
+      // 渠道插件用的核心能力
+      const snapshot = async (workspaceId: string) =>
+        getOrchestrationRegistry().serviceFor(workspaceId)?.snapshot();
+      const cleanCheckout = createCleanCheckout({
+        worktreesRoot,
+        commandEnv: savedCommandEnvironment,
+      });
+      const localInfo = () =>
+        collectLocalInfo({
+          userDataPath: app.getPath('userData'),
+          workspaces: listWorkspaces(),
+          worktreesRoot,
+        });
+      // 渠道宿主：Fynvra 插件经 channel API 用这些能力，只能碰自己拥有的会话 / 工作区 / 任务
+      const channelHost = createChannelHost({
+        store: createChannelStore({
+          filePath: join(app.getPath('userData'), 'fynvra-plugin-sessions.json'),
+        }),
+        agentHost,
+        workspaces: getWorkspaceService(),
+        snapshot,
+        cleanCheckout,
+        knownSecrets: collectAppSecrets,
+        localInfo,
+        call: (pluginId, name, args) => getAppPluginRuntime().call(pluginId, name, args),
+        emit: (pluginId, event, payload) => getAppPluginRuntime().emit(pluginId, event, payload),
+      });
+      setChannelHost(channelHost);
+      setPullRequestBodyExtension('channel', (taskId) => channelHost.pullRequestNote(taskId));
+
       // 会话守护（默认关闭）：主 agent 出错或卡住时自动恢复
       installSessionWatchdog({
         agentHost,
@@ -134,7 +199,16 @@ if (!app.requestSingleInstanceLock()) {
           session.roleId === ORCHESTRATOR_ROLE_ID ||
           (await getRoleStore().get(session.roleId))?.tools === 'orchestrator',
       });
+      await systemProxyReady;
+      // 会话启动前读入归属，triage_report 的路由从一开始就准
+      await channelHost
+        .start()
+        .catch((error: unknown) => console.error('[fynvra] 渠道宿主启动失败', error));
       agentHost.start();
+      // Fynvra 插件：每个启用的插件一个后台进程
+      void startAppPlugins().catch((error: unknown) =>
+        console.error('[fynvra] Fynvra 插件启动失败', error)
+      );
       showMainWindow();
       getUpdateService().start();
     })

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { commandEnvironment, DEFAULT_NETWORK_PROXY, parseNetworkProxy } from './networkProxy';
+import {
+  commandEnvironment,
+  DEFAULT_NETWORK_PROXY,
+  parseNetworkProxy,
+  parseResolvedNetworkProxy,
+  parseSystemProxy,
+  resolveNetworkProxy,
+} from './networkProxy';
 import { parsePreferences, parsePreferencesPatch } from './types/settings';
 
 const manual = { mode: 'manual' as const, url: 'http://127.0.0.1:7890', gitCompatibility: true };
@@ -142,5 +149,78 @@ describe('command environments', () => {
     expect(env.GIT_CONFIG_KEY_3).toBe('unused');
     expect(env.GIT_CONFIG_VALUE_3).toBe('secret');
     expect(env.GIT_CONFIG_COUNT).toBe('3');
+  });
+});
+
+describe('system proxy', () => {
+  it.each([
+    ['DIRECT', { kind: 'direct' }],
+    ['PROXY 127.0.0.1:7890', { kind: 'proxy', url: 'http://127.0.0.1:7890' }],
+    ['PROXY a:1; DIRECT', { kind: 'proxy', url: 'http://a:1' }],
+    ['HTTPS h:8443', { kind: 'proxy', url: 'https://h:8443' }],
+    ['HTTPS h:443', { kind: 'proxy', url: 'https://h' }],
+    ['PROXY [::1]:7890', { kind: 'proxy', url: 'http://[::1]:7890' }],
+    ['PROXY ::1:7890', { kind: 'proxy', url: 'http://[::1]:7890' }],
+    ['SOCKS5 h:1', { kind: 'unsupported' }],
+    ['SOCKS h:1; DIRECT', { kind: 'unsupported' }],
+    ['SOCKS5 h:1; PROXY a:2', { kind: 'proxy', url: 'http://a:2' }],
+    ['PROXY u:p@h:1', { kind: 'unknown' }],
+    ['PROXY h:0', { kind: 'unknown' }],
+    ['PROXY h:70000', { kind: 'unknown' }],
+    ['PROXY h/x:1', { kind: 'unknown' }],
+    ['QUIC h:1', { kind: 'unknown' }],
+    ['', { kind: 'unknown' }],
+  ])('parses %j', (raw, expected) => {
+    expect(parseSystemProxy(raw)).toEqual(expected);
+  });
+
+  it('spec accepts a resolved system url, settings never do', () => {
+    const resolved = { mode: 'system', url: 'http://127.0.0.1:7890', gitCompatibility: false };
+    expect(parseResolvedNetworkProxy(resolved)).toEqual(resolved);
+    expect(parseNetworkProxy(resolved)).toBeNull();
+    expect(parseResolvedNetworkProxy({ ...resolved, url: 'http://u:p@h:1' })).toBeNull();
+    expect(parseResolvedNetworkProxy({ ...resolved, env: {} })).toBeNull();
+    expect(parseNetworkProxy(DEFAULT_NETWORK_PROXY)).toEqual({
+      mode: 'system',
+      gitCompatibility: false,
+    });
+    expect(parsePreferences({ networkProxy: resolved }).networkProxy).toBeUndefined();
+  });
+
+  it('resolves only system mode with a detected proxy', () => {
+    const proxy = { kind: 'proxy', url: 'http://h:1' } as const;
+    expect(resolveNetworkProxy(undefined, proxy)).toEqual({
+      ...DEFAULT_NETWORK_PROXY,
+      url: 'http://h:1',
+    });
+    expect(resolveNetworkProxy(undefined, { kind: 'unsupported' })).toEqual(DEFAULT_NETWORK_PROXY);
+    expect(resolveNetworkProxy(manual, proxy)).toEqual(manual);
+    const environment = { mode: 'environment', gitCompatibility: false } as const;
+    expect(resolveNetworkProxy(environment, proxy)).toEqual(environment);
+  });
+
+  it('replaces all proxy casings with loopback NO_PROXY when an address is resolved', () => {
+    const base = {
+      PATH: '/bin',
+      http_proxy: 'a',
+      Https_Proxy: 'b',
+      ALL_PROXY: 'socks5://c',
+      no_proxy: '*',
+    };
+    const url = 'http://127.0.0.1:7890';
+    const env = commandEnvironment(base, { mode: 'system', url, gitCompatibility: false }, true);
+    expect(env).toEqual({
+      PATH: '/bin',
+      HTTP_PROXY: url,
+      http_proxy: url,
+      HTTPS_PROXY: url,
+      https_proxy: url,
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+      no_proxy: 'localhost,127.0.0.1,::1',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.proxy',
+      GIT_CONFIG_VALUE_0: url,
+    });
+    expect(commandEnvironment(base, DEFAULT_NETWORK_PROXY, true)).toEqual(base);
   });
 });

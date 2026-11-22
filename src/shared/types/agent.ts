@@ -6,10 +6,11 @@ import {
   normalizeThinkingLevel,
   parseRole,
   type Role,
+  type SessionProfile,
   type ThinkingLevel,
 } from '@fynvra/core';
 import { asRecord, isNonEmptyString } from '../guards';
-import { type NetworkProxy, parseNetworkProxy } from '../networkProxy';
+import { parseResolvedNetworkProxy, type ResolvedNetworkProxy } from '../networkProxy';
 import {
   type ApprovalDecision,
   type ApprovalKind,
@@ -139,7 +140,8 @@ const MAX_PLUGIN_PROVIDER_MODELS = 512;
 /** `spawn-session` 的会话参数：全部由 Main 解析好，worker 不读任何 Main 的存储。 */
 export interface SpawnSessionSpec {
   /** Snapshot for shell/Git subprocesses only, never the shared worker environment. */
-  networkProxy?: NetworkProxy;
+  /** system 模式下 Main 解析出的系统代理地址随 url 下发（不落盘） */
+  networkProxy?: ResolvedNetworkProxy;
   /** web_fetch 允许访问本机回环地址；只有开启时才带 */
   webFetchAllowLoopback?: true;
   /** full 档命中保护底线（rm -rf、git push 等）仍要人确认；只有开启时才带，运行中由 set-confirm-dangerous-actions 切换 */
@@ -193,13 +195,17 @@ export interface SpawnSessionSpec {
    * 其他角色只能写/改 Markdown 文档，改其他文件的工具被拦截，非只读命令和 MCP 工具要人确认。运行中由 set-plan-mode 切换
    */
   planMode?: boolean;
+  /** 会话档位（渠道插件会话）：来自会话记录，普通会话不带 */
+  profile?: SessionProfile;
+  /** 档位会话的输出语言名（如 `Simplified Chinese`）：取自界面语言，普通会话不带 */
+  profileLanguage?: string;
 }
 
 /**
  * host-invoke 的目标：编排工具背后的 OrchestrationHost、worker 工具背后的 WorkerHost，
  * 或 fynvra_config 背后的 Main 配置宿主（所有会话都有）。
  */
-export type HostKind = 'orchestration' | 'worker' | 'config';
+export type HostKind = 'orchestration' | 'worker' | 'config' | 'telegram';
 
 /** 配置 Fynvra 的 agent 工具名（与 agent-runtime 的 CONFIG_TOOL_NAME 相同） */
 export const CONFIG_TOOL_NAME = 'fynvra_config';
@@ -255,6 +261,8 @@ export interface AgentApprovalRequest {
   detail: string;
   /** 命中的保护底线（如 git push）：任何档位都要人确认。 */
   protectedAction?: string;
+  /** 值班协调者申请在本机跑 `pnpm test`：Main 换本地化标题并追加风险说明 */
+  note?: 'restricted-tests';
   /** epoch ms：worker 到期按 deny 结束 */
   expiresAt: number;
 }
@@ -394,7 +402,12 @@ const APPROVAL_KIND_SET: Record<ApprovalKind, true> = {
   network: true,
   plugin: true,
 };
-const HOST_KIND_SET: Record<HostKind, true> = { orchestration: true, worker: true, config: true };
+const HOST_KIND_SET: Record<HostKind, true> = {
+  orchestration: true,
+  worker: true,
+  config: true,
+  telegram: true,
+};
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };
 
 function memberOf<T extends string>(set: Record<T, true>, value: unknown): value is T {
@@ -613,13 +626,14 @@ function parseIdentity(raw: unknown): SessionIdentity | null {
 function parseApprovalRequest(raw: unknown): AgentApprovalRequest | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { requestId, toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } =
+  const { requestId, toolCallId, toolName, kind, title, detail, protectedAction, note, expiresAt } =
     record;
   if (!isNonEmptyString(requestId) || !isString(toolCallId) || !isNonEmptyString(toolName)) {
     return null;
   }
   if (!memberOf(APPROVAL_KIND_SET, kind) || !isString(title) || !isString(detail)) return null;
   if (!isOptional(protectedAction, isString)) return null;
+  if (note !== undefined && note !== 'restricted-tests') return null;
   if (!isFiniteNumber(expiresAt) || expiresAt <= 0) return null;
   return {
     requestId,
@@ -629,6 +643,7 @@ function parseApprovalRequest(raw: unknown): AgentApprovalRequest | null {
     title,
     detail,
     ...(protectedAction !== undefined ? { protectedAction: protectedAction as string } : {}),
+    ...(note !== undefined ? { note } : {}),
     expiresAt,
   };
 }
@@ -860,7 +875,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const record = asRecord(raw);
   if (!record) return null;
   const networkProxy =
-    record.networkProxy === undefined ? undefined : parseNetworkProxy(record.networkProxy);
+    record.networkProxy === undefined ? undefined : parseResolvedNetworkProxy(record.networkProxy);
   if (networkProxy === null) return null;
   if (record.webFetchAllowLoopback !== undefined && record.webFetchAllowLoopback !== true) {
     return null;
@@ -902,6 +917,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   }
   if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
   if (!isOptional(planMode, isBoolean)) return null;
+  const { profile } = record;
+  if (profile !== undefined && profile !== 'triage' && profile !== 'restricted') return null;
+  if (!isOptional(record.profileLanguage, isNonEmptyString)) return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
@@ -938,6 +956,10 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
       : {}),
     ...(inPlace === true ? { inPlace: true } : {}),
     ...(planMode === true ? { planMode: true } : {}),
+    ...(profile !== undefined ? { profile } : {}),
+    ...(record.profileLanguage !== undefined
+      ? { profileLanguage: record.profileLanguage as string }
+      : {}),
   };
 }
 

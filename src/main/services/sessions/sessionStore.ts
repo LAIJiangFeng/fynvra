@@ -174,7 +174,7 @@ function parseStoredSession(raw: unknown): StoredSession | null {
   if (!id || !workspaceId || !isValidRoleId(roleId) || typeof title !== 'string') return null;
   if (!isNonEmptyString(cwd) || !isSessionStatus(status)) return null;
   if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return null;
-  const session: StoredSession = {
+  let session: StoredSession = {
     id,
     workspaceId,
     roleId,
@@ -192,6 +192,12 @@ function parseStoredSession(raw: unknown): StoredSession | null {
     if (value === undefined) continue;
     if (!isNonEmptyString(value)) return null;
     session[key] = value;
+  }
+  // 档位读不懂就丢整条：退成普通会话会放开安全边界
+  if (record.profile !== undefined) {
+    if (record.profile !== 'triage' && record.profile !== 'restricted') return null;
+    // 档位会话的审批由档位规则决定，记录里的档位只作兜底：一律规范成最严格的 supervised
+    session = { ...session, profile: record.profile, approvalMode: 'supervised' };
   }
   if (record.model !== undefined) {
     const model = asRecord(record.model);

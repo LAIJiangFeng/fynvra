@@ -1,0 +1,3 @@
+License for github.svg, gitlab.svg and npm.svg, from https://github.com/simple-icons/simple-icons
+Original license: CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/)
+Brand names and logos remain trademarks of their respective owners.

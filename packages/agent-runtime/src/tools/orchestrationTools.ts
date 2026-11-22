@@ -1,6 +1,7 @@
 import { type Static, StringEnum, type TSchema, Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
+  checkRestrictedCommand,
   type Dispatch,
   type Message,
   normalizeThinkingLevel,
@@ -16,6 +17,8 @@ import type {
   DispatchRef,
   DispatchTaskInput,
   MergeWorktreeOutput,
+  OpenPullRequestInput,
+  OpenPullRequestOutput,
   OrchestrationHost,
   OrchestrationToolName,
   ReadWorkerOutputInput,
@@ -92,7 +95,12 @@ export interface OrchestrationToolsOptions {
    * 不调用 Host，直接返回错误。其他编排工具不受影响，已经在跑的 worker 照常处理。缺省视为关闭。
    */
   planMode?: () => boolean;
+  /** restricted 协调者（§7.14）：merge_worktree 直接拒绝，run_checks 只放行白名单命令（Main 侧再查一次） */
+  restricted?: boolean;
 }
+
+const RESTRICTED_MERGE_REFUSAL =
+  'restricted session: merge_worktree is not allowed; deliver the work with open_pull_request instead';
 
 /** 计划模式下 dispatch_task 的拒绝文本 */
 const PLAN_MODE_DISPATCH_REFUSAL =
@@ -299,6 +307,12 @@ export function createOrchestrationTools(
       run: async (params, signal) => {
         const input = parseTextArgs(params, 'command');
         if (!input.ok) return errorResult('run_checks', input.error);
+        if (options.restricted) {
+          // `pnpm test` 返回 ok + needsApproval：这里放行，问维护者由审批门负责——模型调用工具只有经过审批门这一条路
+          const checked = checkRestrictedCommand(input.value.text, { mode: 'checks' });
+          if (!checked.ok)
+            return errorResult('run_checks', `restricted session: ${checked.reason}`);
+        }
         const payload: RunChecksInput = {
           dispatchId: input.value.dispatchId,
           command: input.value.text,
@@ -324,11 +338,53 @@ export function createOrchestrationTools(
       executionMode: 'sequential',
       normalize: normalizeRefArgs,
       run: async (params, signal) => {
+        if (options.restricted) return errorResult('merge_worktree', RESTRICTED_MERGE_REFUSAL);
         const input = parseRefArgs(params);
         if (!input.ok) return errorResult('merge_worktree', input.error);
         const result = await host.mergeWorktree(input.value, signal);
         if (!result.ok) return errorResult('merge_worktree', result.error);
         return textResult(formatMerge(input.value.dispatchId, result), result);
+      },
+    }),
+    tool({
+      name: 'open_pull_request',
+      label: 'Open pull request',
+      description:
+        "Push a worker's branch to origin and open a GitHub pull request for it (instead of merge_worktree). " +
+        'Use it only after review_diff and run_checks pass. Fynvra checks the diff for protected paths, secrets ' +
+        'and local machine info before pushing and refuses on any hit. It never merges the PR; if the branch already ' +
+        'has an open PR its URL is returned. Requires a git workspace and the GitHub CLI (gh).',
+      promptSnippet: "Push an accepted worker's branch and open a GitHub PR (never merges)",
+      promptGuidelines: [
+        'Open a PR only when the user asked for one or merge_worktree is refused, after you reviewed the diff and the checks passed in this conversation.',
+      ],
+      parameters: Type.Object(
+        {
+          dispatch_id: dispatchIdParam(),
+          title: Type.String({ description: 'PR title: one line, at most 200 characters.' }),
+          summary: Type.String({
+            description:
+              'What changed and why, at most 4000 characters. Fynvra adds the file list and checks.',
+          }),
+          base: Type.Optional(
+            Type.String({
+              description: "Target branch; defaults to the workspace's default branch.",
+            })
+          ),
+          draft: Type.Optional(
+            Type.Boolean({ description: 'Open as a draft PR.', default: false })
+          ),
+        },
+        { additionalProperties: false }
+      ),
+      executionMode: 'sequential',
+      normalize: normalizePullRequestArgs,
+      run: async (params, signal) => {
+        const input = parsePullRequestArgs(params);
+        if (!input.ok) return errorResult('open_pull_request', input.error);
+        const result = await host.openPullRequest(input.value, signal);
+        if (!result.ok) return errorResult('open_pull_request', result.error);
+        return textResult(formatPullRequest(input.value.dispatchId, result), result);
       },
     }),
     tool({
@@ -743,6 +799,44 @@ function parseCleanupArgs(params: unknown): Parsed<CleanupWorktreeInput> {
   return { ok: true, value: { ...ref.value, ...(abandon === undefined ? {} : { abandon }) } };
 }
 
+function normalizePullRequestArgs(raw: unknown): ArgRecord {
+  const args = asRecord(raw);
+  const draft = pick(args, 'draft');
+  return compact({
+    ...normalizeRefArgs(raw),
+    title: trimmed(pick(args, 'title')),
+    summary: trimmed(pick(args, 'summary')),
+    base: emptyToUndefined(trimmed(pick(args, 'base'))),
+    draft: draft === undefined || typeof draft === 'boolean' ? draft : { invalidBoolean: draft },
+  });
+}
+
+function parsePullRequestArgs(params: unknown): Parsed<OpenPullRequestInput> {
+  const ref = parseRefArgs(params);
+  if (!ref.ok) return ref;
+  const args = normalizePullRequestArgs(params);
+  const title = requiredText(args.title, 'title');
+  if (!title.ok) return title;
+  const summary = requiredText(args.summary, 'summary');
+  if (!summary.ok) return summary;
+  if (args.base !== undefined && typeof args.base !== 'string') {
+    return { ok: false, error: 'base must be a branch name' };
+  }
+  if (args.draft !== undefined && typeof args.draft !== 'boolean') {
+    return { ok: false, error: 'draft must be a boolean' };
+  }
+  return {
+    ok: true,
+    value: {
+      ...ref.value,
+      title: title.value,
+      summary: summary.value,
+      ...(args.base === undefined ? {} : { base: args.base }),
+      ...(args.draft === undefined ? {} : { draft: args.draft }),
+    },
+  };
+}
+
 function normalizeReadArgs(raw: unknown): ArgRecord {
   const cursor = integerish(pick(asRecord(raw), 'cursor'));
   return compact({
@@ -1075,6 +1169,16 @@ function formatMerge(dispatchId: string, result: MergeWorktreeOutput): string {
     `- conflicting files: ${conflicts}`,
     '',
     'Ask the worker to merge or rebase onto the target branch and resolve the conflicts (reject_work), then review again.',
+  ].join('\n');
+}
+
+function formatPullRequest(dispatchId: string, result: OpenPullRequestOutput): string {
+  return [
+    '## Pull request opened',
+    `- dispatch ${code(dispatchId)}: ${code(result.branch)} → ${code(result.base)} at ${code(shortSha(result.headCommit))}`,
+    `- url: ${result.url}`,
+    '',
+    'The task is completed. Fynvra does not merge the PR; tell the user the URL. cleanup_worktree removes the worktree but keeps the local branch.',
   ].join('\n');
 }
 

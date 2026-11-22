@@ -48,6 +48,8 @@ export {
   type HostResult,
   type ListWorkersOutput,
   type MergeWorktreeOutput,
+  type OpenPullRequestInput,
+  type OpenPullRequestOutput,
   ORCHESTRATION_TOOL_METHODS,
   type OrchestrationHost,
   type OrchestrationToolName,
@@ -113,6 +115,12 @@ export {
   type ReadonlyToolsOptions,
 } from './tools/readonlyTools';
 export { checkUrl as checkWebUrl, isBlockedAddress } from './tools/web/addressPolicy';
+export {
+  FetchError,
+  type FetchedPage,
+  type FetchOptions,
+  fetchPage,
+} from './tools/web/transport';
 export {
   createWebFetchTool,
   WEB_FETCH_TOOL_NAME,

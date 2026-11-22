@@ -74,7 +74,12 @@ export interface SessionRef {
   worktreeId?: string;
   /** 派发它的 orchestrator 会话。 */
   parentSessionId?: string;
+  /** 会话档位：只由 Main 写入，缺省为普通会话。 */
+  profile?: SessionProfile;
 }
+
+/** 会话档位（渠道插件会话，如群反馈值班）：triage 分诊、restricted 受限值班与其 worker。 */
+export type SessionProfile = 'triage' | 'restricted';
 
 /** 任务状态。合法迁移见 `canTransitionTask`。 */
 export type TaskStatus =
@@ -117,6 +122,8 @@ export interface Task {
   fastMode?: boolean;
   /** 合并时固定的 worker 差异范围；不依赖 worktree 目录或分支仍存在。 */
   mergedDiff?: { baseCommit: string; headCommit: string };
+  /** open_pull_request 成功时写入；PR 只开不合并，本地分支保留。旧快照缺省。 */
+  pullRequest?: { url: string; branch: string; base: string; headCommit: string };
   /** 按工作流派发时的定义快照与进度；普通任务没有。`roleId` 是最近启动的节点的角色。 */
   workflow?: TaskWorkflow;
 }

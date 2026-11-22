@@ -96,6 +96,13 @@ function createHost() {
       targetBranch: 'main',
       commit: 'fff0001',
     })),
+    openPullRequest: vi.fn<OrchestrationHost['openPullRequest']>(async () => ({
+      ok: true,
+      url: 'https://github.com/o/r/pull/7',
+      branch: 'fynvra/add-login',
+      base: 'main',
+      headCommit: 'abc1234def567',
+    })),
     rejectWork: vi.fn<OrchestrationHost['rejectWork']>(async () => ({
       ok: true,
       messageId: 'm2',
@@ -490,6 +497,30 @@ describe('review, checks, merge and follow-up tools', () => {
     expect(run.text).toContain('reject_work');
   });
 
+  it('open_pull_request maps to openPullRequest and passes the normalized input', async () => {
+    expect(ORCHESTRATION_TOOL_METHODS.open_pull_request).toBe('openPullRequest');
+    const host = createHost();
+    const tool = toolByName(createOrchestrationTools(host), 'open_pull_request');
+    const run = await runTool(tool, {
+      dispatch_id: ' d1 ',
+      title: ' Fix login ',
+      summary: 'Fixes the form.',
+      base: ' ',
+      draft: true,
+    });
+    expect(run.isError).toBe(false);
+    expect(host.openPullRequest.mock.calls[0]?.[0]).toEqual({
+      dispatchId: 'd1',
+      title: 'Fix login',
+      summary: 'Fixes the form.',
+      draft: true,
+    });
+    expect(run.text).toContain('https://github.com/o/r/pull/7');
+    const missing = await runTool(tool, { dispatch_id: 'd1', title: 'x' });
+    expect(missing.isError).toBe(true);
+    expect(host.openPullRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('requires text for send_to_worker and reject_work', async () => {
     const host = createHost();
     const tools = createOrchestrationTools(host);
@@ -700,5 +731,42 @@ describe('execute never throws', () => {
         expect(result.content[0]).toMatchObject({ type: 'text' });
       }
     }
+  });
+});
+
+describe('restricted coordinator', () => {
+  it('refuses merge_worktree without calling the host and points to open_pull_request', async () => {
+    const host = createHost();
+    const tools = createOrchestrationTools(host, { restricted: true });
+    const run = await runTool(toolByName(tools, 'merge_worktree'), { dispatch_id: 'd1' });
+    expect(run.isError).toBe(true);
+    expect(run.text).toContain('open_pull_request');
+    expect(host.mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it('runs only whitelisted check commands', async () => {
+    const host = createHost();
+    host.runChecks.mockResolvedValue({ ok: true, exitCode: 0, output: '', durationMs: 1 });
+    const tools = createOrchestrationTools(host, { restricted: true });
+    const refused = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm test --run',
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('restricted session');
+    expect(host.runChecks).not.toHaveBeenCalled();
+    const allowed = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm typecheck && pnpm lint',
+    });
+    expect(allowed.isError).toBe(false);
+    expect(host.runChecks).toHaveBeenCalledTimes(1);
+    // 单独的 pnpm test 放行：问维护者由审批门负责
+    const tests = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm test',
+    });
+    expect(tests.isError).toBe(false);
+    expect(host.runChecks).toHaveBeenCalledTimes(2);
   });
 });

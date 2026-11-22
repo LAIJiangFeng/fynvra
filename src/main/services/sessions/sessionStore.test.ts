@@ -93,6 +93,33 @@ describe('parseSessionsFile', () => {
     expect(parsed).toEqual([valid]);
   });
 
+  it('keeps the session profile, treats a missing one as a normal session and drops an unknown one', () => {
+    const triage = session({ id: 'triage', profile: 'triage', approvalMode: 'supervised' });
+    const restricted = session({
+      id: 'restricted',
+      profile: 'restricted',
+      approvalMode: 'supervised',
+    });
+    const legacy = session({ id: 'legacy' });
+    const parsed = parseSessionsFile({
+      sessions: [triage, restricted, legacy, { ...session({ id: 'odd' }), profile: 'admin' }],
+    });
+    // 读不懂的档位不能退成普通会话
+    expect(parsed).toEqual([triage, restricted, legacy]);
+    expect(parsed[2]).not.toHaveProperty('profile');
+  });
+
+  it('normalizes the approval mode of profile sessions to supervised', () => {
+    const parsed = parseSessionsFile({
+      sessions: [
+        session({ id: 'triage', profile: 'triage', approvalMode: 'auto-edits' }),
+        session({ id: 'restricted', profile: 'restricted', approvalMode: 'full' }),
+        session({ id: 'plain', approvalMode: 'auto-edits' }),
+      ],
+    });
+    expect(parsed.map((s) => s.approvalMode)).toEqual(['supervised', 'supervised', 'auto-edits']);
+  });
+
   it('keeps the thinking level of the session model and drops only a level fynvra does not know', () => {
     const thinking = session({
       id: 'thinking',

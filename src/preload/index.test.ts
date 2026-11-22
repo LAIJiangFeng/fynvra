@@ -27,6 +27,7 @@ describe('preload bridge', () => {
     expect(mocks.exposeInMainWorld.mock.calls[0]?.[0]).toBe('fynvra');
     expect(Object.keys(api).sort()).toEqual([
       'appDialog',
+      'appPlugins',
       'files',
       'instructions',
       'mcp',
@@ -83,6 +84,8 @@ describe('preload bridge', () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_TEST_NETWORK, draft);
     await api.settings.cancelNetworkTest();
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST);
+    await api.settings.systemProxy();
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.SETTINGS_SYSTEM_PROXY);
   });
 
   it('用量出口只传范围并映射到 summary 通道', async () => {

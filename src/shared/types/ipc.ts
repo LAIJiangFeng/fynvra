@@ -13,6 +13,8 @@ export const IPC_CHANNELS = {
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_TEST_NETWORK: 'settings:test-network',
   SETTINGS_CANCEL_NETWORK_TEST: 'settings:cancel-network-test',
+  /** 无参：Main 返回当前检测到的系统代理（缓存超过 5 秒先刷新） */
+  SETTINGS_SYSTEM_PROXY: 'settings:system-proxy',
   SETTINGS_AVAILABLE_SHELLS: 'settings:available-shells',
   SETTINGS_PICK_SHELL: 'settings:pick-shell',
   /** Main → Renderer：偏好已变更，各窗口重读 */
@@ -217,8 +219,51 @@ export const IPC_CHANNELS = {
   PLUGINS_SET_PROVIDER_MAPPING: 'plugins:set-provider-mapping',
   /** `{ id, names: string[] }`：整组替换某插件手动添加的服务名（合法、去重、最多 20 个） */
   PLUGINS_SET_MANUAL_PROVIDERS: 'plugins:set-manual-providers',
+  /** 无参数（或 `{}`）：缓存的插件市场状态 `{ state }`，不发网络请求 */
+  PLUGINS_MARKET_STATE: 'plugins:market-state',
+  /** `{ force?: boolean }`：拉取并验签索引（非强制时 1 小时内直接用缓存）→ `{ state }` */
+  PLUGINS_MARKET_REFRESH: 'plugins:market-refresh',
+  /** `{ pluginId, version }`：从市场安装指定版本 */
+  PLUGINS_MARKET_INSTALL: 'plugins:market-install',
+  /** `{ id }`（plugins.json 里的 id）：更新到最新的兼容、未撤回版本 */
+  PLUGINS_MARKET_UPDATE: 'plugins:market-update',
+  /** `{ pluginId, version }`：该版本的 README 文本 `{ text }` */
+  PLUGINS_MARKET_README: 'plugins:market-readme',
+  /** `{ id }`（plugins.json 里的 id）：只读插件目录里的 README.md → `PluginReadmeResult` */
+  PLUGINS_README: 'plugins:readme',
+  /**
+   * `{ source, src }`：加载 README 里的一张图片 → `PluginReadmeImageResult`（data URL）。
+   * src 必须原样出现在该 source 最近读到的 README 里；相对路径读插件目录，https 由 Main 下载
+   */
+  PLUGINS_README_IMAGE: 'plugins:readme-image',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
+
+  // --- appPlugins（Fynvra 插件；id 为 fynvra-plugins.json 里的 id） ---
+  /** 无参数或 `{}` → `{ plugins: AppPluginView[] }` */
+  APP_PLUGINS_LIST: 'appplugins:list',
+  /** `{ id, enabled }`：立即启停进程 */
+  APP_PLUGINS_TOGGLE: 'appplugins:toggle',
+  /** `{ id }`：停进程，删包目录、私有数据与密钥，删登记 */
+  APP_PLUGINS_REMOVE: 'appplugins:remove',
+  /** `{ id }`：走市场更新（仅 market 来源） */
+  APP_PLUGINS_UPDATE: 'appplugins:update',
+  /** 无参数或 `{}`：仅开发版，Main 弹框选目录后复制安装 */
+  APP_PLUGINS_ADD_LOCAL_DEV: 'appplugins:add-local-dev',
+  /** `{ id }`：仅 local 来源，从源目录重新复制 */
+  APP_PLUGINS_RECOPY: 'appplugins:recopy',
+  /** Main → Renderer：登记或运行状态变化 */
+  APP_PLUGINS_CHANGED: 'appplugins:changed',
+  /** `{ id }` → `{ ui: PluginUi | null }`：插件最新的一份设置页描述 */
+  APP_PLUGINS_UI_GET: 'appplugins:ui-get',
+  /** `{ id, action, itemKey?, values? }`：Main 转给插件的 `ui.action`，带回 `{ ok } | { ok: false, error }` */
+  APP_PLUGINS_UI_ACTION: 'appplugins:ui-action',
+  /** `{ id, url }`：只接受 https，在系统浏览器打开 */
+  APP_PLUGINS_OPEN_LINK: 'appplugins:open-link',
+  /** Main → Renderer `{ id }`：该插件的设置页描述变了（含清掉） */
+  APP_PLUGINS_UI_CHANGED: 'appplugins:ui-changed',
+  /** `{ id }`：只读插件包目录里的 README.md → `PluginReadmeResult` */
+  APP_PLUGINS_README: 'appplugins:readme',
 
   // --- instructions ---
   INSTRUCTIONS_LIST: 'instructions:list',

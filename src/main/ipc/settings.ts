@@ -1,6 +1,11 @@
 import { dirname, join } from 'node:path';
 import { errorMessage } from '@shared/guards';
-import { type NetworkTestResult, parseNetworkProxy } from '@shared/networkProxy';
+import {
+  type NetworkTestResult,
+  parseNetworkProxy,
+  resolveNetworkProxy,
+  type SystemProxyStatus,
+} from '@shared/networkProxy';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import {
   type AvailableShellsResult,
@@ -25,6 +30,7 @@ import {
 } from '../services/orchestration/worktreesRoot';
 import { createSettingsFile, type SettingsFile } from '../services/settingsFile';
 import { describeShells, shellDetectionDeps, validShellPreference } from '../services/shells';
+import { getSystemProxy } from '../services/systemProxy';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getOrchestrationRegistry } from './orchestration';
 
@@ -32,6 +38,11 @@ let settingsFile: SettingsFile | null = null;
 /** 正在进行的 worktree 占用统计；新的统计请求会取消它。 */
 let usageScan: AbortController | null = null;
 const networkTests = new Map<Electron.WebContents, AbortController>();
+
+/** 缓存超过 5 秒先刷新；解析器未登记时为未知 */
+async function freshSystemProxy(): Promise<SystemProxyStatus> {
+  return (await getSystemProxy()?.fresh()) ?? { kind: 'unknown' };
+}
 
 /** Main 唯一的 settings.json 句柄；userData 路径在启动早期才确定，所以延迟创建。 */
 export function getSettingsFile(): SettingsFile {
@@ -84,12 +95,22 @@ export function registerSettingsHandlers(): void {
       owner.once('destroyed', cancel);
       owner.on('did-start-navigation', navigate);
       try {
-        return { ok: true, ...(await testCommandNetwork(config, controller.signal)) };
+        // 跟随系统代理时用解析出的地址测
+        const resolved =
+          config.mode === 'system' ? resolveNetworkProxy(config, await freshSystemProxy()) : config;
+        return { ok: true, ...(await testCommandNetwork(resolved, controller.signal)) };
       } finally {
         owner.removeListener('destroyed', cancel);
         owner.removeListener('did-start-navigation', navigate);
         if (networkTests.get(owner) === controller) networkTests.delete(owner);
       }
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.SETTINGS_SYSTEM_PROXY,
+    async (_event, raw: unknown): Promise<IpcResult<{ status: SystemProxyStatus }>> => {
+      if (raw !== undefined) return { ok: false, error: translate('common.invalidArgs') };
+      return { ok: true, status: await freshSystemProxy() };
     }
   );
   ipcMain.handle(IPC_CHANNELS.SETTINGS_CANCEL_NETWORK_TEST, (event, raw: unknown): IpcResult => {

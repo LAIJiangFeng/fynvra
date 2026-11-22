@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createAppDialogApi } from './domains/appDialog';
+import { createAppPluginsApi } from './domains/appPlugins';
 import { createFilesApi } from './domains/files';
 import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
@@ -61,6 +62,7 @@ const api: FynvraApi = {
   instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
   plugins: createPluginsApi(ipcRenderer, subscribe),
+  appPlugins: createAppPluginsApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),
   usage: createUsageApi(ipcRenderer),
 };

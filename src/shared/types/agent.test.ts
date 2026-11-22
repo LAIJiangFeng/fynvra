@@ -67,7 +67,17 @@ describe('parseAgentCommand', () => {
   it('accepts only a restricted command network snapshot', () => {
     const networkProxy = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
     expect(parseAgentCommand(withSpec({ networkProxy }))).toEqual(withSpec({ networkProxy }));
+    // system 模式可带 Main 解析出的地址
+    for (const system of [
+      { ...networkProxy, mode: 'system' },
+      { mode: 'system', gitCompatibility: false },
+    ]) {
+      expect(parseAgentCommand(withSpec({ networkProxy: system }))).toEqual(
+        withSpec({ networkProxy: system })
+      );
+    }
     for (const invalid of [
+      { mode: 'system', url: 'http://u:p@h:1', gitCompatibility: false },
       null,
       { ...networkProxy, env: { SECRET: 'x' } },
       { ...networkProxy, url: 'http://user:secret@proxy' },
@@ -87,6 +97,14 @@ describe('parseAgentCommand', () => {
       { name: 'x', content: 1 },
     ]) {
       expect(parseAgentCommand(withSpec({ instructionFile: invalid }))).toBeNull();
+    }
+  });
+  it('accepts only the known session profiles', () => {
+    for (const profile of ['triage', 'restricted']) {
+      expect(parseAgentCommand(withSpec({ profile }))).toEqual(withSpec({ profile }));
+    }
+    for (const invalid of ['admin', '', null, true]) {
+      expect(parseAgentCommand(withSpec({ profile: invalid }))).toBeNull();
     }
   });
   it('accepts an optional compaction threshold within range', () => {
@@ -475,6 +493,14 @@ describe('parseAgentWorkerEvent', () => {
     {
       type: 'host-invoke',
       identity,
+      callId: '6',
+      kind: 'telegram',
+      method: 'triageReport',
+      input: { kind: 'question', title: 't', summary: 's', reply: 'r' },
+    },
+    {
+      type: 'host-invoke',
+      identity,
       callId: '4',
       kind: 'worker',
       method: 'reportDone',
@@ -488,6 +514,11 @@ describe('parseAgentWorkerEvent', () => {
       type: 'approval-request',
       identity,
       request: { ...approvalRequest, protectedAction: 'git push', detail: '' },
+    },
+    {
+      type: 'approval-request',
+      identity,
+      request: { ...approvalRequest, note: 'restricted-tests' },
     },
     {
       type: 'models-described',
@@ -753,6 +784,8 @@ describe('parseAgentWorkerEvent', () => {
         ['a missing title', { title: undefined }],
         ['a null detail', { detail: null }],
         ['a numeric protected action', { protectedAction: 1 }],
+        ['an unknown note', { note: 'tests' }],
+        ['a null note', { note: null }],
         ['a string expiry', { expiresAt: '1700000000000' }],
         ['a non-positive expiry', { expiresAt: 0 }],
         ['an infinite expiry', { expiresAt: Number.POSITIVE_INFINITY }],

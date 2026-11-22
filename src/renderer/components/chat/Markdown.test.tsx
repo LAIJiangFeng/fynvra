@@ -28,3 +28,66 @@ describe('Markdown 渲染缓存', () => {
     expect(render({ text: '**x**', components: italic })).toContain('<i>second</i>');
   });
 });
+
+const html = (text: string) => renderToStaticMarkup(<Markdown text={text} html />);
+
+describe('Markdown html 开关（README）', () => {
+  it('去掉脚本、内嵌框、事件属性、style 与 javascript: 链接', () => {
+    const out = html(
+      [
+        '<script>alert(1)</script>',
+        '<iframe src="https://x.test"></iframe>',
+        '<img src="https://x.test/a.png" onerror="alert(1)" style="position:fixed">',
+        '<p style="color:red" onclick="x()">hi</p>',
+        '<a href="javascript:alert(1)">bad</a>',
+        '<form action="https://x.test"><input name="q"></form>',
+      ].join('\n\n')
+    );
+    expect(out).not.toMatch(
+      /script|iframe|onerror|onclick|style="(?!text-align)|javascript:|form/i
+    );
+    expect(out).toContain('hi');
+    expect(out).toContain('bad');
+  });
+
+  it('保留 align 并映射为居中；picture 只保留 img；常见排版标签生效', () => {
+    const out = html(
+      [
+        '<p align="center">',
+        '  <picture>',
+        '    <source media="(prefers-color-scheme: dark)" srcset="https://x.test/dark.png">',
+        '    <img src="https://x.test/logo.png" alt="Logo" width="120">',
+        '  </picture>',
+        '  <br><sub>small</sub> <strong>bold</strong>',
+        '</p>',
+        '',
+        '<div align="right">r</div>',
+        '',
+        '<h3 align="center">t</h3>',
+      ].join('\n')
+    );
+    expect(out).toContain('<p style="text-align:center"');
+    expect(out).not.toMatch(/<source|srcset/i);
+    expect(out).toMatch(
+      /<picture>[\s\S]*<img src="https:\/\/x\.test\/logo\.png" alt="Logo" width="120"/
+    );
+    expect(out).toContain('<sub');
+    expect(out).toContain('<strong>bold</strong>');
+    expect(out).toContain('<div style="text-align:right">r</div>');
+    expect(out).toContain('<h3 style="text-align:center"');
+  });
+
+  it('聊天（html 为 false）不变：HTML 原样当文字', () => {
+    const out = renderToStaticMarkup(<Markdown text={'<p align="center"><b>x</b></p>'} />);
+    expect(out).not.toContain('<b>');
+    expect(out).not.toContain('text-align');
+  });
+
+  it('同一 cacheKey 下 html 开关不会复用对方的缓存', () => {
+    const text = '<b>x</b>';
+    const plain = renderToStaticMarkup(<Markdown text={text} cacheKey="html-k" />);
+    const rich = renderToStaticMarkup(<Markdown text={text} cacheKey="html-k" html />);
+    expect(plain).not.toContain('<b>');
+    expect(rich).toContain('<b>x</b>');
+  });
+});

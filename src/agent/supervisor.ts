@@ -36,6 +36,8 @@ import {
   type HostInvoker,
   type HostInvokerOptions,
   orchestrationHostProxy,
+  type TriageHost,
+  triageHostProxy,
   workerHostProxy,
 } from './hostProxy';
 
@@ -88,6 +90,8 @@ export interface OpenSessionInput {
   workerHost: WorkerHost | null;
   /** 所有会话都有：fynvra_config 经 host-invoke（kind: 'config'）转给 Main 的配置宿主 */
   configHost?: ConfigHost | null;
+  /** 仅 `spec.profile === 'triage'` 的会话有：triage_report 经 host-invoke（kind: 'telegram'）转给 Main */
+  triageHost?: TriageHost | null;
   /** 审批门的人工审批通道；supervisor 提供，缺失时需审批的工具调用一律拒绝。 */
   approval?: ApprovalPolicyHooks;
   /** 端点拒绝 max_tokens 后会话已降到它报的上限并静默重发：报给 Main 写回设置，不在界面上显示 */
@@ -262,7 +266,7 @@ export class SessionSupervisor {
     );
     const withdraw = () => this.#approvals.cancel(requestId);
     signal?.addEventListener('abort', withdraw, { once: true });
-    const { toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } = request;
+    const { toolCallId, toolName, kind, title, detail, protectedAction, note, expiresAt } = request;
     try {
       this.#post({
         type: 'approval-request',
@@ -275,6 +279,7 @@ export class SessionSupervisor {
           title,
           detail,
           ...(protectedAction ? { protectedAction } : {}),
+          ...(note ? { note } : {}),
           expiresAt,
         },
       });
@@ -354,7 +359,9 @@ export class SessionSupervisor {
         host:
           spec.role.tools === 'orchestrator' ? orchestrationHostProxy(call('orchestration')) : null,
         workerHost: spec.worker ? workerHostProxy(call('worker')) : null,
-        configHost: configHostProxy(call('config')),
+        // 档位会话没有 fynvra_config
+        configHost: spec.profile ? null : configHostProxy(call('config')),
+        triageHost: spec.profile === 'triage' ? triageHostProxy(call('telegram')) : null,
         approval: {
           request: (request, signal) => this.requestApproval(identity, request, signal),
           timeoutMs: this.#approvalTimeoutMs,

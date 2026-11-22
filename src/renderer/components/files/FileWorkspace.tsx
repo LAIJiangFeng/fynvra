@@ -1,6 +1,6 @@
 import type { WorkspaceFileEntry } from '@shared/types/files';
 import { FileCode2, GitCompareArrows, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
-import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type Ref, useCallback, useEffect, useRef, useState } from 'react';
 import { NewSessionButton } from '@/components/chat/NewSessionButton';
 import { DiffTabPane } from '@/components/orchestration/DiffTabPane';
 import { STATUS_MARK } from '@/components/orchestration/diffView';
@@ -20,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import type { MessageId } from '@/i18n';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { type DiffTab, diffTabsStoreFor } from '@/stores/diffTabs';
@@ -34,6 +35,8 @@ import {
   workspaceTabLimitReached,
 } from '@/stores/workspaceTabs';
 import { FilePane } from './FilePane';
+import { TreeContextMenu } from './FileTreeContextMenu';
+import { type TabCloseAction, tabsToClose } from './tabClose';
 import { WorkspaceTab, WorkspaceTabStrip } from './WorkspaceTabStrip';
 
 /** 中央标签与对话共用空间，切换时不卸载对话或已打开的编辑器。 */
@@ -71,6 +74,14 @@ export function FileWorkspace({
     file: WorkspaceFileEntry;
     action: 'close' | 'reload';
   } | null>(null);
+  const [menu, setMenu] = useState<{
+    tabKey: string;
+    keys: string[];
+    x: number;
+    y: number;
+  } | null>(null);
+  const [bulk, setBulk] = useState<{ files: string[]; terminals: string[] } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const t = useT();
 
   useEffect(() => {
@@ -87,6 +98,55 @@ export function FileWorkspace({
     if (!store.getState().closeFile(file.id) && !store.getState().previews[file.id]?.saving)
       setConfirm({ file, action: 'close' });
   }
+
+  /** 单个关闭：与点 × 完全一致 */
+  function closeTab(key: string) {
+    const id = key.slice(key.indexOf(':') + 1);
+    if (key.startsWith('file:')) {
+      const file = store.getState().opened.find((entry) => entry.id === id);
+      if (file) requestClose(file);
+    } else if (key.startsWith('diff:')) diffStore.getState().close(id);
+    else if (key.startsWith('terminal:')) {
+      const tab = useTerminalsStore.getState().tabs.find((entry) => entry.id === id);
+      if (tab?.exited) void useTerminalsStore.getState().close(id);
+      else if (tab) setClosingTerminal(id);
+    }
+  }
+
+  /** 批量关闭：未保存文件和运行中终端留到汇总确认，正在保存的文件跳过 */
+  function closeTabs(keys: string[]) {
+    if (!tabsReady || keys.length === 0) return;
+    markWorkspaceInteraction(workspaceId);
+    const files: string[] = [];
+    const running: string[] = [];
+    for (const key of keys) {
+      const id = key.slice(key.indexOf(':') + 1);
+      if (key.startsWith('file:')) {
+        if (store.getState().previews[id]?.saving) continue;
+        if (!store.getState().closeFile(id)) files.push(id);
+      } else if (key.startsWith('diff:')) diffStore.getState().close(id);
+      else if (key.startsWith('terminal:')) {
+        const tab = useTerminalsStore.getState().tabs.find((entry) => entry.id === id);
+        if (tab?.exited) void useTerminalsStore.getState().close(id);
+        else if (tab) running.push(id);
+      }
+    }
+    if (files.length || running.length) setBulk({ files, terminals: running });
+  }
+
+  const menuItem = (action: TabCloseAction, label: MessageId) => {
+    const keys = menu ? tabsToClose(menu.keys, menu.tabKey, action) : [];
+    const target = menu?.tabKey ?? '';
+    return {
+      id: action,
+      label: t(label),
+      // 没有 onSelect 的条目在 TreeContextMenu 里不可选
+      onSelect:
+        tabsReady && keys.length > 0
+          ? () => (action === 'close' ? closeTab(target) : closeTabs(keys))
+          : undefined,
+    };
+  };
 
   function requestReload(file: WorkspaceFileEntry) {
     if (isFileDirty(store.getState().previews[file.id])) setConfirm({ file, action: 'reload' });
@@ -108,7 +168,10 @@ export function FileWorkspace({
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <nav aria-label={t('files.opened')} className="flex h-10 shrink-0 border-b bg-sidebar/60">
-        <WorkspaceTabStrip workspaceId={workspaceId}>
+        <WorkspaceTabStrip
+          workspaceId={workspaceId}
+          onTabContextMenu={(tabKey, keys, x, y) => setMenu({ tabKey, keys, x, y })}
+        >
           <WorkspaceTab tabKey="chat">
             <button
               type="button"
@@ -298,6 +361,62 @@ export function FileWorkspace({
           </div>
         ))}
       </div>
+      {menu && (
+        <TreeContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            ...(menu.tabKey === 'chat' ? [] : [menuItem('close', 'workspaceTabs.close')]),
+            menuItem('others', 'workspaceTabs.closeOthers'),
+            menuItem('left', 'workspaceTabs.closeLeft'),
+            menuItem('right', 'workspaceTabs.closeRight'),
+          ]}
+          onClose={closeMenu}
+        />
+      )}
+      <Dialog
+        open={bulk !== null}
+        onOpenChange={(open) => {
+          if (!open) setBulk(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('workspaceTabs.bulkCloseTitle')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                !bulk?.terminals.length
+                  ? 'workspaceTabs.bulkCloseFilesHint'
+                  : !bulk.files.length
+                    ? 'workspaceTabs.bulkCloseTerminalsHint'
+                    : 'workspaceTabs.bulkCloseHint',
+                {
+                  files: bulk?.files.length ?? 0,
+                  terminals: bulk?.terminals.length ?? 0,
+                }
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulk(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (bulk) {
+                  // closeFile 对正在保存的文件返回 false，自然跳过
+                  for (const id of bulk.files) store.getState().closeFile(id, true);
+                  for (const id of bulk.terminals) void useTerminalsStore.getState().close(id);
+                }
+                setBulk(null);
+              }}
+            >
+              {t('workspaceTabs.closeAll')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={closingTerminal !== null}
         onOpenChange={(open) => {

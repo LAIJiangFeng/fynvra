@@ -1,8 +1,12 @@
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import type { MarketStateView } from '@shared/types/pluginMarket';
 import type {
   PluginEntry,
   PluginImportCandidateView,
   PluginProviderMap,
+  PluginReadmeImageResult,
+  PluginReadmeResult,
+  ReadmeSource,
   SetPluginManualProvidersInput,
   SetPluginProviderMappingInput,
 } from '@shared/types/plugins';
@@ -27,6 +31,13 @@ export type PluginToggleResult = IpcResult<{ plugin: PluginEntry }>;
 export type PluginActionResult =
   | { ok: true; plugin: PluginEntry }
   | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+/** 市场安装：PI 插件返回 plugin（plugins.json 条目），Fynvra 插件返回 appPlugin */
+export type PluginMarketInstallResult =
+  | PluginActionResult
+  | { ok: true; appPlugin: import('@shared/types/appPlugins').AppPluginView };
+/** 插件市场状态（market-state / market-refresh） */
+export type PluginMarketStateResult = IpcResult<{ state: MarketStateView }>;
+export type PluginMarketReadmeResult = IpcResult<{ text: string }>;
 export type PluginOpenAsWorkspaceResult = IpcResult<{ workspaceId: string }>;
 /** warnings 是整句提示（只带文件名，不带原文或完整路径） */
 export type PluginScanImportsResult = IpcResult<{
@@ -66,6 +77,19 @@ export interface PluginsApi {
   setProviderMapping(input: SetPluginProviderMappingInput): Promise<PluginSetProviderMappingResult>;
   /** 整组替换插件手动添加的服务名（合法、最多 20 个） */
   setManualProviders(input: SetPluginManualProvidersInput): Promise<PluginSetManualProvidersResult>;
+  /** 缓存的市场状态，不发网络请求 */
+  marketState(): Promise<PluginMarketStateResult>;
+  /** 拉取并验签索引；force 为 false 时 1 小时内直接返回缓存 */
+  marketRefresh(input?: { force?: boolean }): Promise<PluginMarketStateResult>;
+  /** 从市场安装；pluginId 是市场 id（如 `fynvra.example`） */
+  marketInstall(input: { pluginId: string; version: string }): Promise<PluginMarketInstallResult>;
+  /** 把已装的市场插件更新到最新的兼容版本；id 是 plugins.json 里的 id */
+  marketUpdate(input: { id: string }): Promise<PluginActionResult>;
+  marketReadme(input: { pluginId: string; version: string }): Promise<PluginMarketReadmeResult>;
+  /** 只读已装插件目录里的 README.md；单文件插件或没有 README 时 code 为 none */
+  readme(input: { id: string }): Promise<PluginReadmeResult>;
+  /** README 里的一张图片（相对路径或 https）→ data URL；只传 source 与 src */
+  readmeImage(input: { source: ReadmeSource; src: string }): Promise<PluginReadmeImageResult>;
   onChanged(callback: () => void): () => void;
 }
 
@@ -89,6 +113,13 @@ export function createPluginsApi(ipc: Invoker, subscribe: Subscribe): PluginsApi
     convertToCopy: (id) => ipc.invoke(IPC_CHANNELS.PLUGINS_CONVERT_TO_COPY, id),
     setProviderMapping: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_SET_PROVIDER_MAPPING, input),
     setManualProviders: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_SET_MANUAL_PROVIDERS, input),
+    marketState: () => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_STATE),
+    marketRefresh: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_REFRESH, input),
+    marketInstall: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_INSTALL, input),
+    marketUpdate: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_UPDATE, input),
+    marketReadme: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_MARKET_README, input),
+    readme: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_README, input),
+    readmeImage: (input) => ipc.invoke(IPC_CHANNELS.PLUGINS_README_IMAGE, input),
     onChanged: (callback) => subscribe(IPC_CHANNELS.PLUGINS_CHANGED, () => callback()),
   };
 }

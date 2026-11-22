@@ -47,6 +47,7 @@ function makeHost(overrides: Partial<OrchestrationHostDeps> = {}): Orchestration
     workspace: WORKSPACE,
     coordinatorSessionId: COORDINATOR,
     coordinatorBranch: 'main',
+    restricted: false,
     store,
     git: new GitWorktreeManager({ exec: fake.exec }),
     inbox,
@@ -605,6 +606,15 @@ describe('reviewDiff 与 runChecks', () => {
       'pnpm typecheck && pnpm test',
       controller.signal
     );
+  });
+
+  it('runChecks：受限协调者把 restricted 传给执行器，普通协调者不传', async () => {
+    host = makeHost({ restricted: true });
+    const first = await dispatch();
+    await host.runChecks({ dispatchId: first.dispatch.id, command: 'pnpm lint' });
+    expect(runChecks).toHaveBeenLastCalledWith(WORKTREE_PATH, 'pnpm lint', undefined, {
+      restricted: true,
+    });
   });
 
   it('runChecks 抛异常时返回错误结果', async () => {

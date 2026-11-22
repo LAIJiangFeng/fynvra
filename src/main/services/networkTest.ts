@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import {
   commandEnvironment,
   type NetworkProbeResult,
-  type NetworkProxy,
   type NetworkTestResult,
+  type ResolvedNetworkProxy,
 } from '@shared/networkProxy';
 import { killTree } from './orchestration/shellRunner';
 
@@ -44,7 +44,7 @@ function gitDiagnosticEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function disablesNodeTlsVerification(env: NodeJS.ProcessEnv): boolean {
+export function disablesNodeTlsVerification(env: NodeJS.ProcessEnv): boolean {
   return Object.entries(env).some(
     ([key, value]) => key.toUpperCase() === 'NODE_TLS_REJECT_UNAUTHORIZED' && value === '0'
   );
@@ -154,7 +154,7 @@ const probeGit: Probe = (env, signal) =>
 
 /** Never return stderr/exception messages: inherited configuration may contain credentials. */
 export async function testCommandNetwork(
-  config: NetworkProxy,
+  config: ResolvedNetworkProxy,
   cancel: AbortSignal,
   overrides: Partial<NetworkTestDeps> = {}
 ): Promise<NetworkTestResult> {

@@ -30,9 +30,11 @@ import type { CheckCommandPolicy } from './checkCommand';
 import { createOrchestrationHost, type RunChecksFn } from './host';
 import { fail, guard } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
+import type { PullRequestGateDeps } from './pullRequest';
 import {
   currentBranch,
   type PanelReviewDiff,
+  publicBaseRef,
   readDispatchOutput,
   reviewDispatchPanelDiff,
 } from './queries';
@@ -75,6 +77,10 @@ export interface OrchestrationServiceOptions {
   canLaunch?: () => boolean;
   log?: (message: string) => void;
   now?: () => number;
+  /** open_pull_request 的推送闸门数据（见 `pullRequest.ts`）；缺省时该工具拒绝 */
+  pullRequestGate?: PullRequestGateDeps;
+  /** 主 agent 会话是否受限（受限的从公开基线 origin/<默认分支> 切出、推送闸门查保护路径）；缺省都不受限 */
+  isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
 }
 
 /** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
@@ -232,6 +238,7 @@ function deferredHost(resolve: () => HostLookup): OrchestrationHost {
     reviewDiff: (input, signal) => call((host) => host.reviewDiff(input, signal)),
     runChecks: (input, signal) => call((host) => host.runChecks(input, signal)),
     mergeWorktree: (input, signal) => call((host) => host.mergeWorktree(input, signal)),
+    openPullRequest: (input, signal) => call((host) => host.openPullRequest(input, signal)),
     rejectWork: (input, signal) => call((host) => host.rejectWork(input, signal)),
     cleanupWorktree: (input, signal) => call((host) => host.cleanupWorktree(input, signal)),
   };
@@ -417,9 +424,18 @@ export function createOrchestrationService(
     if (cached !== undefined) return cached;
     const lookup = (async (): HostLookup => {
       await ready;
-      // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
-      const branch =
-        workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
+      const restricted = options.isRestrictedCoordinator?.(coordinatorSessionId) ?? false;
+      let branch: string | undefined;
+      if (restricted) {
+        // 受限协调者只从公开基线切出：本地分支上可能有用户没推送的私有提交，不能带进公开 PR；拿不到基线就拒绝
+        const base = await publicBaseRef(options.exec, workspace);
+        if (!base.ok) return base;
+        branch = base.ref;
+      } else {
+        // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
+        branch =
+          workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
+      }
       if (branch === undefined) {
         return fail(
           `the workspace repository ${workspace.repoPath} is not on a branch (detached HEAD) or cannot be read; check out the branch the orchestrator should work on`
@@ -429,6 +445,7 @@ export function createOrchestrationService(
         workspace,
         coordinatorSessionId,
         coordinatorBranch: branch,
+        restricted,
         store,
         git,
         inbox,
@@ -443,6 +460,7 @@ export function createOrchestrationService(
         ...(options.workflows ? { workflows: options.workflows } : {}),
         workflowEngine,
         now,
+        ...(options.pullRequestGate ? { pullRequestGate: options.pullRequestGate } : {}),
       });
       return { ok: true, host };
     })();

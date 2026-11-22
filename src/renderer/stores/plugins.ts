@@ -1,11 +1,20 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
-import type { PluginEntry, PluginProviderMap } from '@shared/types/plugins';
+import type { MarketStateView } from '@shared/types/pluginMarket';
+import type {
+  PluginEntry,
+  PluginProviderMap,
+  PluginReadmeImageResult,
+  PluginReadmeResult,
+  ReadmeSource,
+} from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   PluginActionResult,
   PluginAddResult,
   PluginImportResult,
+  PluginMarketInstallResult,
+  PluginMarketReadmeResult,
   PluginOpenAsWorkspaceResult,
   PluginRemoveResult,
   PluginScanImportsResult,
@@ -42,6 +51,23 @@ export interface PluginsState {
   ): Promise<PluginSetProviderMappingResult>;
   /** 整组替换手动添加的服务名 */
   setManualProviders(id: string, names: string[]): Promise<PluginSetManualProvidersResult>;
+  /** 插件市场视图；还没读过时为 null */
+  market: MarketStateView | null;
+  /** 读取 / 刷新市场的 IPC 本身失败 */
+  marketError: string | null;
+  marketRefreshing: boolean;
+  /** 读缓存，不联网 */
+  loadMarket(): Promise<void>;
+  /** 拉取索引；force 为 false 时 1 小时内 Main 直接返回缓存 */
+  refreshMarket(force: boolean): Promise<void>;
+  marketInstall(pluginId: string, version: string): Promise<PluginMarketInstallResult>;
+  /** id 是 plugins.json 里的 id */
+  marketUpdate(id: string): Promise<PluginActionResult>;
+  marketReadme(pluginId: string, version: string): Promise<PluginMarketReadmeResult>;
+  /** 只读已装插件目录里的 README.md */
+  readme(id: string): Promise<PluginReadmeResult>;
+  /** README 里的一张图片 → data URL（Main 读插件目录或下载 https） */
+  readmeImage(source: ReadmeSource, src: string): Promise<PluginReadmeImageResult>;
 }
 
 /** IPC 调用本身失败（极少见）也折成 { ok: false } */
@@ -53,7 +79,9 @@ async function safely<T>(call: () => Promise<T>): Promise<T | { ok: false; error
   }
 }
 
-async function safeAction(call: () => Promise<PluginActionResult>): Promise<PluginActionResult> {
+async function safeAction<T>(
+  call: () => Promise<T>
+): Promise<T | { ok: false; code: 'failed'; error: string }> {
   try {
     return await call();
   } catch (error) {
@@ -62,6 +90,9 @@ async function safeAction(call: () => Promise<PluginActionResult>): Promise<Plug
 }
 
 const api = window.fynvra.plugins;
+/** 市场读取序号：只认最后一次请求的结果，过期响应丢弃 */
+let marketSeq = 0;
+let refreshSeq = 0;
 
 export const usePluginsStore = create<PluginsState>()((set, get) => ({
   plugins: [],
@@ -169,9 +200,44 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
     }
     return result;
   },
+
+  market: null,
+  marketError: null,
+  marketRefreshing: false,
+
+  async loadMarket() {
+    const mine = ++marketSeq;
+    const result = await safely(() => api.marketState());
+    if (mine !== marketSeq) return;
+    set(result.ok ? { market: result.state, marketError: null } : { marketError: result.error });
+  },
+
+  async refreshMarket(force) {
+    const mine = ++marketSeq;
+    const refreshing = ++refreshSeq;
+    set({ marketRefreshing: true });
+    const result = await safely(() => api.marketRefresh({ force }));
+    // 转圈只由最后一次刷新结束；结果被更新的读取取代时不覆盖
+    if (refreshing === refreshSeq) set({ marketRefreshing: false });
+    if (mine !== marketSeq) return;
+    set(result.ok ? { market: result.state, marketError: null } : { marketError: result.error });
+  },
+
+  // 成功后 Main 广播 plugins:changed，下面的订阅会刷新列表与市场视图
+  marketInstall: (pluginId, version) => safeAction(() => api.marketInstall({ pluginId, version })),
+  marketUpdate: (id) => safeAction(() => api.marketUpdate({ id })),
+  marketReadme: (pluginId, version) => safely(() => api.marketReadme({ pluginId, version })),
+  readme: (id) =>
+    api
+      .readme({ id })
+      .catch((error) => ({ ok: false, code: 'failed', error: errorMessage(error) }) as const),
+  readmeImage: (source, src) =>
+    api.readmeImage({ source, src }).catch(() => ({ ok: false, code: 'failed' }) as const),
 }));
 
 api.onChanged(() => {
-  void usePluginsStore.getState().refresh();
+  const state = usePluginsStore.getState();
+  void state.refresh();
+  if (state.market) void state.loadMarket();
 });
 void usePluginsStore.getState().refresh();

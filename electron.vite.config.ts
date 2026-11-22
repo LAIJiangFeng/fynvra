@@ -20,7 +20,16 @@ export default defineConfig({
     // Agent worker（src/agent/index.ts）不是第二个入口：Main 以 `?modulePath` 引用它
     // （services/agentHost/electronWorker.ts），electron-vite 用本段配置单独构建成 out/main/chunks/ 下的文件，
     // alias 与 externalizeDeps 都沿用这里。pi 因此要写进根 dependencies，否则会被打进 worker 产物。
-    resolve: { alias: { ...sharedAlias, ...coreAlias, ...agentRuntimeAlias } },
+    resolve: {
+      alias: [
+        ...Object.entries({ ...sharedAlias, ...coreAlias, ...agentRuntimeAlias }).map(
+          ([find, replacement]) => ({ find, replacement })
+        ),
+        // 依赖（如 read-excel-file/universal）里的裸 'fflate' 在 Node 条件下会解析到 node 版，
+        // 其顶层 `var require` 与产物开头的 require shim 重名、启动即崩；统一改用 fflate/browser
+        { find: /^fflate$/, replacement: 'fflate/browser' },
+      ],
+    },
   },
   preload: {
     resolve: { alias: sharedAlias },

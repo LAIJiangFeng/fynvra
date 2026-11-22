@@ -8,10 +8,12 @@ import {
   type GitWorktreeManager,
   isDispatchSettled,
   type OrchestrationStore,
+  type Workspace,
 } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { fail } from './hostResult';
 import type { WorkerSessionLauncher } from './launcher';
+import { isValidBranchName } from './pullRequest';
 
 // orchestration 工具（OrchestrationHost）与 orchestration IPC（面板）共用的只读查询
 
@@ -24,6 +26,41 @@ export async function currentBranch(exec: ExecFn, repoPath: string): Promise<str
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 受限协调者的公开基线 `refs/remotes/origin/<defaultBranch>`：不是 git 工作区、没有默认分支或引用不存在都拒绝，
+ * 不退回本地分支。
+ */
+export async function publicBaseRef(
+  exec: ExecFn,
+  workspace: Pick<Workspace, 'vcs' | 'defaultBranch' | 'repoPath'>
+): Promise<HostResult<{ ref: string }>> {
+  if (workspace.vcs !== 'git') {
+    return fail(
+      'a restricted coordinator needs a git workspace with an origin remote; this workspace is not a git repository'
+    );
+  }
+  const name = workspace.defaultBranch;
+  if (name === undefined || !isValidBranchName(name)) {
+    return fail(
+      'a restricted coordinator branches from origin/<default branch>, but this workspace has no default branch'
+    );
+  }
+  const ref = `refs/remotes/origin/${name}`;
+  try {
+    const result = await exec(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`],
+      workspace.repoPath
+    );
+    if (result.code === 0 && result.stdout.trim() !== '') return { ok: true, ref };
+  } catch {
+    // 按引用不存在处理
+  }
+  return fail(
+    `a restricted coordinator branches from the public base origin/${name}, but ${ref} does not exist in ${workspace.repoPath}; run \`git fetch origin\` first`
+  );
 }
 
 /** 在主仓库读 worker 提交；合并后优先使用固定范围，清理目录、删除或复用分支不影响历史改动。 */

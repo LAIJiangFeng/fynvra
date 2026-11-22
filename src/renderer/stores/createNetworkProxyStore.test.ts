@@ -36,6 +36,13 @@ function setup() {
 }
 
 describe('network settings draft lifecycle', () => {
+  it('默认草稿是跟随系统代理', async () => {
+    const { store } = setup();
+    expect(store.getState().draft).toEqual({ mode: 'system', gitCompatibility: false });
+    store.getState().connect();
+    await vi.waitFor(() => expect(store.getState().loaded).toBe(true));
+    expect(store.getState().draft).toEqual({ mode: 'system', gitCompatibility: false });
+  });
   it('saves and clears through settings; tests the normalized unsaved draft', async () => {
     const { store, api, pending } = setup();
     const disconnect = store.getState().connect();

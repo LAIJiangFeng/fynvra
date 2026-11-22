@@ -36,6 +36,8 @@ import { forkAgentWorker } from '../services/agentHost/electronWorker';
 import { writeMagicContextConfig } from '../services/agentHost/magicContextHost';
 import { createRoleResourceResolver } from '../services/agentHost/roleResources';
 import { createShellPathResolver } from '../services/agentHost/shell';
+import { channelReportHost } from '../services/channels/instance';
+import { savedNetworkProxy } from '../services/commandNetwork';
 import { createConfigHost } from '../services/configHost/configHost';
 import { toProviderView } from '../services/providers/providerStore';
 import { createModelResolver } from '../services/providers/resolveModel';
@@ -158,7 +160,8 @@ function createAppAgentHost(): AgentHostService {
       return tokens;
     },
     resolveCompactionStrategy: () => compactionStrategyOf(getSettingsFile().read().preferences),
-    resolveNetworkProxy: () => getSettingsFile().read().preferences.networkProxy,
+    // 跟随系统代理时带上缓存里解析出的地址（会话加载时取一次快照）
+    resolveNetworkProxy: savedNetworkProxy,
     resolveWebFetchAllowLoopback: () =>
       getSettingsFile().read().preferences.webFetchAllowLoopback === true,
     resolveConfirmDangerousActions: () =>
@@ -187,6 +190,8 @@ function createAppAgentHost(): AgentHostService {
       broadcast: (channel) => sendToAllWindows(channel),
       skillsDir: join(userData, 'skills'),
     }),
+    // triage_report：会话归属渠道插件时交给该插件的 channel.report，无归属时返回错误（kind 名沿用 telegram）
+    telegram: channelReportHost,
     removeWorktree: async (session, force) => {
       // 工作区已移除：没有编排状态可对照，只删记录（同以前）
       const service = getOrchestrationRegistry().serviceFor(session.workspaceId);

@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { pickRestrictedEnv } from '@fynvra/core';
 import { errorMessage } from '@shared/guards';
 import { savedCommandEnvironment } from '../commandNetwork';
 import type { RunChecksFn } from './host';
@@ -42,7 +43,7 @@ export function createShellRunner(options: ShellRunnerOptions = {}): RunChecksFn
   const timeoutMs = options.timeoutMs ?? RUN_CHECKS_TIMEOUT_MS;
   const limit = options.outputLimit ?? RUN_CHECKS_OUTPUT_LIMIT;
 
-  return (cwd, command, signal) =>
+  return (cwd, command, signal, runOptions) =>
     new Promise((resolve) => {
       const startedAt = performance.now();
       let output = '';
@@ -70,7 +71,14 @@ export function createShellRunner(options: ShellRunnerOptions = {}): RunChecksFn
           windowsHide: true,
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...savedCommandEnvironment(), NO_COLOR: '1', FORCE_COLOR: '0' },
+          // 受限（值班）协调者：去掉密钥，只留白名单变量
+          env: {
+            ...(runOptions?.restricted
+              ? pickRestrictedEnv(savedCommandEnvironment())
+              : savedCommandEnvironment()),
+            NO_COLOR: '1',
+            FORCE_COLOR: '0',
+          },
         });
       } catch (error) {
         resolve({ exitCode: -1, output: errorMessage(error), durationMs: 0 });
