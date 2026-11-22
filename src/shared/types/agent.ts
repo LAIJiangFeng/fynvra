@@ -359,6 +359,11 @@ export type AgentWorkerEvent =
    * 随后同一 requestId 的 approval_request 会话事件关联工具调用。
    */
   | { type: 'approval-request'; identity: SessionIdentity; request: AgentApprovalRequest }
+  /**
+   * 端点因 max_tokens 超范围拒绝请求，会话已降到它报的上限并静默重发：Main 把 maxOutput 写回该会话模型的设置
+   * （只降不升、不超过窗口），之后的会话一开始就用对的值。不推给 Renderer
+   */
+  | { type: 'model-limits-learned'; identity: SessionIdentity; modelId: string; maxOutput: number }
   /** `fatal`：worker 已不再持有该会话（如创建失败），下次使用前 Main 必须重新 spawn */
   | { type: 'session-error'; identity: SessionIdentity; error: string; fatal: boolean }
   /** 建议请求的结果：text 为空表示没有明确建议或生成失败；Main 只认仍挂在表里的 requestId */
@@ -561,6 +566,12 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(record.callId)
         ? { type: 'host-cancel', identity, callId: record.callId }
         : null;
+    case 'model-limits-learned': {
+      const { modelId, maxOutput } = record;
+      return isNonEmptyString(modelId) && isPositiveInteger(maxOutput)
+        ? { type: 'model-limits-learned', identity, modelId, maxOutput }
+        : null;
+    }
     case 'session-error': {
       const { error, fatal } = record;
       return typeof error === 'string' && typeof fatal === 'boolean'
