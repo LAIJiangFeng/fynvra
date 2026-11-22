@@ -204,9 +204,9 @@ export interface Message {
   - 非 worker 会话提供了 `planMode` 时，`readonly` / `all` 策略再常驻 `write_plan`；计划模式开启时追加提示词并收紧审批门：只放行目标全是 Markdown 文档的写改（§7.10）。
   - 传入 `workerHost` 时（不论哪种策略）再加 worker 工具，并追加 worker 契约提示词。
   - skills → `DefaultResourceLoader` 的 skill 路径；MCP → `createMcpExtension()`；`systemPrompt` → `before_agent_start` 追加扩展。
-  - 会话档位 `profile`（渠道插件会话用，如群反馈值班，§7.14）：优先于上面按策略的工具装配；两档都不加载 MCP、插件和用户的全局指令文件，不注册 `fynvra_config`，只读仓库里已提交的 `AGENTS.md`，跨会话记忆保持关闭。档位会话从不弹审批（档位规则直接放行或拒绝）：界面的审批档位显示为「自动执行（规则把关）」且不可切换（`setApprovalMode` 拒绝）；会话记录里固定存 `supervised` 只作兜底（建会话、restricted 派出的 worker、读旧记录时都规范成它），万一档位规则失效就退回人工审批，卡住而不是放开。
+  - 会话档位 `profile`（渠道插件会话用，如群反馈值班，§7.14）：优先于上面按策略的工具装配；两档都不加载 MCP、插件和用户的全局指令文件，不注册 `fynvra_config`，只读仓库里已提交的 `AGENTS.md`，跨会话记忆保持关闭。档位会话不弹审批（档位规则直接放行或拒绝；唯一例外是下方 restricted 协调者申请本机跑 `pnpm test`）：界面的审批档位显示为「自动执行（规则把关）」且不可切换（`setApprovalMode` 拒绝）；会话记录里固定存 `supervised` 只作兜底（建会话、restricted 派出的 worker、读旧记录时都规范成它），万一档位规则失效就退回人工审批，卡住而不是放开。
     - **triage**：工具只有 `read` / `grep` / `find` / `ls`（带路径校验，规则同下方 restricted 的路径与敏感文件两条）和 `triage_report`；没有 `web_fetch`、`fynvra_config`、`git_readonly`、`write_plan`；系统提示词由 Fynvra 固定（§7.14「分诊 AI 的固定规则」），不追加角色提示词。
-    - **restricted**：不注册 `fynvra_config`，不加载 MCP 和插件。审批门（`approval/gate.ts`）新增实时谓词（写法同 `planMode`），以下规则只直接允许或直接拒绝，不弹审批（无人值守时不会卡住），也不受审批档位和 `allowSession` 影响：
+    - **restricted**：不注册 `fynvra_config`，不加载 MCP 和插件。审批门（`approval/gate.ts`）新增实时谓词（写法同 `planMode`），以下规则只直接允许或直接拒绝，不弹审批（无人值守时不会卡住），也不受审批档位和 `allowSession` 影响（例外只有 `run_checks` 的 `pnpm test`，见下方 restricted 协调者）：
       - 路径限制：读、写、搜索、列目录的目标必须在会话工作目录内；其他工作区、主目录、系统目录、Fynvra 数据目录都拒绝。
         - 请求路径相对 cwd 后必须能被 `normalizeRepoPath` 规范化（拒绝 ADS、末尾带点或空格、`*` / `?` 等）；
         - 用原生 realpath（`fs.promises.realpath` / `realpathSync.native`）取真实路径（含符号链接 / junction，并还原 8.3 短名和大小写）；目标不存在时对最近一个已存在的祖先求 realpath；
@@ -217,7 +217,8 @@ export interface Message {
         - 任意层级出现的 `node_modules`、`.git`、`.gitattributes`、`.gitmodules`、`package.json`、锁文件、`pnpm-workspace.yaml`、`.pnpmfile.*`、`.npmrc`、`biome.json(c)`、`tsconfig*.json`、`*.config.*`、`electron-builder*.yml`、工具 rc 配置（`/^\.[^/]*rc(\..+)?$/`）、`AGENTS.md`、`CLAUDE.md`；
         - 仓库根下的 `.github/`、`patches/`、`scripts/`、`.husky/`；
         - Windows 别名（ADS、末尾带点或空格、8.3 短名）一律按命中处理；比较前先做 Unicode 大小写折叠。
-      - 命令白名单（以 `packages/core/src/security/restrictedCommand.ts` 为准，每段都要命中，其余命令拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`。
+      - 命令白名单（以 `packages/core/src/security/restrictedCommand.ts` 为准，每段都要命中，其余命令拒绝）：`pnpm typecheck`、`pnpm lint`、`pnpm install --frozen-lockfile --offline --ignore-scripts`、`git status/diff/log/show/add/commit/rm/mv`。worker 始终不能跑测试。
+        - 环境变量白名单（`packages/core/src/security/restrictedEnv.ts` 的 `pickRestrictedEnv`，变量名不区分大小写）：受限会话的所有命令子进程（agent 端 exec 与 bash / powershell 的 spawnHook，先过宿主的 commandEnv 再过白名单；Main 端受限协调者的 `run_checks`）只带 `PATH` `PATHEXT` `SystemRoot` `windir` `ComSpec` `SystemDrive` `TEMP` `TMP` `TMPDIR` `HOME` `USERPROFILE` `HOMEDRIVE` `HOMEPATH` `APPDATA` `LOCALAPPDATA` `ProgramData` `ProgramFiles` `ProgramFiles(x86)` `ProgramW6432` `CommonProgramFiles` `NUMBER_OF_PROCESSORS` `PROCESSOR_ARCHITECTURE` `OS` `LANG` `LC_ALL` `LC_CTYPE` `TZ` `TERM` `SHELL` `PNPM_HOME` `XDG_CONFIG_HOME` `XDG_CACHE_HOME` `XDG_DATA_HOME` `XDG_STATE_HOME`。不带代理变量、`GIT_*`、`NODE_OPTIONS`、`npm_config_*` 和任何密钥；用白名单是因为密钥变量名列不全，黑名单漏一个就泄露。不做操作系统级沙箱。
         - 解析器：同时满足 bash 与 PowerShell 两套语义，只允许 `&&` 连接，重定向、命令替换、变量展开等一律拒绝；整条命令（引号内也算）禁止控制字符、Unicode 引号 U+2018–U+201F、行分隔符、双向控制字符、零宽字符；禁止 `--%`。
         - git 全局选项一律拒绝（子命令必须紧跟 `git`）；禁用选项 `-c`、`-C`、`--exec-path`、`--ext-diff`、`--output`、`--git-dir`、`--work-tree`、`--namespace`、`--super-prefix`、`--no-index`、`--pathspec-from-file`、`--orderfile`、`-O*`，含长选项的前缀写法。
         - git 非选项参数（`--` 之后全部算；commit 的 `-m` 取值跳过）：不能以 `/`、`\`、`~`、`:` 开头，不能是盘符，不能含 `\`，不能有 `..` 段（避免 `git diff` 碰到仓库外路径时自动进入 no-index）；按 `:` 切开后任一部分指向敏感文件就拒绝（如 `git show HEAD:.env`），这里不套 8.3 短名规则，`HEAD~1` 照常放行。
@@ -225,7 +226,7 @@ export interface Message {
         - add：禁止 `-e`、`--edit`、`-i`、`--interactive`、`-p`、`--patch`（含合并写的短选项），不能暂存敏感文件。
         - rm / mv：不能动保护路径，不能用 `[`、`]`、`*`、`?` 通配。
       - `network`（`web_fetch`）、`mcp`、`plugin` 类一律拒绝。
-    - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 只放行上述白名单命令；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
+    - **restricted 协调者**（角色工具策略为 orchestrator）：`merge_worktree` 拒绝，只能用 `open_pull_request` 交付；`run_checks` 放行 `pnpm typecheck`、`pnpm lint`（可用 `&&` 串联），不问人；恰好是 `pnpm test`（单段、不带参数）时白名单返回 `needsApproval`，审批门走 `ask()` 问维护者（kind `command`，detail 第一行是命令，带 `note: 'restricted-tests'`；Main 据此把审批条标题换成「值班请求在本机运行测试」并在 detail 末尾追加风险说明，桌面通知照常），`allowSession` 只算这一次、不记住，默认 10 分钟超时；拒绝、超时、中止、出错都返回固定文本，让模型不再申请、直接用 `open_pull_request` 交给 PR 的 CI。`pnpm test` 带参数或与其他命令串联一律拒绝。工具层和 Main 的 `restrictedDenial` 对 `pnpm test` 放行（模型调用工具只有经过审批门这一条路）；`dispatch_task` 派出的 worker 一律继承 restricted；每个工作区同时最多 3 个未结束任务，超出时 `dispatch_task` 返回错误。这些拒绝在 agent-runtime 工具层和 Main 的 `OrchestrationHost` 两侧都执行（Main 按会话记录的 `profile` 判定，不信任工具参数）。
   - `triage_report { kind: 'bug' | 'feature' | 'question' | 'invalid', title, summary, reply, evidence?, assessment?, needInfo?: boolean }`：`reply` 对所有 `kind` 必填且非空（`invalid` 是一句简短的拒绝）；`needInfo` 为 true 时 `reply` 是追问，此时 `kind` 必须是 `bug` 或 `feature`（追问轮数由渠道插件计数）；只注册给 triage 档位；经 `host-invoke`（kind 名 `telegram`，沿用不改）交给 Main，再转给会话所属渠道插件，不在 agent 进程内发任何消息。`evidence` 是 bug 的定位（文件与原因），`assessment` 是新功能的三问评估（每问的结论与理由）；处理见 §7.14。
   - `web_fetch { url, start_index?, max_chars? }`：读取用户给定的公开网页文本，在 agent 进程内执行，不经 Main。
     - 参数：`url` 仅 http/https、≤ 2048 字符、不含用户名或密码；`start_index` 整数 ≥ 0（默认 0，分页继续读）；`max_chars` 默认 20000、上限 50000。
@@ -306,7 +307,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - 本机信息：上述内容里出现本机绝对路径前缀或主机名即拒绝；不查单独出现的用户名单词（误报太多），单词形式的用户名只在群回复里替换；
   - 不设改动规模上限。
 - 执行（独立 argv、不经 shell、套用 §7.7 网络代理环境）：`git push -u origin <branch>`（受限任务用 `git -c core.hooksPath=<空目录> push --no-verify`，避免 pre-push 等 hooks 在本机运行被改过的代码；普通任务照常 push），再 `gh pr create --head <branch> --base <base> --title … --body-file …`（`draft` 时加 `--draft`；设 `GH_PROMPT_DISABLED=1`，保持非交互）；该分支已有 PR 时返回已有链接，保证幂等；没装 `gh` 或未登录时返回可读错误。
-- PR 正文由 Main 按模板拼接：问题 / 改动（文件列表 + `summary`）/ 验证 / 来源（渠道插件经 `channel.setPullRequestNote` 提供的附加段，不写群名）。「验证」段列出本 dispatch 通过的 `run_checks` 命令，没有时写「见 CI」；受限协调者派出的任务再加一行「单元测试与构建未在本机运行，由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果」（有这一行时不写「见 CI」），提示词也要求 summary 不让维护者本地跑测试、不提会话限制。
+- PR 正文由 Main 按模板拼接：问题 / 改动（文件列表 + `summary`）/ 验证 / 来源（渠道插件经 `channel.setPullRequestNote` 提供的附加段，不写群名）。「验证」段列出本 dispatch 通过的 `run_checks` 命令，没有时写「见 CI」；受限协调者派出的任务再加一行「单元测试与构建未在本机运行，由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果」；通过的命令里有维护者批准后跑过的 `pnpm test` 时，这一行改为「构建由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果」（有这一行时不写「见 CI」），提示词也要求 summary 不让维护者本地跑测试、不提会话限制。
 - 成功后写 `Task.pullRequest { url, branch, base, headCommit }` 和 `mergedDiff`，任务从 in-review 变为 completed；失败不改任务状态。任务卡片显示 PR 链接。
 - 清理：worktree 干净、且 HEAD 等于已推送的 `headCommit` 时可以删 worktree，本地分支保留（PR 未合并，不按「无未合并提交」规则删分支）。
 - worker 契约不变：worker 不 push。restricted 协调者只能用 `open_pull_request` 交付（`merge_worktree` 拒绝）。
@@ -657,7 +658,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   4. **外部的人接触不到私有内容**：triage 会话的上下文只有本渠道的消息；值班会话内容不经插件发出。强制点：channel API 只开放 `triage_report` 结果与插件自己的投递。
   5. **密钥不会发出或推上 GitHub**：强制点：channel API 出站文本与推送闸门的 `secrets.scan`。
   6. **不泄露本机信息**：出站文本里的本机路径、用户名、主机名被替换；推送内容里出现本机绝对路径前缀或主机名时拒绝推送。强制点：`secrets.sanitize` + 推送闸门。
-  7. **外部来源的任务不在本机执行项目代码，也不能联网**：`web_fetch`、MCP、插件拒绝；命令只放行白名单，只有允许或拒绝，不弹审批。强制点：§5 restricted 审批门谓词 + `run_checks` 白名单。
+  7. **外部来源的任务不在本机执行项目代码，也不能联网**：`web_fetch`、MCP、插件拒绝；命令只放行白名单，只有允许或拒绝，不弹审批；命令只带白名单环境变量（不带密钥）。唯一例外：协调者可申请在本机跑 `pnpm test`，必须由维护者在桌面上点「允许」，拒绝或 10 分钟无人处理就不跑。强制点：§5 restricted 审批门谓词 + `run_checks` 白名单 + `pickRestrictedEnv`。
   8. **不改会被执行的文件**：保护路径不可写，推送闸门对 base..head 整段 diff 再查一次。强制点：§5 保护路径谓词 + 推送闸门。
   9. **改动不直接进用户的代码**：restricted 协调者不能 `merge_worktree`，只能 `open_pull_request`；PR 只开不合并。强制点：Main `OrchestrationHost` 按会话 `profile` 拒绝。
   10. **CI 拿不到 secrets**：`check.yml` 只由 `pull_request` 触发、`permissions: contents: read`、`persist-credentials: false`、不引用 secrets。强制点：第 8 条禁止改 `.github/**`。
@@ -826,7 +827,7 @@ export function createOrchestrationHost(deps: {
   workspace: Workspace; coordinatorSessionId: string;
   coordinatorBranch: string;          // 工作区 vcs 为 none 时为空串（不读分支，整条编排不跑 git）
   store: OrchestrationStore; git: GitWorktreeManager; inbox: Inbox; launcher: WorkerSessionLauncher; roles: RoleStore;
-  runChecks: (cwd: string, command: string, signal?: AbortSignal) => Promise<{ exitCode: number; output: string; durationMs: number }>;
+  runChecks: (cwd: string, command: string, signal?: AbortSignal, options?: { restricted?: boolean }) => Promise<{ exitCode: number; output: string; durationMs: number }>;
   resolveWorktreesRoot: (workspace: Workspace) => Promise<string>; // worktree 托管根目录，每次建 worktree 时现算（store 里推导不出来）：
                                       // preferences.worktreesRoot 配置时为 <根目录>/<仓库目录名>，否则仓库同级的 <仓库目录名>-worktrees，
                                       // 默认位置不可写等情况退回 userData/worktrees（src/main/services/orchestration/worktreesRoot.ts）

@@ -515,6 +515,11 @@ describe('parseAgentWorkerEvent', () => {
       request: { ...approvalRequest, protectedAction: 'git push', detail: '' },
     },
     {
+      type: 'approval-request',
+      identity,
+      request: { ...approvalRequest, note: 'restricted-tests' },
+    },
+    {
       type: 'models-described',
       requestId: 'describe-1',
       result: {
@@ -764,6 +769,8 @@ describe('parseAgentWorkerEvent', () => {
         ['a missing title', { title: undefined }],
         ['a null detail', { detail: null }],
         ['a numeric protected action', { protectedAction: 1 }],
+        ['an unknown note', { note: 'tests' }],
+        ['a null note', { note: null }],
         ['a string expiry', { expiresAt: '1700000000000' }],
         ['a non-positive expiry', { expiresAt: 0 }],
         ['an infinite expiry', { expiresAt: Number.POSITIVE_INFINITY }],

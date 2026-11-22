@@ -259,6 +259,8 @@ export interface AgentApprovalRequest {
   detail: string;
   /** 命中的保护底线（如 git push）：任何档位都要人确认。 */
   protectedAction?: string;
+  /** 值班协调者申请在本机跑 `pnpm test`：Main 换本地化标题并追加风险说明 */
+  note?: 'restricted-tests';
   /** epoch ms：worker 到期按 deny 结束 */
   expiresAt: number;
 }
@@ -611,13 +613,14 @@ function parseIdentity(raw: unknown): SessionIdentity | null {
 function parseApprovalRequest(raw: unknown): AgentApprovalRequest | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const { requestId, toolCallId, toolName, kind, title, detail, protectedAction, expiresAt } =
+  const { requestId, toolCallId, toolName, kind, title, detail, protectedAction, note, expiresAt } =
     record;
   if (!isNonEmptyString(requestId) || !isString(toolCallId) || !isNonEmptyString(toolName)) {
     return null;
   }
   if (!memberOf(APPROVAL_KIND_SET, kind) || !isString(title) || !isString(detail)) return null;
   if (!isOptional(protectedAction, isString)) return null;
+  if (note !== undefined && note !== 'restricted-tests') return null;
   if (!isFiniteNumber(expiresAt) || expiresAt <= 0) return null;
   return {
     requestId,
@@ -627,6 +630,7 @@ function parseApprovalRequest(raw: unknown): AgentApprovalRequest | null {
     title,
     detail,
     ...(protectedAction !== undefined ? { protectedAction: protectedAction as string } : {}),
+    ...(note !== undefined ? { note } : {}),
     expiresAt,
   };
 }

@@ -750,7 +750,7 @@ describe('restricted coordinator', () => {
     const tools = createOrchestrationTools(host, { restricted: true });
     const refused = await runTool(toolByName(tools, 'run_checks'), {
       dispatch_id: 'd1',
-      command: 'pnpm test',
+      command: 'pnpm test --run',
     });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain('restricted session');
@@ -761,5 +761,12 @@ describe('restricted coordinator', () => {
     });
     expect(allowed.isError).toBe(false);
     expect(host.runChecks).toHaveBeenCalledTimes(1);
+    // 单独的 pnpm test 放行：问维护者由审批门负责
+    const tests = await runTool(toolByName(tools, 'run_checks'), {
+      dispatch_id: 'd1',
+      command: 'pnpm test',
+    });
+    expect(tests.isError).toBe(false);
+    expect(host.runChecks).toHaveBeenCalledTimes(2);
   });
 });

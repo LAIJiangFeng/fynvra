@@ -681,7 +681,17 @@ describe('SessionSupervisor approvals', () => {
       new AbortController().signal
     );
     expect(of('approval-request')[0]?.request).not.toHaveProperty('protectedAction');
+    expect(of('approval-request')[0]?.request).not.toHaveProperty('note');
     expect(of('session-event').at(-1)?.event).not.toHaveProperty('reason');
+  });
+
+  it('forwards the restricted-tests note to Main', async () => {
+    const { approval, of } = await running();
+    void approval.request(
+      gateRequest({ protectedAction: undefined, note: 'restricted-tests' }),
+      new AbortController().signal
+    );
+    expect(of('approval-request')[0]?.request).toMatchObject({ note: 'restricted-tests' });
   });
 
   it('drops the pending request when the gate withdraws it', async () => {
