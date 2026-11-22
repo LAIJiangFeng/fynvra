@@ -98,6 +98,7 @@ export interface AgentHostDeps {
   modelLimits?: {
     ensure(providerId: string, modelId: string): Promise<boolean>;
     learn(providerId: string, modelId: string, message: string): Promise<boolean>;
+    learnMaxOutput(providerId: string, modelId: string, maxOutput: number): Promise<boolean>;
   };
   /** 每个工作区上一次用过的模型（settings.json）；缺省不记 */
   lastModels?: LastModelStore;
@@ -544,8 +545,8 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (event.type === 'context_runtime') {
       state.contextRuntime = event.snapshot;
       state.contextRuntimeSeq = state.sessionSeq;
-      // prober 自带去重：重复的快照不会重复请求
-      if (event.snapshot.context.windowSource === 'estimated' && state.modelRef)
+      // prober 自带去重：重复的快照不会重复请求。窗口来自设置时也探测：条目可能缺最大输出（只补缺失的）
+      if (event.snapshot.context.windowSource !== 'catalog' && state.modelRef)
         probeModelLimits(state.modelRef);
     }
     const envelope: SessionEventEnvelope = {
@@ -905,8 +906,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   }
 
   /**
-   * worker 报窗口是估计值时在后台探测（不等它），写回后推给活会话。
-   * 设置值、pi 目录里有的不探测：目录值不写进设置，随 pi 目录更新
+   * worker 报窗口是估计值或设置值时在后台探测（不等它），只补设置里缺的窗口 / 最大输出，写回后推给活会话。
+   * 会话创建和换模型后 worker 都会立刻发快照，所以探测在换模型时就开始。
+   * pi 目录里有的不探测：目录值不写进设置，随 pi 目录更新
    */
   function probeModelLimits(ref: ModelRef): void {
     if (!deps.modelLimits) return;
@@ -916,7 +918,17 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       .catch((error: unknown) => log('warn', `model ${ref.modelId}: ${errorMessage(error)}`));
   }
 
-  /** 模型请求因上下文超限失败：从报错里学服务端的真实上限，写回后推给活会话 */
+  /** worker 已按端点报的最大输出静默重发：写回设置（与 learn 同一口径：只降不升、不超过窗口），再推给活会话 */
+  function learnMaxOutput(state: LiveSession, maxOutput: number): void {
+    const ref = state.modelRef;
+    if (!deps.modelLimits || !ref) return;
+    void deps.modelLimits
+      .learnMaxOutput(ref.providerId, ref.modelId, maxOutput)
+      .then((updated) => (updated ? pushModelLimits(ref) : undefined))
+      .catch((error: unknown) => log('warn', `model ${ref.modelId}: ${errorMessage(error)}`));
+  }
+
+  /** 模型请求因上下文超限或 max_tokens 超范围失败：从报错里学服务端的真实上限，写回后推给活会话 */
   function learnModelLimits(state: LiveSession, message: string): void {
     const ref = state.modelRef;
     if (!deps.modelLimits || !ref) return;
@@ -1096,6 +1108,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!currentOf(event.identity)) return;
         announceApproval(event.identity, event.request);
         return;
+      case 'model-limits-learned': {
+        // 过期 generation 的不认；只写回会话当前模型（期间换过模型就丢弃）
+        const state = currentOf(event.identity);
+        if (!state || state.modelRef?.modelId !== event.modelId) return;
+        learnMaxOutput(state, event.maxOutput);
+        return;
+      }
       case 'session-error': {
         const state = currentOf(event.identity);
         if (!state) return;

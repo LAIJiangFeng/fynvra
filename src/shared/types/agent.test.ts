@@ -482,6 +482,7 @@ describe('parseAgentWorkerEvent', () => {
     },
     { type: 'host-cancel', identity, callId: '3' },
     { type: 'session-error', identity, error: 'no API key', fatal: true },
+    { type: 'model-limits-learned', identity, modelId: 'glm-x', maxOutput: 131_072 },
     { type: 'approval-request', identity, request: approvalRequest },
     {
       type: 'approval-request',
@@ -694,6 +695,20 @@ describe('parseAgentWorkerEvent', () => {
     ],
     ['a host cancel without callId', { type: 'host-cancel', identity }],
     ['a session error without the fatal flag', { type: 'session-error', identity, error: 'x' }],
+    ...[0, -1, 1.5, '131072', Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, null, undefined].map(
+      (maxOutput): [string, unknown] => [
+        `a learned max output of ${String(maxOutput)}`,
+        { type: 'model-limits-learned', identity, modelId: 'glm-x', maxOutput },
+      ]
+    ),
+    [
+      'a learned max output without a model id',
+      { type: 'model-limits-learned', identity, modelId: '', maxOutput: 131_072 },
+    ],
+    [
+      'a learned max output without identity',
+      { type: 'model-limits-learned', modelId: 'glm-x', maxOutput: 131_072 },
+    ],
     [
       'an approval request without identity',
       { type: 'approval-request', request: approvalRequest },
