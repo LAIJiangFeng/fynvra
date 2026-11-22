@@ -6,6 +6,8 @@ import type { HostCallResult } from '@shared/types/agent';
 import type {
   ChannelAttachment,
   ChannelFilterResult,
+  ChannelModel,
+  ChannelModelRef,
   ChannelProfile,
   ChannelPromptResult,
   ChannelSessionStatus,
@@ -25,7 +27,16 @@ export const REPORT_TIMEOUT_MS = 30_000;
 
 export interface ChannelHostDeps {
   store: ChannelStore;
-  agentHost: Pick<AgentHostService, 'createProfileSession' | 'promptWhenIdle' | 'get' | 'observe'>;
+  agentHost: Pick<
+    AgentHostService,
+    | 'createProfileSession'
+    | 'promptWhenIdle'
+    | 'get'
+    | 'observe'
+    | 'modelOptions'
+    | 'setModel'
+    | 'profileDefaultModel'
+  >;
   workspaces: { get(id: string): Workspace | undefined };
   snapshot(
     workspaceId: string
@@ -47,8 +58,16 @@ export interface ChannelHost {
   start(): Promise<() => void>;
   createSession(
     pluginId: string,
-    input: { workspaceId: string; profile: ChannelProfile; title: string }
+    input: { workspaceId: string; profile: ChannelProfile; title: string; model?: ChannelModelRef }
   ): Promise<{ sessionId: string }>;
+  /** 启用且有 key 的服务下的全部模型（顺序同设置页）；不带 key、baseUrl 等配置 */
+  models(): Promise<{ models: ChannelModel[] }>;
+  /** 换本插件会话的模型；null 回到档位默认；会话运行中时报错 */
+  setSessionModel(
+    pluginId: string,
+    sessionId: string,
+    model: ChannelModelRef | null
+  ): Promise<void>;
   refreshCheckout(pluginId: string, workspaceId: string): Promise<void>;
   originCommit(pluginId: string, workspaceId: string): Promise<{ commit: string }>;
   /** attachments 从 `<dataDir>/attachments/` 读取，规则同聊天输入框（见 attachments.ts） */
@@ -197,7 +216,7 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
         activity: (sessionId) => pushStatus(sessionId),
       });
     },
-    async createSession(pluginId, { workspaceId, profile, title }) {
+    async createSession(pluginId, { workspaceId, profile, title, model }) {
       const workspace = deps.workspaces.get(workspaceId);
       if (!workspace) throw new Error('workspace not found');
       if (workspace.vcs !== 'git') throw new Error('workspace is not a git repository');
@@ -208,12 +227,43 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
         profile,
         cwd: ensured.path,
         title,
+        // 只带服务与模型，思考档位用默认；不可用时报错，退回由插件决定
+        ...(model ? { model: { providerId: model.providerId, modelId: model.modelId } } : {}),
       });
       if (!created.ok) return fail(created.error);
       const sessionId = created.session.id;
       await store.addSession({ sessionId, pluginId, workspaceId });
       lastStatus.set(sessionId, statusOf(sessionId));
       return { sessionId };
+    },
+    async models() {
+      const options = await agentHost.modelOptions({});
+      if (!options.ok) return fail(options.error);
+      // 只挑显示用字段，不把服务配置带给插件
+      return {
+        models: options.providers.flatMap((provider) =>
+          provider.models.map((entry) => ({
+            providerId: provider.providerId,
+            providerName: provider.name,
+            modelId: entry.id,
+            label: entry.name || entry.id,
+          }))
+        ),
+      };
+    },
+    async setSessionModel(pluginId, sessionId, model) {
+      ownSession(pluginId, sessionId);
+      const session = agentHost.get(sessionId);
+      if (!session) throw new Error('session not found');
+      let target = model ? { providerId: model.providerId, modelId: model.modelId } : undefined;
+      if (!target) {
+        // 渠道会话都有档位；万一没有按 restricted 取默认
+        const fallback = await agentHost.profileDefaultModel(session.profile ?? 'restricted');
+        if (!fallback.ok) return fail(fallback.error);
+        target = fallback.model;
+      }
+      const set = await agentHost.setModel({ sessionId, model: target });
+      if (!set.ok) await fail(set.error);
     },
     async refreshCheckout(pluginId, workspaceId) {
       const workspace = ownWorkspace(pluginId, workspaceId);

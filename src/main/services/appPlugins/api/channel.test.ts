@@ -6,7 +6,9 @@ import { API_METHODS, type ApiDeps } from './index';
 
 /** 每个方法一份合法入参 */
 const VALID: Record<string, unknown> = {
+  'channel.models': undefined,
   'channel.createSession': { workspaceId: 'ws1', profile: 'triage', title: 't' },
+  'channel.setSessionModel': { sessionId: 's1', model: null },
   'channel.refreshCheckout': { workspaceId: 'ws1' },
   'channel.originCommit': { workspaceId: 'ws1' },
   'channel.prompt': { sessionId: 's1', text: 'hi' },
@@ -18,7 +20,9 @@ const VALID: Record<string, unknown> = {
 
 function fakeHost(): ChannelHost {
   return {
+    models: vi.fn(async () => ({ models: [] })),
     createSession: vi.fn(async () => ({ sessionId: 's1' })),
+    setSessionModel: vi.fn(async () => undefined),
     refreshCheckout: vi.fn(async () => undefined),
     originCommit: vi.fn(async () => ({ commit: 'c' })),
     prompt: vi.fn(async () => ({ delivered: true })),
@@ -84,6 +88,53 @@ describe('channel API', () => {
     });
     expect(rpc.host?.prompt).toHaveBeenCalledWith('p.a', 's1', 'hi', undefined);
     expect(rpc.host?.setPullRequestNote).toHaveBeenCalledWith('p.a', 't1', null);
+    expect(rpc.host?.setSessionModel).toHaveBeenCalledWith('p.a', 's1', null);
+  });
+
+  it('createSession / setSessionModel 带合法 model 时原样转给宿主', async () => {
+    const rpc = connect(['channel']);
+    const model = { providerId: 'p1', modelId: 'm1' };
+    const create = { workspaceId: 'ws1', profile: 'restricted', title: 't', model };
+    expect(await rpc.request('channel.createSession', create)).toMatchObject({ ok: true });
+    expect(rpc.host?.createSession).toHaveBeenCalledWith('p.a', create);
+    expect(await rpc.request('channel.setSessionModel', { sessionId: 's1', model })).toMatchObject({
+      ok: true,
+    });
+    expect(rpc.host?.setSessionModel).toHaveBeenCalledWith('p.a', 's1', model);
+  });
+
+  it('model 不合法、入参有多余键时拒绝', async () => {
+    const rpc = connect(['channel']);
+    const base = { workspaceId: 'ws1', profile: 'triage', title: 't' };
+    const bad = [
+      { providerId: '', modelId: 'm' },
+      { providerId: 'p', modelId: 'x'.repeat(201) },
+      { providerId: 'p' },
+      { providerId: 'p', modelId: 'm', thinking: 'high' },
+      'p/m',
+      null,
+    ];
+    for (const model of bad) {
+      expect(await rpc.request('channel.createSession', { ...base, model })).toMatchObject({
+        ok: false,
+        error: 'invalid params: channel.createSession',
+      });
+      if (model === null) continue;
+      expect(
+        await rpc.request('channel.setSessionModel', { sessionId: 's1', model })
+      ).toMatchObject({ ok: false, error: 'invalid params: channel.setSessionModel' });
+    }
+    for (const params of [
+      { sessionId: 's1' },
+      { sessionId: 's1', model: null, extra: 1 },
+      { sessionId: '', model: null },
+    ]) {
+      expect(await rpc.request('channel.setSessionModel', params)).toMatchObject({ ok: false });
+    }
+    expect(await rpc.request('channel.models', { x: 1 })).toMatchObject({ ok: false });
+    expect(rpc.host?.createSession).not.toHaveBeenCalled();
+    expect(rpc.host?.setSessionModel).not.toHaveBeenCalled();
+    expect(rpc.host?.models).not.toHaveBeenCalled();
   });
 
   it('只能建 triage / restricted；入参多余键、超长 prompt 被拒', async () => {

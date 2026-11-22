@@ -1,6 +1,10 @@
 // 渠道宿主 API（ARCHITECTURE §7.12「渠道 API」）：全部需要 channel 权限；归属核对与安全规则在 channels/host.ts。
 import { asRecord } from '@shared/guards';
-import type { ChannelAttachment, ChannelProfile } from '@shared/types/appPluginApi';
+import type {
+  ChannelAttachment,
+  ChannelModelRef,
+  ChannelProfile,
+} from '@shared/types/appPluginApi';
 import type { ChannelHost } from '../../channels/host';
 import { type ApiContext, type ApiMethod, defineMethod } from './types';
 
@@ -55,6 +59,13 @@ function parseAttachments(raw: unknown): ChannelAttachment[] | null {
   return items;
 }
 
+/** 模型引用：只含非空且不超过 200 字符的 providerId 与 modelId */
+function parseModelRef(raw: unknown): ChannelModelRef | null {
+  const record = only(raw, ['providerId', 'modelId']);
+  if (!record || !isId(record.providerId) || !isId(record.modelId)) return null;
+  return { providerId: record.providerId, modelId: record.modelId };
+}
+
 /** 只有一个 id 字段的入参 */
 function idParam<K extends string>(key: K) {
   return (raw: unknown): Record<K, string> | null => {
@@ -65,20 +76,42 @@ function idParam<K extends string>(key: K) {
 }
 
 export const CHANNEL_API: Record<string, ApiMethod> = {
+  'channel.models': defineMethod({
+    permission: 'channel',
+    parse: (raw) => (raw === undefined || only(raw, []) ? {} : null),
+    run: (ctx) => host(ctx).models(),
+  }),
+  'channel.setSessionModel': defineMethod({
+    permission: 'channel',
+    parse: (raw) => {
+      const record = only(raw, ['sessionId', 'model']);
+      if (!record || !isId(record.sessionId) || !('model' in record)) return null;
+      const model = record.model === null ? null : parseModelRef(record.model);
+      if (record.model !== null && !model) return null;
+      return { sessionId: record.sessionId, model };
+    },
+    run: async (ctx, { sessionId, model }) => {
+      await host(ctx).setSessionModel(ctx.pluginId, sessionId, model);
+      return null;
+    },
+  }),
   'channel.createSession': defineMethod({
     permission: 'channel',
     parse: (raw) => {
-      const record = only(raw, ['workspaceId', 'profile', 'title']);
+      const record = only(raw, ['workspaceId', 'profile', 'title', 'model']);
       if (!record || !isId(record.workspaceId)) return null;
       if (!PROFILES.includes(record.profile as ChannelProfile)) return null;
       const { title } = record;
       if (typeof title !== 'string' || title.trim() === '' || title.length > MAX_TITLE_CHARS) {
         return null;
       }
+      const model = record.model === undefined ? undefined : parseModelRef(record.model);
+      if (model === null) return null;
       return {
         workspaceId: record.workspaceId,
         profile: record.profile as ChannelProfile,
         title,
+        ...(model ? { model } : {}),
       };
     },
     run: (ctx, input) => host(ctx).createSession(ctx.pluginId, input),

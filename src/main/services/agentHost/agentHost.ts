@@ -237,6 +237,8 @@ export interface AgentHostService extends AgentHost {
   createProfileSession(
     input: CreateProfileSessionInput
   ): Promise<IpcResult<{ session: SessionSummary }>>;
+  /** 档位会话的默认模型（同 createProfileSession 不指定模型时）：角色配的模型，没配用解析器默认 */
+  profileDefaultModel(profile: SessionProfile): Promise<IpcResult<{ model: SessionModelRef }>>;
   start(): void;
   /** 关闭 worker（先让它关闭全部会话）并落盘注册表 */
   shutdown(timeoutMs: number): Promise<void>;
@@ -1905,6 +1907,35 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     changed(stored.workspaceId);
   }
 
+  /** 档位会话的角色：triage 用内置 worker 角色的固定配置，restricted 用 orchestrator 角色 */
+  async function profileRoleOf(
+    profile: SessionProfile
+  ): Promise<Result<{ roleId: string; role: Role }>> {
+    const roleId = profile === 'triage' ? WORKER_ROLE_ID : ORCHESTRATOR_ROLE_ID;
+    let role: Role | undefined;
+    try {
+      role = profile === 'triage' ? getBuiltinRole(roleId) : await deps.roles.get(roleId);
+    } catch (error) {
+      return fail(errorMessage(error));
+    }
+    if (!role) return fail(translate('agent.roleNotFound', { id: roleId }));
+    return { ok: true, roleId, role };
+  }
+
+  /** 档位会话的模型：指定的优先，其次角色配的，最后是解析器默认；指定的不可用时报错，不退回默认 */
+  async function profileModelOf(
+    role: Role,
+    model?: SessionModelRef
+  ): Promise<Result<{ model: SessionModelRef }>> {
+    const requested = model ?? modelRefOf(role);
+    const resolved = await deps.models.resolve(requested && bareRef(requested));
+    if (!resolved.ok) return resolved;
+    return {
+      ok: true,
+      model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
+    };
+  }
+
   const launcher: WorkerSessionLauncher = {
     async createWorkerSession(input) {
       if (!deps.workspaces.get(input.workspaceId))
@@ -1919,6 +1950,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const parentSessionId = coordinatorOf(input.workspaceId, input.runId);
       const parent = parentSessionId ? deps.store.get(parentSessionId) : undefined;
       // 派发时指定的模型优先；否则角色配了模型用角色的；没配就跟主 agent 当前的模型、思考档位与 Fast
+      // （restricted 主会话例外：主会话模型优先于角色模型）
       let requested: SessionModelRef | undefined;
       if (input.model !== undefined) {
         const picked = await pickModel(input.model);
@@ -1926,8 +1958,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         requested = picked.ref;
       } else {
         requested =
-          modelRefOf(role) ??
-          (parentSessionId ? deps.store.get(parentSessionId)?.model : undefined);
+          // 值班（restricted）协调者派出的修复跟值班会话当前的模型：插件为值班单独选的模型要管到 worker
+          parent?.profile === 'restricted'
+            ? (parent.model ?? modelRefOf(role))
+            : (modelRefOf(role) ??
+              (parentSessionId ? deps.store.get(parentSessionId)?.model : undefined));
       }
       const resolved = await deps.models.resolve(requested && bareRef(requested));
       if (!resolved.ok) return resolved;
@@ -2044,17 +2079,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (!workspace) return fail(translate('common.workspaceNotFound'));
       const checked = await profileCwdOf(workspace, input.cwd);
       if (!checked.ok) return checked;
-      const roleId = input.profile === 'triage' ? WORKER_ROLE_ID : ORCHESTRATOR_ROLE_ID;
-      let role: Role | undefined;
-      try {
-        role = input.profile === 'triage' ? getBuiltinRole(roleId) : await deps.roles.get(roleId);
-      } catch (error) {
-        return fail(errorMessage(error));
-      }
-      if (!role) return fail(translate('agent.roleNotFound', { id: roleId }));
-      const requested = input.model ?? modelRefOf(role);
-      const resolved = await deps.models.resolve(requested && bareRef(requested));
-      if (!resolved.ok) return resolved;
+      const profileRole = await profileRoleOf(input.profile);
+      if (!profileRole.ok) return profileRole;
+      const { roleId, role } = profileRole;
+      const model = await profileModelOf(role, input.model);
+      if (!model.ok) return model;
       const time = now();
       const stored: StoredSession = {
         id: newId(),
@@ -2065,7 +2094,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         status: 'idle',
         createdAt: time,
         updatedAt: time,
-        model: sessionModelOf(resolved.ref, requested?.thinking, resolved.model.fastMode),
+        model: model.model,
         // 档位会话从不弹审批（档位规则直接放行或拒绝）；万一规则失效，退回人工审批卡住而不是放开
         approvalMode: 'supervised',
         profile: input.profile,
@@ -2073,6 +2102,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       deps.store.put(stored);
       changed(workspace.id);
       return { ok: true, session: summaryOf(stored) };
+    },
+    async profileDefaultModel(profile) {
+      const profileRole = await profileRoleOf(profile);
+      return profileRole.ok ? profileModelOf(profileRole.role) : profileRole;
     },
     start() {
       client.start();
