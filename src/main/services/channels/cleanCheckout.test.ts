@@ -1,7 +1,9 @@
 import { join } from 'node:path';
 import type { Workspace } from '@shared/types/workspace';
 import { describe, expect, it } from 'vitest';
-import { createCleanCheckout, type GitExec } from './cleanCheckout';
+import { cleanCheckoutDir, createCleanCheckout, type GitExec } from './cleanCheckout';
+
+const TG = 'com.fynvra.telegram';
 
 const SHA = 'a'.repeat(40);
 const workspace: Workspace = {
@@ -38,7 +40,7 @@ describe('clean checkout', () => {
       now: () => 0,
     });
     const path = join('/wt', 'ws1', 'telegram-clean');
-    expect(await checkout.ensure(workspace)).toEqual({ ok: true, path });
+    expect(await checkout.ensure(workspace, TG)).toEqual({ ok: true, path });
     expect(calls[0]?.args).toEqual([
       'rev-parse',
       '--verify',
@@ -51,7 +53,7 @@ describe('clean checkout', () => {
 
     exists = true;
     calls.length = 0;
-    expect(await checkout.refresh(workspace)).toEqual({ ok: true });
+    expect(await checkout.refresh(workspace, TG)).toEqual({ ok: true });
     const fetch = calls.find((call) => call.args[0] === 'fetch');
     expect(fetch?.args).toEqual(['fetch', 'origin', 'main']);
     expect(fetch?.env).toMatchObject({
@@ -70,8 +72,37 @@ describe('clean checkout', () => {
 
     // 10 分钟内不再 fetch
     calls.length = 0;
-    await checkout.refresh(workspace);
+    await checkout.refresh(workspace, TG);
     expect(calls.some((call) => call.args[0] === 'fetch')).toBe(false);
+  });
+
+  it('其他插件各用 clean-<pluginId>；非法 pluginId 报错且不碰 git', async () => {
+    const { git, calls } = fakeGit();
+    const checkout = createCleanCheckout({
+      git,
+      worktreesRoot: async () => '/wt',
+      commandEnv: () => ({}),
+      exists: () => true,
+    });
+    expect(await checkout.ensure(workspace, 'com.fynvra.feishu')).toEqual({
+      ok: true,
+      path: join('/wt', 'ws1', 'clean-com.fynvra.feishu'),
+    });
+    expect(cleanCheckoutDir('com.acme.chat')).toBe('clean-com.acme.chat');
+    calls.length = 0;
+    for (const bad of ['../x', 'com.fynvra/../a', 'com..x', '', 'COM.A']) {
+      expect(() => cleanCheckoutDir(bad)).toThrow('invalid plugin id');
+      expect(await checkout.ensure(workspace, bad)).toEqual({
+        ok: false,
+        error: 'invalid plugin id',
+      });
+      expect(await checkout.refresh(workspace, bad)).toEqual({
+        ok: false,
+        error: 'invalid plugin id',
+      });
+      await expect(checkout.pathOf(workspace, bad)).rejects.toThrow('invalid plugin id');
+    }
+    expect(calls).toEqual([]);
   });
 
   it('没有 origin/<default> 时拒绝', async () => {
@@ -82,7 +113,7 @@ describe('clean checkout', () => {
       commandEnv: () => ({}),
       exists: () => false,
     });
-    const result = await checkout.ensure(workspace);
+    const result = await checkout.ensure(workspace, TG);
     expect(result.ok).toBe(false);
     expect(calls.some((call) => call.args.includes('worktree'))).toBe(false);
   });

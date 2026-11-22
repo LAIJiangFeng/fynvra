@@ -136,7 +136,7 @@ describe('createSession', () => {
       profile: 'triage',
       title: '分诊',
     });
-    expect(h.cleanCheckout.ensure).toHaveBeenCalledWith(WS_GIT);
+    expect(h.cleanCheckout.ensure).toHaveBeenCalledWith(WS_GIT, 'p.a');
     expect(h.created).toEqual([
       { workspaceId: 'ws1', profile: 'triage', cwd: 'C:/wt/ws1/telegram-clean', title: '分诊' },
     ]);
@@ -274,7 +274,7 @@ describe('会话归属', () => {
     await expect(h.host.refreshCheckout('p.b', 'ws1')).rejects.toThrow();
     expect(await h.host.originCommit('p.a', 'ws1')).toEqual({ commit: 'a'.repeat(40) });
     await h.host.refreshCheckout('p.a', 'ws1');
-    expect(h.cleanCheckout.refresh).toHaveBeenCalledTimes(1);
+    expect(h.cleanCheckout.refresh).toHaveBeenCalledWith(WS_GIT, 'p.a');
     h.setSession(sessionId, { status: 'running' });
     await expect(h.host.refreshCheckout('p.a', 'ws1')).rejects.toThrow('running');
     expect(h.cleanCheckout.refresh).toHaveBeenCalledTimes(1);

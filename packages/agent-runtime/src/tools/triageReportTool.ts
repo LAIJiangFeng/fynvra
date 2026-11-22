@@ -46,7 +46,7 @@ const triageSchema = Type.Object(
       description: `What the reporter said and what you found, for the maintainer (max ${TRIAGE_LIMITS.summary}).`,
     }),
     reply: Type.String({
-      description: `Plain-text reply posted to the group; required and non-empty for every kind (a short polite refusal for invalid). With needInfo it is the follow-up question (max ${TRIAGE_LIMITS.reply}).`,
+      description: `Plain-text reply posted to the chat; required and non-empty for every kind (a short polite refusal for invalid). With needInfo it is the follow-up question (max ${TRIAGE_LIMITS.reply}).`,
     }),
     evidence: Type.Optional(
       Type.String({
@@ -66,7 +66,7 @@ const triageSchema = Type.Object(
     ),
     project: Type.Optional(
       Type.String({
-        description: `Only when the delivered message lists other projects bound to this group and the feedback clearly belongs to one of them rather than to this repository: that project's name, exactly as listed (max ${TRIAGE_LIMITS.project}). Omit it in every other case. When set, this reply is not posted to the group; the feedback is handed over to that project's triage instead.`,
+        description: `Only when the delivered message lists other projects bound to this chat and the feedback clearly belongs to one of them rather than to this repository: that project's name, exactly as listed (max ${TRIAGE_LIMITS.project}). Omit it in every other case. When set, this reply is not posted to the chat; the feedback is handed over to that project's triage instead.`,
       })
     ),
   },
@@ -117,8 +117,8 @@ export function createTriageReportTool(host: TriageHost): ToolDefinition {
     name: TRIAGE_REPORT_TOOL_NAME,
     label: 'Triage report',
     description:
-      'Report your triage conclusion for the group messages. Fynvra posts `reply` to the group (after filtering) and routes the report; call it once per batch.',
-    promptSnippet: 'Report the triage conclusion and the reply for the group',
+      'Report your triage conclusion for the chat messages. Fynvra posts `reply` to the chat (after filtering) and routes the report; call it once per batch.',
+    promptSnippet: 'Report the triage conclusion and the reply for the chat',
     parameters: triageSchema,
     executionMode: 'sequential',
     execute: (_toolCallId, params: Static<typeof triageSchema>, signal) =>

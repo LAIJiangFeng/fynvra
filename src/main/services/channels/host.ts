@@ -236,7 +236,7 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
       if (!workspace) throw new Error('workspace not found');
       if (workspace.vcs !== 'git') throw new Error('workspace is not a git repository');
       await checkModelThinking(model);
-      const ensured = await deps.cleanCheckout.ensure(workspace);
+      const ensured = await deps.cleanCheckout.ensure(workspace, pluginId);
       if (!ensured.ok) return fail(`clean checkout failed: ${ensured.error}`);
       const created = await agentHost.createProfileSession({
         workspaceId,
@@ -286,14 +286,14 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
     },
     async refreshCheckout(pluginId, workspaceId) {
       const workspace = ownWorkspace(pluginId, workspaceId);
-      // 本插件在该工作区有会话在跑时不动它的工作目录
+      // 本插件在该工作区有会话在跑时不动它的工作目录；干净检出按插件分目录，别的插件的会话不受影响
       const busy = store.sessionsOf(pluginId).some((owner) => {
         if (owner.workspaceId !== workspaceId) return false;
         const status = statusOf(owner.sessionId);
         return status === 'running' || status === 'waiting-approval';
       });
       if (busy) throw new Error('a session of this plugin is running in this workspace');
-      const refreshed = await deps.cleanCheckout.refresh(workspace);
+      const refreshed = await deps.cleanCheckout.refresh(workspace, pluginId);
       if (!refreshed.ok) await fail(`refresh failed: ${refreshed.error}`);
     },
     async originCommit(pluginId, workspaceId) {
