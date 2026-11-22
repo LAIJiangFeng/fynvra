@@ -26,6 +26,12 @@ vi.mock('../services/plugins/marketHttp', () => ({
   MarketHttpError: class extends Error {},
 }));
 
+// 显式注入空公钥列表，覆盖「未开放」分支
+vi.mock('../services/plugins/marketConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/plugins/marketConfig')>()),
+  MARKET_PUBLIC_KEYS: [],
+}));
+
 vi.mock('../windows/createAppWindow', () => ({ sendToAllWindows: vi.fn() }));
 
 const call = (channel: string, raw?: unknown) => {
