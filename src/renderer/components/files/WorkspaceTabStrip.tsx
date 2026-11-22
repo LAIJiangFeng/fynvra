@@ -23,13 +23,17 @@ const StripContext = createContext<{
   dragged: RefObject<string | null>;
   target: { key: string; after: boolean } | null;
   setTarget(target: { key: string; after: boolean } | null): void;
+  onContextMenu?(tabKey: string, x: number, y: number): void;
 } | null>(null);
 
 export function WorkspaceTabStrip({
   workspaceId,
+  onTabContextMenu,
   children,
 }: {
   workspaceId: string;
+  /** orderedKeys 为界面实际显示顺序 */
+  onTabContextMenu?(tabKey: string, orderedKeys: string[], x: number, y: number): void;
   children: ReactNode;
 }) {
   const order = useWorkspaceTabsStore((state) => state.views[workspaceId]?.order);
@@ -81,7 +85,23 @@ export function WorkspaceTabStrip({
     return rank(a.props.tabKey) - rank(b.props.tabKey);
   });
   return (
-    <StripContext.Provider value={{ workspaceId, dragged, target, setTarget }}>
+    <StripContext.Provider
+      value={{
+        workspaceId,
+        dragged,
+        target,
+        setTarget,
+        onContextMenu: onTabContextMenu
+          ? (tabKey, x, y) =>
+              onTabContextMenu(
+                tabKey,
+                tabs.map((tab) => tab.props.tabKey),
+                x,
+                y
+              )
+          : undefined,
+      }}
+    >
       <fieldset
         ref={scroll}
         className="m-0 flex min-w-0 flex-initial overflow-x-auto overflow-y-hidden border-0 p-0 [scrollbar-width:thin]"
@@ -126,7 +146,7 @@ export function WorkspaceTab({ tabKey, children }: { tabKey: string; children: R
   const t = useT();
   const suppressClick = useRef(false);
   if (!context) return children;
-  const { workspaceId, dragged, target, setTarget } = context;
+  const { workspaceId, dragged, target, setTarget, onContextMenu } = context;
   const accepted = (types: readonly string[]) => !!dragged.current && types.includes(MIME);
   return (
     <fieldset
@@ -138,6 +158,11 @@ export function WorkspaceTab({ tabKey, children }: { tabKey: string; children: R
           'after:pointer-events-none after:absolute after:inset-y-0 after:z-10 after:w-0.5 after:bg-primary'
       )}
       title={t('workspaceTabs.drag')}
+      onContextMenu={(event) => {
+        if (!onContextMenu) return;
+        event.preventDefault();
+        onContextMenu(tabKey, event.clientX, event.clientY);
+      }}
       onPointerDownCapture={(event) => {
         // Close buttons retain their click/confirmation behavior and cannot start a drag.
         const close = (event.target as Element).closest('button[aria-label]');

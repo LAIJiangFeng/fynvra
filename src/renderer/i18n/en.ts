@@ -11,6 +11,14 @@ export const en: MessagesShape<typeof zhCN> = {
     corrupt: 'A damaged tab snapshot was set aside. The original file is retained in workspace-ui',
     removeDrafts:
       'Remove this workspace and its saved tabs and unsaved drafts? Files on disk will be kept',
+    close: 'Close',
+    closeOthers: 'Close others',
+    closeLeft: 'Close to the left',
+    closeRight: 'Close to the right',
+    bulkCloseTitle: 'Close tabs',
+    bulkCloseHint:
+      '{files} file(s) have unsaved changes and {terminals} terminal(s) are still running. Discard unsaved changes and close them all?',
+    closeAll: 'Close all',
   },
   terminals: {
     restored: 'History restored · New terminal session',
