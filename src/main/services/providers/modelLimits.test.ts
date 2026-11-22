@@ -7,6 +7,7 @@ import {
   createModelsDevCatalog,
   MODELS_DEV_URL,
   normalizeModelId,
+  parseMaxOutputLimit,
   parseModelsDev,
   parseOverflowLimit,
 } from './modelLimits';
@@ -129,6 +130,39 @@ describe('parseOverflowLimit', () => {
   });
 });
 
+const ZHIPU_MAX_TOKENS =
+  '400 {"error":{"message":"[1210][max_tokens参数非法：限制数值范围[1,131072]]","type":"invalid_request_error"},"type":"error"}';
+
+describe('parseMaxOutputLimit', () => {
+  it.each([
+    [ZHIPU_MAX_TOKENS, 131_072],
+    [
+      'max_tokens: 200000 > 64000, which is the maximum allowed number of output tokens for this model',
+      64_000,
+    ],
+    [
+      'max_tokens is too large: 200000. This model supports at most 128000 completion tokens, whereas you provided 200000.',
+      128_000,
+    ],
+    ['max_tokens must be less than or equal to `8192`', 8_192],
+  ])('%s', (message, limit) => {
+    expect(parseMaxOutputLimit(message)).toBe(limit);
+  });
+
+  it.each([
+    "This model's maximum context length is 128000 tokens.",
+    'prompt is too long: 210345 tokens > 200000 maximum',
+    'context_length_exceeded: max_tokens 32000',
+    'Rate limit reached: limit 30000 tokens per minute',
+  ])('不是最大输出报错：%s', (message) => {
+    expect(parseMaxOutputLimit(message)).toBeUndefined();
+  });
+
+  it('max_tokens 报错不当作窗口', () => {
+    expect(parseOverflowLimit(ZHIPU_MAX_TOKENS)).toBeUndefined();
+  });
+});
+
 describe('createModelLimitsProber', () => {
   const RELAY = 'https://relay.example.com';
 
@@ -217,5 +251,33 @@ describe('createModelLimitsProber', () => {
     expect((await store.get(providerId))?.models[0]?.contextWindow).toBe(272_000);
     expect(await prober.learn(providerId, 'gpt-6-astra', message)).toBe(false);
     expect(await prober.learn(providerId, 'gpt-6-astra', 'rate limited')).toBe(false);
+  });
+
+  it('max_tokens 超范围时写回最大输出，窗口不动，只降不升', async () => {
+    const store = createProviderStore({ filePath: join(dir, 'providers.json') });
+    const saved = await store.upsert({
+      name: 'GLM',
+      api: 'openai-completions',
+      baseUrl: 'https://glm.example.com',
+      enabled: true,
+      models: [{ id: 'glm-x', name: 'GLM', contextWindow: 200_000, maxOutput: 200_000 }],
+      apiKey: 'sk-glm-secret',
+    });
+    if (!saved.ok) throw new Error(saved.error);
+    const providerId = saved.provider.id;
+    const prober = createModelLimitsProber({
+      store,
+      fetch: fakeFetch({}),
+      catalog: { lookup: async () => undefined },
+    });
+    expect(await prober.learn(providerId, 'glm-x', ZHIPU_MAX_TOKENS)).toBe(true);
+    expect((await store.get(providerId))?.models[0]).toMatchObject({
+      contextWindow: 200_000,
+      maxOutput: 131_072,
+    });
+    expect(await prober.learn(providerId, 'glm-x', ZHIPU_MAX_TOKENS)).toBe(false);
+    const larger = 'max_tokens must be less than or equal to 150000';
+    expect(await prober.learn(providerId, 'glm-x', larger)).toBe(false);
+    expect((await store.get(providerId))?.models[0]?.maxOutput).toBe(131_072);
   });
 });

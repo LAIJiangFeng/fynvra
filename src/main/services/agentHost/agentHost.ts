@@ -916,7 +916,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       .catch((error: unknown) => log('warn', `model ${ref.modelId}: ${errorMessage(error)}`));
   }
 
-  /** 模型请求因上下文超限失败：从报错里学服务端的真实上限，写回后推给活会话 */
+  /** 模型请求因上下文超限或 max_tokens 超范围失败：从报错里学服务端的真实上限，写回后推给活会话 */
   function learnModelLimits(state: LiveSession, message: string): void {
     const ref = state.modelRef;
     if (!deps.modelLimits || !ref) return;

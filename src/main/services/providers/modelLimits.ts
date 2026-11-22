@@ -166,13 +166,39 @@ export function parseOverflowLimit(message: string): number | undefined {
   return undefined;
 }
 
+/** 服务端在 max_tokens 超范围报错里报的最大输出（各家措辞），按顺序匹配第一个；都要求紧挨 max_tokens */
+const MAX_OUTPUT_PATTERNS: readonly RegExp[] = [
+  // 智谱：max_tokens参数非法：限制数值范围[1,131072]，取区间上界
+  /max_tokens[^[\]\n]{0,40}\[\s*\d+\s*,\s*(\d+)\s*\]/i,
+  // Anthropic：max_tokens: 200000 > 64000, which is the maximum allowed number of output tokens
+  /max_tokens:\s*\d+\s*>\s*(\d+),?\s*which is the maximum allowed/i,
+  // OpenAI：max_tokens is too large: 200000. This model supports at most 128000 completion tokens
+  /max_tokens[^\n]{0,80}?supports at most (\d+) completion tokens/i,
+  // max_tokens must be less than or equal to `131072`
+  /max_tokens[^.\n]{0,40}?must be less than or equal to [`'"]?(\d+)/i,
+];
+
+/** 从 max_tokens 超范围的报错文字里取出服务端允许的最大输出；取不到时返回 undefined。纯函数。 */
+export function parseMaxOutputLimit(message: string): number | undefined {
+  for (const pattern of MAX_OUTPUT_PATTERNS) {
+    const digits = pattern.exec(message)?.[1];
+    if (!digits) continue;
+    const limit = Number(digits);
+    if (isPositiveInt(limit)) return limit;
+  }
+  return undefined;
+}
+
 export interface ModelLimitsProber {
   /**
    * 设置条目缺 contextWindow 时探测（服务端列表 → models.dev，取第一个查到的）并只补缺失的字段。
    * 同一服务 + 模型在一次运行里只探测一次，并发调用共用一次。写回了返回 true；从不 reject。
    */
   ensure(providerId: string, modelId: string): Promise<boolean>;
-  /** 溢出报错里有上限时写回（覆盖已有值：端点自己报的最可信）。写回了返回 true；从不 reject。 */
+  /**
+   * 溢出报错里有窗口上限时写回（覆盖已有值：端点自己报的最可信）；max_tokens 超范围报错里有最大输出上限时，
+   * 比已有值小（或没有值）才写回，且不超过窗口。写回了返回 true；从不 reject。
+   */
   learn(providerId: string, modelId: string, message: string): Promise<boolean>;
 }
 
@@ -238,13 +264,33 @@ export function createModelLimitsProber(options: {
     },
     async learn(providerId, modelId, message) {
       const contextWindow = parseOverflowLimit(message);
-      if (!contextWindow) return false;
-      try {
-        return await store.updateModelLimits(providerId, modelId, { contextWindow }, true);
-      } catch {
-        log('warn', `model ${modelId}: saving the context window from an overflow error failed`);
-        return false;
+      const maxOutput = parseMaxOutputLimit(message);
+      let updated = false;
+      if (contextWindow) {
+        try {
+          updated = await store.updateModelLimits(providerId, modelId, { contextWindow }, true);
+        } catch {
+          log('warn', `model ${modelId}: saving the context window from an overflow error failed`);
+        }
       }
+      if (maxOutput) {
+        try {
+          const entry = (await store.get(providerId))?.models.find((model) => model.id === modelId);
+          const limit = Math.min(maxOutput, entry?.contextWindow ?? maxOutput);
+          if (entry && (entry.maxOutput === undefined || limit < entry.maxOutput)) {
+            const saved = await store.updateModelLimits(
+              providerId,
+              modelId,
+              { maxOutput: limit },
+              true
+            );
+            updated = saved || updated;
+          }
+        } catch {
+          log('warn', `model ${modelId}: saving the max output from a max_tokens error failed`);
+        }
+      }
+      return updated;
     },
   };
 }
