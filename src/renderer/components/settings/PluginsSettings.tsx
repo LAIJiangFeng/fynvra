@@ -5,7 +5,6 @@ import {
   localPluginMode,
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
-  type PluginMode,
 } from '@shared/types/plugins';
 import {
   AppWindow,
@@ -61,6 +60,7 @@ import { AppPluginSettings } from './AppPluginSettings';
 import { AppPluginsSection, hasAppPluginUi } from './AppPluginsSection';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
+import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
 import { PluginImportDialog } from './PluginImportDialog';
 import {
   MarketRevokedNote,
@@ -85,6 +85,12 @@ export function PluginsSettings() {
   const [tab, setTab] = useState<PluginsTab>('installed');
   // 正在看哪个 Fynvra 插件的设置页（id）
   const [openApp, setOpenApp] = useState<string | null>(null);
+  // 正在看哪个 PI 插件的详情；addName 为从卡片菜单选了「添加服务名」
+  const [openPi, setOpenPi] = useState<{ id: string; addName: boolean } | null>(null);
+  const piPlugin = usePluginsStore((state) =>
+    openPi ? state.plugins.find((plugin) => plugin.id === openPi.id) : undefined
+  );
+  const piLoaded = usePluginsStore((state) => state.loaded);
   const appPlugin = useAppPluginsStore((state) =>
     openApp ? state.plugins.find((plugin) => plugin.id === openApp) : undefined
   );
@@ -94,6 +100,11 @@ export function PluginsSettings() {
   useEffect(() => {
     if (openApp && appLoaded && !(appPlugin && hasAppPluginUi(appPlugin))) setOpenApp(null);
   }, [openApp, appLoaded, appPlugin]);
+
+  // 看详情时插件被删除，回到插件列表
+  useEffect(() => {
+    if (openPi && piLoaded && !piPlugin) setOpenPi(null);
+  }, [openPi, piLoaded, piPlugin]);
 
   // 已安装页也要市场视图来显示「有更新」；只读缓存，不联网
   useEffect(() => {
@@ -115,6 +126,17 @@ export function PluginsSettings() {
     );
   }
 
+  if (openPi && piPlugin) {
+    return (
+      <PluginDetail
+        key={openPi.id}
+        plugin={piPlugin}
+        initialAdding={openPi.addName}
+        onBack={() => setOpenPi(null)}
+      />
+    );
+  }
+
   return (
     <Tabs
       value={tab}
@@ -132,7 +154,10 @@ export function PluginsSettings() {
         </TabsTrigger>
       </TabsList>
       <TabsContent value="installed">
-        <InstalledPlugins onOpenApp={setOpenApp} />
+        <InstalledPlugins
+          onOpenApp={setOpenApp}
+          onOpenPi={(id, addName = false) => setOpenPi({ id, addName })}
+        />
       </TabsContent>
       <TabsContent value="market">
         <PluginMarketTab />
@@ -142,7 +167,13 @@ export function PluginsSettings() {
 }
 
 /** 「已安装」：上面是 Fynvra 插件，下面是 PI 插件（添加本地插件、从 npm / git 安装，启用 / 停用 / 移除）。 */
-function InstalledPlugins({ onOpenApp }: { onOpenApp: (id: string) => void }) {
+function InstalledPlugins({
+  onOpenApp,
+  onOpenPi,
+}: {
+  onOpenApp: (id: string) => void;
+  onOpenPi: (id: string, addName?: boolean) => void;
+}) {
   const plugins = usePluginsStore((state) => state.plugins);
   const loaded = usePluginsStore((state) => state.loaded);
   const error = usePluginsStore((state) => state.error);
@@ -242,11 +273,16 @@ function InstalledPlugins({ onOpenApp }: { onOpenApp: (id: string) => void }) {
             </Button>
           </EmptyState>
         ) : (
-          <ul className="divide-y rounded-lg border">
+          <PluginGrid>
             {plugins.map((plugin) => (
-              <PluginRow key={plugin.id} plugin={plugin} onStatus={setStatus} />
+              <PluginCardItem
+                key={plugin.id}
+                plugin={plugin}
+                onOpen={onOpenPi}
+                onStatus={setStatus}
+              />
             ))}
-          </ul>
+          </PluginGrid>
         )}
 
         <PluginImportDialog
@@ -259,145 +295,259 @@ function InstalledPlugins({ onOpenApp }: { onOpenApp: (id: string) => void }) {
   );
 }
 
-function PluginRow({
-  plugin,
-  onStatus,
-}: {
-  plugin: PluginEntry;
-  onStatus: (status: Status) => void;
-}) {
-  const toggle = usePluginsStore((state) => state.toggle);
+/** PI 插件的删除：按模式给出后果说明，确认后移除（详情页在插件消失后自动返回列表） */
+function usePluginRemove(
+  plugin: PluginEntry,
+  onStatus: (status: Status) => void
+): [busy: boolean, run: () => Promise<void>] {
   const remove = usePluginsStore((state) => state.remove);
-  const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const [addingName, setAddingName] = useState(false);
+  const [busy, setBusy] = useState(false);
   const t = useT();
   const mode = localPluginMode(plugin);
-  const onError = (text: string) => onStatus({ tone: 'error', text });
+  const run = async () => {
+    const confirmed = await confirmDialog({
+      message: t('settings.plugins.removeConfirm', { name: plugin.name }),
+      detail: t(
+        mode === 'copy'
+          ? 'settings.plugins.removeConsequenceCopy'
+          : mode === 'link'
+            ? 'settings.plugins.removeConsequenceLink'
+            : 'settings.plugins.removeConsequence'
+      ),
+      confirmLabel: t('common.confirmDelete'),
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setBusy(true);
+    const result = await remove(plugin.id);
+    setBusy(false);
+    if (!result.ok) onStatus({ tone: 'error', text: result.error });
+    else if (result.warning) onStatus({ tone: 'success', text: result.warning });
+  };
+  return [busy, run];
+}
+
+/** 市场里的新版本号（没有更新为 null）与市场视图 */
+function usePluginMarket(plugin: PluginEntry) {
   const marketView = usePluginsStore((state) =>
     plugin.market ? marketViewOf(state.market, plugin.id) : undefined
   );
   const newVersion =
     marketView?.updateAvailable && marketView.latest ? marketView.latest.version : null;
+  return { marketView, newVersion };
+}
 
+/** 来源类型、市场版本与分级、链接、已停用、有更新 */
+function PluginBadges({ plugin, newVersion }: { plugin: PluginEntry; newVersion: string | null }) {
+  const t = useT();
   return (
-    <li className="flex items-start gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-sm">{plugin.name}</span>
-          <Badge variant="outline">{t(`settings.plugins.kinds.${plugin.kind}`)}</Badge>
-          {plugin.market && (
-            <>
-              <span className="text-muted-foreground text-xs">{plugin.market.version}</span>
-              <MarketTierBadge tier={plugin.market.tier} />
-            </>
-          )}
-          {newVersion && (
-            <span className="text-primary text-xs">
-              {t('settings.plugins.market.updateAvailable', { version: newVersion })}
-            </span>
-          )}
-          {mode === 'link' && <Badge variant="outline">{t('settings.plugins.linked')}</Badge>}
-          {!plugin.enabled && <Badge>{t('common.disabled')}</Badge>}
-        </div>
-        <p
-          className="truncate font-mono text-muted-foreground text-xs"
-          title={plugin.kind === 'local' ? plugin.path : `${plugin.path}\n${plugin.source}`}
-        >
-          {plugin.path}
-        </p>
-        {plugin.market?.revokedReason !== undefined && (
-          <MarketRevokedNote reason={plugin.market.revokedReason} />
-        )}
-        <RequestedProviders
-          plugin={plugin}
-          adding={addingName}
-          onAddingChange={setAddingName}
-          onError={onError}
-        />
-        {confirmingRemove && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-xs">
-              {t(
-                mode === 'copy'
-                  ? 'settings.plugins.removeConsequenceCopy'
-                  : mode === 'link'
-                    ? 'settings.plugins.removeConsequenceLink'
-                    : 'settings.plugins.removeConsequence'
-              )}
-            </span>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={removing}
-              onClick={async () => {
-                setRemoving(true);
-                const result = await remove(plugin.id);
-                setRemoving(false);
-                if (!result.ok) {
-                  setConfirmingRemove(false);
-                  onError(result.error);
-                } else if (result.warning) {
-                  onStatus({ tone: 'success', text: result.warning });
-                }
-              }}
-            >
-              {removing && <Loader2 className="animate-spin" />}
-              {t(removing ? 'settings.plugins.removing' : 'common.confirmDelete')}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={removing}
-              onClick={() => setConfirmingRemove(false)}
-            >
-              {t('common.cancel')}
-            </Button>
-          </div>
-        )}
-      </div>
-      {newVersion && <MarketUpdateButton id={plugin.id} />}
-      <Switch
-        className="mt-1"
-        checked={plugin.enabled}
-        aria-label={t('common.enableItem', { name: plugin.name })}
-        onCheckedChange={async (enabled) => {
-          const result = await toggle(plugin.id, enabled);
-          if (!result.ok) onError(result.error);
-        }}
-      />
-      <PluginActions
-        plugin={plugin}
-        mode={mode}
-        onStatus={onStatus}
-        onAddServiceName={() => setAddingName(true)}
-      />
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label={t('common.deleteItem', { name: plugin.name })}
-        className="text-destructive hover:text-destructive"
-        onClick={() => setConfirmingRemove(true)}
-      >
-        <Trash2 />
-      </Button>
-    </li>
+    <>
+      <Badge variant="outline">{t(`settings.plugins.kinds.${plugin.kind}`)}</Badge>
+      {plugin.market && (
+        <>
+          <span className="text-muted-foreground text-xs">{plugin.market.version}</span>
+          <MarketTierBadge tier={plugin.market.tier} />
+        </>
+      )}
+      {localPluginMode(plugin) === 'link' && (
+        <Badge variant="outline">{t('settings.plugins.linked')}</Badge>
+      )}
+      {!plugin.enabled && <Badge>{t('common.disabled')}</Badge>}
+      {newVersion && (
+        <span className="text-primary text-xs">
+          {t('settings.plugins.market.updateAvailable', { version: newVersion })}
+        </span>
+      )}
+    </>
   );
 }
 
-/** 卡片的「…」菜单：打开文件夹、用…打开、作为工作区打开，以及按模式出现的重新复制 / 转为副本 */
-function PluginActions({
+/** 启用开关 */
+function PluginSwitch({
   plugin,
-  mode,
-  onStatus,
-  onAddServiceName,
+  onError,
 }: {
   plugin: PluginEntry;
-  mode: PluginMode | null;
-  onStatus: (status: Status) => void;
-  /** 在卡片里原地打开「添加模型服务名」输入框 */
-  onAddServiceName: () => void;
+  onError: (text: string) => void;
 }) {
+  const toggle = usePluginsStore((state) => state.toggle);
+  const t = useT();
+  return (
+    <Switch
+      checked={plugin.enabled}
+      aria-label={t('common.enableItem', { name: plugin.name })}
+      onCheckedChange={async (enabled) => {
+        const result = await toggle(plugin.id, enabled);
+        if (!result.ok) onError(result.error);
+      }}
+    />
+  );
+}
+
+function PluginCardItem({
+  plugin,
+  onOpen,
+  onStatus,
+}: {
+  plugin: PluginEntry;
+  onOpen: (id: string, addName?: boolean) => void;
+  onStatus: (status: Status) => void;
+}) {
+  const t = useT();
+  const { marketView, newVersion } = usePluginMarket(plugin);
+  const [removing, runRemove] = usePluginRemove(plugin, onStatus);
+  const providerCount = pluginProviderNames(plugin).length;
+  const revoked = plugin.market?.revokedReason;
+
+  return (
+    <PluginCard
+      icon={Puzzle}
+      name={plugin.name}
+      onOpen={() => onOpen(plugin.id)}
+      badges={<PluginBadges plugin={plugin} newVersion={newVersion} />}
+      description={
+        marketView?.description ?? (
+          <span
+            className="block truncate font-mono text-xs"
+            title={plugin.kind === 'local' ? plugin.path : `${plugin.path}\n${plugin.source}`}
+          >
+            {plugin.path}
+          </span>
+        )
+      }
+      extra={
+        (revoked !== undefined || providerCount > 0) && (
+          <>
+            {revoked !== undefined && <MarketRevokedNote reason={revoked} />}
+            {providerCount > 0 && (
+              <p className="text-muted-foreground text-xs">
+                {t('settings.plugins.usesProviders', { count: providerCount })}
+              </p>
+            )}
+          </>
+        )
+      }
+      author={
+        <PluginAuthor name={marketView?.author ?? t(`settings.plugins.kinds.${plugin.kind}`)} />
+      }
+      actions={
+        <>
+          {newVersion && <MarketUpdateButton id={plugin.id} />}
+          <PluginSwitch plugin={plugin} onError={(text) => onStatus({ tone: 'error', text })} />
+          <PluginActions
+            plugin={plugin}
+            removing={removing}
+            onStatus={onStatus}
+            onAddServiceName={() => onOpen(plugin.id, true)}
+            onRemove={() => void runRemove()}
+          />
+        </>
+      }
+    />
+  );
+}
+
+/** PI 插件详情：完整路径与来源、撤回说明、模型服务配置和删除 */
+function PluginDetail({
+  plugin,
+  initialAdding,
+  onBack,
+}: {
+  plugin: PluginEntry;
+  initialAdding: boolean;
+  onBack: () => void;
+}) {
+  const t = useT();
+  const [status, setStatus] = useState<Status | null>(null);
+  const [addingName, setAddingName] = useState(initialAdding);
+  const { marketView, newVersion } = usePluginMarket(plugin);
+  const [removing, runRemove] = usePluginRemove(plugin, setStatus);
+  const onError = (text: string) => setStatus({ tone: 'error', text });
+  const rows: [string, string][] = [[t('settings.plugins.detailPath'), plugin.path]];
+  if (plugin.source !== plugin.path) rows.push([t('settings.plugins.detailSource'), plugin.source]);
+
+  return (
+    <div className="grid gap-5">
+      <div>
+        <Button size="sm" variant="ghost" onClick={onBack}>
+          <ArrowLeft />
+          {t('settings.plugins.back')}
+        </Button>
+      </div>
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <h3 className="font-medium">{plugin.name}</h3>
+          <PluginBadges plugin={plugin} newVersion={newVersion} />
+        </div>
+        {newVersion && <MarketUpdateButton id={plugin.id} />}
+        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+          <PluginSwitch plugin={plugin} onError={onError} />
+          <PluginActions
+            plugin={plugin}
+            removing={removing}
+            onStatus={setStatus}
+            onAddServiceName={() => setAddingName(true)}
+            onRemove={() => void runRemove()}
+          />
+        </div>
+      </div>
+      {marketView?.description && (
+        <p className="text-muted-foreground text-sm">{marketView.description}</p>
+      )}
+      {status && (
+        <InlineMessage tone={status.tone} className="break-all">
+          {status.text}
+        </InlineMessage>
+      )}
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="min-w-0 select-text break-all font-mono text-xs leading-5">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {plugin.market?.revokedReason !== undefined && (
+        <MarketRevokedNote reason={plugin.market.revokedReason} />
+      )}
+      <RequestedProviders
+        plugin={plugin}
+        adding={addingName}
+        onAddingChange={setAddingName}
+        onError={onError}
+      />
+      <div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={removing}
+          className="text-destructive hover:text-destructive"
+          onClick={() => void runRemove()}
+        >
+          {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
+          {t(removing ? 'settings.plugins.removing' : 'common.delete')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** 「…」菜单：打开文件夹、用…打开、作为工作区打开、添加服务名，按模式出现的重新复制 / 转为副本，以及删除 */
+function PluginActions({
+  plugin,
+  removing,
+  onStatus,
+  onAddServiceName,
+  onRemove,
+}: {
+  plugin: PluginEntry;
+  removing: boolean;
+  onStatus: (status: Status) => void;
+  /** 打开「添加模型服务名」输入框（卡片上会先进入详情页） */
+  onAddServiceName: () => void;
+  onRemove: () => void;
+}) {
+  const mode = localPluginMode(plugin);
   const reveal = usePluginsStore((state) => state.reveal);
   const openIn = usePluginsStore((state) => state.openIn);
   const openAsWorkspace = usePluginsStore((state) => state.openAsWorkspace);
@@ -454,7 +604,7 @@ function PluginActions({
       }}
     >
       <DropdownMenuTrigger
-        disabled={busy}
+        disabled={busy || removing}
         render={
           <Button
             variant="ghost"
@@ -463,7 +613,7 @@ function PluginActions({
           />
         }
       >
-        {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
+        {busy || removing ? <Loader2 className="animate-spin" /> : <Ellipsis />}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
@@ -527,6 +677,11 @@ function PluginActions({
             {t('settings.plugins.convertToCopy')}
           </DropdownMenuItem>
         )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={onRemove}>
+          <Trash2 />
+          {t('common.delete')}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

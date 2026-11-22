@@ -176,6 +176,7 @@ export function createAppPluginService(deps: {
           id: manifest.id,
           name: manifest.name,
           version: manifest.version,
+          ...(manifest.description !== undefined ? { description: manifest.description } : {}),
           source: 'local',
           path: copied.path,
           enabled: true,
@@ -211,6 +212,8 @@ export function createAppPluginService(deps: {
         await registry.update(id, {
           name: checked.manifest.name,
           version: checked.manifest.version,
+          // 清单删了简介时 undefined 会把旧值清掉
+          description: checked.manifest.description,
           permissions: checked.manifest.permissions,
           path: copied.path,
         });

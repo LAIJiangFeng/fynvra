@@ -22,6 +22,8 @@ export interface AppPluginManifest {
   id: string;
   name: string;
   version: string;
+  /** 可选简介（trim 后 1–300 字），不合法时直接丢弃 */
+  description?: string;
   kind: 'fynvra';
   host: { main: string };
   permissions: AppPluginPermission[];
@@ -42,10 +44,12 @@ export function parseAppPluginManifest(raw: unknown): AppPluginManifest | null {
   const main = asRecord(host)?.main;
   if (!isAppPluginMain(main)) return null;
   if (permissions !== undefined && !Array.isArray(permissions)) return null;
+  const description = typeof record.description === 'string' ? record.description.trim() : '';
   return {
     id,
     name,
     version,
+    ...(description.length > 0 && description.length <= 300 ? { description } : {}),
     kind: 'fynvra',
     host: { main },
     permissions: filterPermissions('fynvra', permissions ?? []) as AppPluginPermission[],
@@ -60,6 +64,8 @@ export interface AppPluginView {
   id: string;
   name: string;
   version: string;
+  /** 清单里的简介（市场来源可能没有，界面再回退到市场视图） */
+  description?: string;
   /** 本地来源为 null */
   tier: MarketTier | null;
   source: AppPluginSource;
