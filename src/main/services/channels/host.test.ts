@@ -357,11 +357,13 @@ describe('channel.report 路由', () => {
     const { h, a } = await withRuns();
     const router = routeChannelReport(() => h.host);
     const signal = new AbortController().signal;
-    expect(await router.invoke(a, 'triageReport', { k: 1 }, signal)).toEqual({ ok: true });
+    // project 等字段原样透传给插件
+    const input = { kind: 'bug', title: 't', summary: 's', reply: 'r', project: 'web-app' };
+    expect(await router.invoke(a, 'triageReport', input, signal)).toEqual({ ok: true });
     expect(h.deps.call).toHaveBeenCalledWith('p.a', 'channel.report', {
       sessionId: a,
       method: 'triageReport',
-      input: { k: 1 },
+      input,
     });
     const notOwned = { ok: false, error: 'session is not owned by a channel plugin' };
     expect(await router.invoke('legacy', 'triageReport', {}, signal)).toEqual(notOwned);
