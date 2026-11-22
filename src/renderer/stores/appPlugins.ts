@@ -1,5 +1,6 @@
 import { errorMessage } from '@shared/guards';
 import type { AppPluginView } from '@shared/types/appPlugins';
+import type { PluginReadmeResult } from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   AppPluginActionResult,
@@ -18,6 +19,8 @@ export interface AppPluginsState {
   update(id: string): Promise<AppPluginActionResult>;
   recopy(id: string): Promise<AppPluginActionResult>;
   addLocalDev(): Promise<AppPluginActionResult>;
+  /** 只读插件包目录里的 README.md */
+  readme(id: string): Promise<PluginReadmeResult>;
 }
 
 const api = window.fynvra.appPlugins;
@@ -59,6 +62,7 @@ export const useAppPluginsStore = create<AppPluginsState>()((set) => ({
   update: (id) => safeAction(() => api.update({ id })),
   recopy: (id) => safeAction(() => api.recopy({ id })),
   addLocalDev: () => safeAction(() => api.addLocalDev()),
+  readme: (id) => safeAction(() => api.readme({ id })),
 }));
 
 api.onChanged(() => {

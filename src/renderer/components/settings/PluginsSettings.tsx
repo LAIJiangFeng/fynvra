@@ -56,11 +56,10 @@ import { useAppPluginsStore } from '@/stores/appPlugins';
 import { usePluginsStore } from '@/stores/plugins';
 import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { AppPluginSettings } from './AppPluginSettings';
-import { AppPluginsSection, hasAppPluginUi } from './AppPluginsSection';
+import { AppPluginDetail, AppPluginsSection } from './AppPluginsSection';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
-import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
+import { PluginAuthor, PluginCard, PluginGrid, PluginHeader } from './PluginCard';
 import { PluginImportDialog } from './PluginImportDialog';
 import {
   MarketRevokedNote,
@@ -68,6 +67,7 @@ import {
   MarketUpdateButton,
   PluginMarketTab,
 } from './PluginMarket';
+import { InstalledReadme, PluginDetailTabs } from './PluginReadme';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
@@ -78,13 +78,13 @@ type Target = { kind: 'local' } | { kind: 'remote'; source: string };
 
 type PluginsTab = 'installed' | 'market';
 
-/** 设置 → 插件：「已安装」「市场」两个标签；Fynvra 插件的设置在插件页内打开，返回后回到原来的标签。 */
+/** 设置 → 插件：「已安装」「市场」两个标签；插件详情在插件页内打开，返回后回到原来的标签。 */
 export function PluginsSettings() {
   const t = useT();
   const loadMarket = usePluginsStore((state) => state.loadMarket);
   const [tab, setTab] = useState<PluginsTab>('installed');
-  // 正在看哪个 Fynvra 插件的设置页（id）
-  const [openApp, setOpenApp] = useState<string | null>(null);
+  // 正在看哪个 Fynvra 插件的详情；settingsRequest 每次从菜单选「设置」加一，详情页切到设置标签
+  const [openApp, setOpenApp] = useState<{ id: string; settingsRequest: number } | null>(null);
   // 正在看哪个 PI 插件的详情；addName 为从卡片菜单选了「添加服务名」
   const [openPi, setOpenPi] = useState<{ id: string; addName: boolean } | null>(null);
   const piPlugin = usePluginsStore((state) =>
@@ -92,13 +92,18 @@ export function PluginsSettings() {
   );
   const piLoaded = usePluginsStore((state) => state.loaded);
   const appPlugin = useAppPluginsStore((state) =>
-    openApp ? state.plugins.find((plugin) => plugin.id === openApp) : undefined
+    openApp ? state.plugins.find((plugin) => plugin.id === openApp.id) : undefined
   );
   const appLoaded = useAppPluginsStore((state) => state.loaded);
+  const openAppPlugin = (id: string, settings = false) =>
+    setOpenApp((prev) => ({
+      id,
+      settingsRequest: settings ? (prev?.id === id ? prev.settingsRequest : 0) + 1 : 0,
+    }));
 
-  // 看设置时插件被删除、停用或不再有设置页，回到插件列表
+  // 看详情时插件被删除，回到插件列表
   useEffect(() => {
-    if (openApp && appLoaded && !(appPlugin && hasAppPluginUi(appPlugin))) setOpenApp(null);
+    if (openApp && appLoaded && !appPlugin) setOpenApp(null);
   }, [openApp, appLoaded, appPlugin]);
 
   // 看详情时插件被删除，回到插件列表
@@ -113,16 +118,13 @@ export function PluginsSettings() {
 
   if (openApp && appPlugin) {
     return (
-      <div className="grid gap-4">
-        <div>
-          <Button size="sm" variant="ghost" onClick={() => setOpenApp(null)}>
-            <ArrowLeft />
-            {t('settings.plugins.back')}
-          </Button>
-        </div>
-        <h3 className="font-medium">{appPlugin.name}</h3>
-        <AppPluginSettings key={openApp} id={openApp} />
-      </div>
+      <AppPluginDetail
+        key={openApp.id}
+        plugin={appPlugin}
+        settingsRequest={openApp.settingsRequest}
+        onOpen={openAppPlugin}
+        onBack={() => setOpenApp(null)}
+      />
     );
   }
 
@@ -155,7 +157,7 @@ export function PluginsSettings() {
       </TabsList>
       <TabsContent value="installed">
         <InstalledPlugins
-          onOpenApp={setOpenApp}
+          onOpenApp={openAppPlugin}
           onOpenPi={(id, addName = false) => setOpenPi({ id, addName })}
         />
       </TabsContent>
@@ -171,7 +173,7 @@ function InstalledPlugins({
   onOpenApp,
   onOpenPi,
 }: {
-  onOpenApp: (id: string) => void;
+  onOpenApp: (id: string, settings?: boolean) => void;
   onOpenPi: (id: string, addName?: boolean) => void;
 }) {
   const plugins = usePluginsStore((state) => state.plugins);
@@ -384,38 +386,64 @@ function PluginSwitch({
   );
 }
 
-function PluginCardItem({
+/**
+ * PI 插件的卡片与详情页标题区共用：同一组徽标、简介、开关和「…」菜单，只换布局。
+ * 标题区不重复显示撤回说明和模型服务数（在「设置」标签里）
+ */
+function PluginFace({
+  variant,
   plugin,
+  removing,
+  runRemove,
   onOpen,
   onStatus,
 }: {
+  variant: 'card' | 'header';
   plugin: PluginEntry;
+  removing: boolean;
+  runRemove: () => Promise<void>;
+  /** 打开详情页；addName 为从菜单选了「添加服务名」 */
   onOpen: (id: string, addName?: boolean) => void;
   onStatus: (status: Status) => void;
 }) {
   const t = useT();
   const { marketView, newVersion } = usePluginMarket(plugin);
-  const [removing, runRemove] = usePluginRemove(plugin, onStatus);
   const providerCount = pluginProviderNames(plugin).length;
   const revoked = plugin.market?.revokedReason;
-
+  const face = {
+    icon: Puzzle,
+    name: plugin.name,
+    badges: <PluginBadges plugin={plugin} newVersion={newVersion} />,
+    description: marketView?.description ?? plugin.description ?? (
+      <span className="block truncate text-xs">
+        {t('settings.plugins.noDescription')} ·{' '}
+        <span className="font-mono">
+          {plugin.path.split(/[\\/]/).filter(Boolean).at(-1) ?? plugin.path}
+        </span>
+      </span>
+    ),
+    author: (
+      <PluginAuthor name={marketView?.author ?? t(`settings.plugins.kinds.${plugin.kind}`)} />
+    ),
+    actions: (
+      <>
+        {newVersion && <MarketUpdateButton id={plugin.id} />}
+        <PluginSwitch plugin={plugin} onError={(text) => onStatus({ tone: 'error', text })} />
+        <PluginActions
+          plugin={plugin}
+          removing={removing}
+          onStatus={onStatus}
+          onAddServiceName={() => onOpen(plugin.id, true)}
+          onRemove={() => void runRemove()}
+        />
+      </>
+    ),
+  };
+  if (variant === 'header') return <PluginHeader {...face} />;
   return (
     <PluginCard
-      icon={Puzzle}
-      name={plugin.name}
+      {...face}
       onOpen={() => onOpen(plugin.id)}
-      badges={<PluginBadges plugin={plugin} newVersion={newVersion} />}
-      description={
-        marketView?.description ??
-        plugin.description ?? (
-          <span className="block truncate text-xs">
-            {t('settings.plugins.noDescription')} ·{' '}
-            <span className="font-mono">
-              {plugin.path.split(/[\\/]/).filter(Boolean).at(-1) ?? plugin.path}
-            </span>
-          </span>
-        )
-      }
       extra={
         (revoked !== undefined || providerCount > 0) && (
           <>
@@ -428,27 +456,36 @@ function PluginCardItem({
           </>
         )
       }
-      author={
-        <PluginAuthor name={marketView?.author ?? t(`settings.plugins.kinds.${plugin.kind}`)} />
-      }
-      actions={
-        <>
-          {newVersion && <MarketUpdateButton id={plugin.id} />}
-          <PluginSwitch plugin={plugin} onError={(text) => onStatus({ tone: 'error', text })} />
-          <PluginActions
-            plugin={plugin}
-            removing={removing}
-            onStatus={onStatus}
-            onAddServiceName={() => onOpen(plugin.id, true)}
-            onRemove={() => void runRemove()}
-          />
-        </>
-      }
     />
   );
 }
 
-/** PI 插件详情：完整路径与来源、撤回说明、模型服务配置和删除 */
+function PluginCardItem({
+  plugin,
+  onOpen,
+  onStatus,
+}: {
+  plugin: PluginEntry;
+  onOpen: (id: string, addName?: boolean) => void;
+  onStatus: (status: Status) => void;
+}) {
+  const [removing, runRemove] = usePluginRemove(plugin, onStatus);
+  return (
+    <PluginFace
+      variant="card"
+      plugin={plugin}
+      removing={removing}
+      runRemove={runRemove}
+      onOpen={onOpen}
+      onStatus={onStatus}
+    />
+  );
+}
+
+/**
+ * PI 插件详情：标题区 + 「使用说明」（插件目录里的 README.md，没有时退回市场版本的 README）
+ * 和「设置」（完整路径与来源、撤回说明、模型服务配置和删除）
+ */
 function PluginDetail({
   plugin,
   initialAdding,
@@ -461,9 +498,12 @@ function PluginDetail({
   const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
   const [addingName, setAddingName] = useState(initialAdding);
-  const { marketView, newVersion } = usePluginMarket(plugin);
+  // 选「添加服务名」时加一，详情页切到「设置」标签
+  const [settingsRequest, setSettingsRequest] = useState(initialAdding ? 1 : 0);
+  const marketReadme = usePluginsStore((state) => state.marketReadme);
   const [removing, runRemove] = usePluginRemove(plugin, setStatus);
   const onError = (text: string) => setStatus({ tone: 'error', text });
+  const market = plugin.market;
   const rows: [string, string][] = [[t('settings.plugins.detailPath'), plugin.path]];
   if (plugin.source !== plugin.path) rows.push([t('settings.plugins.detailSource'), plugin.source]);
 
@@ -475,62 +515,69 @@ function PluginDetail({
           {t('settings.plugins.back')}
         </Button>
       </div>
-      <div className="flex items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <h3 className="font-medium">{plugin.name}</h3>
-          <PluginBadges plugin={plugin} newVersion={newVersion} />
-        </div>
-        {newVersion && <MarketUpdateButton id={plugin.id} />}
-        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
-          <PluginSwitch plugin={plugin} onError={onError} />
-          <PluginActions
-            plugin={plugin}
-            removing={removing}
-            onStatus={setStatus}
-            onAddServiceName={() => setAddingName(true)}
-            onRemove={() => void runRemove()}
-          />
-        </div>
-      </div>
-      {(marketView?.description ?? plugin.description) && (
-        <p className="text-muted-foreground text-sm">
-          {marketView?.description ?? plugin.description}
-        </p>
-      )}
+      <PluginFace
+        variant="header"
+        plugin={plugin}
+        removing={removing}
+        runRemove={runRemove}
+        onOpen={() => {
+          setAddingName(true);
+          setSettingsRequest((count) => count + 1);
+        }}
+        onStatus={setStatus}
+      />
       {status && (
         <InlineMessage tone={status.tone} className="break-all">
           {status.text}
         </InlineMessage>
       )}
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
-        {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 select-text break-all font-mono text-xs leading-5">{value}</dd>
+      <PluginDetailTabs
+        tabKey={`pi:${plugin.id}`}
+        settingsRequest={settingsRequest}
+        readme={
+          <InstalledReadme
+            kind="pi"
+            id={plugin.id}
+            description={plugin.description}
+            fallback={market ? () => marketReadme(market.id, market.version) : undefined}
+          />
+        }
+        settings={
+          <div className="grid gap-5">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
+              {rows.map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="min-w-0 select-text break-all font-mono text-xs leading-5">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {plugin.market?.revokedReason !== undefined && (
+              <MarketRevokedNote reason={plugin.market.revokedReason} />
+            )}
+            <RequestedProviders
+              plugin={plugin}
+              adding={addingName}
+              onAddingChange={setAddingName}
+              onError={onError}
+            />
+            <div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={removing}
+                className="text-destructive hover:text-destructive"
+                onClick={() => void runRemove()}
+              >
+                {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {t(removing ? 'settings.plugins.removing' : 'common.delete')}
+              </Button>
+            </div>
           </div>
-        ))}
-      </dl>
-      {plugin.market?.revokedReason !== undefined && (
-        <MarketRevokedNote reason={plugin.market.revokedReason} />
-      )}
-      <RequestedProviders
-        plugin={plugin}
-        adding={addingName}
-        onAddingChange={setAddingName}
-        onError={onError}
+        }
       />
-      <div>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={removing}
-          className="text-destructive hover:text-destructive"
-          onClick={() => void runRemove()}
-        >
-          {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
-          {t(removing ? 'settings.plugins.removing' : 'common.delete')}
-        </Button>
-      </div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   parseUiActionInput,
 } from '@shared/types/appPluginUi';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import type { PluginReadmeResult } from '@shared/types/plugins';
 import { notificationPreferencesOf } from '@shared/types/settings';
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from 'electron';
 import type {
@@ -41,6 +42,7 @@ import {
 import { getChannelHost } from '../services/channels/instance';
 import { freshCommandEnvironment } from '../services/commandNetwork';
 import { showDesktopNotification } from '../services/notifications/desktop';
+import { readPluginReadme } from '../services/plugins/pluginReadme';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { busyResult, exclusive, getPluginMarket, pluginCopyRoot } from './plugins';
 import { getSettingsFile } from './settings';
@@ -249,6 +251,19 @@ export function createAppPluginHandlers(deps: AppPluginHandlerDeps): Record<stri
         return normalizeUiActionResult(result);
       } catch (error) {
         return { ok: false, error: errorMessage(error) };
+      }
+    },
+    [IPC_CHANNELS.APP_PLUGINS_README]: async (_sender, raw): Promise<PluginReadmeResult> => {
+      const input = parseAppPluginIdInput(raw);
+      if (!input) return invalid();
+      try {
+        const record = (await deps.service().list()).find((item) => item.id === input.id);
+        if (!record) {
+          return { ok: false, code: 'not-found', error: translate('appPlugins.notFound') };
+        }
+        return await readPluginReadme(record.path);
+      } catch (error) {
+        return failed(error);
       }
     },
     [IPC_CHANNELS.APP_PLUGINS_OPEN_LINK]: async (_sender, raw): Promise<IpcResult> => {

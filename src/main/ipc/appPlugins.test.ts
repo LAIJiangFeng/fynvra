@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
 import { createPluginUiStore } from '../services/appPlugins/api/ui';
@@ -140,6 +143,32 @@ describe('appPlugins IPC', () => {
     expect(await call(IPC_CHANNELS.APP_PLUGINS_UI_GET, { id: 'fynvra.demo', x: 1 })).toEqual(
       invalid
     );
+  });
+
+  it('readme：按登记的 path 读取；非法或未知 id 返回错误', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fynvra-appreadme-'));
+    try {
+      await writeFile(join(dir, 'README.md'), '# Demo');
+      const { service, call } = setup();
+      Object.assign(service, { list: vi.fn(async () => [{ id: 'fynvra.demo', path: dir }]) });
+      expect(await call(IPC_CHANNELS.APP_PLUGINS_README, { id: 'fynvra.demo' })).toEqual({
+        ok: true,
+        text: '# Demo',
+      });
+      expect(await call(IPC_CHANNELS.APP_PLUGINS_README, { id: 'fynvra.other' })).toMatchObject({
+        ok: false,
+        code: 'not-found',
+      });
+      expect(
+        await call(IPC_CHANNELS.APP_PLUGINS_README, { id: 'fynvra.demo', path: '/x' })
+      ).toMatchObject({ ok: false, code: 'invalid' });
+      expect(await call(IPC_CHANNELS.APP_PLUGINS_README, 'fynvra.demo')).toMatchObject({
+        ok: false,
+        code: 'invalid',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('ui-action：入参收窄，转给插件的 ui.action 并带回结果', async () => {

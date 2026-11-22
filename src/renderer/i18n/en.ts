@@ -1437,6 +1437,13 @@ export const en: MessagesShape<typeof zhCN> = {
       imported: 'Imported {count} plugins',
       importFailedItems: '{done}; {count} failed: {items}',
       tabs: { installed: 'Installed', market: 'Marketplace' },
+      detailTabs: { readme: 'Guide', settings: 'Settings' },
+      readme: {
+        loading: 'Loading guide…',
+        none: 'This plugin does not provide a guide (README.md)',
+        tooLarge: 'The guide is too large to show (over 256 KB)',
+        failed: 'Failed to read the guide: {error}',
+      },
       market: {
         refresh: 'Refresh',
         lastUpdated: 'Last updated: {time}',
@@ -1467,7 +1474,6 @@ export const en: MessagesShape<typeof zhCN> = {
         noMatch: 'No matching plugins',
         back: 'Back to marketplace',
         readme: 'Readme',
-        readmeLoading: 'Loading readme…',
         noReadme: 'No readme',
         image: '[Image: {alt}]',
         version: 'Version',

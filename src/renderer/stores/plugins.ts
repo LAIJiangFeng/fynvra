@@ -1,7 +1,7 @@
 import { errorMessage } from '@shared/guards';
 import type { IpcResult } from '@shared/types/ipc';
 import type { MarketStateView } from '@shared/types/pluginMarket';
-import type { PluginEntry, PluginProviderMap } from '@shared/types/plugins';
+import type { PluginEntry, PluginProviderMap, PluginReadmeResult } from '@shared/types/plugins';
 import { create } from 'zustand';
 import type {
   PluginActionResult,
@@ -58,6 +58,8 @@ export interface PluginsState {
   /** id 是 plugins.json 里的 id */
   marketUpdate(id: string): Promise<PluginActionResult>;
   marketReadme(pluginId: string, version: string): Promise<PluginMarketReadmeResult>;
+  /** 只读已装插件目录里的 README.md */
+  readme(id: string): Promise<PluginReadmeResult>;
 }
 
 /** IPC 调用本身失败（极少见）也折成 { ok: false } */
@@ -217,6 +219,10 @@ export const usePluginsStore = create<PluginsState>()((set, get) => ({
   marketInstall: (pluginId, version) => safeAction(() => api.marketInstall({ pluginId, version })),
   marketUpdate: (id) => safeAction(() => api.marketUpdate({ id })),
   marketReadme: (pluginId, version) => safely(() => api.marketReadme({ pluginId, version })),
+  readme: (id) =>
+    api
+      .readme({ id })
+      .catch((error) => ({ ok: false, code: 'failed', error: errorMessage(error) }) as const),
 }));
 
 api.onChanged(() => {

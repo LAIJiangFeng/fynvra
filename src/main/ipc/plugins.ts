@@ -11,6 +11,7 @@ import {
   MAX_PLUGIN_IMPORT_IDS,
   MAX_REQUESTED_PROVIDERS,
   type PluginEntry,
+  type PluginReadmeResult,
   parseRemotePluginSource,
   type SetPluginManualProvidersInput,
   type SetPluginProviderMappingInput,
@@ -57,6 +58,7 @@ import {
   renameWithRetry,
   replaceCopy,
 } from '../services/plugins/pluginCopies';
+import { readPluginReadme } from '../services/plugins/pluginReadme';
 import { createPluginRegistry, type PluginRegistry } from '../services/plugins/pluginRegistry';
 import {
   legacyPluginDir,
@@ -319,6 +321,23 @@ export function registerPluginHandlers(): void {
           ok: false,
           error: translate('plugins.updateFailed', { error: errorMessage(error) }),
         };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS_README,
+    async (_event, raw: unknown): Promise<PluginReadmeResult> => {
+      const input = asRecord(raw);
+      if (!input || Object.keys(input).some((key) => key !== 'id') || !isRegistryId(input.id)) {
+        return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
+      }
+      try {
+        const plugin = await getPluginRegistry().get(input.id);
+        if (!plugin) return { ok: false, code: 'not-found', error: translate('plugins.notFound') };
+        return await readPluginReadme(plugin.path);
+      } catch (error) {
+        return { ok: false, code: 'failed', error: errorMessage(error) };
       }
     }
   );

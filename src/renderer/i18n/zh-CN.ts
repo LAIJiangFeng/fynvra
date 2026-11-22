@@ -1377,6 +1377,13 @@ export const zhCN = {
       imported: '已导入 {count} 个插件',
       importFailedItems: '{done}；{count} 个失败：{items}',
       tabs: { installed: '已安装', market: '市场' },
+      detailTabs: { readme: '使用说明', settings: '设置' },
+      readme: {
+        loading: '正在加载说明…',
+        none: '这个插件没有提供使用说明（README.md）',
+        tooLarge: '说明文档太大（超过 256 KB），不予显示',
+        failed: '读取说明文档失败：{error}',
+      },
       market: {
         refresh: '刷新',
         lastUpdated: '上次更新：{time}',
@@ -1406,7 +1413,6 @@ export const zhCN = {
         noMatch: '没有匹配的插件',
         back: '返回市场',
         readme: '说明',
-        readmeLoading: '正在加载说明…',
         noReadme: '没有说明文档',
         image: '[图片：{alt}]',
         version: '版本',

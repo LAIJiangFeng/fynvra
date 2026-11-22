@@ -1,6 +1,7 @@
 import type { AppPluginView } from '@shared/types/appPlugins';
 import type { PluginUi, UiActionInput, UiActionResult } from '@shared/types/appPluginUi';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
+import type { PluginReadmeResult } from '@shared/types/plugins';
 
 export type AppPluginListResult = IpcResult<{ plugins: AppPluginView[] }>;
 /** busy：已有插件安装 / 删除在进行（与 PI 插件共用串行锁）；canceled：取消了选择框 */
@@ -33,6 +34,8 @@ export interface AppPluginsApi {
   uiAction(input: UiActionInput): Promise<AppPluginUiActionResult>;
   /** 设置页里的 https 链接，在系统浏览器打开 */
   openLink(input: { id: string; url: string }): Promise<IpcResult>;
+  /** 只读插件包目录里的 README.md；没有时 code 为 none */
+  readme(input: { id: string }): Promise<PluginReadmeResult>;
   /** 某个插件的设置页描述变了（含被清掉） */
   onUiChanged(callback: (id: string) => void): () => void;
 }
@@ -53,6 +56,7 @@ export function createAppPluginsApi(ipc: Invoker, subscribe: Subscribe): AppPlug
     uiGet: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_UI_GET, input),
     uiAction: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_UI_ACTION, input),
     openLink: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_OPEN_LINK, input),
+    readme: (input) => ipc.invoke(IPC_CHANNELS.APP_PLUGINS_README, input),
     onUiChanged: (callback) =>
       subscribe(IPC_CHANNELS.APP_PLUGINS_UI_CHANGED, (payload) => {
         const id = (payload as { id?: unknown } | null)?.id;

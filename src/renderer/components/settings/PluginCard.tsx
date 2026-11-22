@@ -27,6 +27,50 @@ export function PluginAuthor({ name, note }: { name: string; note?: ReactNode })
   );
 }
 
+export interface PluginFaceProps {
+  icon: LucideIcon;
+  name: string;
+  badges?: ReactNode;
+  description: ReactNode;
+  extra?: ReactNode;
+  author: ReactNode;
+  actions?: ReactNode;
+}
+
+/**
+ * 详情页的标题区：与卡片用同一组属性（图标、名字、徽标、作者与版本、简介、附加区），
+ * 操作（更新、开关、「…」菜单）放右侧
+ */
+export function PluginHeader({
+  icon: Icon,
+  name,
+  badges,
+  description,
+  extra,
+  author,
+  actions,
+}: PluginFaceProps) {
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-start gap-3">
+        <span className="grid size-11 shrink-0 place-items-center rounded-lg border bg-muted">
+          <Icon className="size-5 text-muted-foreground" />
+        </span>
+        <div className="grid min-w-0 flex-1 gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="font-medium">{name}</h3>
+            {badges}
+          </div>
+          {author}
+        </div>
+        {actions && <div className="flex shrink-0 items-center gap-1.5 pt-0.5">{actions}</div>}
+      </div>
+      <div className="text-muted-foreground text-sm">{description}</div>
+      {extra && <div className="grid min-w-0 gap-2">{extra}</div>}
+    </div>
+  );
+}
+
 /**
  * 通用插件卡片（只负责展示）：图标 + 名字 + 徽标、两行简介、附加区、分隔线和底部（作者 / 操作）。
  * 传了 onOpen 时整张卡可点：用一个铺满卡片的透明 button 实现（不把开关、菜单嵌进 button 里），
@@ -41,16 +85,7 @@ export function PluginCard({
   author,
   actions,
   onOpen,
-}: {
-  icon: LucideIcon;
-  name: string;
-  badges?: ReactNode;
-  description: ReactNode;
-  extra?: ReactNode;
-  author: ReactNode;
-  actions?: ReactNode;
-  onOpen?: () => void;
-}) {
+}: PluginFaceProps & { onOpen?: () => void }) {
   return (
     <li
       className={cn(

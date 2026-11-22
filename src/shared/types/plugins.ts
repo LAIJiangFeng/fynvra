@@ -169,3 +169,11 @@ export function parseRemotePluginSource(
 const NPM_SPEC = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(?:@[\w.^~<>=*|+-]+)?$/i;
 /** `<host>/<path>[@ref]` */
 const GIT_SPEC = /^[a-z0-9][\w.-]*(?::\d+)?\/[\w.~/-]+(?:@[\w./-]+)?$/i;
+
+/**
+ * `plugins:readme` / `appplugins:readme` 的返回：插件目录里的 README.md 文本。
+ * none：单文件插件或目录里没有 README；too-large：超过 256 KB；failed 的 error 只带错误码，不带本机路径
+ */
+export type PluginReadmeResult =
+  | { ok: true; text: string }
+  | { ok: false; code: 'none' | 'too-large' | 'invalid' | 'not-found' | 'failed'; error: string };
