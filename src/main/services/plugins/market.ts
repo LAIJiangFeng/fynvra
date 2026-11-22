@@ -577,16 +577,13 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     return { ok: true, tmp, description: appManifest?.description };
   }
 
-  /** Fynvra 插件安装：只装官方插件，装进 fynvra-plugins/，登记并立即启用 */
+  /** Fynvra 插件安装：官方或已审核（com.fynvra.* 只留给官方，由 parseMarketIndex 把关），装进 fynvra-plugins/，登记并立即启用 */
   async function installApp(
     plugin: MarketPlugin,
     version: MarketVersion
   ): Promise<MarketInstallResult> {
-    if (plugin.tier !== 'official') {
-      return { ok: false, code: 'invalid', error: translate('appPlugins.officialOnly') };
-    }
     if (!appPlugins) {
-      return { ok: false, code: 'invalid', error: translate('appPlugins.officialOnly') };
+      return { ok: false, code: 'invalid', error: translate('appPlugins.unavailable') };
     }
     const existing = (await appPlugins.list()).find((entry) => entry.id === plugin.id);
     if (existing) {
@@ -648,7 +645,7 @@ export function createPluginMarket(deps: PluginMarketDeps): PluginMarket {
     }
     const plugin = ready.index.plugins.find((item) => item.id === entry.id);
     const latest = plugin && latestUsableVersion(ready.index, plugin);
-    if (plugin?.kind !== 'fynvra' || plugin.tier !== 'official') {
+    if (plugin?.kind !== 'fynvra') {
       return { ok: false, code: 'invalid', error: translate('plugins.marketNoUpdate') };
     }
     if (!latest || compareSemver(latest.version, entry.version) <= 0) {

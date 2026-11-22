@@ -285,7 +285,7 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
   },
   appPlugins: {
     notFound: 'Fynvra plugin not found',
-    officialOnly: 'Only official Fynvra plugins are supported for now',
+    unavailable: 'Fynvra plugins are unavailable right now',
     alreadyInstalled: '"{name}" is already installed',
     invalidManifest: 'Not a valid Fynvra plugin: {error}',
     installFailed: 'Failed to install the Fynvra plugin: {error}',
