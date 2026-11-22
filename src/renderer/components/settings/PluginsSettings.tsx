@@ -69,6 +69,7 @@ import {
 } from './PluginMarket';
 import { InstalledReadme, PluginDetailTabs } from './PluginReadme';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
+import { pluginSourceIconKind } from './pluginSource';
 import { draftFromCatalog, type ProviderDraft } from './providerForm';
 import { useSettingsViewStore } from './settingsViewStore';
 
@@ -423,7 +424,14 @@ function PluginFace({
       </span>
     ),
     author: (
-      <PluginAuthor name={marketView?.author ?? t(`settings.plugins.kinds.${plugin.kind}`)} />
+      <PluginAuthor
+        icon={pluginSourceIconKind({
+          kind: plugin.kind,
+          source: plugin.source,
+          tier: plugin.market?.tier,
+        })}
+        name={marketView?.author ?? t(`settings.plugins.kinds.${plugin.kind}`)}
+      />
     ),
     actions: (
       <>

@@ -30,6 +30,7 @@ import { marketViewOf } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid, PluginHeader } from './PluginCard';
 import { MarketRevokedNote, MarketTierBadge, MarketUpdateButton } from './PluginMarket';
 import { InstalledReadme, PluginDetailTabs } from './PluginReadme';
+import { pluginSourceIconKind } from './pluginSource';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -251,7 +252,16 @@ function AppPluginFace({
         {plugin.revokedReason !== undefined && <MarketRevokedNote reason={plugin.revokedReason} />}
       </>
     ),
-    author: <PluginAuthor name={authorName} note={plugin.version} />,
+    author: (
+      <PluginAuthor
+        icon={pluginSourceIconKind({
+          kind: plugin.source === 'local' ? 'local' : undefined,
+          tier: plugin.tier,
+        })}
+        name={authorName}
+        note={plugin.version}
+      />
+    ),
     actions: (
       <>
         {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}

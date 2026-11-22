@@ -45,6 +45,7 @@ import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { filterMarketPlugins, marketAction, marketNeedsRefresh } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
 import { ReadmeLoading, ReadmeView } from './PluginReadme';
+import { pluginSourceIconKind } from './pluginSource';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -361,6 +362,7 @@ function MarketCard({
       extra={plugin.revoked && <MarketRevokedNote reason={plugin.revoked.reason} />}
       author={
         <PluginAuthor
+          icon={pluginSourceIconKind({ tier: plugin.tier })}
           name={plugin.author}
           note={
             plugin.latest && t('settings.plugins.market.latest', { version: plugin.latest.version })
