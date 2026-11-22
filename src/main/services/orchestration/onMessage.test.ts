@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Message, Workspace } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOrchestrationRegistry, type OrchestrationRegistryOptions } from './registry';
+import {
+  createOrchestrationRegistry,
+  type OrchestrationRegistry,
+  type OrchestrationRegistryOptions,
+} from './registry';
 import { createFakeExec, createFakeLauncher, createFakeRoles } from './testing';
 
 // Task 24：桌面通知经 registry.onMessage 拿到收件箱新投递的消息（worker_done / question / escalation …）
@@ -11,8 +15,11 @@ import { createFakeExec, createFakeLauncher, createFakeRoles } from './testing';
 let dir: string;
 let WS1: Workspace;
 
+/** 本用例建出的所有 registry，afterEach 删目录前统一等它们写盘完成 */
+let registries: OrchestrationRegistry[] = [];
+
 function make(overrides: Partial<OrchestrationRegistryOptions> = {}) {
-  return createOrchestrationRegistry({
+  const registry = createOrchestrationRegistry({
     userDataPath: join(dir, 'userData'),
     listWorkspaces: () => [WS1],
     roles: createFakeRoles(),
@@ -23,6 +30,8 @@ function make(overrides: Partial<OrchestrationRegistryOptions> = {}) {
     log: () => {},
     ...overrides,
   });
+  registries.push(registry);
+  return registry;
 }
 
 /** 主 agent 派一个任务，返回 worker 会话 id（fake launcher 给的是 session_w1） */
@@ -48,10 +57,12 @@ beforeEach(() => {
     defaultBranch: 'main',
     vcs: 'git',
   };
+  registries = [];
 });
 
-afterEach(() => {
-  // Windows 上编排状态的异步写盘与删除竞争会报 ENOTEMPTY，加重试
+afterEach(async () => {
+  // 先等所有服务写盘完成，再删目录；重试只用于 Windows 句柄延迟释放
+  await Promise.all(registries.map((registry) => registry.flushAll()));
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
