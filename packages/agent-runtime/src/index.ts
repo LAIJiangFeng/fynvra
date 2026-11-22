@@ -116,6 +116,12 @@ export {
 } from './tools/readonlyTools';
 export { checkUrl as checkWebUrl, isBlockedAddress } from './tools/web/addressPolicy';
 export {
+  FetchError,
+  type FetchedPage,
+  type FetchOptions,
+  fetchPage,
+} from './tools/web/transport';
+export {
   createWebFetchTool,
   WEB_FETCH_TOOL_NAME,
   type WebFetchDetails,

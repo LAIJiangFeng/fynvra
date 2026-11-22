@@ -1,3 +1,6 @@
+import { asRecord } from '../guards';
+import { isMarketPluginId, isMarketVersion } from './pluginMarket';
+
 /** 插件来源类型：本地目录 / 扩展文件、经 pi 包管理器安装的 npm / git 包，或从插件市场安装 */
 export type PluginKind = 'local' | 'npm' | 'git' | 'market';
 
@@ -177,3 +180,59 @@ const GIT_SPEC = /^[a-z0-9][\w.-]*(?::\d+)?\/[\w.~/-]+(?:@[\w./-]+)?$/i;
 export type PluginReadmeResult =
   | { ok: true; text: string }
   | { ok: false; code: 'none' | 'too-large' | 'invalid' | 'not-found' | 'failed'; error: string };
+
+/** README 属于哪个插件：已装的 Fynvra / PI 插件按 id，市场按插件 id + 版本 */
+export type ReadmeSource =
+  | { kind: 'fynvra' | 'pi'; id: string }
+  | { kind: 'market'; pluginId: string; version: string };
+
+/** README 图片地址的长度上限（字符） */
+export const MAX_README_IMAGE_SRC = 2048;
+
+/** `plugins:readme-image` 的返回；code 只是错误码，不带本机路径 */
+export type PluginReadmeImageResult =
+  | { ok: true; dataUrl: string }
+  | {
+      ok: false;
+      code: 'invalid' | 'not-in-readme' | 'not-found' | 'unsupported' | 'too-large' | 'failed';
+    };
+
+function onlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(record).every((key) => keys.includes(key));
+}
+
+/** 收窄 ReadmeSource，拒绝多余键 */
+export function parseReadmeSource(raw: unknown): ReadmeSource | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const { kind } = record;
+  if (kind === 'fynvra' || kind === 'pi') {
+    if (!onlyKeys(record, ['kind', 'id'])) return null;
+    const valid = kind === 'pi' ? isRegistryId(record.id) : isMarketPluginId(record.id);
+    return valid ? { kind, id: record.id as string } : null;
+  }
+  if (kind === 'market' && onlyKeys(record, ['kind', 'pluginId', 'version'])) {
+    const { pluginId, version } = record;
+    return isMarketPluginId(pluginId) && isMarketVersion(version)
+      ? { kind, pluginId, version }
+      : null;
+  }
+  return null;
+}
+
+/** `plugins:readme-image` 入参：`{ source, src }`，src 非空且不超过 2048 字符，拒绝多余键 */
+export function parseReadmeImageInput(raw: unknown): { source: ReadmeSource; src: string } | null {
+  const record = asRecord(raw);
+  if (!record || !onlyKeys(record, ['source', 'src'])) return null;
+  const source = parseReadmeSource(record.source);
+  const { src } = record;
+  if (!source || typeof src !== 'string' || !src || src.length > MAX_README_IMAGE_SRC) return null;
+  return { source, src };
+}
+
+/** README 缓存与图片缓存的键 */
+export function readmeSourceKey(source: ReadmeSource): string {
+  return source.kind === 'market'
+    ? `market:${source.pluginId}@${source.version}`
+    : `${source.kind}:${source.id}`;
+}

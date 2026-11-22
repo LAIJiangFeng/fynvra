@@ -15,5 +15,8 @@ describe('插件领域的 preload API', () => {
     expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.APP_PLUGINS_README, {
       id: 'fynvra.demo',
     });
+    const input = { source: { kind: 'pi' as const, id: 'demo' }, src: 'logo.png' };
+    await createPluginsApi(ipc, subscribe).readmeImage(input);
+    expect(invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.PLUGINS_README_IMAGE, input);
   });
 });

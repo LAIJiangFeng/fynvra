@@ -1443,6 +1443,7 @@ export const en: MessagesShape<typeof zhCN> = {
         none: 'This plugin does not provide a guide (README.md)',
         tooLarge: 'The guide is too large to show (over 256 KB)',
         failed: 'Failed to read the guide: {error}',
+        image: 'Image',
       },
       market: {
         refresh: 'Refresh',
@@ -1475,7 +1476,6 @@ export const en: MessagesShape<typeof zhCN> = {
         back: 'Back to marketplace',
         readme: 'Readme',
         noReadme: 'No readme',
-        image: '[Image: {alt}]',
         version: 'Version',
         publishedAt: 'Published',
         changelog: 'Changelog',

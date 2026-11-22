@@ -231,6 +231,11 @@ export const IPC_CHANNELS = {
   PLUGINS_MARKET_README: 'plugins:market-readme',
   /** `{ id }`（plugins.json 里的 id）：只读插件目录里的 README.md → `PluginReadmeResult` */
   PLUGINS_README: 'plugins:readme',
+  /**
+   * `{ source, src }`：加载 README 里的一张图片 → `PluginReadmeImageResult`（data URL）。
+   * src 必须原样出现在该 source 最近读到的 README 里；相对路径读插件目录，https 由 Main 下载
+   */
+  PLUGINS_README_IMAGE: 'plugins:readme-image',
   /** Main → Renderer：插件列表已变更 */
   PLUGINS_CHANGED: 'plugins:changed',
 

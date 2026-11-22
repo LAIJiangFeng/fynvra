@@ -1383,6 +1383,7 @@ export const zhCN = {
         none: '这个插件没有提供使用说明（README.md）',
         tooLarge: '说明文档太大（超过 256 KB），不予显示',
         failed: '读取说明文档失败：{error}',
+        image: '图片',
       },
       market: {
         refresh: '刷新',
@@ -1414,7 +1415,6 @@ export const zhCN = {
         back: '返回市场',
         readme: '说明',
         noReadme: '没有说明文档',
-        image: '[图片：{alt}]',
         version: '版本',
         publishedAt: '发布时间',
         changelog: '更新日志',

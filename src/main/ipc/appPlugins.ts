@@ -43,6 +43,7 @@ import { getChannelHost } from '../services/channels/instance';
 import { freshCommandEnvironment } from '../services/commandNetwork';
 import { showDesktopNotification } from '../services/notifications/desktop';
 import { readPluginReadme } from '../services/plugins/pluginReadme';
+import { rememberReadme } from '../services/plugins/readmeImages';
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { busyResult, exclusive, getPluginMarket, pluginCopyRoot } from './plugins';
 import { getSettingsFile } from './settings';
@@ -261,7 +262,9 @@ export function createAppPluginHandlers(deps: AppPluginHandlerDeps): Record<stri
         if (!record) {
           return { ok: false, code: 'not-found', error: translate('appPlugins.notFound') };
         }
-        return await readPluginReadme(record.path);
+        const result = await readPluginReadme(record.path);
+        if (result.ok) rememberReadme({ kind: 'fynvra', id: input.id }, result.text);
+        return result;
       } catch (error) {
         return failed(error);
       }
