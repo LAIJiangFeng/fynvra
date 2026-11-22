@@ -7,6 +7,6 @@ export function profileLanguagePrompt(language: string): string {
   return `# Output language
 
 Write everything you author in ${language}: your messages in this conversation (including notes before and after tool calls), the \`title\`, \`summary\`, \`evidence\` and \`assessment\` of triage_report, and, in a duty session, dispatch briefs, commit message bodies, and pull request titles and bodies.
-Exception: the \`reply\` of triage_report (posted to the group) still follows the triage rules and uses the reporter's own language.
+Exception: the \`reply\` of triage_report (posted to the chat) still follows the triage rules and uses the reporter's own language.
 Keep code, commands, file paths and identifiers as they are; do not translate them.`;
 }

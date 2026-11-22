@@ -1,11 +1,19 @@
-// 每个工作区一个干净检出（ARCHITECTURE §7.14「会话」）：只含 origin/<默认分支> 已提交文件的 detached worktree。
+// 每个工作区、每个渠道插件一个干净检出（ARCHITECTURE §7.14「会话」）：只含 origin/<默认分支> 已提交文件的 detached worktree。
 // 只用远端引用，不用本地分支，免得把用户没推送的提交暴露给分诊。
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { isMarketPluginId } from '@shared/types/pluginMarket';
 import type { Workspace } from '@shared/types/workspace';
 
-export const CLEAN_CHECKOUT_DIR = 'telegram-clean';
+// Telegram 插件沿用旧目录名：已有分诊会话的 cwd 记录的就是它，改名会让它们读到过期的检出
+export const TELEGRAM_CLEAN_CHECKOUT_DIR = 'telegram-clean';
+
+/** 插件的干净检出目录名；pluginId 不合规时抛错，不拼进路径 */
+export function cleanCheckoutDir(pluginId: string): string {
+  if (!isMarketPluginId(pluginId)) throw new Error('invalid plugin id');
+  return pluginId === 'com.fynvra.telegram' ? TELEGRAM_CLEAN_CHECKOUT_DIR : `clean-${pluginId}`;
+}
 /** 每个工作区 fetch 的最小间隔 */
 export const FETCH_INTERVAL_MS = 10 * 60_000;
 
@@ -38,16 +46,22 @@ export interface CleanCheckoutDeps {
 }
 
 export interface CleanCheckout {
-  /** `<worktreesRoot>/<workspaceId>/telegram-clean` */
-  pathOf(workspace: Workspace): Promise<string>;
+  /** `<worktreesRoot>/<workspaceId>/<cleanCheckoutDir(pluginId)>` */
+  pathOf(workspace: Workspace, pluginId: string): Promise<string>;
   /** origin/<默认分支> 的提交；不是 git 工作区、没有默认分支或远端引用不存在时返回错误 */
   originCommit(
     workspace: Workspace
   ): Promise<{ ok: true; commit: string } | { ok: false; error: string }>;
   /** 不存在就用 `git worktree add --detach` 建出来，返回路径 */
-  ensure(workspace: Workspace): Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+  ensure(
+    workspace: Workspace,
+    pluginId: string
+  ): Promise<{ ok: true; path: string } | { ok: false; error: string }>;
   /** 尽力 fetch（限频，失败不阻断），再切到 origin/<默认分支> 并清掉未跟踪文件 */
-  refresh(workspace: Workspace): Promise<{ ok: true } | { ok: false; error: string }>;
+  refresh(
+    workspace: Workspace,
+    pluginId: string
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /** 检出时不跑 hooks（post-checkout 等）：指向一个不存在的目录 */
@@ -65,8 +79,8 @@ export function createCleanCheckout(deps: CleanCheckoutDeps): CleanCheckout {
   const now = deps.now ?? Date.now;
   const lastFetch = new Map<string, number>();
 
-  const pathOf = async (workspace: Workspace) =>
-    join(await deps.worktreesRoot(workspace), workspace.id, CLEAN_CHECKOUT_DIR);
+  const pathOf = async (workspace: Workspace, pluginId: string) =>
+    join(await deps.worktreesRoot(workspace), workspace.id, cleanCheckoutDir(pluginId));
 
   const branchOf = (workspace: Workspace): string | undefined =>
     workspace.vcs === 'git' &&
@@ -91,10 +105,11 @@ export function createCleanCheckout(deps: CleanCheckoutDeps): CleanCheckout {
     return { ok: true, commit };
   };
 
-  const ensure: CleanCheckout['ensure'] = async (workspace) => {
+  const ensure: CleanCheckout['ensure'] = async (workspace, pluginId) => {
+    if (!isMarketPluginId(pluginId)) return { ok: false, error: 'invalid plugin id' };
     const origin = await originCommit(workspace);
     if (!origin.ok) return origin;
-    const path = await pathOf(workspace);
+    const path = await pathOf(workspace, pluginId);
     if (exists(path)) return { ok: true, path };
     // 目录被删掉时先清掉 git 里残留的登记
     await git(['worktree', 'prune'], { cwd: workspace.repoPath });
@@ -109,7 +124,8 @@ export function createCleanCheckout(deps: CleanCheckoutDeps): CleanCheckout {
     pathOf,
     originCommit,
     ensure,
-    async refresh(workspace) {
+    async refresh(workspace, pluginId) {
+      if (!isMarketPluginId(pluginId)) return { ok: false, error: 'invalid plugin id' };
       const branch = branchOf(workspace);
       if (!branch) return { ok: false, error: 'workspace has no default branch' };
       const last = lastFetch.get(workspace.id);
@@ -122,7 +138,7 @@ export function createCleanCheckout(deps: CleanCheckoutDeps): CleanCheckout {
           timeoutMs: 120_000,
         });
       }
-      const ensured = await ensure(workspace);
+      const ensured = await ensure(workspace, pluginId);
       if (!ensured.ok) return ensured;
       const checkout = await git(
         [...noHooks(ensured.path), 'checkout', '--detach', '--force', remoteRef(branch)],

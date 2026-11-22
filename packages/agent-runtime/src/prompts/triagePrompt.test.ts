@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RESTRICTED_COORDINATOR_PROMPT } from './restrictedPrompt';
 import { TRIAGE_PROMPT } from './triagePrompt';
 
 describe('TRIAGE_PROMPT', () => {
@@ -27,5 +28,13 @@ describe('TRIAGE_PROMPT', () => {
 
   it('用反馈者的语言回复', () => {
     expect(TRIAGE_PROMPT).toContain("Reply in the reporter's language");
+  });
+
+  it('分诊与值班提示词不写死平台，群聊私聊都适用', () => {
+    for (const prompt of [TRIAGE_PROMPT, RESTRICTED_COORDINATOR_PROMPT]) {
+      expect(prompt).not.toMatch(/Telegram (group|duty)/);
+    }
+    expect(TRIAGE_PROMPT).toContain('a private chat with the bot');
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain('# Restricted session (chat feedback duty)');
   });
 });
