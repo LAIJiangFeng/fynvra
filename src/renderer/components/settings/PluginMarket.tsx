@@ -6,7 +6,16 @@ import {
   type MarketTier,
   type PluginKind,
 } from '@shared/types/pluginMarket';
-import { ArrowLeft, ExternalLink, Loader2, PackagePlus, RefreshCw, Store } from 'lucide-react';
+import {
+  ArrowLeft,
+  Blocks,
+  ExternalLink,
+  Loader2,
+  PackagePlus,
+  Puzzle,
+  RefreshCw,
+  Store,
+} from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import type { Components } from 'react-markdown';
 import { Markdown } from '@/components/chat/Markdown';
@@ -36,6 +45,7 @@ import { usePluginsStore } from '@/stores/plugins';
 import { useRolesStore } from '@/stores/roles';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { filterMarketPlugins, marketAction, marketNeedsRefresh } from './marketView';
+import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
 
 type Status = { tone: 'error' | 'success'; text: string };
 
@@ -263,7 +273,7 @@ export function PluginMarketTab() {
                 )}
               />
             ) : (
-              <ul className="divide-y rounded-lg border">
+              <PluginGrid>
                 {shown.map((plugin) => (
                   <MarketCard
                     key={plugin.id}
@@ -278,7 +288,7 @@ export function PluginMarketTab() {
                     }}
                   />
                 ))}
-              </ul>
+              </PluginGrid>
             )}
           </>
         )}
@@ -338,30 +348,28 @@ function MarketCard({
 }) {
   const t = useT();
   return (
-    <li className="flex items-start gap-3 px-4 py-3">
-      <button
-        type="button"
-        className="min-w-0 flex-1 rounded text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        onClick={onOpen}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-sm hover:underline">{plugin.name}</span>
+    <PluginCard
+      icon={plugin.kind === 'fynvra' ? Blocks : Puzzle}
+      name={plugin.name}
+      onOpen={onOpen}
+      badges={
+        <>
           <MarketTierBadge tier={plugin.tier} />
           <MarketKindBadge kind={plugin.kind} />
-          {plugin.latest && (
-            <span className="text-muted-foreground text-xs">
-              {t('settings.plugins.market.latest', { version: plugin.latest.version })}
-            </span>
-          )}
-        </div>
-        <p className="text-muted-foreground text-xs">
-          {t('settings.plugins.market.by', { author: plugin.author })}
-        </p>
-        <p className="mt-0.5 line-clamp-2 text-muted-foreground text-sm">{plugin.description}</p>
-        {plugin.revoked && <MarketRevokedNote reason={plugin.revoked.reason} />}
-      </button>
-      <MarketActionButton plugin={plugin} onInstall={onInstall} />
-    </li>
+        </>
+      }
+      description={plugin.description}
+      extra={plugin.revoked && <MarketRevokedNote reason={plugin.revoked.reason} />}
+      author={
+        <PluginAuthor
+          name={plugin.author}
+          note={
+            plugin.latest && t('settings.plugins.market.latest', { version: plugin.latest.version })
+          }
+        />
+      }
+      actions={<MarketActionButton plugin={plugin} onInstall={onInstall} />}
+    />
   );
 }
 

@@ -1,8 +1,15 @@
 import type { AppPluginStatus, AppPluginView } from '@shared/types/appPlugins';
-import { FolderPlus, Loader2, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { Blocks, Ellipsis, FolderPlus, Loader2, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { confirmDialog } from '@/lib/appDialog';
@@ -10,6 +17,7 @@ import { useAppPluginsStore } from '@/stores/appPlugins';
 import { usePluginsStore } from '@/stores/plugins';
 import { InlineMessage, SectionHeader } from './common';
 import { marketViewOf } from './marketView';
+import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
 import { MarketRevokedNote, MarketTierBadge, MarketUpdateButton } from './PluginMarket';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -76,17 +84,17 @@ export function AppPluginsSection({ onOpen }: { onOpen: (id: string) => void }) 
           {t('settings.plugins.app.empty')}
         </p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <PluginGrid>
           {plugins.map((plugin) => (
-            <AppPluginRow key={plugin.id} plugin={plugin} onOpen={onOpen} onStatus={setStatus} />
+            <AppPluginCard key={plugin.id} plugin={plugin} onOpen={onOpen} onStatus={setStatus} />
           ))}
-        </ul>
+        </PluginGrid>
       )}
     </section>
   );
 }
 
-function AppPluginRow({
+function AppPluginCard({
   plugin,
   onOpen,
   onStatus,
@@ -105,6 +113,7 @@ function AppPluginRow({
   const t = useT();
   const newVersion =
     marketView?.updateAvailable && marketView.latest ? marketView.latest.version : null;
+  const hasUi = hasAppPluginUi(plugin);
   const onError = (text: string) => onStatus({ tone: 'error', text });
 
   const runRemove = async () => {
@@ -134,12 +143,20 @@ function AppPluginRow({
     onStatus({ tone: 'success', text: t('settings.plugins.recopied', { name: plugin.name }) });
   };
 
+  const authorName =
+    plugin.tier === 'official'
+      ? t('settings.plugins.app.official')
+      : plugin.source === 'local'
+        ? t('settings.plugins.app.localDev')
+        : (marketView?.author ?? t('settings.plugins.kinds.market'));
+
   return (
-    <li className="flex items-start gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-sm">{plugin.name}</span>
-          <span className="text-muted-foreground text-xs">{plugin.version}</span>
+    <PluginCard
+      icon={Blocks}
+      name={plugin.name}
+      onOpen={hasUi ? () => onOpen(plugin.id) : undefined}
+      badges={
+        <>
           {plugin.tier ? (
             <MarketTierBadge tier={plugin.tier} />
           ) : (
@@ -153,55 +170,77 @@ function AppPluginRow({
               {t('settings.plugins.market.updateAvailable', { version: newVersion })}
             </span>
           )}
-        </div>
-        {plugin.lastError && (
-          <InlineMessage tone="error" className="mt-1 break-all">
-            {plugin.lastError}
-          </InlineMessage>
-        )}
-        {plugin.revokedReason !== undefined && <MarketRevokedNote reason={plugin.revokedReason} />}
-      </div>
-      {hasAppPluginUi(plugin) && (
-        <Button size="sm" variant="outline" onClick={() => onOpen(plugin.id)}>
-          <Settings2 />
-          {t('settings.plugins.app.settings')}
-        </Button>
-      )}
-      {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}
-      <Switch
-        className="mt-1"
-        checked={plugin.enabled}
-        disabled={busy}
-        aria-label={t('common.enableItem', { name: plugin.name })}
-        onCheckedChange={async (enabled) => {
-          setBusy(true);
-          const result = await toggle(plugin.id, enabled);
-          setBusy(false);
-          if (!result.ok) onError(result.error);
-        }}
-      />
-      {plugin.source === 'local' && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          disabled={busy}
-          aria-label={t('settings.plugins.app.recopy')}
-          title={t('settings.plugins.app.recopy')}
-          onClick={() => void runRecopy()}
-        >
-          <RefreshCw />
-        </Button>
-      )}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        disabled={busy}
-        aria-label={t('common.deleteItem', { name: plugin.name })}
-        className="text-destructive hover:text-destructive"
-        onClick={() => void runRemove()}
-      >
-        {busy ? <Loader2 className="animate-spin" /> : <Trash2 />}
-      </Button>
-    </li>
+        </>
+      }
+      description={
+        plugin.description ??
+        marketView?.description ??
+        t('settings.plugins.app.fallbackDescription', { version: plugin.version })
+      }
+      extra={
+        (plugin.lastError || plugin.revokedReason !== undefined) && (
+          <>
+            {plugin.lastError && (
+              <InlineMessage tone="error" className="break-all">
+                {plugin.lastError}
+              </InlineMessage>
+            )}
+            {plugin.revokedReason !== undefined && (
+              <MarketRevokedNote reason={plugin.revokedReason} />
+            )}
+          </>
+        )
+      }
+      author={<PluginAuthor name={authorName} note={plugin.version} />}
+      actions={
+        <>
+          {newVersion && <MarketUpdateButton id={plugin.id} kind="fynvra" />}
+          <Switch
+            checked={plugin.enabled}
+            disabled={busy}
+            aria-label={t('common.enableItem', { name: plugin.name })}
+            onCheckedChange={async (enabled) => {
+              setBusy(true);
+              const result = await toggle(plugin.id, enabled);
+              setBusy(false);
+              if (!result.ok) onError(result.error);
+            }}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              disabled={busy}
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t('settings.plugins.moreActions', { name: plugin.name })}
+                />
+              }
+            >
+              {busy ? <Loader2 className="animate-spin" /> : <Ellipsis />}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {hasUi && (
+                <DropdownMenuItem onClick={() => onOpen(plugin.id)}>
+                  <Settings2 />
+                  {t('settings.plugins.app.settings')}
+                </DropdownMenuItem>
+              )}
+              {plugin.source === 'local' && (
+                <DropdownMenuItem onClick={() => void runRecopy()}>
+                  <RefreshCw />
+                  {t('settings.plugins.app.recopy')}
+                </DropdownMenuItem>
+              )}
+              {(hasUi || plugin.source === 'local') && <DropdownMenuSeparator />}
+              <DropdownMenuItem variant="destructive" onClick={() => void runRemove()}>
+                <Trash2 />
+                {t('common.delete')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    />
   );
 }
