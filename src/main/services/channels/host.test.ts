@@ -58,7 +58,7 @@ function harness(patch: Partial<ChannelHostDeps> = {}) {
           apiKey: 'sk-secret',
           baseUrl: 'https://x',
           models: [
-            { id: 'm1', name: 'Model One', thinkingLevels: ['low'] },
+            { id: 'm1', name: 'Model One', thinkingLevels: ['off', 'low'], defaultThinking: 'low' },
             { id: 'm2', name: '', thinkingLevels: [] },
           ],
         },
@@ -74,6 +74,12 @@ function harness(patch: Partial<ChannelHostDeps> = {}) {
       ok: true as const,
       model: { providerId: 'p1', modelId: profile === 'triage' ? 'default' : 'orch' },
     })),
+    // 模拟 agentHost.checkThinking：m1 支持 off/low，其余只接受 off
+    checkThinking: vi.fn(async (ref: { modelId: string }, thinking: string) =>
+      (ref.modelId === 'm1' ? ['off', 'low'] : ['off']).includes(thinking)
+        ? { ok: true as const }
+        : { ok: false as const, error: `model does not support thinking ${thinking}` }
+    ),
     get: (id: string) => sessions.get(id),
     observe: (observer: SessionObserver) => {
       observers.push(observer);
@@ -454,13 +460,20 @@ describe('事件', () => {
 });
 
 describe('模型', () => {
-  it('models 只给服务 id、服务名、模型 id 与显示名，不带 key 与 baseUrl', async () => {
+  it('models 只给服务 id、服务名、模型 id、显示名与档位，不带 key 与 baseUrl', async () => {
     const h = harness();
     const result = await h.host.models();
     expect(result).toEqual({
       models: [
-        { providerId: 'p1', providerName: 'Prov', modelId: 'm1', label: 'Model One' },
-        { providerId: 'p1', providerName: 'Prov', modelId: 'm2', label: 'm2' },
+        {
+          providerId: 'p1',
+          providerName: 'Prov',
+          modelId: 'm1',
+          label: 'Model One',
+          thinkingLevels: ['off', 'low'],
+          defaultThinking: 'low',
+        },
+        { providerId: 'p1', providerName: 'Prov', modelId: 'm2', label: 'm2', thinkingLevels: [] },
       ],
     });
     expect(JSON.stringify(result)).not.toMatch(/sk-secret|https:\/\/x/);
@@ -520,5 +533,63 @@ describe('模型', () => {
     await expect(
       h.host.setSessionModel('p.a', sessionId, { providerId: 'p1', modelId: 'm1' })
     ).rejects.toThrow('cannot switch while running');
+  });
+
+  it('带 thinking：支持时一并交给 agentHost，不支持时报错且不建会话、不换模型', async () => {
+    const h = harness();
+    await h.host.start();
+    const base = { workspaceId: 'ws1', profile: 'triage' as const, title: 't' };
+    const { sessionId } = await h.host.createSession('p.a', {
+      ...base,
+      model: { providerId: 'p1', modelId: 'm1', thinking: 'low' },
+    });
+    expect(h.agentHost.checkThinking).toHaveBeenCalledWith(
+      { providerId: 'p1', modelId: 'm1', thinking: 'low' },
+      'low'
+    );
+    expect(h.created[0]).toMatchObject({
+      model: { providerId: 'p1', modelId: 'm1', thinking: 'low' },
+    });
+
+    await expect(
+      h.host.createSession('p.a', {
+        ...base,
+        model: { providerId: 'p1', modelId: 'm2', thinking: 'high' },
+      })
+    ).rejects.toThrow('does not support thinking high');
+    expect(h.created).toHaveLength(1);
+
+    await h.host.setSessionModel('p.a', sessionId, {
+      providerId: 'p1',
+      modelId: 'm2',
+      thinking: 'off',
+    });
+    expect(h.agentHost.setModel).toHaveBeenLastCalledWith({
+      sessionId,
+      model: { providerId: 'p1', modelId: 'm2', thinking: 'off' },
+    });
+    h.agentHost.setModel.mockClear();
+    await expect(
+      h.host.setSessionModel('p.a', sessionId, { providerId: 'p1', modelId: 'm1', thinking: 'max' })
+    ).rejects.toThrow('does not support thinking max');
+    expect(h.agentHost.setModel).not.toHaveBeenCalled();
+  });
+
+  it('不带 thinking 时不校验档位，交给 agentHost 的引用里也没有 thinking', async () => {
+    const h = harness();
+    await h.host.start();
+    const { sessionId } = await h.host.createSession('p.a', {
+      workspaceId: 'ws1',
+      profile: 'triage',
+      title: 't',
+      model: { providerId: 'p1', modelId: 'm1' },
+    });
+    expect((h.created[0] as { model: object }).model).toEqual({ providerId: 'p1', modelId: 'm1' });
+    await h.host.setSessionModel('p.a', sessionId, { providerId: 'p1', modelId: 'm2' });
+    expect(h.agentHost.setModel).toHaveBeenLastCalledWith({
+      sessionId,
+      model: { providerId: 'p1', modelId: 'm2' },
+    });
+    expect(h.agentHost.checkThinking).not.toHaveBeenCalled();
   });
 });
