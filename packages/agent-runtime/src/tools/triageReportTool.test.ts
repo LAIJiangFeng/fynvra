@@ -25,6 +25,20 @@ describe('parseTriageReport', () => {
     expect(parseTriageReport({ ...base, reply })).toContain('too long');
   });
 
+  it('keeps a trimmed project, drops a blank one, refuses bad types and long names', () => {
+    expect(parseTriageReport({ ...base, project: '  web-app ' })).toEqual({
+      ...base,
+      project: 'web-app',
+    });
+    expect(parseTriageReport({ ...base, project: '   ' })).toEqual(base);
+    expect(parseTriageReport({ ...base, project: 3 })).toContain('project must be a string');
+    const long = 'p'.repeat(TRIAGE_LIMITS.project + 1);
+    expect(parseTriageReport({ ...base, project: long })).toContain('project is too long');
+    expect(
+      parseTriageReport({ ...base, project: 'p'.repeat(TRIAGE_LIMITS.project) })
+    ).toMatchObject({ project: 'p'.repeat(TRIAGE_LIMITS.project) });
+  });
+
   it('allows needInfo only for bugs and features', () => {
     expect(parseTriageReport({ ...base, kind: 'question', needInfo: true })).toContain('only for');
     expect(parseTriageReport({ ...base, kind: 'invalid', needInfo: true })).toContain('only for');

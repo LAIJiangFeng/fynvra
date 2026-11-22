@@ -310,6 +310,8 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
   if (homepage !== undefined && !isHttpsUrl(homepage)) return null;
   if (!MARKET_CATEGORIES.includes(category as MarketCategory)) return null;
   if (!MARKET_TIERS.includes(tier as MarketTier)) return null;
+  // legacy.* 等 API 按 com.fynvra.* 的 id 授权，这个命名空间只留给官方
+  if (id.startsWith('com.fynvra.') && tier !== 'official') return null;
   const kind = record.kind ?? 'pi';
   if (!PLUGIN_KINDS.includes(kind as PluginKind)) return null;
   if (!Array.isArray(tags) || tags.length > 10 || !tags.every((tag) => isText(tag, 1, 32))) {

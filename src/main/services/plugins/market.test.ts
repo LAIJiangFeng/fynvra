@@ -528,20 +528,33 @@ describe('Fynvra 插件分流', () => {
     });
   });
 
-  it('Fynvra 插件但 tier 为 reviewed：拒绝且不下载', async () => {
-    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier: 'reviewed' });
-    const app = appStack();
-    const market = makeMarket({ appPlugins: app.service });
+  it('已审核的第三方 Fynvra 插件可以安装和更新', async () => {
+    const { app, market } = await installedApp('reviewed');
+    expect(await app.appRegistry.get(ID)).toMatchObject({ tier: 'reviewed', enabled: true });
+    publish(
+      [
+        { version: '1.0.0', zip: appZip('1.0.0') },
+        { version: '1.1.0', zip: appZip('1.1.0') },
+      ],
+      { kind: 'fynvra', tier: 'reviewed', sequence: 2 }
+    );
+    await market.refresh({ force: true });
+    const result = await market.updateApp({ id: ID });
+    expect(result).toMatchObject({ ok: true, plugin: { version: '1.1.0', tier: 'reviewed' } });
+  });
+
+  it('没有 Fynvra 插件服务时拒绝且不下载', async () => {
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier: 'official' });
+    const market = makeMarket();
     await market.refresh();
     http.mockClear();
     const result = await market.install({ pluginId: ID, version: '1.0.0' });
     expect(result).toEqual({
       ok: false,
       code: 'invalid',
-      error: translate('appPlugins.officialOnly'),
+      error: translate('appPlugins.unavailable'),
     });
     expect(http).not.toHaveBeenCalled();
-    expect(await app.appRegistry.list()).toEqual([]);
   });
 
   const badPackages: [string, string, Uint8Array, string][] = [
@@ -571,8 +584,8 @@ describe('Fynvra 插件分流', () => {
     });
   }
 
-  async function installedApp() {
-    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier: 'official' });
+  async function installedApp(tier: 'official' | 'reviewed' = 'official') {
+    publish([{ version: '1.0.0', zip: appZip('1.0.0') }], { kind: 'fynvra', tier });
     const app = appStack();
     const market = makeMarket({ appPlugins: app.service });
     await market.refresh();

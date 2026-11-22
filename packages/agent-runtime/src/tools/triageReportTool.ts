@@ -15,6 +15,7 @@ export const TRIAGE_LIMITS = {
   reply: 3_000,
   evidence: 4_000,
   assessment: 4_000,
+  project: 100,
 } as const;
 
 export interface TriageReport {
@@ -25,6 +26,8 @@ export interface TriageReport {
   evidence?: string;
   assessment?: string;
   needInfo?: boolean;
+  /** 转交给本群绑定的另一个项目时填它的项目名（已 trim）；填了以后 reply 不发到群里 */
+  project?: string;
 }
 
 /** triage_report 背后的 Main 宿主（host-invoke kind 'telegram'，method 'triageReport'）；agent 进程内不发任何消息 */
@@ -61,6 +64,11 @@ const triageSchema = Type.Object(
           'true when a bug cannot be located yet, or a feature request is too unclear to assess, and reply asks for the missing details.',
       })
     ),
+    project: Type.Optional(
+      Type.String({
+        description: `Only when the delivered message lists other projects bound to this group and the feedback clearly belongs to one of them rather than to this repository: that project's name, exactly as listed (max ${TRIAGE_LIMITS.project}). Omit it in every other case. When set, this reply is not posted to the group; the feedback is handed over to that project's triage instead.`,
+      })
+    ),
   },
   { additionalProperties: false }
 );
@@ -90,6 +98,15 @@ export function parseTriageReport(raw: unknown): TriageReport | string {
       return 'needInfo is only for kind "bug" or "feature"';
     }
     report.needInfo = args.needInfo;
+  }
+  if (args.project !== undefined) {
+    if (typeof args.project !== 'string') return 'project must be a string';
+    const project = args.project.trim();
+    if (project.length > TRIAGE_LIMITS.project) {
+      return `project is too long (${project.length} characters, max ${TRIAGE_LIMITS.project})`;
+    }
+    // 只有空白时当作没填
+    if (project !== '') report.project = project;
   }
   return report;
 }

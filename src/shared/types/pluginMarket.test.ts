@@ -97,6 +97,23 @@ describe('parseMarketIndex', () => {
     expect(parsed?.revoked).toEqual([]);
   });
 
+  it('com.fynvra.* 只留给官方：非官方条目只丢这一项', () => {
+    const parsed = parseMarketIndex(
+      index({
+        plugins: [
+          plugin({ id: 'com.fynvra.telegram', kind: 'fynvra' }),
+          plugin({ id: 'com.fynvra.fake', kind: 'fynvra', tier: 'reviewed' }),
+          plugin({ id: 'acme.bot', kind: 'fynvra', tier: 'reviewed' }),
+        ],
+      }),
+      '1.0.0'
+    );
+    expect(parsed?.plugins.map((p) => [p.id, p.tier])).toEqual([
+      ['com.fynvra.telegram', 'official'],
+      ['acme.bot', 'reviewed'],
+    ]);
+  });
+
   it('顶层不合法返回 null', () => {
     expect(parseMarketIndex(null, '1.0.0')).toBeNull();
     expect(parseMarketIndex(index({ schemaVersion: 2 }), '1.0.0')).toBeNull();

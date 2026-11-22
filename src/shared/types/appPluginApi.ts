@@ -80,7 +80,26 @@ export interface ChannelOrchestrationEvent {
   workspaceId: string;
 }
 
-/** 宿主调插件 `channel.report` 的入参：本插件 triage 会话里的 triage_report 等调用（input 未收窄） */
+/**
+ * `method === 'triageReport'` 时 `channel.report` 的 input：agent-runtime 的 parseTriageReport 已校验，
+ * Main 原样透传（插件仍应按 unknown 收窄）
+ */
+export interface ChannelTriageReport {
+  kind: 'bug' | 'feature' | 'question' | 'invalid';
+  title: string;
+  summary: string;
+  reply: string;
+  evidence?: string;
+  assessment?: string;
+  needInfo?: boolean;
+  /**
+   * 反馈属于本群绑定的另一个项目时是该项目名（已 trim，1–100 字符）：插件不把 reply 发到群里，
+   * 而是把这条反馈转给那个项目的分诊会话（最多转一次）
+   */
+  project?: string;
+}
+
+/** 宿主调插件 `channel.report` 的入参：本插件 triage 会话里的 triage_report 等调用（input 未收窄，triageReport 见 ChannelTriageReport） */
 export interface ChannelReportCall {
   sessionId: string;
   method: string;

@@ -268,7 +268,7 @@ export const mainZhCN = {
   },
   appPlugins: {
     notFound: 'Fynvra 插件不存在',
-    officialOnly: 'Fynvra 插件目前只支持官方插件',
+    unavailable: 'Fynvra 插件暂不可用',
     alreadyInstalled: '已安装「{name}」',
     invalidManifest: '不是有效的 Fynvra 插件：{error}',
     installFailed: '安装 Fynvra 插件失败：{error}',

@@ -1502,7 +1502,7 @@ export const en: MessagesShape<typeof zhCN> = {
         installRisk:
           'Plugins run code on this computer with your permissions, and Fynvra cannot limit what they do. Only install plugins you trust',
         installRiskApp:
-          'Fynvra plugins keep running in the background and execute code with your permissions; Fynvra cannot limit them. Only official plugins are available for now',
+          'Fynvra plugins keep running in the background and execute code with your permissions; Fynvra cannot limit them. Official plugins are maintained by Fynvra; reviewed plugins are built by third parties and reviewed by the maintainers. Only install plugins you trust',
         tierHint:
           'Official: published by Fynvra maintainers. Reviewed: built by a third-party author; maintainers reviewed the code of this version',
         attachRoles: 'Attach to these roles after installing',

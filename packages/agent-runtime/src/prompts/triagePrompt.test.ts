@@ -20,6 +20,11 @@ describe('TRIAGE_PROMPT', () => {
     );
   });
 
+  it('反馈属于本群绑定的其他项目时填 project，已转交过的不再填', () => {
+    expect(TRIAGE_PROMPT).toContain('set project to that project');
+    expect(TRIAGE_PROMPT).toContain('do not set project');
+  });
+
   it('用反馈者的语言回复', () => {
     expect(TRIAGE_PROMPT).toContain("Reply in the reporter's language");
   });

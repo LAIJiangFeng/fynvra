@@ -1441,7 +1441,7 @@ export const zhCN = {
         installRisk:
           '插件会以你的权限在本机运行代码，Fynvra 无法限制它能做什么。只安装你信任的插件',
         installRiskApp:
-          'Fynvra 插件会在后台常驻运行，以你的权限执行代码，Fynvra 无法限制它。目前只提供官方插件',
+          'Fynvra 插件会在后台常驻运行，以你的权限执行代码，Fynvra 无法限制它。官方插件由 Fynvra 维护；已审核插件由第三方开发、经维护者审核。只安装你信任的插件',
         tierHint: '官方：Fynvra 维护者发布；已审核：第三方作者开发，维护者审核过这个版本的代码',
         attachRoles: '安装后挂到这些角色',
         attachHint: '插件按角色挂载，之后新打开的该角色会话才能用',
