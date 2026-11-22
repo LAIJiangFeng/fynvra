@@ -6,10 +6,11 @@ import type {
   UiFieldValue,
   UiList,
   UiNode,
+  UiSection,
   UiTone,
 } from '@shared/types/appPluginUi';
 import { ExternalLink, Loader2 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +35,7 @@ import {
   shouldCommit,
   wireValue,
 } from './appPluginForm';
+import { type LayoutRow, layoutNodes } from './appPluginLayout';
 import { InlineMessage } from './common';
 
 const api = window.fynvra.appPlugins;
@@ -150,21 +152,69 @@ export function AppPluginSettings({ id }: { id: string }) {
   }
   return (
     <div className="grid gap-8">
-      <Nodes nodes={ui.children} at={{ scope: 'root', siblings: ui.children }} form={form} />
+      <Nodes
+        nodes={ui.children}
+        at={{ scope: 'root', siblings: ui.children }}
+        form={form}
+        nested={false}
+      />
     </div>
   );
 }
 
-/** 一组同级节点，末尾显示该容器的操作错误 */
-function Nodes({ nodes, at, form }: { nodes: readonly UiNode[]; at: Scope; form: Form }) {
+/** 原生设置页的一行：左边名称，右边控件 */
+const ROW = 'flex min-h-12 items-center justify-between gap-4 px-4 py-2';
+const CARD = 'divide-y rounded-lg border';
+
+/** 一组同级节点按 layoutNodes 排成卡片 / 分组 / 列表，末尾显示该容器的操作错误 */
+function Nodes({
+  nodes,
+  at,
+  form,
+  nested,
+}: {
+  nodes: readonly UiNode[];
+  at: Scope;
+  form: Form;
+  /** 是否在 section 里：决定 section 标题的层级 */
+  nested: boolean;
+}) {
   const error = form.errors[at.scope];
   return (
     <>
-      {nodes.map((node, index) => (
-        // 描述是整份替换的静态树，用位置做 key
-        // biome-ignore lint/suspicious/noArrayIndexKey: 节点没有稳定 id
-        <NodeView key={index} node={node} index={index} at={at} form={form} />
-      ))}
+      {layoutNodes(nodes).map((block, index) => {
+        if (block.type === 'section') {
+          return (
+            <SectionView
+              key={`s:${block.index}`}
+              section={block.section}
+              scope={`${at.scope}.${block.index}`}
+              nested={nested}
+              form={form}
+            />
+          );
+        }
+        if (block.type === 'list') {
+          return (
+            <ListView
+              key={`l:${block.index}`}
+              list={block.list}
+              scope={`${at.scope}.${block.index}`}
+              form={form}
+            />
+          );
+        }
+        return (
+          // 描述是整份替换的静态树，用位置做 key
+          // biome-ignore lint/suspicious/noArrayIndexKey: 卡片没有稳定 id
+          <ul key={`c:${index}`} className={CARD}>
+            {block.rows.map((row, rowIndex) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: 行没有稳定 id
+              <RowView key={rowIndex} row={row} at={at} form={form} />
+            ))}
+          </ul>
+        );
+      })}
       {error && (
         <InlineMessage tone="error" className="break-all">
           {error}
@@ -174,69 +224,133 @@ function Nodes({ nodes, at, form }: { nodes: readonly UiNode[]; at: Scope; form:
   );
 }
 
-function NodeView({
-  node,
-  index,
-  at,
+function SectionView({
+  section,
+  scope,
+  nested,
   form,
 }: {
-  node: UiNode;
-  index: number;
-  at: Scope;
+  section: UiSection;
+  scope: string;
+  nested: boolean;
   form: Form;
 }) {
-  switch (node.type) {
-    case 'section': {
-      const scope = `${at.scope}.${index}`;
-      return (
-        <section className="grid gap-3">
-          <h3 className="font-medium">{node.title}</h3>
-          <Nodes nodes={node.children} at={{ scope, siblings: node.children }} form={form} />
-        </section>
-      );
-    }
-    case 'text':
-      return (
-        <p
-          className={cn(
-            'whitespace-pre-wrap break-words text-sm',
-            node.tone && TONE_CLASS[node.tone]
-          )}
-        >
-          {node.text}
-        </p>
-      );
+  return (
+    <section className="grid">
+      {nested ? (
+        <h4 className="mb-2 font-medium text-muted-foreground text-sm">{section.title}</h4>
+      ) : (
+        <h3 className="mb-3 font-medium">{section.title}</h3>
+      )}
+      <div className="grid gap-3">
+        <Nodes
+          nodes={section.children}
+          at={{ scope, siblings: section.children }}
+          form={form}
+          nested
+        />
+      </div>
+    </section>
+  );
+}
+
+function RowView({ row, at, form }: { row: LayoutRow; at: Scope; form: Form }) {
+  switch (row.type) {
     case 'keyValue':
       return (
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
-          {node.items.map((item, itemIndex) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: 键值对没有稳定 id
-            <div key={itemIndex} className="contents">
-              <dt className="text-muted-foreground">{item.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words">{item.value}</dd>
-            </div>
-          ))}
-        </dl>
+        <li className={ROW}>
+          <span className="min-w-0 text-sm">{row.label}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words text-right text-muted-foreground text-sm">
+            {row.value}
+          </span>
+        </li>
+      );
+    case 'text':
+      return (
+        <li className="px-4 py-2.5">
+          <p
+            className={cn(
+              'whitespace-pre-wrap break-words text-muted-foreground text-xs',
+              row.text.tone && TONE_CLASS[row.text.tone]
+            )}
+          >
+            {row.text.text}
+          </p>
+        </li>
       );
     case 'field':
-      return <FieldView field={node} at={at} form={form} />;
-    case 'button':
+      return <FieldRow row={row} at={at} form={form} />;
+    case 'buttons':
       return (
-        <div>
-          <ButtonView button={node} at={at} form={form} />
-        </div>
+        <li className={cn(ROW, 'flex-wrap justify-end gap-2')}>
+          {row.buttons.map((button, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 按钮没有稳定 id
+            <ButtonView key={index} button={button} at={at} form={form} />
+          ))}
+        </li>
       );
-    case 'list':
-      return <ListView list={node} scope={`${at.scope}.${index}`} form={form} />;
   }
 }
 
-function FieldView({ field, at, form }: { field: UiField; at: Scope; form: Form }) {
+/** field 一行：名称与说明在左，控件和并进来的按钮在右；窄屏时控件换到下一行 */
+function FieldRow({
+  row,
+  at,
+  form,
+}: {
+  row: Extract<LayoutRow, { type: 'field' }>;
+  at: Scope;
+  form: Form;
+}) {
   const inputId = useId();
+  const { field, hint, buttons } = row;
+  return (
+    <li className={cn(ROW, 'flex-wrap gap-y-2')}>
+      <div className="grid min-w-0 gap-0.5">
+        <label htmlFor={inputId} className="text-sm">
+          {field.label}
+        </label>
+        {hint && (
+          <p
+            className={cn(
+              'whitespace-pre-wrap break-words text-muted-foreground text-xs',
+              hint.tone && TONE_CLASS[hint.tone]
+            )}
+          >
+            {hint.text}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <FieldControl id={inputId} field={field} at={at} form={form} />
+        {buttons.map((button, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 按钮没有稳定 id
+          <ButtonView key={index} button={button} at={at} form={form} />
+        ))}
+      </div>
+    </li>
+  );
+}
+
+/** 字段的控件本身。compact：列表项里的紧凑写法，不显示标签，标签作 aria-label */
+function FieldControl({
+  id,
+  field,
+  at,
+  form,
+  compact,
+}: {
+  id?: string;
+  field: UiField;
+  at: Scope;
+  form: Form;
+  compact?: boolean;
+}) {
   const key = draftKey(at.scope, field.id);
   const draft = form.drafts[key];
   const value = currentValue(field, draft);
   const disabled = form.busy !== null;
+  const ariaLabel = compact ? field.label : undefined;
   const edit = (next: string | boolean) => form.setDraft(key, { base: field.value, value: next });
   const commitText = () => {
     if (!field.action) return;
@@ -256,24 +370,19 @@ function FieldView({ field, at, form }: { field: UiField; at: Scope; form: Form 
 
   if (field.kind === 'toggle') {
     return (
-      <div className="flex items-center justify-between gap-3">
-        <label htmlFor={inputId} className="font-medium text-sm">
-          {field.label}
-        </label>
-        <Switch
-          id={inputId}
-          checked={value === true}
-          disabled={disabled}
-          onCheckedChange={(checked) => void commitNow(checked)}
-        />
-      </div>
+      <Switch
+        id={id}
+        aria-label={ariaLabel}
+        checked={value === true}
+        disabled={disabled}
+        onCheckedChange={(checked) => void commitNow(checked)}
+      />
     );
   }
 
-  let control: ReactNode;
   if (field.kind === 'select') {
     const items = field.options ?? [];
-    control = (
+    return (
       <Select
         items={items}
         value={String(value)}
@@ -282,7 +391,7 @@ function FieldView({ field, at, form }: { field: UiField; at: Scope; form: Form 
           if (typeof next === 'string') void commitNow(next);
         }}
       >
-        <SelectTrigger id={inputId} className="w-full max-w-sm">
+        <SelectTrigger id={id} aria-label={ariaLabel} className={compact ? 'w-44' : 'w-56'}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -294,55 +403,53 @@ function FieldView({ field, at, form }: { field: UiField; at: Scope; form: Form 
         </SelectContent>
       </Select>
     );
-  } else {
-    control = (
-      <Input
-        id={inputId}
-        type={field.kind === 'password' ? 'password' : field.kind === 'number' ? 'number' : 'text'}
-        value={String(value)}
-        min={field.min}
-        max={field.max}
-        placeholder={field.placeholder}
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-        className="max-w-sm"
-        onChange={(event) => edit(event.target.value)}
-        onBlur={() => {
-          if (commitOn(field) === 'blur') commitText();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            commitText();
-          }
-        }}
-      />
-    );
   }
+
   return (
-    <div className="grid min-w-0 gap-1.5">
-      <label htmlFor={inputId} className="font-medium text-sm">
-        {field.label}
-      </label>
-      {control}
-    </div>
+    <Input
+      id={id}
+      aria-label={ariaLabel}
+      type={field.kind === 'password' ? 'password' : field.kind === 'number' ? 'number' : 'text'}
+      value={String(value)}
+      min={field.min}
+      max={field.max}
+      placeholder={field.placeholder ?? ariaLabel}
+      autoComplete="off"
+      spellCheck={false}
+      disabled={disabled}
+      className={compact ? 'h-8 w-48' : field.kind === 'number' ? 'w-28' : 'w-64'}
+      onChange={(event) => edit(event.target.value)}
+      onBlur={() => {
+        if (commitOn(field) === 'blur') commitText();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          commitText();
+        }
+      }}
+    />
   );
 }
 
 function ButtonView({ button, at, form }: { button: UiButton; at: Scope; form: Form }) {
   const running = form.busy === `${at.scope}|${button.action}`;
+  const destructive = button.tone === 'destructive';
   return (
     <Button
       size="sm"
-      variant={button.tone === 'destructive' ? 'destructive' : 'outline'}
+      // 危险按钮不用实心红，克制地用红字；确认框仍是 destructive
+      variant={destructive ? 'ghost' : 'outline'}
+      className={
+        destructive ? 'text-destructive hover:bg-destructive/10 hover:text-destructive' : undefined
+      }
       disabled={form.busy !== null}
       onClick={async () => {
         if (button.confirm) {
           const confirmed = await confirmDialog({
             message: button.confirm,
             confirmLabel: button.label,
-            destructive: button.tone === 'destructive',
+            destructive,
           });
           if (!confirmed) return;
         }
@@ -360,7 +467,7 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
   const [linkError, setLinkError] = useState<string | null>(null);
   if (list.items.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed px-4 py-6 text-center text-muted-foreground text-sm">
+      <p className="rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs">
         {list.empty ?? t('settings.plugins.app.emptyList')}
       </p>
     );
@@ -376,7 +483,7 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
   };
   return (
     <div className="grid gap-2">
-      <ul className="divide-y rounded-lg border">
+      <ul className={CARD}>
         {list.items.map((item) => {
           const controls = item.controls ?? [];
           const at: Scope = {
@@ -386,49 +493,61 @@ function ListView({ list, scope, form }: { list: UiList; scope: string; form: Fo
           };
           const error = form.errors[at.scope];
           return (
-            <li key={item.key} className="grid gap-1.5 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-sm">{item.title}</span>
-                {item.badges?.map((badge, index) => (
-                  <Badge
-                    // biome-ignore lint/suspicious/noArrayIndexKey: 徽标没有稳定 id
-                    key={index}
-                    variant={badge.tone === 'error' ? 'destructive' : 'outline'}
-                    className={
-                      badge.tone && badge.tone !== 'error' ? TONE_CLASS[badge.tone] : undefined
-                    }
-                  >
-                    {badge.text}
-                  </Badge>
-                ))}
-              </div>
-              {item.subtitle && (
-                <p className="break-words text-muted-foreground text-xs">{item.subtitle}</p>
-              )}
-              {item.body && <p className="whitespace-pre-wrap break-words text-sm">{item.body}</p>}
-              {item.link && (
-                <button
-                  type="button"
-                  className="inline-flex w-fit items-center gap-1 break-all font-medium text-primary text-sm underline underline-offset-4"
-                  title={item.link.url}
-                  onClick={() => item.link && void openLink(item.link.url)}
-                >
-                  {item.link.label}
-                  <ExternalLink className="size-3.5 shrink-0" />
-                </button>
-              )}
-              {controls.length > 0 && (
-                <div className="flex flex-wrap items-end gap-2">
-                  {controls.map((control, index) =>
-                    control.type === 'field' ? (
-                      <FieldView key={`f:${control.id}`} field={control} at={at} form={form} />
-                    ) : (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: 按钮没有稳定 id
-                      <ButtonView key={`b:${index}`} button={control} at={at} form={form} />
-                    )
+            <li key={item.key} className="grid gap-2 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <div className="grid min-w-0 gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-sm">{item.title}</span>
+                    {item.badges?.map((badge, index) => (
+                      <Badge
+                        // biome-ignore lint/suspicious/noArrayIndexKey: 徽标没有稳定 id
+                        key={index}
+                        variant={badge.tone === 'error' ? 'destructive' : 'outline'}
+                        className={
+                          badge.tone && badge.tone !== 'error' ? TONE_CLASS[badge.tone] : undefined
+                        }
+                      >
+                        {badge.text}
+                      </Badge>
+                    ))}
+                  </div>
+                  {item.subtitle && (
+                    <p className="break-words text-muted-foreground text-xs">{item.subtitle}</p>
+                  )}
+                  {item.body && (
+                    <p className="whitespace-pre-wrap break-words text-sm">{item.body}</p>
+                  )}
+                  {item.link && (
+                    <button
+                      type="button"
+                      className="inline-flex w-fit items-center gap-1 break-all font-medium text-primary text-sm underline underline-offset-4"
+                      title={item.link.url}
+                      onClick={() => item.link && void openLink(item.link.url)}
+                    >
+                      {item.link.label}
+                      <ExternalLink className="size-3.5 shrink-0" />
+                    </button>
                   )}
                 </div>
-              )}
+                {controls.length > 0 && (
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    {controls.map((control, index) =>
+                      control.type === 'field' ? (
+                        <FieldControl
+                          key={`f:${control.id}`}
+                          field={control}
+                          at={at}
+                          form={form}
+                          compact
+                        />
+                      ) : (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: 按钮没有稳定 id
+                        <ButtonView key={`b:${index}`} button={control} at={at} form={form} />
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
               {error && (
                 <InlineMessage tone="error" className="break-all">
                   {error}
