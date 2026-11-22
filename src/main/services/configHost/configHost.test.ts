@@ -53,6 +53,11 @@ function setup(overrides: Partial<ConfigHostDeps> = {}) {
         roles.set(role.id, role);
         return { ok: true as const, role };
       }),
+      remove: vi.fn(async (id: string) =>
+        roles.delete(id)
+          ? { ok: true as const }
+          : { ok: false as const, error: `role "${id}" not found` }
+      ),
     },
     mcp: {
       list: vi.fn(async () => servers),
@@ -220,6 +225,99 @@ describe('createConfigHost', () => {
     await expect(
       call({ action: 'role_set_skills', role: 'nobody', add: ['pdf'] })
     ).resolves.toMatchObject({ ok: false });
+  });
+
+  it('role_upsert creates a custom role and broadcasts', async () => {
+    const { call, deps, roles } = setup();
+    const result = await call({
+      action: 'role_upsert',
+      role_config: {
+        id: 'qa',
+        name: 'QA',
+        systemPrompt: 'Test everything',
+        skillIds: ['pdf'],
+        mcpServerIds: ['gh'],
+        tools: 'readonly',
+        approvalMode: 'supervised',
+      },
+    });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        role: { id: 'qa', name: 'QA', tools: 'readonly', approvalMode: 'supervised' },
+        created: true,
+      },
+    });
+    expect(roles.get('qa')).toMatchObject({
+      systemPrompt: 'Test everything',
+      skillIds: ['pdf'],
+      mcpServerIds: ['gh'],
+      pluginIds: [],
+    });
+    expect(deps.broadcast).toHaveBeenCalledWith('roles:changed');
+  });
+
+  it('role_upsert keeps omitted fields and clears null ones on update', async () => {
+    const { call, roles } = setup();
+    roles.set('qa', {
+      id: 'qa',
+      name: 'QA',
+      description: 'old',
+      systemPrompt: 'Keep me',
+      skillIds: [],
+      mcpServerIds: ['stale'],
+      tools: 'readonly',
+      approvalMode: 'supervised',
+    });
+    await expect(
+      call({ action: 'role_upsert', role_config: { id: 'qa', name: 'QA 2', description: null } })
+    ).resolves.toMatchObject({ ok: true, result: { created: false, role: { name: 'QA 2' } } });
+    const saved = roles.get('qa');
+    expect(saved?.systemPrompt).toBe('Keep me');
+    expect(saved?.mcpServerIds).toEqual(['stale']);
+    expect(saved && 'description' in saved).toBe(false);
+  });
+
+  it('role_upsert rejects built-in ids, invalid roles and unknown ids', async () => {
+    const { call, deps } = setup();
+    const base = { name: 'X', tools: 'all', approvalMode: 'supervised' };
+    for (const id of ['orchestrator', 'worker']) {
+      const result = await call({ action: 'role_upsert', role_config: { ...base, id } });
+      expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/Settings/) });
+    }
+    await expect(
+      call({ action: 'role_upsert', role_config: { id: 'x', name: 'X' } })
+    ).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/^invalid role:/) });
+    for (const [key, error] of [
+      ['skillIds', /unknown skill id\(s\): ghost/],
+      ['mcpServerIds', /unknown MCP server id\(s\): ghost/],
+      ['pluginIds', /unknown plugin id\(s\): ghost/],
+    ] as const) {
+      await expect(
+        call({ action: 'role_upsert', role_config: { ...base, id: 'x', [key]: ['ghost'] } })
+      ).resolves.toMatchObject({ ok: false, error: expect.stringMatching(error) });
+    }
+    expect(deps.roles.save).not.toHaveBeenCalled();
+  });
+
+  it('role_remove deletes custom roles only', async () => {
+    const { call, deps, roles } = setup();
+    roles.set('qa', { ...worker, id: 'qa' });
+    await expect(call({ action: 'role_remove', id: 'qa' })).resolves.toEqual({
+      ok: true,
+      result: { removed: 'qa' },
+    });
+    expect(roles.has('qa')).toBe(false);
+    expect(deps.broadcast).toHaveBeenCalledWith('roles:changed');
+    await expect(call({ action: 'role_remove', id: 'worker' })).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(call({ action: 'role_remove', id: 'ghost' })).resolves.toMatchObject({
+      ok: false,
+      error: 'role "ghost" not found',
+    });
+    expect(roles.has('worker')).toBe(true);
+    expect(deps.broadcast).toHaveBeenCalledTimes(1);
   });
 
   it('mcp_upsert converts env maps, keeps enabled on update and returns keys only', async () => {

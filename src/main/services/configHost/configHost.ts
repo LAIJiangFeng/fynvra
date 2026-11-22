@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
+  isBuiltinRoleId,
   isValidRoleId,
   isValidWorkflowId,
   parseRole,
@@ -34,7 +35,7 @@ export type GitCloner = (
 /** 与「设置」页 IPC handler 用的是同一批服务实例（生产由 ipc/sessions.ts 注入） */
 export interface ConfigHostDeps {
   skills: Pick<SkillRegistry, 'list' | 'add'>;
-  roles: Pick<RoleStore, 'list' | 'get' | 'save'>;
+  roles: Pick<RoleStore, 'list' | 'get' | 'save' | 'remove'>;
   mcp: Pick<McpRegistry, 'list' | 'get' | 'upsert' | 'remove'>;
   workflows: Pick<WorkflowRegistry, 'list' | 'save' | 'remove'>;
   plugins: {
@@ -61,20 +62,72 @@ type Outcome = { ok: true; result: unknown } | { ok: false; error: string };
 const fail = (error: string): Outcome => ({ ok: false, error });
 
 /**
- * Main 侧的配置宿主：agent 的 fynvra_config 经它改技能 / MCP / 工作流 / 插件 / 角色技能，
+ * Main 侧的配置宿主：agent 的 fynvra_config 经它改技能 / MCP / 工作流 / 插件 / 自定义角色与角色技能，
  * 校验与广播与「设置」页的 IPC handler 一致。审批已在 agent 进程的审批门完成；这里只做入参收窄。
  * 结果里 MCP 只给 toMcpServerView（env / headers 只有键名）。
  */
 export function createConfigHost(deps: ConfigHostDeps): ConfigHost {
   const cloneGit = deps.cloneGit ?? gitClone;
 
-  async function saveRole(role: Role): Promise<Outcome> {
-    const parsed = parseRole(role);
-    if (!parsed.ok) return fail(parsed.error);
+  /** parseRole 校验 → 保存 → 广播；与「设置」页同一条路径 */
+  async function persistRole(
+    input: unknown
+  ): Promise<{ ok: true; role: Role } | { ok: false; error: string }> {
+    const parsed = parseRole(input);
+    if (!parsed.ok) return parsed;
     const saved = await deps.roles.save(parsed.role);
-    if (!saved.ok) return fail(saved.error);
+    if (!saved.ok) return saved;
     deps.broadcast(IPC_CHANNELS.ROLES_CHANGED);
+    return { ok: true, role: saved.role };
+  }
+
+  async function saveRole(role: Role): Promise<Outcome> {
+    const saved = await persistRole(role);
+    if (!saved.ok) return saved;
     return { ok: true, result: { role: saved.role.id, skillIds: saved.role.skillIds } };
+  }
+
+  async function upsertRole(args: Args): Promise<Outcome> {
+    const input = asRecord(args.role_config);
+    if (!input) return fail('role_upsert needs role_config (an object)');
+    if (!isValidRoleId(input.id)) return fail('role_config.id must be a valid role id');
+    if (isBuiltinRoleId(input.id)) {
+      return fail(`built-in role ${input.id} can only be changed in Fynvra Settings`);
+    }
+    // 只校验本次传入的 id；已有角色里原本挂着的失效 id 不拦
+    const checks = [
+      ['skill', input.skillIds, () => deps.skills.list()],
+      ['MCP server', input.mcpServerIds, () => deps.mcp.list()],
+      ['plugin', input.pluginIds, () => deps.plugins.list()],
+    ] as const;
+    for (const [label, raw, load] of checks) {
+      if (!Array.isArray(raw)) continue;
+      const known = new Set((await load()).map((entry) => entry.id));
+      const unknown = raw.filter((id) => typeof id === 'string' && !known.has(id));
+      if (unknown.length > 0) {
+        return fail(`unknown ${label} id(s): ${unknown.join(', ')}; call list first`);
+      }
+    }
+    const existing = await deps.roles.get(input.id);
+    // 省略的字段保留原值；null 由 parseRole 视同缺省，即清空
+    const parsed = parseRole(existing ? { ...existing, ...input } : input);
+    if (!parsed.ok) return fail(`invalid role: ${parsed.error}`);
+    const saved = await persistRole(parsed.role);
+    if (!saved.ok) return saved;
+    const { id, name, tools, approvalMode } = saved.role;
+    return {
+      ok: true,
+      result: { role: { id, name, tools, approvalMode }, created: !existing },
+    };
+  }
+
+  async function removeRole(args: Args): Promise<Outcome> {
+    if (!isValidRoleId(args.id)) return fail('role_remove needs id (a role id)');
+    if (isBuiltinRoleId(args.id)) return fail(`built-in role ${args.id} cannot be removed`);
+    const removed = await deps.roles.remove(args.id);
+    if (!removed.ok) return fail(removed.error);
+    deps.broadcast(IPC_CHANNELS.ROLES_CHANGED);
+    return { ok: true, result: { removed: args.id } };
   }
 
   async function list(): Promise<Outcome> {
@@ -265,6 +318,10 @@ export function createConfigHost(deps: ConfigHostDeps): ConfigHost {
         return installSkill(args, signal);
       case 'role_set_skills':
         return setRoleSkills(args);
+      case 'role_upsert':
+        return upsertRole(args);
+      case 'role_remove':
+        return removeRole(args);
       case 'mcp_upsert':
         return upsertMcp(args);
       case 'mcp_remove':
