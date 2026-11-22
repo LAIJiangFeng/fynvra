@@ -20,6 +20,7 @@ import type {
 import { appendChatFiles } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configureMainLocale } from '../../i18n';
 import { createOrchestrationRegistry } from '../orchestration/registry';
 import { createFakeExec, createFakeRoles } from '../orchestration/testing';
 import { type StoredProvider, toProviderView } from '../providers/providerStore';
@@ -3331,6 +3332,29 @@ describe('createAgentHost profile sessions', () => {
     }
   });
 
+  it('gives profile sessions the UI language name and leaves normal sessions alone', async () => {
+    const env = profileEnv();
+    const plain = await createSession(env);
+    await env.host.prompt(plain.id, 'hi');
+    expect(specOf(env, plain.id)).not.toHaveProperty('profileLanguage');
+    for (const [language, name] of [
+      ['zh-CN', 'Simplified Chinese'],
+      ['en', 'English'],
+    ] as const) {
+      configureMainLocale({ language: () => language, systemLanguages: () => [] });
+      try {
+        for (const profile of ['triage', 'restricted'] as const) {
+          const session = await profileSession(env, profile);
+          const spec = specOf(env, session.id);
+          expect(spec?.profileLanguage).toBe(name);
+          expect(spec).not.toHaveProperty('instructionFile');
+        }
+      } finally {
+        configureMainLocale(null);
+      }
+    }
+  });
+
   it('refuses to switch the approval mode of a profile session and keeps the record', async () => {
     const env = profileEnv();
     for (const profile of ['triage', 'restricted'] as const) {
@@ -3373,6 +3397,7 @@ describe('createAgentHost profile sessions', () => {
       plugins: [],
     });
     expect(specOf(env, restricted.sessionId)).not.toHaveProperty('instructionFile');
+    expect(specOf(env, restricted.sessionId)?.profileLanguage).toBe('Simplified Chinese');
 
     parent = plain.id;
     const normal = await launcher.createWorkerSession({ ...input, dispatchId: 'dsp_2' });

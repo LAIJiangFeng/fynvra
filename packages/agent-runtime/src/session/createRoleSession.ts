@@ -37,6 +37,7 @@ import {
   DIRECT_PLAN_MODE_PROMPT,
   PLAN_MODE_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { profileLanguagePrompt } from '../prompts/profileLanguagePrompt';
 import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import { TRIAGE_PROMPT } from '../prompts/triagePrompt';
 import { createConfigTool } from '../tools/configTool';
@@ -143,6 +144,8 @@ export interface CreateRoleSessionOptions {
    * triage 只有 read / grep / find / ls 与 triage_report（需要 `triageHost`），系统提示词固定为 TRIAGE_PROMPT
    */
   profile?: SessionProfile;
+  /** 档位会话的输出语言名（如 `Simplified Chinese`，来自界面语言）；只对带 profile 的会话生效 */
+  profileLanguage?: string;
   /** triage_report 背后的宿主；只有 triage 档位用 */
   triageHost?: TriageHost | null;
 }
@@ -225,10 +228,15 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
           ? { instructionFile: options.resourcePaths.instructionFile }
           : {}),
       });
-  const promptAppend =
-    options.profile === 'restricted' && orchestrator
-      ? [roleAppend, RESTRICTED_COORDINATOR_PROMPT].filter(Boolean).join('\n\n')
-      : roleAppend;
+  const promptAppend = [
+    roleAppend,
+    options.profile === 'restricted' && orchestrator ? RESTRICTED_COORDINATOR_PROMPT : '',
+    options.profile && options.profileLanguage
+      ? profileLanguagePrompt(options.profileLanguage)
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   const gate = createApprovalGate({
     mode: role.approvalMode,
     ...(options.approval ?? NO_APPROVAL_CHANNEL),

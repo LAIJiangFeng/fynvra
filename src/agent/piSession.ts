@@ -146,7 +146,13 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         host,
         workerHost,
         configHost: configHost ?? null,
-        ...(spec.profile ? { profile: spec.profile, triageHost: triageHost ?? null } : {}),
+        ...(spec.profile
+          ? {
+              profile: spec.profile,
+              triageHost: triageHost ?? null,
+              ...(spec.profileLanguage ? { profileLanguage: spec.profileLanguage } : {}),
+            }
+          : {}),
         // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
         ...(approval
           ? {

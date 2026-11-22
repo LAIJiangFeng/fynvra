@@ -20,6 +20,7 @@ import {
   WORKER_ROLE_ID,
 } from '@fynvra/core';
 import { asRecord, errorMessage } from '@shared/guards';
+import type { Locale } from '@shared/i18n';
 import { supportsFastMode } from '@shared/modelFast';
 import type {
   AgentApprovalRequest,
@@ -60,7 +61,7 @@ import {
   compactionTimeoutMsOf,
 } from '@shared/types/settings';
 import type { Workspace } from '@shared/types/workspace';
-import { translate } from '../../i18n';
+import { mainLocale, translate } from '../../i18n';
 import { isInsideDirectory } from '../orchestration/worktreesRoot';
 import type { BranchTracker } from '../sessions/branches';
 import { readHistory, readHistoryProjection, sessionFilePath } from '../sessions/history';
@@ -395,6 +396,11 @@ const NO_ORCHESTRATION_HOST =
   'orchestration is not wired yet: this build has no OrchestrationHost for this session, so orchestration tools cannot run';
 const NO_WORKER_HOST =
   'this session has no coordinator: it was not dispatched by an orchestrator, or the worker host is not wired yet';
+/** 界面语言 → 档位会话提示词里的语言名 */
+const PROFILE_LANGUAGE_NAMES: Record<Locale, string> = {
+  'zh-CN': 'Simplified Chinese',
+  en: 'English',
+};
 const TITLE_MAX_CHARS = 60;
 /** restricted 会话所在工作区同时未结束的任务上限（§7.14 第 12 条） */
 const MAX_RESTRICTED_OPEN_TASKS = 3;
@@ -748,7 +754,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(stored.planMode === true && stored.dispatchId === undefined
             ? { planMode: true }
             : {}),
-          ...(profile ? { profile, plugins: [] } : {}),
+          // 档位会话按界面语言输出：只带语言名，不读用户的指令文件
+          ...(profile
+            ? { profile, plugins: [], profileLanguage: PROFILE_LANGUAGE_NAMES[mainLocale()] }
+            : {}),
         },
       };
     } catch (error) {

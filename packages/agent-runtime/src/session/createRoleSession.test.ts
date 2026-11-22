@@ -26,6 +26,7 @@ import {
   ORCHESTRATOR_PROMPT,
   WORKER_CONTRACT_PROMPT,
 } from '../prompts/orchestratorPrompt';
+import { profileLanguagePrompt } from '../prompts/profileLanguagePrompt';
 import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import {
   type CreateRoleSessionOptions,
@@ -954,6 +955,67 @@ describe('createRoleSession profiles', () => {
     ]);
     await session.prompt('Merge it.');
     expect(merge).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRoleSession profile language', () => {
+  async function promptOf(options: Partial<CreateRoleSessionOptions> & { role: Role }) {
+    const { session } = await open(options);
+    let prompt = '';
+    faux.setResponses([
+      (context: TranscriptContext) => {
+        prompt = systemText(context);
+        return fauxAssistantMessage('ok');
+      },
+    ]);
+    await session.prompt('hi');
+    return prompt;
+  }
+
+  it('appends the language rule to triage and restricted sessions, without the instruction file', async () => {
+    const resourcePaths = {
+      skills: [],
+      mcpServers: [],
+      instructionFile: { name: 'AGENTS.md', content: 'USER INSTRUCTIONS MARKER' },
+    };
+    for (const language of ['Simplified Chinese', 'English']) {
+      const prompts = [
+        await promptOf({
+          role: role({}),
+          profile: 'triage',
+          triageHost: { triageReport: async () => ({ ok: true }) },
+          profileLanguage: language,
+          resourcePaths,
+        }),
+        await promptOf({
+          role: builtinRole(ORCHESTRATOR_ROLE_ID),
+          host: orchestrationHost(),
+          profile: 'restricted',
+          profileLanguage: language,
+          resourcePaths,
+        }),
+        await promptOf({
+          role: role({ tools: 'all' }),
+          workerHost: workerHost(),
+          profile: 'restricted',
+          profileLanguage: language,
+          resourcePaths,
+        }),
+      ];
+      for (const prompt of prompts) {
+        expect(prompt).toContain(profileLanguagePrompt(language));
+        expect(prompt).not.toContain('USER INSTRUCTIONS MARKER');
+      }
+    }
+  });
+
+  it('ignores the language for a session without a profile', async () => {
+    const prompt = await promptOf({
+      role: builtinRole(ORCHESTRATOR_ROLE_ID),
+      host: orchestrationHost(),
+      profileLanguage: 'English',
+    });
+    expect(prompt).not.toContain('# Output language');
   });
 });
 
