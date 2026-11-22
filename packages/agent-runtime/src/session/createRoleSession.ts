@@ -268,7 +268,17 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
     agentDir,
     settingsManager,
     // 资源只来自角色：不发现磁盘上的扩展 / skill / 提示词模板 / 主题，也不用 SYSTEM.md / APPEND_SYSTEM.md。
-    // 项目的 AGENTS.md 等上下文文件照常加载。
+    // 项目的 AGENTS.md 等上下文文件照常加载。档位会话只留真实路径在 cwd 之内的，
+    // 上级目录与 agentDir 的个人 AGENTS.md 可能被群成员套出来，链接到 cwd 外的同理。
+    ...(options.profile
+      ? {
+          agentsFilesOverride: (base: {
+            agentsFiles: Array<{ path: string; content: string }>;
+          }) => ({
+            agentsFiles: base.agentsFiles.filter((file) => isRealPathInside(cwd, file.path)),
+          }),
+        }
+      : {}),
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -450,6 +460,17 @@ function withSensitiveFilter(
         }
       : tool
   );
+}
+
+/** file 的真实路径是否在 dir 的真实路径之内；realpath 失败视为不在（fail-closed） */
+function isRealPathInside(dir: string, file: string): boolean {
+  try {
+    // 原生 realpath 会还原大小写与 8.3 短名，path.relative 再处理盘符不同的情况
+    const relative = path.relative(fs.realpathSync.native(dir), fs.realpathSync.native(file));
+    return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  } catch {
+    return false;
+  }
 }
 
 /** 内存设置：与用户本机的 pi CLI 配置隔离；关掉 pi 的安装遥测与 provider 署名请求头 */

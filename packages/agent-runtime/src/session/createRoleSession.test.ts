@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -871,6 +871,79 @@ describe('createRoleSession profiles', () => {
     expect(session.getActiveToolNames().sort()).toEqual(
       ['read', 'grep', 'find', 'ls', 'triage_report'].sort()
     );
+  });
+
+  describe('context files', () => {
+    let base = '';
+    let cwd = '';
+    let profileAgentDir = '';
+    let linked = false;
+
+    beforeAll(async () => {
+      base = path.join(tmp, 'context-files');
+      cwd = path.join(base, 'repo');
+      profileAgentDir = path.join(base, 'agent');
+      await mkdir(path.join(base, 'outside'), { recursive: true });
+      await mkdir(cwd, { recursive: true });
+      await mkdir(profileAgentDir, { recursive: true });
+      await writeFile(path.join(base, 'AGENTS.md'), 'PARENT_AGENTS_MARKER');
+      await writeFile(path.join(profileAgentDir, 'AGENTS.md'), 'GLOBAL_AGENTS_MARKER');
+      await writeFile(path.join(cwd, 'AGENTS.md'), 'REPO_AGENTS_MARKER');
+      await writeFile(path.join(base, 'outside', 'CLAUDE.md'), 'LINKED_AGENTS_MARKER');
+      await mkdir(path.join(base, 'linked-repo'));
+      try {
+        // Windows 上没有权限时建不了符号链接，相关用例跳过
+        await symlink(
+          path.join(base, 'outside', 'CLAUDE.md'),
+          path.join(base, 'linked-repo', 'CLAUDE.md'),
+          'file'
+        );
+        linked = true;
+      } catch {
+        linked = false;
+      }
+    });
+
+    async function promptOf(sessionCwd: string, profiled: boolean): Promise<string> {
+      const { session } = await open({
+        cwd: sessionCwd,
+        agentDir: profileAgentDir,
+        role: role({}),
+        ...(profiled ? { profile: 'triage' as const, triageHost: triageHost() } : {}),
+      });
+      let prompt = '';
+      faux.setResponses([
+        (context: TranscriptContext) => {
+          prompt = systemText(context);
+          return fauxAssistantMessage('ok');
+        },
+      ]);
+      await session.prompt('hi');
+      return prompt;
+    }
+
+    it('loads only the repository AGENTS.md for a profile session', async () => {
+      const prompt = await promptOf(cwd, true);
+      expect(prompt).toContain('REPO_AGENTS_MARKER');
+      expect(prompt).not.toContain('PARENT_AGENTS_MARKER');
+      expect(prompt).not.toContain('GLOBAL_AGENTS_MARKER');
+    });
+
+    it('still loads parent and global AGENTS.md for a session without a profile', async () => {
+      const prompt = await promptOf(cwd, false);
+      expect(prompt).toContain('REPO_AGENTS_MARKER');
+      expect(prompt).toContain('PARENT_AGENTS_MARKER');
+      expect(prompt).toContain('GLOBAL_AGENTS_MARKER');
+    });
+
+    it('drops a context file reached through a link pointing outside the working directory', async (ctx) => {
+      if (!linked) ctx.skip(); // 本机不允许创建符号链接 / junction
+      // 仓库里的 CLAUDE.md 是指向仓库外的符号链接
+      const linkedCwd = path.join(base, 'linked-repo');
+      expect(await promptOf(linkedCwd, false)).toContain('LINKED_AGENTS_MARKER');
+      const prompt = await promptOf(linkedCwd, true);
+      expect(prompt).not.toContain('LINKED_AGENTS_MARKER');
+    });
   });
 
   it('refuses a triage session without a triage host', async () => {
