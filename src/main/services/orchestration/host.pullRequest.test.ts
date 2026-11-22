@@ -3,7 +3,7 @@ import type { DispatchTaskOutput, OrchestrationHost } from '@fynvra/agent-runtim
 import { GitWorktreeManager, Inbox, InMemoryOrchestrationStore } from '@fynvra/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOrchestrationHost, type OrchestrationHostDeps } from './host';
-import { setPullRequestBodyExtension } from './pullRequest';
+import { PR_BODY_CI_NOTE, setPullRequestBodyExtension } from './pullRequest';
 import { createFakeExec, createFakeLauncher, createFakeRoles, type FakeExec } from './testing';
 import { createWorkerHost } from './workerHost';
 
@@ -171,6 +171,16 @@ describe('openPullRequest', () => {
     scriptRepo();
     expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
     expect(bodies[0]).toContain('## 验证\n\n见 CI');
+    expect(bodies[0]).not.toContain('Checks');
+  });
+
+  it('受限任务：「验证」段注明测试与构建由 PR 的 Checks 负责', async () => {
+    const first = await reported();
+    host = makeHost({ restricted: true });
+    scriptRepo();
+    await host.runChecks({ dispatchId: first.dispatch.id, command: 'pnpm lint' });
+    expect(await host.openPullRequest(input(first.dispatch.id))).toMatchObject({ ok: true });
+    expect(bodies[0]).toContain(`## 验证\n\n- \`pnpm lint\`\n${PR_BODY_CI_NOTE}\n`);
   });
 
   it('分支已有 PR：直接返回它的链接，不再创建', async () => {

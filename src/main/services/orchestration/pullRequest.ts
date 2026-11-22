@@ -63,19 +63,26 @@ export function pullRequestInputError(input: {
   return null;
 }
 
+export const PR_BODY_CI_NOTE =
+  '- 单元测试与构建未在本机运行，由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果';
+
 export function buildPullRequestBody(input: {
   taskId: string;
   summary: string;
   files: readonly string[];
   checks: readonly string[];
+  /** 受限协调者（值班）派出的任务：本机只跑 typecheck / lint，测试与构建交给 PR 的 Checks。 */
+  restricted?: boolean;
 }): string {
   const { files, checks } = input;
+  const verified = checks.map((command) => `- \`${command}\``);
+  if (input.restricted) verified.push(PR_BODY_CI_NOTE);
   const listed = files.slice(0, PR_BODY_MAX_FILES).map((file) => `- \`${file}\``);
   if (files.length > PR_BODY_MAX_FILES) listed.push(`…另有 ${files.length - PR_BODY_MAX_FILES} 个`);
   const sections = [
     `## 改动\n\n${input.summary.trim()}`,
     `## 文件\n\n${listed.length > 0 ? listed.join('\n') : '（无）'}`,
-    `## 验证\n\n${checks.length > 0 ? checks.map((command) => `- \`${command}\``).join('\n') : '见 CI'}`,
+    `## 验证\n\n${verified.length > 0 ? verified.join('\n') : '见 CI'}`,
   ];
   for (const extension of bodyExtensions.values()) {
     const text = extension(input.taskId)?.trim();

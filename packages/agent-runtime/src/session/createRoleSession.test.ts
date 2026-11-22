@@ -1011,6 +1011,9 @@ describe('createRoleSession restricted coordinator', () => {
     }
     const [restricted, normal] = prompts;
     expect(restricted).toContain(RESTRICTED_COORDINATOR_PROMPT.trim());
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain(
+      "unit tests and the build run in the pull request's CI checks"
+    );
     expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
     expect(normal).not.toContain('# Restricted session');
   });
