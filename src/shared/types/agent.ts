@@ -197,6 +197,8 @@ export interface SpawnSessionSpec {
   planMode?: boolean;
   /** 会话档位（渠道插件会话）：来自会话记录，普通会话不带 */
   profile?: SessionProfile;
+  /** 档位会话的输出语言名（如 `Simplified Chinese`）：取自界面语言，普通会话不带 */
+  profileLanguage?: string;
 }
 
 /**
@@ -906,6 +908,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   if (!isOptional(planMode, isBoolean)) return null;
   const { profile } = record;
   if (profile !== undefined && profile !== 'triage' && profile !== 'restricted') return null;
+  if (!isOptional(record.profileLanguage, isNonEmptyString)) return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
@@ -943,6 +946,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     ...(inPlace === true ? { inPlace: true } : {}),
     ...(planMode === true ? { planMode: true } : {}),
     ...(profile !== undefined ? { profile } : {}),
+    ...(record.profileLanguage !== undefined
+      ? { profileLanguage: record.profileLanguage as string }
+      : {}),
   };
 }
 

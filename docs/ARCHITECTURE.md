@@ -643,7 +643,7 @@ snapcompact（`src/agent/snapcompact/`，移植自 oh-my-pi，MIT）不调用模
   - Telegram 群反馈值班的渠道逻辑（Bot API、轮询、群准入、限流、卡片、追问、设置页、`telegram.json` 的读写）已移到注册表仓库的官方 Fynvra 插件 `com.fynvra.telegram`（`fynvra-plugins/official/com.fynvra.telegram`），从插件市场安装；开发版可从本地目录安装。Fynvra 不再内置 Telegram 服务、它的 IPC 和设置页。
   - 核心只提供渠道插件运行所需的安全底座：档位会话、出站过滤、干净检出、推送闸门、PR 只开不合并、公开基线。插件只能经 §7.12 的 channel API 使用它们，且只能作用于自己拥有的会话 / 工作区 / 任务。没有插件归属的会话调用 `triage_report` 一律返回错误。
 - 所属层与文件：
-  - **会话档位**（§5）：`triage`（只读已提交代码 + `triage_report`）与 `restricted`（受限值班协调者及其 worker）；两档不加载 MCP、插件、全局指令文件，不注册 `fynvra_config`，跨会话记忆关闭；审批由档位规则直接放行或拒绝，界面显示「自动执行（规则把关）」，不可切换。分诊和受限提示词在 `packages/agent-runtime`，由 Fynvra 固定，用户与角色配置改不了。
+  - **会话档位**（§5）：`triage`（只读已提交代码 + `triage_report`）与 `restricted`（受限值班协调者及其 worker）；两档不加载 MCP、插件、全局指令文件，不注册 `fynvra_config`，跨会话记忆关闭；审批由档位规则直接放行或拒绝，界面显示「自动执行（规则把关）」，不可切换。分诊和受限提示词在 `packages/agent-runtime`，由 Fynvra 固定，用户与角色配置改不了。档位会话按 Fynvra 界面语言输出（Main 把语言名放进 spawn spec 的 `profileLanguage`，群回复 `reply` 除外，仍用反馈者的语言），不读指令文件。
   - **`triage_report` 路由**：agent 侧经 `host-invoke`（kind 名沿用 `telegram`，不改名以免牵动 agent-runtime）交给 Main；`src/main/services/channels/instance.ts` 按会话归属转给对应插件的 `channel.report`，无归属返回 `{ ok: false, error: 'session is not owned by a channel plugin' }`。
   - **干净检出**：`src/main/services/channels/cleanCheckout.ts`，`<worktreesRoot>/<workspaceId>/telegram-clean`（目录名保留，已有插件会话还指向它）：只含已提交文件的 detached worktree，只看 origin 默认分支，不跑 hooks。
   - **出站过滤** `src/main/services/secrets/`（插件发出的文本与推送闸门共用）：已知密钥精确匹配（`providers.json` 的 key、MCP env 的值、名字像 KEY / TOKEN / SECRET / PASSWORD 的环境变量值）；常见格式（私钥块、`sk-`、`ghp_`、`github_pat_`、`AKIA`、Telegram bot token `<数字>:<35 位>`）；本机路径、用户名、主机名替换（`collectLocalInfo`，`channels/localInfo.ts`）。密钥命中整条拒绝，不做部分打码。
