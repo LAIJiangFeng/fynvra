@@ -3037,6 +3037,9 @@ describe('automatic model limits', () => {
     const modelLimits = {
       ensure: vi.fn(() => probed.promise),
       learn: vi.fn(async (_providerId: string, _modelId: string, _message: string) => false),
+      learnMaxOutput: vi.fn(
+        async (_providerId: string, _modelId: string, _maxOutput: number) => false
+      ),
     };
     const env = setup({ models: modelsOf(providers), modelLimits });
     return { env, providers, probed, modelLimits };
@@ -3109,13 +3112,68 @@ describe('automatic model limits', () => {
     expect(env.sent('set-model')[0]).toMatchObject({ model: { contextWindow: 1_000_000 } });
   });
 
-  it.each(['catalog', 'settings'] as const)('does not probe a %s window', async (source) => {
+  it('does not probe a catalog window', async () => {
     const { env, modelLimits } = limitsEnv();
     const session = await createSession(env);
     await env.host.prompt(session.id, 'hi');
-    report(env, session.id, 1, source);
+    report(env, session.id, 1, 'catalog');
     expect(env.sent('spawn-session')).toHaveLength(1);
     expect(modelLimits.ensure).not.toHaveBeenCalled();
+  });
+
+  it('probes a settings window too: the entry may lack the max output', async () => {
+    const { env, modelLimits } = limitsEnv(200_000);
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    report(env, session.id, 1, 'settings');
+    expect(modelLimits.ensure).toHaveBeenCalledWith('anthropic', 'claude-sonnet-5-5');
+  });
+
+  it('persists the max output the worker learned from a silent retry and pushes it', async () => {
+    const { env, providers, modelLimits } = limitsEnv(200_000);
+    modelLimits.learnMaxOutput.mockImplementation(async () => {
+      const model = providers[0]?.models[0];
+      if (model) model.maxOutput = 131_072;
+      return true;
+    });
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    env.worker().emit({
+      type: 'model-limits-learned',
+      identity: identityOf(session.id),
+      modelId: 'claude-sonnet-5-5',
+      maxOutput: 131_072,
+    });
+    expect(modelLimits.learnMaxOutput).toHaveBeenCalledWith(
+      'anthropic',
+      'claude-sonnet-5-5',
+      131_072
+    );
+    await flush();
+    await flush();
+    settle(env, session.id, 1);
+    await vi.waitFor(() =>
+      expect(env.sent('set-model').at(-1)).toMatchObject({ model: { maxOutput: 131_072 } })
+    );
+  });
+
+  it('ignores a learned max output from a stale generation or another model', async () => {
+    const { env, modelLimits } = limitsEnv(200_000);
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    env.worker().emit({
+      type: 'model-limits-learned',
+      identity: { sessionId: session.id, generation: 2 },
+      modelId: 'claude-sonnet-5-5',
+      maxOutput: 131_072,
+    });
+    env.worker().emit({
+      type: 'model-limits-learned',
+      identity: identityOf(session.id),
+      modelId: 'glm-x',
+      maxOutput: 131_072,
+    });
+    expect(modelLimits.learnMaxOutput).not.toHaveBeenCalled();
   });
 
   it('learns the limit from a model overflow error and pushes it', async () => {

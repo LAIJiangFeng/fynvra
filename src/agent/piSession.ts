@@ -22,6 +22,7 @@ import { compactionStrategyOf, compactionTimeoutMsOf } from '@shared/types/setti
 import { createCompactionChainExtension } from './compaction/methods';
 import { createContextRecovery } from './contextRecovery';
 import { createMagicContextCompaction } from './magicContext';
+import { installMaxTokensRetry } from './maxTokensRetry';
 import type { WorkerResolvedModel } from './models';
 import { createSessionSettings, roleWithShellPrompt } from './shell';
 import { createSnapcompactExtension } from './snapcompact/snapcompact';
@@ -83,7 +84,7 @@ export interface PiSessionFactoryOptions {
  * 审批门由 createRoleSession 按 spec.role.approvalMode（Main 给的会话档位）建好，经 onGate 交回这里，换档位调它的 setMode。
  */
 export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSession {
-  return async ({ identity, spec, host, workerHost, configHost, approval }) => {
+  return async ({ identity, spec, host, workerHost, configHost, approval, onMaxOutputLearned }) => {
     const model = await options.resolveModel(withRoleThinking(spec.model, spec.role));
     // 插件在 createRoleSession 里加载，此前先让它们按服务 id 找得到模型服务
     if (spec.pluginRefs?.length) options.registerPlugins?.(spec.pluginRefs);
@@ -215,6 +216,18 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
         })
       : undefined;
     dropEmptyUserText(session);
+    // 端点拒绝 max_tokens 时降到它报的上限并静默重发一次；本会话后续请求（含压缩）都按新上限，Main 写回设置
+    installMaxTokensRetry(session.agent, (model, maxOutput) => {
+      const current = activeModel.model;
+      if (
+        current.provider === model.provider &&
+        current.id === model.id &&
+        current.maxTokens > maxOutput
+      ) {
+        activeModel = { ...activeModel, model: { ...current, maxTokens: maxOutput } };
+      }
+      onMaxOutputLearned?.(model.id, maxOutput);
+    });
     const setFastMode = installFastMode(session, spec.model.fastMode === true);
     // 换模型后建议请求也要用新模型：闭包里保存当前解析结果，不改会话的 thinking / Fast
     options.onModelSelected?.(identity.sessionId, model);
