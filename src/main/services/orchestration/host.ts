@@ -1004,6 +1004,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
       summary: input.summary,
       files,
       checks: passedChecks.get(dispatch.id) ?? [],
+      restricted,
     });
     let known: readonly string[];
     let local: Awaited<ReturnType<PullRequestGateDeps['localInfo']>>;

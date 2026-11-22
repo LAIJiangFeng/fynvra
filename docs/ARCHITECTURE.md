@@ -306,7 +306,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
   - 本机信息：上述内容里出现本机绝对路径前缀或主机名即拒绝；不查单独出现的用户名单词（误报太多），单词形式的用户名只在群回复里替换；
   - 不设改动规模上限。
 - 执行（独立 argv、不经 shell、套用 §7.7 网络代理环境）：`git push -u origin <branch>`（受限任务用 `git -c core.hooksPath=<空目录> push --no-verify`，避免 pre-push 等 hooks 在本机运行被改过的代码；普通任务照常 push），再 `gh pr create --head <branch> --base <base> --title … --body-file …`（`draft` 时加 `--draft`；设 `GH_PROMPT_DISABLED=1`，保持非交互）；该分支已有 PR 时返回已有链接，保证幂等；没装 `gh` 或未登录时返回可读错误。
-- PR 正文由 Main 按模板拼接：问题 / 改动（文件列表 + `summary`）/ 验证 / 来源（渠道插件经 `channel.setPullRequestNote` 提供的附加段，不写群名）。
+- PR 正文由 Main 按模板拼接：问题 / 改动（文件列表 + `summary`）/ 验证 / 来源（渠道插件经 `channel.setPullRequestNote` 提供的附加段，不写群名）。「验证」段列出本 dispatch 通过的 `run_checks` 命令，没有时写「见 CI」；受限协调者派出的任务再加一行「单元测试与构建未在本机运行，由 PR 的 Checks（CI）负责，合并前请查看 Checks 结果」（有这一行时不写「见 CI」），提示词也要求 summary 不让维护者本地跑测试、不提会话限制。
 - 成功后写 `Task.pullRequest { url, branch, base, headCommit }` 和 `mergedDiff`，任务从 in-review 变为 completed；失败不改任务状态。任务卡片显示 PR 链接。
 - 清理：worktree 干净、且 HEAD 等于已推送的 `headCommit` 时可以删 worktree，本地分支保留（PR 未合并，不按「无未合并提交」规则删分支）。
 - worker 契约不变：worker 不 push。restricted 协调者只能用 `open_pull_request` 交付（`merge_worktree` 拒绝）。
