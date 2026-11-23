@@ -10,6 +10,7 @@ import type {
   SessionModelRef,
   SessionSummary,
 } from '@shared/types/chat';
+import { MAX_CHAT_IMAGES } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionsApi } from '../../lib/api/sessions';
@@ -21,7 +22,6 @@ import {
   selectDraftImagesOf,
   selectMessagesOf,
   selectQueueOf,
-  selectSendNowOf,
   selectSessionsOf,
   selectStatusOf,
 } from './selectors';
@@ -1304,21 +1304,23 @@ describe('createSessionsStore · 文档附件', () => {
     const [queued] = selectQueueOf('s1')(state());
     expect(queued).toEqual(expect.objectContaining({ text: 'second', files: [DOC] }));
     expect(state().draftFiles).toEqual({});
+    // 交给 pi 的是拼好的正文
+    const handed = '<file name="a.md">\n# 标题\n</file>\nsecond';
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: handed });
 
     // 草稿里还有附件时不撤回
     state().attachFiles('s1', [CSV]);
-    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('draft-exists');
+    expect(await state().recallQueued('s1', queued?.id ?? '')).toBe('draft-exists');
     state().removeDraftFile('s1', 0);
-    expect(state().recallQueued('s1', queued?.id ?? '')).toBe('recalled');
+    api.takeBackQueued.mockResolvedValueOnce({ ok: true, texts: [handed] });
+    expect(await state().recallQueued('s1', queued?.id ?? '')).toBe('recalled');
     expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
     expect(state().drafts.s1).toBe('second');
 
-    await state().send('second');
+    // 作为 prompt 发出时同样拼好正文
     emitEvent(2, { type: 'agent_settled', aborted: false });
-    expect(api.prompt).toHaveBeenLastCalledWith({
-      sessionId: 's1',
-      text: '<file name="a.md">\n# 标题\n</file>\nsecond',
-    });
+    await state().send('second');
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: handed });
   });
 
   it('超过个数或合计字数上限的不加并给出原因，放得下的照加', async () => {
@@ -1762,6 +1764,8 @@ describe('createSessionsStore · queue while running', () => {
 
   it('drains the queue in order, one prompt per settled turn', async () => {
     const { store, api, emitEvent } = await running();
+    // 交出失败的留在本地，本轮结束后按顺序作为 prompt 发出
+    api.steer.mockResolvedValue({ ok: false, error: 'busy' });
     await store.getState().send('second');
     await store.getState().send('third');
 
@@ -1773,6 +1777,8 @@ describe('createSessionsStore · queue while running', () => {
     expect(selectStatusOf('s1')(store.getState())).toBe('running');
 
     emitEvent(3, { type: 'message_end', role: 'user', text: 'second' });
+    // 新回合开始后再次尝试交出，等它失败回到本地
+    await settle();
     emitEvent(4, { type: 'agent_settled', aborted: false });
     await settle();
     expect(api.prompt).toHaveBeenCalledTimes(3);
@@ -1844,127 +1850,118 @@ describe('createSessionsStore · queue while running', () => {
     emitEvent(2, { type: 'agent_settled', aborted: true });
     emitEvent(4, { type: 'agent_settled', aborted: false });
     await settle();
-    expect(api.prompt).toHaveBeenCalledTimes(2);
+    // 过期的中断结算没把已交出项恢复为本地项；正常结算视为已交付
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(texts(store)).toEqual([]);
   });
 
-  it('removes a queued message', async () => {
-    const { store } = await running();
+  const isHanded = (store: Awaited<ReturnType<typeof running>>['store']) =>
+    selectQueueOf('s1')(store.getState()).map((item) => item.handed !== undefined);
+
+  it('运行中按 Enter：交给 pi，模型读到后移出队列并作为普通用户消息显示', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    expect(api.steer).toHaveBeenCalledWith({ sessionId: 's1', text: 'second' });
+    expect(isHanded(store)).toEqual([true]);
+
+    emitEvent(2, { type: 'message_end', role: 'user', text: 'second' });
+    expect(texts(store)).toEqual([]);
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(
+      selectMessagesOf('s1')(store.getState()).filter((message) => message.role === 'user')
+    ).toEqual([
+      expect.objectContaining({ text: 'first' }),
+      expect.objectContaining({ text: 'second' }),
+    ]);
+  });
+
+  it('`/` 开头的命令运行中不交出，本轮结束后作为 prompt 发出', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('/compact');
+    expect(api.steer).not.toHaveBeenCalled();
+    expect(isHanded(store)).toEqual([false]);
+    emitEvent(2, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: '/compact' });
+  });
+
+  it('正常结算：剩下的已交出项视为已交付并移除', async () => {
+    const { store, api, emitEvent } = await running();
     await store.getState().send('second');
     await store.getState().send('third');
-    const [first] = selectQueueOf('s1')(store.getState());
-    store.getState().removeQueued('s1', first?.id ?? '');
+    emitEvent(2, { type: 'message_end', role: 'user', text: 'second' });
     expect(texts(store)).toEqual(['third']);
+    emitEvent(3, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(texts(store)).toEqual([]);
+    expect(api.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('中断结算：已交出项恢复为本地项，队首作为 prompt 发出，其余在新回合开始后再交出', async () => {
+    const { store, api, emitEvent } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+    expect(isHanded(store)).toEqual([true, true]);
+    emitEvent(2, { type: 'agent_settled', aborted: true });
+    await settle();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual(['third']);
+    expect(isHanded(store)).toEqual([false]);
+
+    emitEvent(3, { type: 'message_end', role: 'user', text: 'second' });
+    await settle();
+    expect(api.steer).toHaveBeenCalledTimes(3);
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(isHanded(store)).toEqual([true]);
   });
 
   // 列表快照给 running：停止后的兜底 loadSessions 不会在结算前就把会话当成 idle 发出队首
-  it('立即发送：停止当前回合，把最新一条队列项移到队首，结算后作为下一条 prompt 发出', async () => {
+  it('立即发送：草稿排到队尾，全部交出后打断本轮，结算后接着发出', async () => {
     const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
+    api.steer.mockResolvedValueOnce({ ok: false, error: 'busy' });
     await store.getState().send('second');
-    store.getState().attachImages('s1', [SHOT]);
-    await store.getState().send('third');
+    expect(isHanded(store)).toEqual([false]);
+    store.getState().setDraft('s1', 'also check docs');
 
     expect(await store.getState().steer('s1')).toBe(true);
+    expect(store.getState().drafts.s1).toBeUndefined();
     expect(api.abort).toHaveBeenCalledWith('s1');
-    expect(api.steer).not.toHaveBeenCalled();
-    expect(texts(store)).toEqual(['third', 'second']);
+    expect(texts(store)).toEqual(['second', 'also check docs']);
 
     emitEvent(2, { type: 'agent_settled', aborted: true });
     await settle();
-    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third', images: [SHOT] });
-    expect(texts(store)).toEqual(['second']);
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(texts(store)).toEqual(['also check docs']);
   });
 
-  it('立即发送指定队列项：移到队首', async () => {
-    const { store, api } = await running([summary('s1', { status: 'running' })]);
-    await store.getState().send('second');
-    await store.getState().send('third');
-    const [second] = selectQueueOf('s1')(store.getState());
-    expect(await store.getState().steer('s1', second?.id)).toBe(true);
-    expect(api.abort).toHaveBeenCalledWith('s1');
-    expect(texts(store)).toEqual(['second', 'third']);
-  });
-
-  it('队列为空时立即发送草稿；没有可发内容返回 false', async () => {
+  it('立即发送：队列和草稿都为空时返回 false', async () => {
     const { store, api } = await running([summary('s1', { status: 'running' })]);
     expect(await store.getState().steer('s1')).toBe(false);
     expect(api.abort).not.toHaveBeenCalled();
-    store.getState().setDraft('s1', 'also check docs');
-    expect(await store.getState().steer('s1')).toBe(true);
-    expect(store.getState().drafts.s1).toBeUndefined();
-    expect(texts(store)).toEqual(['also check docs']);
-    expect(api.abort).toHaveBeenCalledWith('s1');
   });
 
-  it('停止失败时返回 false，消息留在队首并提示错误', async () => {
+  it('立即发送：停止失败时返回 false 并提示错误', async () => {
     const { store, api } = await running([summary('s1', { status: 'running' })]);
     await store.getState().send('second');
-    await store.getState().send('third');
     api.abort.mockResolvedValueOnce({ ok: false, error: 'gone' });
     expect(await store.getState().steer('s1')).toBe(false);
-    expect(texts(store)).toEqual(['third', 'second']);
+    expect(texts(store)).toEqual(['second']);
     expect(store.getState().notice).toContain('gone');
   });
 
   const toolStart = { type: 'tool_start', toolCallId: 'c1', toolName: 'bash', args: {} } as const;
-  const toolEnd = {
-    type: 'tool_end',
-    toolCallId: 'c1',
-    toolName: 'bash',
-    isError: false,
-    output: 'ok',
-    outputTruncated: false,
-    durationMs: 1,
-  } as const;
 
-  it('工具执行中立即发送：不杀工具，工具跑完再停止，结算后发出', async () => {
+  it('工具执行中立即发送：不打断，消息已交给 pi', async () => {
     const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
-    await store.getState().send('second');
-    await store.getState().send('third');
     emitEvent(2, toolStart);
-
+    store.getState().setDraft('s1', 'second');
     expect(await store.getState().steer('s1')).toBe(true);
     expect(api.abort).not.toHaveBeenCalled();
-    expect(texts(store)).toEqual(['third', 'second']);
-    const [head] = selectQueueOf('s1')(store.getState());
-    expect(selectSendNowOf('s1')(store.getState())).toBe(head?.id);
-
-    emitEvent(3, toolEnd);
-    expect(api.abort).toHaveBeenCalledTimes(1);
-    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
-
-    emitEvent(4, { type: 'agent_settled', aborted: true });
-    await settle();
-    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
-    expect(texts(store)).toEqual(['second']);
+    expect(api.steer).toHaveBeenCalledWith({ sessionId: 's1', text: 'second' });
+    expect(isHanded(store)).toEqual([true]);
   });
 
-  it('工具执行中被标记后本轮正常结束：不停止，清掉标记，队首照常发出', async () => {
-    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
-    await store.getState().send('second');
-    emitEvent(2, toolStart);
-    expect(await store.getState().steer('s1')).toBe(true);
-
-    emitEvent(3, { type: 'agent_settled', aborted: false });
-    await settle();
-    expect(api.abort).not.toHaveBeenCalled();
-    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
-    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
-  });
-
-  it('被标记的条目删除后，工具跑完不再停止', async () => {
-    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
-    await store.getState().send('second');
-    emitEvent(2, toolStart);
-    expect(await store.getState().steer('s1')).toBe(true);
-    const [head] = selectQueueOf('s1')(store.getState());
-    store.getState().removeQueued('s1', head?.id ?? '');
-    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
-
-    emitEvent(3, toolEnd);
-    expect(api.abort).not.toHaveBeenCalled();
-  });
-
-  it('等审批时立即发送：立刻停止', async () => {
+  it('等审批时立即发送：立刻打断', async () => {
     const { store, api, emitEvent, emitApproval } = await running([
       summary('s1', { status: 'running' }),
     ]);
@@ -1979,42 +1976,114 @@ describe('createSessionsStore · queue while running', () => {
       expiresAt: 0,
     });
     expect(selectStatusOf('s1')(store.getState())).toBe('waiting-approval');
-
     expect(await store.getState().steer('s1')).toBe(true);
     expect(api.abort).toHaveBeenCalledWith('s1');
-    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
   });
 
-  it('worker 会话运行中仍走 pi steer，不中断', async () => {
+  it('worker 会话立即发送：交出但不打断', async () => {
     const { store, api } = await running([summary('s1', { dispatchId: 'd1' })]);
     await store.getState().send('second');
     expect(await store.getState().steer('s1')).toBe(true);
     expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
     expect(api.abort).not.toHaveBeenCalled();
-    expect(texts(store)).toEqual([]);
-  });
-
-  it('worker 会话 steer 失败时放回队列', async () => {
-    const { store, api } = await running([summary('s1', { dispatchId: 'd1' })]);
-    await store.getState().send('second');
-    api.steer.mockResolvedValueOnce({ ok: false, error: 'gone' });
-    expect(await store.getState().steer('s1')).toBe(false);
-    expect(texts(store)).toEqual(['second']);
-    expect(store.getState().notice).toContain('gone');
   });
 
   it('sends a queued message as a prompt when the session is idle', async () => {
     const { store, api, emitEvent } = await running();
+    api.steer.mockResolvedValueOnce({ ok: false, error: 'busy' });
     await store.getState().send('second');
     // A rejected prompt puts it back and leaves the session idle; it is not retried by itself
     api.prompt.mockResolvedValueOnce({ ok: false, error: 'gone' });
     emitEvent(2, { type: 'agent_settled', aborted: false });
     await settle();
-    const [second] = selectQueueOf('s1')(store.getState());
-    expect(await store.getState().steer('s1', second?.id)).toBe(true);
-    expect(api.steer).not.toHaveBeenCalled();
+    expect(texts(store)).toEqual(['second']);
+    expect(await store.getState().steer('s1')).toBe(true);
+    await settle();
     expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
     expect(texts(store)).toEqual([]);
+  });
+
+  it('撤回全部：只有本地项时不去宿主撤回，文字逐行放在草稿之前，图片并入草稿', async () => {
+    const { store, api } = await setup();
+    await store.getState().selectSession('s1');
+    // 第一条的回显还没确认（回合没开始），排队的都是本地项
+    await store.getState().send('first');
+    await store.getState().send('second');
+    store.getState().attachImages('s1', [SHOT]);
+    await store.getState().send('third');
+    store.getState().setDraft('s1', 'draft');
+    expect(api.steer).not.toHaveBeenCalled();
+
+    expect(await store.getState().recallAllQueued('s1')).toBe('recalled');
+    expect(api.takeBackQueued).not.toHaveBeenCalled();
+    expect(texts(store)).toEqual([]);
+    expect(store.getState().drafts.s1).toBe('second\nthird\ndraft');
+    expect(store.getState().draftImages.s1).toEqual([SHOT]);
+  });
+
+  it('撤回全部：有已交出项时先去宿主撤回，按返回原文恢复，没返回的视为已交付', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+    api.takeBackQueued.mockResolvedValueOnce({ ok: true, texts: ['third'] });
+    expect(await store.getState().recallAllQueued('s1')).toBe('recalled');
+    expect(api.takeBackQueued).toHaveBeenCalledWith('s1');
+    expect(texts(store)).toEqual([]);
+    expect(store.getState().drafts.s1).toBe('third');
+  });
+
+  it('撤回全部：宿主撤回失败时提示，不改动队列', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    api.takeBackQueued.mockResolvedValueOnce({ ok: false, error: 'gone' });
+    expect(await store.getState().recallAllQueued('s1')).toBe('failed');
+    expect(texts(store)).toEqual(['second']);
+    expect(isHanded(store)).toEqual([true]);
+    expect(store.getState().notice).toContain('gone');
+  });
+
+  it('撤回全部：合并后超出图片上限时不撤回', async () => {
+    const { store } = await setup();
+    await store.getState().selectSession('s1');
+    await store.getState().send('first');
+    store.getState().attachImages('s1', [SHOT]);
+    await store.getState().send('second');
+    store.getState().attachImages(
+      's1',
+      Array.from({ length: MAX_CHAT_IMAGES }, () => SHOT)
+    );
+    expect(await store.getState().recallAllQueued('s1')).toBe('too-many');
+    expect(texts(store)).toEqual(['second']);
+    expect(store.getState().draftImages.s1).toHaveLength(MAX_CHAT_IMAGES);
+  });
+
+  it('删除已交出的一条：先撤回，其余项重新交出', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+    api.takeBackQueued.mockResolvedValueOnce({ ok: true, texts: ['second', 'third'] });
+    const [second] = selectQueueOf('s1')(store.getState());
+    await store.getState().removeQueued('s1', second?.id ?? '');
+    expect(api.takeBackQueued).toHaveBeenCalledWith('s1');
+    expect(texts(store)).toEqual(['third']);
+    await settle();
+    expect(api.steer).toHaveBeenCalledTimes(3);
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(isHanded(store)).toEqual([true]);
+  });
+
+  it('撤回编辑已交出的一条：先撤回，放进草稿，其余项重新交出', async () => {
+    const { store, api } = await running();
+    await store.getState().send('second');
+    await store.getState().send('third');
+    api.takeBackQueued.mockResolvedValueOnce({ ok: true, texts: ['second', 'third'] });
+    const [second] = selectQueueOf('s1')(store.getState());
+    expect(await store.getState().recallQueued('s1', second?.id ?? '')).toBe('recalled');
+    expect(store.getState().drafts.s1).toBe('second');
+    expect(texts(store)).toEqual(['third']);
+    await settle();
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(isHanded(store)).toEqual([true]);
   });
 });
 

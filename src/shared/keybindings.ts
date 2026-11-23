@@ -42,8 +42,8 @@ const ACTIONS = {
   newline: { scope: 'composer', chord: 'shift+enter' },
   'cycle-approval': { scope: 'composer', chord: 'shift+tab' },
   'stop-turn': { scope: 'composer', chord: 'escape' },
-  /** 运行中：把最近一条排队的消息（没有排队时是草稿）移到队首，模型思考、输出或等审批时立刻停止当前回合后发出，工具执行中等工具跑完再停止发出；worker 会话仍走 steer */
-  'steer-now': { scope: 'composer', chord: 'mod+s' },
+  /** 对应 Claude Code 的 Ctrl+Enter：排队消息（草稿排在后面）立刻发出，模型在写回复时打断本轮，工具执行中等工具执行完 */
+  'steer-now': { scope: 'composer', chord: 'mod+enter' },
   'open-model-picker': { scope: 'composer', chord: 'mod+m' },
   'history-prev': { scope: 'composer', chord: 'arrowup' },
   'history-next': { scope: 'composer', chord: 'arrowdown' },
