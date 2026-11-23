@@ -52,6 +52,7 @@ import {
   selectQueueOf,
   selectRecoveryBlockedOf,
   selectReplySuggestionOf,
+  selectSendNowOf,
   selectSessionOf,
   selectStatusOf,
   useSessionsStore,
@@ -247,6 +248,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const removeQueued = useSessionsStore((state) => state.removeQueued);
   const recallQueued = useSessionsStore((state) => state.recallQueued);
   const queue = useSessionsStore(selectQueueOf(sessionId));
+  const sendNowId = useSessionsStore(selectSendNowOf(sessionId));
   const compacting = useSessionsStore(selectCompactingOf(sessionId));
   const recoveryBlocked = useSessionsStore(selectRecoveryBlockedOf(sessionId));
   const recovering = useSessionsStore((state) => state.recoveringCompaction[sessionId] === true);
@@ -731,6 +733,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       >
         <QueuedMessages
           queue={queue}
+          sendNowId={sendNowId}
           steerLabel={steerLabel}
           blocked={recoveryBlocked}
           compacting={compacting}
@@ -971,6 +974,7 @@ const DraftAttachments = memo(function DraftAttachments({
  */
 const QueuedMessages = memo(function QueuedMessages({
   queue,
+  sendNowId,
   steerLabel,
   blocked,
   compacting,
@@ -979,6 +983,8 @@ const QueuedMessages = memo(function QueuedMessages({
   onRemove,
 }: {
   queue: QueuedMessage[];
+  /** 工具跑完后待发的「立即发送」条目 */
+  sendNowId: string | undefined;
   steerLabel: string;
   blocked: boolean;
   compacting: boolean;
@@ -1019,12 +1025,17 @@ const QueuedMessages = memo(function QueuedMessages({
                 {t('chat.queuedFiles', { count: item.files.length })}
               </span>
             )}
+            {item.id === sendNowId && (
+              <span role="status" className="min-w-0 shrink truncate text-muted-foreground">
+                {t('chat.sendNowAfterTool')}
+              </span>
+            )}
             <button
               type="button"
               aria-label={t('chat.sendNow', { chord: steerLabel })}
               title={t('chat.sendNow', { chord: steerLabel })}
               onClick={() => onSendNow(item.id)}
-              disabled={blocked}
+              disabled={blocked || item.id === sendNowId}
               className={`${buttonClass} disabled:pointer-events-none disabled:opacity-40`}
             >
               <SendHorizontal className="size-3.5" />

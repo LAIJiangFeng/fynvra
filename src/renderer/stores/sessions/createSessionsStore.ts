@@ -86,6 +86,8 @@ export interface SessionsState extends ChatProjection {
   queuedBySession: Record<string, QueuedMessage[]>;
   recoveringCompaction: Record<string, true>;
   stopping: Record<string, true>;
+  /** 工具执行中点了「立即发送」的队列项 id：工具跑完、模型开始下一步时再停止当前回合并发出它 */
+  sendNowBySession: Record<string, string>;
   retryCompaction(sessionId: string): Promise<void>;
   /** 手动压缩请求在途（只到 ACK 为止，之后由会话状态与压缩事件接管） */
   compactRequests: Record<string, true>;
@@ -138,8 +140,9 @@ export interface SessionsState extends ChatProjection {
   send(text: string): Promise<boolean>;
   /**
    * 立即发送：取队列项 `queuedId`，否则最新一条队列项，否则草稿（文字、图片、附件）。会话空闲时作为普通
-   * prompt 发出；运行中先把它移到队首并停止当前回合（同 Stop），结算后作为下一条 prompt 发出；worker
-   * 会话运行中仍走 pi steer 插话，避免中断把尝试判为失败。没有可发内容、停止或投递失败时返回 false
+   * prompt 发出；运行中先把它移到队首：模型在思考、输出或等审批时立刻停止当前回合（同 Stop），工具执行中
+   * 则记入 sendNowBySession，等工具跑完再停止，结算后作为下一条 prompt 发出；worker 会话运行中仍走
+   * pi steer 插话，避免中断把尝试判为失败。没有可发内容、停止或投递失败时返回 false
    */
   steer(sessionId: string, queuedId?: string): Promise<boolean>;
   /** Drop a queued message */
@@ -560,8 +563,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
+      // 回合自己结束了，「立即发送」的标记作废，队首由下面的 drain 照常发出
+      for (const { sessionId, event } of batch)
+        if (event.type === 'agent_settled') clearSendNow(sessionId);
       // Normal, failed and stopped turns alike continue with the next queued message.
       for (const sessionId of settled) drainQueue(sessionId);
+      fireSendNow();
       // 队列真的空了、状态仍 idle 才请求；drainQueue 发了下一条时这里会看到 running
       for (const [sessionId, roundId] of normal) maybeRequestSuggestion(sessionId, roundId);
     }
@@ -575,6 +582,40 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           runtime?.recoveryRequired ||
           runtime?.pendingPromptCount
       );
+    }
+
+    /** 有工具在执行（等审批时不算，那时可以立刻停止） */
+    function toolRunning(sessionId: string): boolean {
+      const runtime = get().runtimeBySession[sessionId];
+      return (
+        Object.keys(runtime?.toolStartedAt ?? {}).length > 0 &&
+        statusOf(get(), sessionId) !== 'waiting-approval'
+      );
+    }
+
+    function clearSendNow(sessionId: string, queuedId?: string): void {
+      const marked = get().sendNowBySession[sessionId];
+      if (marked === undefined || (queuedId !== undefined && marked !== queuedId)) return;
+      set((state) => ({ sendNowBySession: omitKey(state.sendNowBySession, sessionId) }));
+    }
+
+    /** 工具跑完、模型开始下一步时，停止带「立即发送」标记的回合；结算后由 drainQueue 发出队首 */
+    function fireSendNow(): void {
+      for (const [sessionId, queuedId] of Object.entries(get().sendNowBySession)) {
+        if (!queueOf(sessionId).some((item) => item.id === queuedId)) {
+          clearSendNow(sessionId);
+          continue;
+        }
+        if (
+          !isBusy(statusOf(get(), sessionId)) ||
+          toolRunning(sessionId) ||
+          get().stopping[sessionId] ||
+          recoveryBlocked(sessionId)
+        )
+          continue;
+        clearSendNow(sessionId);
+        void stopTurn(sessionId);
+      }
     }
 
     function queueOf(sessionId: string): QueuedMessage[] {
@@ -675,6 +716,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return;
       const [next] = queueOf(sessionId);
       if (!next) return;
+      clearSendNow(sessionId, next.id);
       setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
       void deliver(sessionId, next.text, next.images, next.files, (state) => {
         // Put it back in front; deliver does not retry it right away so a broken session does not loop
@@ -805,6 +847,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       recoveringCompaction: {},
       compactRequests: {},
       stopping: {},
+      sendNowBySession: {},
       loadingHistory: {},
       listErrors: {},
       approvalSubmissions: {},
@@ -1077,6 +1120,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ? queue.find((candidate) => candidate.id === queuedId)
           : queue[queue.length - 1];
         if (queuedId && !item) return false;
+        if (item) clearSendNow(sessionId, item.id);
         const draftText = get().drafts[sessionId] ?? '';
         const message: QueuedMessage | undefined =
           item ??
@@ -1133,8 +1177,9 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
           return deliver(sessionId, message.text, message.images, message.files, putBack);
         }
-        // 非 worker 会话：放到队首并停止当前回合，aborted 结算后由 drainQueue 作为下一条 prompt 发出；
-        // 停止失败时消息留在队首，等本轮正常结束后照常发出
+        // 非 worker 会话：放到队首。模型在思考、输出或等审批时立刻停止当前回合；工具执行中不杀工具，
+        // 记下标记，等工具跑完由 fireSendNow 停止。aborted 结算后由 drainQueue 作为下一条 prompt 发出；
+        // 停止失败或本轮自己结束时，消息留在队首照常发出
         if (findSession(get(), sessionId)?.dispatchId === undefined) {
           const head: QueuedMessage = fromQueue
             ? message
@@ -1145,6 +1190,13 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               [sessionId]: [head, ...(state.queuedBySession[sessionId] ?? [])],
             },
           }));
+          if (toolRunning(sessionId)) {
+            set((state) => ({
+              sendNowBySession: { ...state.sendNowBySession, [sessionId]: head.id },
+            }));
+            return true;
+          }
+          clearSendNow(sessionId);
           return stopTurn(sessionId);
         }
         // worker 会话中断会被判为尝试失败，仍走 pi steer。
@@ -1229,6 +1281,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       },
 
       removeQueued(sessionId, queuedId) {
+        clearSendNow(sessionId, queuedId);
         setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
       },
 
@@ -1256,6 +1309,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           bumpSuggestionVersion(sessionId);
           result = 'recalled';
           return {
+            sendNowBySession:
+              state.sendNowBySession[sessionId] === queuedId
+                ? omitKey(state.sendNowBySession, sessionId)
+                : state.sendNowBySession,
             queuedBySession:
               rest.length > 0
                 ? { ...state.queuedBySession, [sessionId]: rest }
@@ -1280,6 +1337,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       abort() {
         const sessionId = get().activeSessionId;
         if (!sessionId || get().stopping[sessionId]) return Promise.resolve();
+        clearSendNow(sessionId);
         // 直接返回 stopTurn 的 promise，不多包一层 await，保持与原实现相同的结算时序
         return stopTurn(sessionId) as Promise<unknown> as Promise<void>;
       },
@@ -1667,6 +1725,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ...lists,
           recoveringCompaction: omitKey(before.recoveringCompaction, sessionId),
           stopping: omitKey(before.stopping, sessionId),
+          sendNowBySession: omitKey(before.sendNowBySession, sessionId),
           drafts: omitKey(before.drafts, sessionId),
           draftImages: omitKey(before.draftImages, sessionId),
           draftFiles: omitKey(before.draftFiles, sessionId),

@@ -428,6 +428,7 @@ export const zhCN = {
     queuedFiles: '{count} 个文件',
     queuedAttachmentsOnly: '（仅附件）',
     sendNow: '立即发送（{chord}）',
+    sendNowAfterTool: '工具执行完后发送，点「停止」可立即发送',
     removeQueued: '从队列中移除',
     recallQueued: '撤回编辑',
     recallQueuedDraftExists: '请先处理输入框中的草稿，再撤回编辑',

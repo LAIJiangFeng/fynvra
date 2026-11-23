@@ -141,6 +141,10 @@ export const selectQueueOf =
   (state: SessionsState): QueuedMessage[] =>
     state.queuedBySession[sessionId] ?? EMPTY_QUEUE;
 
+/** 工具跑完后待发的「立即发送」队列项 id */
+export const selectSendNowOf = (sessionId: string) => (state: SessionsState) =>
+  state.sendNowBySession[sessionId];
+
 export const selectCompactingOf = (sessionId: string) => (state: SessionsState) =>
   compactionActive(state.runtimeBySession[sessionId]?.compaction);
 

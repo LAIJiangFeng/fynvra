@@ -450,6 +450,7 @@ export const en: MessagesShape<typeof zhCN> = {
     queuedFiles: '{count} file(s)',
     queuedAttachmentsOnly: '(attachments only)',
     sendNow: 'Send now ({chord})',
+    sendNowAfterTool: 'Sends when the current tool finishes; press Stop to send now',
     removeQueued: 'Remove from queue',
     recallQueued: 'Recall to edit',
     recallQueuedDraftExists: 'Finish or clear the current draft before recalling a queued message',
