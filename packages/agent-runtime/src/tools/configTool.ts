@@ -10,6 +10,8 @@ export const CONFIG_ACTIONS = [
   'list',
   'skill_install',
   'role_set_skills',
+  'role_upsert',
+  'role_remove',
   'mcp_upsert',
   'mcp_remove',
   'workflow_upsert',
@@ -33,7 +35,7 @@ const configSchema = Type.Object(
     id: Type.Optional(
       Type.String({
         description:
-          'Target id (from list) for mcp_remove, workflow_remove, plugin_enable and plugin_disable.',
+          'Target id (from list) for role_remove, mcp_remove, workflow_remove, plugin_enable and plugin_disable.',
       })
     ),
     source: Type.Optional(
@@ -52,6 +54,12 @@ const configSchema = Type.Object(
     role: Type.Optional(Type.String({ description: 'role_set_skills: the role id.' })),
     add: listParam('role_set_skills: skill ids to add.'),
     remove: listParam('role_set_skills: skill ids to remove.'),
+    role_config: objectParam(
+      'role_upsert: { id, name, description?, systemPrompt?, model?: { providerId, modelId, thinking? }, skillIds?, mcpServerIds?, ' +
+        'pluginIds?, instructionFileId?, tools: "all"|"readonly"|"orchestrator", approvalMode: "supervised"|"auto-edits"|"full" }. ' +
+        'Updating an existing custom role keeps omitted fields; null clears an optional field. ' +
+        'Built-in roles (orchestrator, worker) can only be changed in Fynvra Settings.'
+    ),
     server: objectParam(
       'mcp_upsert: { id? (omit to add, set to replace), name, transport: "stdio"|"sse"|"http", command?, args?, url?, enabled?, ' +
         'env?: { KEY: value }, headers?: { KEY: value } }. Omit a value ({ "key": "KEY" } in list form) to keep the stored one.'
@@ -73,10 +81,11 @@ export function createConfigTool(host: ConfigHost): ToolDefinition {
     name: CONFIG_TOOL_NAME,
     label: 'Fynvra config',
     description:
-      "Configure Fynvra itself when the user asks: list or change skills, MCP servers, workflows, plugins and roles' skills. " +
+      'Configure Fynvra itself when the user asks: list or change skills, MCP servers, workflows, plugins and roles ' +
+      '(create, update or remove custom roles; change the skills of a role). ' +
       'Changes go through Fynvra settings (never edit Fynvra userData files by hand). Secret values are never shown back.',
     promptSnippet:
-      'Install skills, edit MCP servers, workflows, plugins and role skills in Fynvra when the user asks',
+      'Install skills, edit MCP servers, workflows, plugins, custom roles and role skills in Fynvra when the user asks',
     parameters: configSchema,
     executionMode: 'sequential',
     prepareArguments: (raw) => normalizeConfigArgs(raw) as Static<typeof configSchema>,
@@ -126,6 +135,12 @@ export function describeConfigAction(input: unknown): string {
       const remove = list(args.remove);
       return `Change skills of role ${text(args.role)}:${add ? ` add ${add}` : ''}${remove ? ` remove ${remove}` : ''}`;
     }
+    case 'role_upsert': {
+      const role = asRecord(args.role_config);
+      return `Save role ${text(role.id)} "${text(role.name)}" (tools: ${text(role.tools)}, approval: ${text(role.approvalMode)})`;
+    }
+    case 'role_remove':
+      return `Remove role ${text(args.id)}`;
     case 'mcp_upsert': {
       const server = asRecord(args.server);
       const target =
@@ -168,13 +183,18 @@ export function describeConfigAction(input: unknown): string {
 function normalizeConfigArgs(raw: unknown) {
   const args = asRecord(raw);
   const action = trimmed(pick(args, 'action'));
+  const role = pick(args, 'role', 'role_id', 'roleId');
   return compact({
     action: typeof action === 'string' ? action.toLowerCase() : action,
     id: trimmed(pick(args, 'id')),
     source: trimmed(pick(args, 'source')),
     path: trimmed(pick(args, 'path')),
     roles: stringList(pick(args, 'roles', 'role_ids', 'roleIds')),
-    role: trimmed(pick(args, 'role', 'role_id', 'roleId')),
+    // 模型常把角色对象直接写进 role：对象当 role_config，字符串才留给 role_set_skills
+    role: typeof role === 'string' ? role.trim() : undefined,
+    role_config:
+      pick(args, 'role_config', 'roleConfig') ??
+      (role !== null && typeof role === 'object' && !Array.isArray(role) ? role : undefined),
     add: stringList(pick(args, 'add')),
     remove: stringList(pick(args, 'remove')),
     server: pick(args, 'server'),
