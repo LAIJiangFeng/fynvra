@@ -476,8 +476,14 @@ function applyEvent(
         (!event.aborted && slice.runtime.pendingAssistantFailure?.stopReason === 'error'
           ? slice.runtime.pendingAssistantFailure.message
           : undefined);
+      const settled = settleMessages(slice.messages);
       return {
-        messages: settleMessages(slice.messages),
+        // 中断时宿主丢弃尚未写入 pi 历史的输入：这些回显不会再被确认
+        messages: event.aborted
+          ? settled.map((message) =>
+              message.optimistic && !message.failed ? { ...message, failed: true } : message
+            )
+          : settled,
         runtime: {
           ...endProgress(slice.runtime, now, event.aborted),
           error,

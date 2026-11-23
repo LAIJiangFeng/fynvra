@@ -1731,8 +1731,8 @@ describe('createSessionsStore · queue while running', () => {
   const SHOT: ChatImage = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
 
   /** s1 selected and running a first turn */
-  async function running() {
-    const env = await setup();
+  async function running(initial?: SessionSummary[]) {
+    const env = await setup(initial);
     await env.store.getState().selectSession('s1');
     await env.store.getState().send('first');
     env.emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
@@ -1849,34 +1849,66 @@ describe('createSessionsStore · queue while running', () => {
     expect(texts(store)).toEqual(['third']);
   });
 
-  it('steers the most recent queued message (with its images), or a given one', async () => {
-    const { store, api } = await running();
+  // 列表快照给 running：停止后的兜底 loadSessions 不会在结算前就把会话当成 idle 发出队首
+  it('立即发送：停止当前回合，把最新一条队列项移到队首，结算后作为下一条 prompt 发出', async () => {
+    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
     await store.getState().send('second');
     store.getState().attachImages('s1', [SHOT]);
     await store.getState().send('third');
 
     expect(await store.getState().steer('s1')).toBe(true);
-    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third', images: [SHOT] });
-    expect(texts(store)).toEqual(['second']);
+    expect(api.abort).toHaveBeenCalledWith('s1');
+    expect(api.steer).not.toHaveBeenCalled();
+    expect(texts(store)).toEqual(['third', 'second']);
 
+    emitEvent(2, { type: 'agent_settled', aborted: true });
+    await settle();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third', images: [SHOT] });
+    expect(texts(store)).toEqual(['second']);
+  });
+
+  it('立即发送指定队列项：移到队首', async () => {
+    const { store, api } = await running([summary('s1', { status: 'running' })]);
+    await store.getState().send('second');
+    await store.getState().send('third');
     const [second] = selectQueueOf('s1')(store.getState());
     expect(await store.getState().steer('s1', second?.id)).toBe(true);
-    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
-    expect(texts(store)).toEqual([]);
-    expect(api.prompt).toHaveBeenCalledTimes(1);
+    expect(api.abort).toHaveBeenCalledWith('s1');
+    expect(texts(store)).toEqual(['second', 'third']);
   });
 
-  it('steers the draft when nothing is queued; nothing to send returns false', async () => {
-    const { store, api } = await running();
+  it('队列为空时立即发送草稿；没有可发内容返回 false', async () => {
+    const { store, api } = await running([summary('s1', { status: 'running' })]);
     expect(await store.getState().steer('s1')).toBe(false);
+    expect(api.abort).not.toHaveBeenCalled();
     store.getState().setDraft('s1', 'also check docs');
     expect(await store.getState().steer('s1')).toBe(true);
-    expect(api.steer).toHaveBeenCalledWith({ sessionId: 's1', text: 'also check docs' });
     expect(store.getState().drafts.s1).toBeUndefined();
+    expect(texts(store)).toEqual(['also check docs']);
+    expect(api.abort).toHaveBeenCalledWith('s1');
   });
 
-  it('puts a message back when steering fails', async () => {
-    const { store, api } = await running();
+  it('停止失败时返回 false，消息留在队首并提示错误', async () => {
+    const { store, api } = await running([summary('s1', { status: 'running' })]);
+    await store.getState().send('second');
+    await store.getState().send('third');
+    api.abort.mockResolvedValueOnce({ ok: false, error: 'gone' });
+    expect(await store.getState().steer('s1')).toBe(false);
+    expect(texts(store)).toEqual(['third', 'second']);
+    expect(store.getState().notice).toContain('gone');
+  });
+
+  it('worker 会话运行中仍走 pi steer，不中断', async () => {
+    const { store, api } = await running([summary('s1', { dispatchId: 'd1' })]);
+    await store.getState().send('second');
+    expect(await store.getState().steer('s1')).toBe(true);
+    expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+    expect(api.abort).not.toHaveBeenCalled();
+    expect(texts(store)).toEqual([]);
+  });
+
+  it('worker 会话 steer 失败时放回队列', async () => {
+    const { store, api } = await running([summary('s1', { dispatchId: 'd1' })]);
     await store.getState().send('second');
     api.steer.mockResolvedValueOnce({ ok: false, error: 'gone' });
     expect(await store.getState().steer('s1')).toBe(false);

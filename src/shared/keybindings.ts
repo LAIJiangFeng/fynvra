@@ -42,7 +42,7 @@ const ACTIONS = {
   newline: { scope: 'composer', chord: 'shift+enter' },
   'cycle-approval': { scope: 'composer', chord: 'shift+tab' },
   'stop-turn': { scope: 'composer', chord: 'escape' },
-  /** 运行中：把最近一条排队的消息（没有排队时是草稿）立即插入当前回合（steer） */
+  /** 运行中：停止当前回合（同 Stop），把最近一条排队的消息（没有排队时是草稿）作为下一条立即发出；worker 会话仍走 steer */
   'steer-now': { scope: 'composer', chord: 'mod+s' },
   'open-model-picker': { scope: 'composer', chord: 'mod+m' },
   'history-prev': { scope: 'composer', chord: 'arrowup' },
