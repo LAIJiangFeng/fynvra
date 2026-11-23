@@ -21,6 +21,7 @@ import {
   selectDraftImagesOf,
   selectMessagesOf,
   selectQueueOf,
+  selectSendNowOf,
   selectSessionsOf,
   selectStatusOf,
 } from './selectors';
@@ -1896,6 +1897,86 @@ describe('createSessionsStore · queue while running', () => {
     expect(await store.getState().steer('s1')).toBe(false);
     expect(texts(store)).toEqual(['third', 'second']);
     expect(store.getState().notice).toContain('gone');
+  });
+
+  const toolStart = { type: 'tool_start', toolCallId: 'c1', toolName: 'bash', args: {} } as const;
+  const toolEnd = {
+    type: 'tool_end',
+    toolCallId: 'c1',
+    toolName: 'bash',
+    isError: false,
+    output: 'ok',
+    outputTruncated: false,
+    durationMs: 1,
+  } as const;
+
+  it('工具执行中立即发送：不杀工具，工具跑完再停止，结算后发出', async () => {
+    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
+    await store.getState().send('second');
+    await store.getState().send('third');
+    emitEvent(2, toolStart);
+
+    expect(await store.getState().steer('s1')).toBe(true);
+    expect(api.abort).not.toHaveBeenCalled();
+    expect(texts(store)).toEqual(['third', 'second']);
+    const [head] = selectQueueOf('s1')(store.getState());
+    expect(selectSendNowOf('s1')(store.getState())).toBe(head?.id);
+
+    emitEvent(3, toolEnd);
+    expect(api.abort).toHaveBeenCalledTimes(1);
+    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
+
+    emitEvent(4, { type: 'agent_settled', aborted: true });
+    await settle();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'third' });
+    expect(texts(store)).toEqual(['second']);
+  });
+
+  it('工具执行中被标记后本轮正常结束：不停止，清掉标记，队首照常发出', async () => {
+    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
+    await store.getState().send('second');
+    emitEvent(2, toolStart);
+    expect(await store.getState().steer('s1')).toBe(true);
+
+    emitEvent(3, { type: 'agent_settled', aborted: false });
+    await settle();
+    expect(api.abort).not.toHaveBeenCalled();
+    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
+    expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: 'second' });
+  });
+
+  it('被标记的条目删除后，工具跑完不再停止', async () => {
+    const { store, api, emitEvent } = await running([summary('s1', { status: 'running' })]);
+    await store.getState().send('second');
+    emitEvent(2, toolStart);
+    expect(await store.getState().steer('s1')).toBe(true);
+    const [head] = selectQueueOf('s1')(store.getState());
+    store.getState().removeQueued('s1', head?.id ?? '');
+    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
+
+    emitEvent(3, toolEnd);
+    expect(api.abort).not.toHaveBeenCalled();
+  });
+
+  it('等审批时立即发送：立刻停止', async () => {
+    const { store, api, emitEvent, emitApproval } = await running([
+      summary('s1', { status: 'running' }),
+    ]);
+    await store.getState().send('second');
+    emitEvent(2, toolStart);
+    emitApproval({
+      id: 'req-1',
+      sessionId: 's1',
+      kind: 'command',
+      title: 'bash',
+      detail: 'pnpm test',
+      expiresAt: 0,
+    });
+    expect(selectStatusOf('s1')(store.getState())).toBe('waiting-approval');
+
+    expect(await store.getState().steer('s1')).toBe(true);
+    expect(api.abort).toHaveBeenCalledWith('s1');
+    expect(selectSendNowOf('s1')(store.getState())).toBeUndefined();
   });
 
   it('worker 会话运行中仍走 pi steer，不中断', async () => {
