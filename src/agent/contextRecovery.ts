@@ -627,6 +627,12 @@ export function createContextRecovery({
     async abort() {
       const stoppedCommand = stopCommands();
       cancel('user');
+      // 无恢复锁时，Stop 连同尚未写入 pi 历史的输入一起取消（与 clearQueue 一致），否则渲染端会一直排队。
+      if (!blocked && !recovering && pending.length) {
+        pending.length = 0;
+        checkpoint();
+        publish();
+      }
       await session.abort();
       // The drain loop leaves on the next ticks; wait so the caller sees the session idle.
       if (stoppedCommand) await drained;

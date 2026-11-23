@@ -311,6 +311,43 @@ describe('compaction failures end the turn without locking the session', () => {
     expect(env.events.some((e) => e.type === 'error' && e.message === FAILED)).toBe(false);
   });
 
+  it('Stop cancels steered and follow-up inputs not yet written to history', async () => {
+    const env = await setup();
+    const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    const requests: string[] = [];
+    env.faux.setResponses([
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return late.promise;
+      },
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return fauxAssistantMessage('next answer');
+      },
+    ]);
+    const run = env.recovery.prompt('first');
+    await flush();
+    const before = env.latest().pendingPromptCount;
+    const steered = env.recovery.prompt('steered-q7', undefined, true);
+    expect(env.latest().pendingPromptCount).toBe(before + 1);
+    const follow = env.recovery.prompt('follow-q7');
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(before + 2);
+    const abort = env.recovery.abort();
+    late.resolve(fauxAssistantMessage('cancelled result'));
+    await Promise.all([run, steered, follow, abort]);
+    expect(env.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
+    await env.recovery.prompt('next');
+    const jsonl = await readFile(join(env.dir, 'session.jsonl'), 'utf8');
+    expect(jsonl).toContain('next answer');
+    expect(usersIn(env.manager, 'next')).toHaveLength(1);
+    expect(usersIn(env.manager, 'steered-q7')).toHaveLength(0);
+    expect(usersIn(env.manager, 'follow-q7')).toHaveLength(0);
+    expect(requests.some((r) => r.includes('steered-q7') || r.includes('follow-q7'))).toBe(false);
+    const restored = await env.reopen();
+    expect(restored.latest().pendingPromptCount).toBe(0);
+  });
+
   it('cancels downstream on shutdown and discards late results', async () => {
     const env = await setup();
     const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
