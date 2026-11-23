@@ -104,6 +104,7 @@ export const IPC_CHANNELS = {
   SESSIONS_STEER: 'sessions:steer',
   SESSIONS_RETRY_COMPACTION: 'sessions:retry-compaction',
   SESSIONS_COMPACT: 'sessions:compact',
+  SESSIONS_TAKE_BACK_QUEUED: 'sessions:take-back-queued',
   SESSIONS_ABORT: 'sessions:abort',
   /** 从 pi jsonl 重建的消息投影 */
   SESSIONS_HISTORY: 'sessions:history',

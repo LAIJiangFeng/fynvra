@@ -419,6 +419,39 @@ describe('compaction failures end the turn without locking the session', () => {
     expect(restored.latest().pendingPromptCount).toBe(0);
   });
 
+  it('takes back steered inputs and re-hands queued follow-ups to pi', async () => {
+    const env = await setup(false);
+    const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    const requests: string[] = [];
+    env.faux.setResponses([
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return late.promise;
+      },
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return fauxAssistantMessage('follow answer');
+      },
+    ]);
+    const run = env.recovery.prompt('first-tb');
+    await flush();
+    const a = env.recovery.prompt('steer-a-tb', undefined, true);
+    const f = env.recovery.prompt('follow-f-tb');
+    const b = env.recovery.prompt('steer-b-tb', undefined, true);
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(3);
+    expect(await env.recovery.takeBackQueued()).toEqual(['steer-a-tb', 'steer-b-tb']);
+    expect(env.latest().pendingPromptCount).toBe(1);
+    late.resolve(fauxAssistantMessage('first answer'));
+    await Promise.all([run, a, f, b]);
+    await flush();
+    expect(usersIn(env.manager, 'follow-f-tb')).toHaveLength(1);
+    expect(usersIn(env.manager, 'steer-a-tb')).toHaveLength(0);
+    expect(usersIn(env.manager, 'steer-b-tb')).toHaveLength(0);
+    expect(requests.some((r) => r.includes('steer-a-tb') || r.includes('steer-b-tb'))).toBe(false);
+    expect(env.latest().pendingPromptCount).toBe(0);
+  });
+
   it('cancels downstream on shutdown and discards late results', async () => {
     const env = await setup();
     const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
@@ -461,6 +494,9 @@ describe('legacy recovery locks from fail-closed versions stay recoverable', () 
     const env = await setup(true, 0, 'native', {
       beforeOpen: legacyLock({ written: 'already written', pending: ['held across restart'] }),
     });
+    expect(env.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 1 });
+    // 恢复锁下的输入只由显式恢复处理，撤回不动 pending
+    expect(await env.recovery.takeBackQueued()).toEqual([]);
     expect(env.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 1 });
     const restored = await env.reopen();
     expect(restored.latest()).toMatchObject({ recoveryRequired: true, pendingPromptCount: 1 });

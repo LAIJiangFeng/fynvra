@@ -39,6 +39,7 @@ class FakeSession implements SupervisedSession {
   steerImages: (ChatImage[] | undefined)[] = [];
   retryCompaction = vi.fn(async () => {});
   compact = vi.fn(async () => {});
+  takeBackQueued = vi.fn(async () => ['queued']);
   aborts = 0;
   disposals = 0;
   idle = true;
@@ -245,6 +246,29 @@ describe('SessionSupervisor compaction recovery', () => {
       { requestId: 'failed', result: { ok: false, error: 'compaction failed' } },
       { requestId: 'busy', result: { ok: false } },
     ]);
+    await env.supervisor.shutdown();
+  });
+  it('takes back queued inputs and rejects a stale generation', async () => {
+    const env = setup();
+    env.supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec() });
+    await settle();
+    env.supervisor.handle({ type: 'take-back-queued', identity: id1, requestId: 'ok' });
+    env.supervisor.handle({
+      type: 'take-back-queued',
+      identity: { ...id1, generation: 0 },
+      requestId: 'stale',
+    });
+    await settle();
+    expect(env.sessions[0]?.takeBackQueued).toHaveBeenCalledTimes(1);
+    expect(env.of('queue-taken-back')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ requestId: 'ok', result: { ok: true, texts: ['queued'] } }),
+        expect.objectContaining({
+          requestId: 'stale',
+          result: expect.objectContaining({ ok: false }),
+        }),
+      ])
+    );
     await env.supervisor.shutdown();
   });
 });

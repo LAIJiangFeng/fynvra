@@ -124,6 +124,12 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
     abort: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     retryCompaction: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
     compact: vi.fn(async (_sessionId: string): Promise<IpcResult> => ({ ok: true })),
+    takeBackQueued: vi.fn(
+      async (_sessionId: string): Promise<IpcResult<{ texts: string[] }>> => ({
+        ok: true,
+        texts: [],
+      })
+    ),
     history: vi.fn(
       async (_sessionId: string): ReturnType<SessionsApi['history']> => ({
         ok: true,

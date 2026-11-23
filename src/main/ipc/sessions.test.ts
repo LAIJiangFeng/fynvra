@@ -49,6 +49,7 @@ const host = {
   abort: vi.fn(async () => ({ ok: true })),
   retryCompaction: vi.fn(async () => ({ ok: true })),
   compact: vi.fn(async () => ({ ok: true })),
+  takeBackQueued: vi.fn(async () => ({ ok: true, texts: [] })),
   history: vi.fn(async () => ({ ok: true, messages: [] })),
   respondApproval: vi.fn(async () => ({ ok: true })),
   setModel: vi.fn(async () => ({ ok: true })),
@@ -185,6 +186,7 @@ describe('sessions IPC', () => {
       [
         'sessions:retry-compaction',
         'sessions:compact',
+        'sessions:take-back-queued',
         'sessions:abort',
         'sessions:archive',
         'sessions:create',
@@ -318,6 +320,8 @@ describe('sessions IPC', () => {
     expect(host.retryCompaction).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_COMPACT, 's-1');
     expect(host.compact).toHaveBeenCalledWith('s-1');
+    await invoke(IPC_CHANNELS.SESSIONS_TAKE_BACK_QUEUED, 's-1');
+    expect(host.takeBackQueued).toHaveBeenCalledWith('s-1');
     await invoke(IPC_CHANNELS.SESSIONS_ABORT, 's-1');
     expect(host.abort).toHaveBeenCalledWith('s-1');
     const coldHistory = {
@@ -430,6 +434,8 @@ describe('sessions IPC', () => {
     [IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, '../s'],
     [IPC_CHANNELS.SESSIONS_COMPACT, 42],
     [IPC_CHANNELS.SESSIONS_COMPACT, '../s'],
+    [IPC_CHANNELS.SESSIONS_TAKE_BACK_QUEUED, 42],
+    [IPC_CHANNELS.SESSIONS_TAKE_BACK_QUEUED, '../s'],
     [IPC_CHANNELS.SESSIONS_ABORT, 42],
     [IPC_CHANNELS.SESSIONS_HISTORY, 'C:\\data\\agent\\sessions\\x.jsonl'],
     [IPC_CHANNELS.SESSIONS_REMOVE, ''],
