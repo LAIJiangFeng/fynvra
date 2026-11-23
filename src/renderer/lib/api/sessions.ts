@@ -624,6 +624,11 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
       return { ok: false, error: translate('chat.noCompactionRecovery') };
     },
 
+    // mock 不把排队消息交给宿主，没有可撤回的
+    async takeBackQueued() {
+      return { ok: true, texts: [] };
+    },
+
     // mock 没有真实上下文可压缩：空闲时直接接受，运行中与 Main 一样拒绝
     async compact(sessionId) {
       const session = sessions.get(sessionId);

@@ -283,6 +283,8 @@ export type AgentCommand =
   | { type: 'retry-compaction'; identity: SessionIdentity; requestId: string }
   /** 手动压缩空闲会话；结果回同一 requestId 的 compaction-recovery-result，Stop 经 abort 取消 */
   | { type: 'compact'; identity: SessionIdentity; requestId: string }
+  /** 撤回运行中以 steer 排队、尚未被模型读到的输入；结果回同一 requestId 的 queue-taken-back */
+  | { type: 'take-back-queued'; identity: SessionIdentity; requestId: string }
   | { type: 'abort'; identity: SessionIdentity }
   | { type: 'dispose-session'; identity: SessionIdentity }
   | {
@@ -343,6 +345,13 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       requestId: string;
       result: { ok: true } | { ok: false; error: string };
+    }
+  /** take-back-queued 的结果：texts 是被撤回输入的原文，按原顺序 */
+  | {
+      type: 'queue-taken-back';
+      identity: SessionIdentity;
+      requestId: string;
+      result: { ok: true; texts: string[] } | { ok: false; error: string };
     }
   | {
       type: 'host-invoke';
@@ -488,6 +497,10 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       return isNonEmptyString(record.requestId)
         ? { type: 'compact', identity, requestId: record.requestId }
         : null;
+    case 'take-back-queued':
+      return isNonEmptyString(record.requestId)
+        ? { type: 'take-back-queued', identity, requestId: record.requestId }
+        : null;
     case 'abort':
       return { type: 'abort', identity };
     case 'dispose-session':
@@ -549,6 +562,27 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
             result: result.ok ? { ok: true } : { ok: false, error: result.error },
           }
         : null;
+    }
+    case 'queue-taken-back': {
+      if (!isNonEmptyString(record.requestId)) return null;
+      const result = asRecord(record.result);
+      if (result?.ok === false && typeof result.error === 'string') {
+        return {
+          type: 'queue-taken-back',
+          identity,
+          requestId: record.requestId,
+          result: { ok: false, error: result.error },
+        };
+      }
+      const { texts } = result ?? {};
+      if (result?.ok !== true || !Array.isArray(texts)) return null;
+      if (!texts.every((text) => typeof text === 'string')) return null;
+      return {
+        type: 'queue-taken-back',
+        identity,
+        requestId: record.requestId,
+        result: { ok: true, texts: [...texts] },
+      };
     }
     case 'session-status':
       return isSessionStatus(record.status)

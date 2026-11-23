@@ -231,6 +231,41 @@ describe('context runtime snapshots and recovery', () => {
     expect(env.sent('spawn-session')).toHaveLength(1);
   });
 
+  it('takes back queued inputs: empty before spawn, settles on the matching result, fails on timeout', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    expect(await env.host.takeBackQueued(session.id)).toEqual({ ok: true, texts: [] });
+    expect(env.sent('take-back-queued')).toHaveLength(0);
+    expect(await env.host.takeBackQueued('missing')).toMatchObject({ ok: false });
+    expect(await env.host.prompt(session.id, 'work')).toEqual({ ok: true });
+    await vi.waitFor(() => expect(env.sent('spawn-session')).toHaveLength(1));
+    const pending = env.host.takeBackQueued(session.id);
+    const command = env.sent('take-back-queued')[0];
+    if (command?.type !== 'take-back-queued') throw new Error('missing take-back command');
+    // 过期 generation 与不匹配的 requestId 都被丢弃
+    for (const stale of [
+      { identity: { ...command.identity, generation: 0 }, requestId: command.requestId },
+      { identity: command.identity, requestId: 'stale' },
+    ]) {
+      env.worker().emit({ type: 'queue-taken-back', ...stale, result: { ok: true, texts: ['x'] } });
+    }
+    env.worker().emit({
+      type: 'queue-taken-back',
+      identity: command.identity,
+      requestId: command.requestId,
+      result: { ok: true, texts: ['a', 'b'] },
+    });
+    expect(await pending).toEqual({ ok: true, texts: ['a', 'b'] });
+    vi.useFakeTimers();
+    try {
+      const timedOut = env.host.takeBackQueued(session.id);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await timedOut).toMatchObject({ ok: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects manual compaction while the session is running', async () => {
     const env = setup();
     const session = await createSession(env);

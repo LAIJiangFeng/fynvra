@@ -347,6 +347,10 @@ export function registerSessionHandlers(
     withSessionId(raw, (sessionId) => host().compact(sessionId))
   );
 
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_TAKE_BACK_QUEUED, (_event, raw: unknown) =>
+    withSessionId(raw, (sessionId) => host().takeBackQueued(sessionId))
+  );
+
   ipcMain.handle(IPC_CHANNELS.SESSIONS_ABORT, (_event, raw: unknown) =>
     withSessionId(raw, (sessionId) => host().abort(sessionId))
   );

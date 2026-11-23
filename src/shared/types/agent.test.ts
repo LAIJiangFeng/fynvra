@@ -64,6 +64,11 @@ const withModel = (patch: Record<string, unknown>) =>
   withSpec({ model: { ...spec.model, ...patch } });
 
 describe('parseAgentCommand', () => {
+  it('parses take-back-queued with a request id', () => {
+    const command = { type: 'take-back-queued', identity, requestId: 'r1' };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, requestId: '' })).toBeNull();
+  });
   it('accepts only a restricted command network snapshot', () => {
     const networkProxy = { mode: 'manual', url: 'http://127.0.0.1:7890', gitCompatibility: true };
     expect(parseAgentCommand(withSpec({ networkProxy }))).toEqual(withSpec({ networkProxy }));
@@ -400,6 +405,21 @@ describe('parseAgentCommand', () => {
 });
 
 describe('parseAgentWorkerEvent', () => {
+  it('parses queue-taken-back and rejects malformed texts', () => {
+    const ok = {
+      type: 'queue-taken-back',
+      identity,
+      requestId: 'r1',
+      result: { ok: true, texts: ['a', 'b'] },
+    };
+    expect(parseAgentWorkerEvent(ok)).toEqual(ok);
+    const failed = { ...ok, result: { ok: false, error: 'gone' } };
+    expect(parseAgentWorkerEvent(failed)).toEqual(failed);
+    for (const texts of [undefined, 'a', ['a', 1], [null]]) {
+      expect(parseAgentWorkerEvent({ ...ok, result: { ok: true, texts } })).toBeNull();
+    }
+    expect(parseAgentWorkerEvent({ ...ok, requestId: '' })).toBeNull();
+  });
   const events: FynvraSessionEvent[] = [
     { type: 'text_delta', delta: 'Hel', seq: 1 },
     { type: 'thinking_delta', delta: 'hmm', seq: 2 },

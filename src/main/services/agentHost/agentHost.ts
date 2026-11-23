@@ -277,6 +277,8 @@ export interface AgentHostService extends AgentHost {
   retryCompaction(sessionId: string): Promise<IpcResult>;
   /** Manual compaction of an idle session: ACK on acceptance, the worker result settles it; Stop cancels. */
   compact(sessionId: string): Promise<IpcResult>;
+  /** 撤回运行中以 steer 排队、尚未被模型读到的输入，返回原文；会话不在 worker 里时为空 */
+  takeBackQueued(sessionId: string): Promise<IpcResult<{ texts: string[] }>>;
   abort(sessionId: string): Promise<IpcResult>;
   history(sessionId: string): Promise<
     IpcResult<{
@@ -410,6 +412,8 @@ const TITLE_MAX_CHARS = 60;
 /** restricted 会话所在工作区同时未结束的任务上限（§7.14 第 12 条） */
 const MAX_RESTRICTED_OPEN_TASKS = 3;
 const DESCRIBE_TIMEOUT_MS = 15_000;
+/** take-back-queued 等 worker 回答的上限；超时当失败，迟到的结果丢弃 */
+const TAKE_BACK_TIMEOUT_MS = 10_000;
 /** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
 const SUGGESTION_TIMEOUT_MS = 10_000;
 /** 等 worker 关完会话的上限：到时不再等，清理照常继续 */
@@ -452,6 +456,12 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 等 worker 回答的 describe-models：requestId → 结算 */
   const describing = new Map<string, (result: ModelsDescribedResult) => void>();
   let describeSeq = 0;
+  /** 等 worker 回答的 take-back-queued：requestId → 结算（带会话与 generation，过期回包丢弃） */
+  const takingBack = new Map<
+    string,
+    { sessionId: string; generation: number; settle(result: IpcResult<{ texts: string[] }>): void }
+  >();
+  let takeBackSeq = 0;
   let orchestrationHostFor: (
     coordinatorSessionId: string,
     workspaceId: string
@@ -638,6 +648,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     state.calls.clear();
     for (const [requestId, pending] of approvals) {
       if (pending.sessionId === sessionId) approvals.delete(requestId);
+    }
+    for (const pending of [...takingBack.values()]) {
+      if (pending.sessionId === sessionId)
+        pending.settle(fail(translate('agent.workerUnavailable')));
     }
   }
 
@@ -1123,6 +1137,20 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const operation = state?.recovery;
         if (!state || !operation || operation.requestId !== event.requestId) return;
         finishRecovery(event.identity.sessionId, state, operation, event.result);
+        return;
+      }
+      case 'queue-taken-back': {
+        const pending = takingBack.get(event.requestId);
+        // requestId / 会话 / generation 任一对不上就是过期回包
+        if (
+          !pending ||
+          !currentOf(event.identity) ||
+          pending.sessionId !== event.identity.sessionId ||
+          pending.generation !== event.identity.generation
+        ) {
+          return;
+        }
+        pending.settle(event.result);
         return;
       }
       case 'session-event': {
@@ -2251,6 +2279,27 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       // Loading an unloaded session and compacting happen asynchronously after the ACK.
       void startRecovery(stored, state, operation);
       return { ok: true };
+    },
+    async takeBackQueued(sessionId) {
+      if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
+      const state = live.get(sessionId);
+      if (!state?.spawned) return { ok: true, texts: [] };
+      const identity = identityOf(sessionId, state);
+      const requestId = `take-back-${++takeBackSeq}`;
+      return new Promise((resolve) => {
+        const timer = setTimeout(
+          () => settle(fail(translate('agent.workerUnavailable'))),
+          TAKE_BACK_TIMEOUT_MS
+        );
+        const settle = (result: IpcResult<{ texts: string[] }>) => {
+          clearTimeout(timer);
+          takingBack.delete(requestId);
+          resolve(result);
+        };
+        takingBack.set(requestId, { ...identity, settle });
+        if (!send({ type: 'take-back-queued', identity, requestId }))
+          settle(fail(translate('agent.workerUnavailable')));
+      });
     },
     async abort(sessionId) {
       if (!deps.store.get(sessionId)) return fail(translate('common.sessionNotFound'));
