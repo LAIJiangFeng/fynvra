@@ -211,6 +211,32 @@ describe('乐观回显', () => {
     expect(messagesOf(state).map((message) => message.id)).toEqual(['local-2']);
     expect(runtimeOf(state)).toMatchObject({ status: 'running', error: undefined });
   });
+
+  it('aborted agent_settled 把未确认的回显标为失败，之后同文本 message_end 仍能确认', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: 'hi',
+      createdAt: T0,
+    });
+    state = run([{ type: 'agent_settled', aborted: true }], state);
+    expect(messagesOf(state)[0]).toMatchObject({ id: 'local-1', optimistic: true, failed: true });
+
+    state = run([{ type: 'message_end', role: 'user', text: 'hi' }], state, 2);
+    expect(messagesOf(state)).toHaveLength(1);
+    expect(messagesOf(state)[0]?.optimistic).toBeUndefined();
+    expect(messagesOf(state)[0]?.failed).toBeUndefined();
+  });
+
+  it('非 aborted 的 agent_settled 不标回显失败', () => {
+    let state = addOptimisticMessage(emptyProjection(), S, {
+      id: 'local-1',
+      text: 'hi',
+      createdAt: T0,
+    });
+    state = run([{ type: 'agent_settled', aborted: false }], state);
+    expect(messagesOf(state)[0]).toMatchObject({ id: 'local-1', optimistic: true });
+    expect(messagesOf(state)[0]?.failed).toBeUndefined();
+  });
 });
 
 describe('slash command 与 notice', () => {

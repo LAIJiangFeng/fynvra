@@ -41,6 +41,8 @@ export interface SessionsApi {
   retryCompaction(sessionId: string): Promise<IpcResult>;
   /** Accept a manual compaction of an idle session; progress and failure arrive through session events. */
   compact(sessionId: string): Promise<IpcResult>;
+  /** 撤回运行中排队、尚未被模型读到的消息，返回原文（按原顺序）供放回输入框 */
+  takeBackQueued(sessionId: string): Promise<IpcResult<{ texts: string[] }>>;
   abort(sessionId: string): Promise<IpcResult>;
   /** 从 pi jsonl 重建的消息投影；Renderer 切换会话时调用 */
   history(sessionId: string): Promise<
@@ -126,6 +128,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
     steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
     retryCompaction: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, sessionId),
     compact: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_COMPACT, sessionId),
+    takeBackQueued: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_TAKE_BACK_QUEUED, sessionId),
     abort: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_ABORT, sessionId),
     history: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_HISTORY, sessionId),
     respondApproval: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_RESPOND_APPROVAL, input),

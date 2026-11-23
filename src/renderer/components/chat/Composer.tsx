@@ -49,8 +49,8 @@ import {
   selectDraftImagesOf,
   selectDraftOf,
   selectMessagesOf,
+  selectQueueHeldOf,
   selectQueueOf,
-  selectRecoveryBlockedOf,
   selectReplySuggestionOf,
   selectSessionOf,
   selectStatusOf,
@@ -246,9 +246,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const steer = useSessionsStore((state) => state.steer);
   const removeQueued = useSessionsStore((state) => state.removeQueued);
   const recallQueued = useSessionsStore((state) => state.recallQueued);
+  const recallAllQueued = useSessionsStore((state) => state.recallAllQueued);
   const queue = useSessionsStore(selectQueueOf(sessionId));
   const compacting = useSessionsStore(selectCompactingOf(sessionId));
-  const recoveryBlocked = useSessionsStore(selectRecoveryBlockedOf(sessionId));
+  // 只在真正的上下文恢复阻塞时提示「等待恢复」；运行中已交给 pi 的排队消息不算
+  const recoveryBlocked = useSessionsStore(selectQueueHeldOf(sessionId));
   const recovering = useSessionsStore((state) => state.recoveringCompaction[sessionId] === true);
   const stopping = useSessionsStore((state) => state.stopping[sessionId] === true);
   const abort = useSessionsStore((state) => state.abort);
@@ -362,20 +364,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
     setBrowsing(false);
     void send(draft);
   };
-  /** Idle: same as send. Running: steer the latest queued message, or the draft when none is queued */
+  /** 立即发送：空闲且没有排队时同发送；否则草稿排在队尾，排队消息立刻发出 */
   const steerNow = () => {
-    if (recoveryBlocked) {
-      if (queue.length === 0) submit();
-      return;
-    }
-    if (!busy) {
+    if (!busy && queue.length === 0) {
       submit();
       return;
     }
-    if (queue.length === 0) {
-      history.current = null;
-      setBrowsing(false);
-    }
+    history.current = null;
+    setBrowsing(false);
     void steer(sessionId);
   };
 
@@ -524,25 +520,22 @@ export function Composer({ sessionId }: { sessionId: string }) {
   );
 
   // The row buttons disappear with the row: keep the focus in the input
-  const sendQueuedNow = useCallback(
-    (id: string) => {
-      void steer(sessionId, id);
-      input.current?.focus();
-    },
-    [sessionId, steer]
-  );
+  const sendQueuedNow = useCallback(() => {
+    void steer(sessionId);
+    input.current?.focus();
+  }, [sessionId, steer]);
   const dropQueued = useCallback(
     (id: string) => {
-      removeQueued(sessionId, id);
+      void removeQueued(sessionId, id);
       input.current?.focus();
     },
     [sessionId, removeQueued]
   );
 
   const recallForEditing = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (useSessionsStore.getState().activeSessionId !== sessionId) return;
-      const result = recallQueued(sessionId, id);
+      const result = await recallQueued(sessionId, id);
       if (result === 'draft-exists') {
         setComposerHint({ text: t('chat.recallQueuedDraftExists') });
         return;
@@ -629,6 +622,23 @@ export function Composer({ sessionId }: { sessionId: string }) {
       if (approvalMode && !profile) void setApprovalMode(sessionId, nextApprovalMode(approvalMode));
       return;
     }
+    // 排队非空时在第一行按 ↑：撤回全部排队消息到输入框（对应 Claude Code 的 Up），队列为空时照旧翻历史
+    if (
+      queue.length > 0 &&
+      !history.current &&
+      matchAction(event, 'history-prev') &&
+      caretOnVisualLineEdge(textarea, 'first')
+    ) {
+      event.preventDefault();
+      void recallAllQueued(sessionId).then((result) => {
+        if (result === 'too-many') setComposerHint({ text: t('chat.recallQueuedTooMany') });
+        if (result !== 'recalled' || useSessionsStore.getState().activeSessionId !== sessionId)
+          return;
+        pendingCaret.current = { sessionId, caret: 'end', focus: true };
+        setComposerHint(null);
+      });
+      return;
+    }
     if (matchAction(event, 'history-prev') && caretOnVisualLineEdge(textarea, 'first')) {
       const state = history.current ?? startHistory(sent, { text: draft, images, files });
       const next = up(state);
@@ -665,7 +675,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     if (matchAction(event, 'steer-now')) {
-      // Always swallow it (Ctrl+S / Cmd+S), even when there is nothing to send
+      // 总是吞掉（Ctrl/Cmd+S），没有可发内容时也不换行
       event.preventDefault();
       steerNow();
       return;
@@ -982,7 +992,8 @@ const QueuedMessages = memo(function QueuedMessages({
   steerLabel: string;
   blocked: boolean;
   compacting: boolean;
-  onSendNow: (id: string) => void;
+  /** 作用于整个队列 */
+  onSendNow: () => void;
   onRecall: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -1002,7 +1013,9 @@ const QueuedMessages = memo(function QueuedMessages({
         return (
           <li
             key={item.id}
-            className="flex items-center gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3 text-xs"
+            className={`flex items-center gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3 text-xs ${
+              item.handed !== undefined ? 'text-muted-foreground' : ''
+            }`}
           >
             <span className="min-w-0 flex-1 truncate">
               {preview || (
@@ -1019,11 +1032,16 @@ const QueuedMessages = memo(function QueuedMessages({
                 {t('chat.queuedFiles', { count: item.files.length })}
               </span>
             )}
+            {item.handed !== undefined && (
+              <span className="min-w-0 shrink truncate text-muted-foreground">
+                {t('chat.queuedHanded')}
+              </span>
+            )}
             <button
               type="button"
               aria-label={t('chat.sendNow', { chord: steerLabel })}
               title={t('chat.sendNow', { chord: steerLabel })}
-              onClick={() => onSendNow(item.id)}
+              onClick={onSendNow}
               disabled={blocked}
               className={`${buttonClass} disabled:pointer-events-none disabled:opacity-40`}
             >

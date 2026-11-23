@@ -65,6 +65,8 @@ export interface SupervisedSession {
   retryCompaction?(): Promise<void>;
   /** 可选：手动压缩空闲会话；Stop 取消时正常返回，失败抛错（错误事件已由会话自己发出） */
   compact?(): Promise<void>;
+  /** 可选：撤回运行中以 steer 排队、尚未被模型读到的输入，按原顺序返回原文；未实现时当没有 */
+  takeBackQueued?(): Promise<string[]>;
   abort(): Promise<void>;
   /** 没有进行中的回合、重试或排队消息 */
   isIdle(): boolean;
@@ -182,6 +184,9 @@ export class SessionSupervisor {
         return;
       case 'compact':
         void this.#compact(command.identity, command.requestId);
+        return;
+      case 'take-back-queued':
+        void this.#takeBackQueued(command.identity, command.requestId);
         return;
       case 'abort':
         void this.#abort(command.identity);
@@ -757,6 +762,26 @@ export class SessionSupervisor {
     }
     this.#settleIfIdle(managed, session);
     finish(failure);
+  }
+
+  async #takeBackQueued(identity: SessionIdentity, requestId: string): Promise<void> {
+    const finish = (result: { ok: true; texts: string[] } | { ok: false; error: string }) =>
+      this.#post({ type: 'queue-taken-back', identity, requestId, result });
+    const managed = this.#current(identity);
+    if (!managed) {
+      finish({ ok: false, error: 'The session is not loaded.' });
+      return;
+    }
+    const session = await managed.opening;
+    if (!session || managed.closed) {
+      finish({ ok: false, error: 'The session is closed.' });
+      return;
+    }
+    try {
+      finish({ ok: true, texts: (await session.takeBackQueued?.()) ?? [] });
+    } catch (error) {
+      finish({ ok: false, error: errorMessage(error) });
+    }
   }
 
   async #abort(identity: SessionIdentity): Promise<void> {

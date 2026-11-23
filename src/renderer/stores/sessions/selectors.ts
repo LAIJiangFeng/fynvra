@@ -144,6 +144,20 @@ export const selectQueueOf =
 export const selectCompactingOf = (sessionId: string) => (state: SessionsState) =>
   compactionActive(state.runtimeBySession[sessionId]?.compaction);
 
+/**
+ * 排队消息在等真正的上下文恢复（压缩、恢复锁、恢复中）：运行中 pendingPromptCount > 0 可能只是已交给 pi 的
+ * 排队消息，不算；空闲时仍算
+ */
+export const selectQueueHeldOf = (sessionId: string) => (state: SessionsState) => {
+  const runtime = state.runtimeBySession[sessionId];
+  return Boolean(
+    compactionActive(runtime?.compaction) ||
+      runtime?.recoveryRequired ||
+      (runtime?.pendingPromptCount && !isBusy(statusOf(state, sessionId))) ||
+      state.recoveringCompaction[sessionId]
+  );
+};
+
 export const selectRecoveryBlockedOf = (sessionId: string) => (state: SessionsState) => {
   const runtime = state.runtimeBySession[sessionId];
   return Boolean(

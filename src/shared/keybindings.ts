@@ -42,7 +42,7 @@ const ACTIONS = {
   newline: { scope: 'composer', chord: 'shift+enter' },
   'cycle-approval': { scope: 'composer', chord: 'shift+tab' },
   'stop-turn': { scope: 'composer', chord: 'escape' },
-  /** 运行中：把最近一条排队的消息（没有排队时是草稿）立即插入当前回合（steer） */
+  /** 立即发送（机制对应 Claude Code 的 Ctrl+Enter，快捷键为 Ctrl/Cmd+S）：排队消息（草稿排在后面）立刻发出，模型在写回复时打断本轮，工具执行中等工具执行完 */
   'steer-now': { scope: 'composer', chord: 'mod+s' },
   'open-model-picker': { scope: 'composer', chord: 'mod+m' },
   'history-prev': { scope: 'composer', chord: 'arrowup' },

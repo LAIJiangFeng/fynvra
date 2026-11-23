@@ -18,6 +18,8 @@ interface PendingInput {
   text: string;
   images?: ChatImage[];
   submitted: boolean;
+  /** 来自 prompt(..., true)（运行中以 steer 交给宿主），可被 takeBackQueued 撤回。 */
+  steer?: boolean;
 }
 interface Options {
   session: AgentSession;
@@ -80,6 +82,10 @@ export function createContextRecovery({
   /** Extension commands Fynvra is running instead of a prompt; Stop releases them at once. */
   const commands = new Set<SlashCommandRun>();
   let drained: Promise<void> = Promise.resolve();
+  /** drain 循环正在提交、尚未被消费的输入；撤回时不能动它。 */
+  let current: PendingInput | undefined;
+  /** 运行中正在交给 pi 队列的提交；撤回前要等它们入队，否则清空后才入队会被重复投递。 */
+  const handing = new Set<Promise<void>>();
 
   // Recovery survives unloading/restarting without putting message bodies in settings.json.
   for (const entry of session.sessionManager.getBranch()) {
@@ -421,7 +427,9 @@ export function createContextRecovery({
       while (pending.length && allowed() && !stopped && !disposed) {
         const input = pending[0];
         if (!input) break;
+        current = input;
         await submit(input);
+        current = undefined;
         // A rejected preflight must not silently consume an acknowledged input.
         if (pending.includes(input)) break;
       }
@@ -430,6 +438,7 @@ export function createContextRecovery({
       if (compaction?.phase === 'running' || compaction?.phase === 'backoff') cancel('exception');
       throw error;
     } finally {
+      current = undefined;
       resolve();
       running = false;
       for (const input of pending) input.submitted = false;
@@ -465,14 +474,65 @@ export function createContextRecovery({
       publish();
     },
     async prompt(text: string, images?: ChatImage[], steer = false) {
-      const input: PendingInput = { text, ...(images?.length ? { images } : {}), submitted: false };
+      const input: PendingInput = {
+        text,
+        ...(images?.length ? { images } : {}),
+        submitted: false,
+        ...(steer ? { steer } : {}),
+      };
       pending.push(input);
       checkpoint();
       publish();
       if (blocked || recovering) return;
       stopped = false;
-      if (running && !session.isCompacting) await submit(input, steer);
-      else await drain();
+      if (running && !session.isCompacting) {
+        const handed = submit(input, steer);
+        const tracked = handed.then(
+          () => undefined,
+          () => undefined
+        );
+        handing.add(tracked);
+        void tracked.finally(() => handing.delete(tracked));
+        await handed;
+      } else await drain();
+    },
+    /**
+     * 撤回运行中以 steer 排队、尚未被模型读到的输入，按原顺序返回原文（对应 pi 的 dequeue）。
+     * 恢复锁下的输入只由显式恢复处理，不撤回。
+     */
+    async takeBackQueued(): Promise<string[]> {
+      if (disposed || blocked || recovering) return [];
+      await Promise.all(handing);
+      if (disposed || blocked || recovering) return [];
+      session.clearQueue();
+      const texts: string[] = [];
+      const requeue: PendingInput[] = [];
+      for (let i = 0; i < pending.length; ) {
+        const input = pending[i];
+        if (!input || input === current) {
+          i++;
+          continue;
+        }
+        if (input.steer) {
+          texts.push(input.text);
+          pending.splice(i, 1);
+          continue;
+        }
+        // clearQueue 也清掉了之前以 followUp 交给 pi 的输入（如 Main 发来的 prompt），要重新交回。
+        if (input.submitted) requeue.push(input);
+        i++;
+      }
+      for (const input of requeue) {
+        // 运行已结束时交给 drain 重新投递，避免这里启动并等待一整轮。
+        if (session.isStreaming) await submit(input);
+        else input.submitted = false;
+      }
+      checkpoint();
+      publish();
+      if (!running && requeue.some((input) => !input.submitted)) {
+        void drain().catch(() => writeLog('take-back requeue failed'));
+      }
+      return texts;
     },
     async retryCompaction() {
       if (recovering || running || !session.isIdle) throw new Error('The session is busy.');
@@ -627,6 +687,12 @@ export function createContextRecovery({
     async abort() {
       const stoppedCommand = stopCommands();
       cancel('user');
+      // 无恢复锁时，Stop 连同尚未写入 pi 历史的输入一起取消（与 clearQueue 一致），否则渲染端会一直排队。
+      if (!blocked && !recovering && pending.length) {
+        pending.length = 0;
+        checkpoint();
+        publish();
+      }
       await session.abort();
       // The drain loop leaves on the next ticks; wait so the caller sees the session idle.
       if (stoppedCommand) await drained;
