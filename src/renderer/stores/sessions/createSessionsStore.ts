@@ -137,9 +137,9 @@ export interface SessionsState extends ChatProjection {
    */
   send(text: string): Promise<boolean>;
   /**
-   * Send a message into the running turn right away (pi steer): the queued message `queuedId`, else the
-   * most recent queued one, else the draft (text and images). When the session is idle the message is
-   * sent as a normal prompt. Returns false when there is nothing to send or it was not delivered
+   * 立即发送：取队列项 `queuedId`，否则最新一条队列项，否则草稿（文字、图片、附件）。会话空闲时作为普通
+   * prompt 发出；运行中先把它移到队首并停止当前回合（同 Stop），结算后作为下一条 prompt 发出；worker
+   * 会话运行中仍走 pi steer 插话，避免中断把尝试判为失败。没有可发内容、停止或投递失败时返回 false
    */
   steer(sessionId: string, queuedId?: string): Promise<boolean>;
   /** Drop a queued message */
@@ -591,6 +591,23 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
               : omitKey(state.queuedBySession, sessionId),
         };
       });
+    }
+
+    /** 停止当前回合（Stop 与「立即发送」共用），返回是否停止成功；队列不清空，结算后照常发出队首 */
+    async function stopTurn(sessionId: string): Promise<boolean> {
+      clearSuggestion(sessionId);
+      set((state) => ({ stopping: { ...state.stopping, [sessionId]: true } }));
+      // Stop ends the turn, not the queue: the next queued message follows once it settles
+      const result = await safely(() => api.abort(sessionId));
+      set((state) => ({ stopping: omitKey(state.stopping, sessionId) }));
+      if (!result.ok)
+        set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
+      // Safety net: resync the status from Main in case this chat missed its settlement.
+      const session = result.ok ? findSession(get(), sessionId) : undefined;
+      if (session) void get().loadSessions(session.workspaceId);
+      // The settled event may have arrived while stopping held the drain back
+      drainQueue(sessionId);
+      return result.ok;
     }
 
     /**
@@ -1116,6 +1133,21 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
           return deliver(sessionId, message.text, message.images, message.files, putBack);
         }
+        // 非 worker 会话：放到队首并停止当前回合，aborted 结算后由 drainQueue 作为下一条 prompt 发出；
+        // 停止失败时消息留在队首，等本轮正常结束后照常发出
+        if (findSession(get(), sessionId)?.dispatchId === undefined) {
+          const head: QueuedMessage = fromQueue
+            ? message
+            : { ...message, id: `queued-${++queueSeq}` };
+          set((state) => ({
+            queuedBySession: {
+              ...state.queuedBySession,
+              [sessionId]: [head, ...(state.queuedBySession[sessionId] ?? [])],
+            },
+          }));
+          return stopTurn(sessionId);
+        }
+        // worker 会话中断会被判为尝试失败，仍走 pi steer。
         // No echo: pi injects it into the run and the transcript shows it once it is delivered
         const result = await safely(() =>
           api.steer({
@@ -1245,21 +1277,11 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         return result;
       },
 
-      async abort() {
+      abort() {
         const sessionId = get().activeSessionId;
-        if (!sessionId || get().stopping[sessionId]) return;
-        clearSuggestion(sessionId);
-        set((state) => ({ stopping: { ...state.stopping, [sessionId]: true } }));
-        // Stop ends the turn, not the queue: the next queued message follows once it settles
-        const result = await safely(() => api.abort(sessionId));
-        set((state) => ({ stopping: omitKey(state.stopping, sessionId) }));
-        if (!result.ok)
-          set({ notice: translate('sessions.errors.abortFailed', { error: result.error }) });
-        // Safety net: resync the status from Main in case this chat missed its settlement.
-        const session = result.ok ? findSession(get(), sessionId) : undefined;
-        if (session) void get().loadSessions(session.workspaceId);
-        // The settled event may have arrived while stopping held the drain back
-        drainQueue(sessionId);
+        if (!sessionId || get().stopping[sessionId]) return Promise.resolve();
+        // 直接返回 stopTurn 的 promise，不多包一层 await，保持与原实现相同的结算时序
+        return stopTurn(sessionId) as Promise<unknown> as Promise<void>;
       },
 
       async respondApproval(requestId, decision) {
