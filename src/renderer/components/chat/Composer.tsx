@@ -675,7 +675,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
       return;
     }
     if (matchAction(event, 'steer-now')) {
-      // 总是吞掉（Ctrl/Cmd+Enter），没有可发内容时也不换行
+      // 总是吞掉（Ctrl/Cmd+S），没有可发内容时也不换行
       event.preventDefault();
       steerNow();
       return;

@@ -238,9 +238,9 @@ describe('默认键', () => {
     expect(defaultChord('new-session', 'mac')).toBe('meta+n');
     expect(defaultChord('prev-session', 'mac')).toBe('shift+meta+[');
     expect(defaultChord('open-model-picker', 'mac')).toBe('meta+m');
-    expect(defaultChord('steer-now', 'windows')).toBe('ctrl+enter');
-    expect(defaultChord('steer-now', 'linux')).toBe('ctrl+enter');
-    expect(defaultChord('steer-now', 'mac')).toBe('meta+enter');
+    expect(defaultChord('steer-now', 'windows')).toBe('ctrl+s');
+    expect(defaultChord('steer-now', 'linux')).toBe('ctrl+s');
+    expect(defaultChord('steer-now', 'mac')).toBe('meta+s');
   });
 
   it('缩放与文件预览动作的默认键', () => {

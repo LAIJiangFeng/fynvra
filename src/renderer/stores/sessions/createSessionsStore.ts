@@ -158,7 +158,7 @@ export interface SessionsState extends ChatProjection {
    */
   send(text: string): Promise<boolean>;
   /**
-   * 立即发送（对应 Claude Code 的 Ctrl+Enter），作用于整个队列：草稿先排到队尾。会话空闲时照常发出队首；
+   * 立即发送（机制对应 Claude Code 的 Ctrl+Enter，快捷键为 Ctrl/Cmd+S），作用于整个队列：草稿先排到队尾。会话空闲时照常发出队首；
    * 运行中先把本地项交给 pi，再在模型思考、输出或等审批时停止当前回合，结算后排队消息接着发出；
    * 工具执行中或 worker 会话不打断，消息在工具执行完后由 pi 交给模型。没有可发内容、停止中、
    * 等待上下文恢复或停止失败时返回 false
