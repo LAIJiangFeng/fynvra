@@ -311,6 +311,114 @@ describe('compaction failures end the turn without locking the session', () => {
     expect(env.events.some((e) => e.type === 'error' && e.message === FAILED)).toBe(false);
   });
 
+  it('Stop during pre-prompt compaction cancels the stopped input and inputs queued meanwhile', async () => {
+    const env = await setup();
+    const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    const requests: string[] = [];
+    const respond = (text: string) => (context: { messages: unknown }) => {
+      requests.push(JSON.stringify(context.messages));
+      return fauxAssistantMessage(text);
+    };
+    env.faux.setResponses([
+      // 挂起的是发送前压缩的摘要请求，first-q7 尚未写入历史
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return late.promise;
+      },
+      respond('summary'),
+      respond('next answer'),
+    ]);
+    const run = env.recovery.prompt('first-q7');
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(1);
+    // 压缩期间 steer/followUp 都只留在宿主 pending，不进 pi 队列
+    const steered = env.recovery.prompt('steered-q7', undefined, true);
+    const follow = env.recovery.prompt('follow-q7');
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(3);
+    const abort = env.recovery.abort();
+    late.resolve(fauxAssistantMessage('cancelled result'));
+    await Promise.all([run, steered, follow, abort]);
+    expect(env.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
+    await env.recovery.prompt('next');
+    const messages = env.manager
+      .getEntries()
+      .flatMap((e) => (e.type === 'message' ? [e.message] : []));
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: [{ text: 'next answer' }],
+    });
+    expect(usersIn(env.manager, 'next')).toHaveLength(1);
+    // pi 在被中止的 preflight 后仍把 first-q7 写入历史，并以 aborted 收尾、不请求模型；它只出现一次，不随 next 重发
+    expect(usersIn(env.manager, 'first-q7')).toHaveLength(1);
+    const first = messages.findIndex(
+      (m) => m.role === 'user' && JSON.stringify(m).includes('first-q7')
+    );
+    expect(messages[first + 1]).toMatchObject({ role: 'assistant', stopReason: 'aborted' });
+    expect(usersIn(env.manager, 'steered-q7')).toHaveLength(0);
+    expect(usersIn(env.manager, 'follow-q7')).toHaveLength(0);
+    expect(requests.some((r) => r.includes('steered-q7') || r.includes('follow-q7'))).toBe(false);
+    const restored = await env.reopen();
+    expect(restored.latest().pendingPromptCount).toBe(0);
+  });
+
+  it('Stop cancels inputs handed to the pi steer and follow-up queues', async () => {
+    // 无历史：不触发发送前压缩，挂起的就是 first-q7 的 LLM 请求
+    const env = await setup(false);
+    const steer = vi.spyOn(env.session, 'steer');
+    const followUp = vi.spyOn(env.session, 'prompt');
+    const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
+    const requests: string[] = [];
+    env.faux.setResponses([
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return late.promise;
+      },
+      (context) => {
+        requests.push(JSON.stringify(context.messages));
+        return fauxAssistantMessage('next answer');
+      },
+    ]);
+    const run = env.recovery.prompt('first-q7');
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(0);
+    const steered = env.recovery.prompt('steered-q7', undefined, true);
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(1);
+    const follow = env.recovery.prompt('follow-q7');
+    await flush();
+    expect(env.latest().pendingPromptCount).toBe(2);
+    expect(steer).toHaveBeenCalledWith('steered-q7', undefined);
+    expect(followUp).toHaveBeenCalledWith(
+      'follow-q7',
+      expect.objectContaining({ streamingBehavior: 'followUp' })
+    );
+    const abort = env.recovery.abort();
+    late.resolve(fauxAssistantMessage('cancelled result'));
+    await Promise.all([run, steered, follow, abort]);
+    expect(env.latest()).toMatchObject({ recoveryRequired: false, pendingPromptCount: 0 });
+    await env.recovery.prompt('next');
+    const users = env.manager
+      .getEntries()
+      .filter((e) => e.type === 'message' && e.message.role === 'user');
+    expect(users).toHaveLength(2);
+    expect(
+      env.manager
+        .getEntries()
+        .some(
+          (e) =>
+            e.type === 'message' &&
+            e.message.role === 'assistant' &&
+            JSON.stringify(e.message.content).includes('next answer')
+        )
+    ).toBe(true);
+    expect(usersIn(env.manager, 'first-q7')).toHaveLength(1);
+    expect(usersIn(env.manager, 'next')).toHaveLength(1);
+    expect(requests.some((r) => r.includes('steered-q7') || r.includes('follow-q7'))).toBe(false);
+    const restored = await env.reopen();
+    expect(restored.latest().pendingPromptCount).toBe(0);
+  });
+
   it('cancels downstream on shutdown and discards late results', async () => {
     const env = await setup();
     const late = Promise.withResolvers<ReturnType<typeof fauxAssistantMessage>>();
