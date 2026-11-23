@@ -18,6 +18,7 @@ import {
   type SessionEventEnvelope,
   type SessionModelRef,
   type SessionSummary,
+  stripImageHints,
 } from '@shared/types/chat';
 import type { IpcResult } from '@shared/types/ipc';
 import { create, type StoreApi } from 'zustand';
@@ -57,9 +58,30 @@ export interface QueuedMessage {
   text: string;
   images: ChatImage[];
   files: ChatFile[];
+  /** 已经 steer 交给 pi、模型还没读到时，为交出的正文（附件块已拼入）；还在本地排队时没有 */
+  handed?: string;
 }
 
-type RecallQueuedResult = 'recalled' | 'draft-exists' | 'missing';
+/** 撤回合并后的草稿是否超出图片或附件的上限（单张、单个已在加入时检查过） */
+function overDraftLimits(images: readonly ChatImage[], files: readonly ChatFile[]): boolean {
+  const bytes = images.reduce((sum, image) => sum + (base64ByteLength(image.data) ?? 0), 0);
+  const chars = files.reduce((sum, file) => sum + file.text.length, 0);
+  return (
+    images.length > MAX_CHAT_IMAGES ||
+    bytes > MAX_CHAT_IMAGES_TOTAL_BYTES ||
+    files.length > MAX_CHAT_FILES ||
+    chars > MAX_CHAT_FILES_TOTAL_CHARS
+  );
+}
+
+/** 去掉交出标记，恢复为本地队列项 */
+function asLocal({ handed: _handed, ...item }: QueuedMessage): QueuedMessage {
+  return item;
+}
+
+type RecallQueuedResult = 'recalled' | 'draft-exists' | 'missing' | 'failed';
+/** 撤回全部排队消息的结果：`too-many` 合并后超出草稿的图片或附件上限，`failed` 撤回请求失败 */
+export type RecallAllResult = 'recalled' | 'empty' | 'too-many' | 'failed';
 
 export interface SessionsState extends ChatProjection {
   /** 侧栏选中的工作区；新建会话建在这里 */
@@ -78,16 +100,13 @@ export interface SessionsState extends ChatProjection {
   /** 刚结束一轮生成的灰字建议；只在内存，与草稿分开，切换会话 / 新轮 / 换模型时清掉 */
   replySuggestions: Record<string, ReplySuggestion>;
   /**
-   * Messages queued while the session was running, oldest first. The queue never pauses: each turn's
-   * settlement (normal, failed or stopped) sends the next one. Running, Stop in flight, approvals and
-   * compaction/recovery only delay delivery; a rejected prompt goes back to the head and waits for the
-   * next settlement, send or send-now instead of retrying in a loop.
+   * 运行中排队的消息，最早的在前。回合已开始时非命令项逐条 steer 交给 pi（handed），当前工具调用结束后
+   * 由模型在同一轮读到；命令和交出失败的留到本轮结束后按顺序作为 prompt 发出。Stop 中断时宿主丢弃已交出的，
+   * 它们恢复为本地项接着发出。被拒的 prompt 回到队首，等下一次结算、发送或立即发送，不循环重试。
    */
   queuedBySession: Record<string, QueuedMessage[]>;
   recoveringCompaction: Record<string, true>;
   stopping: Record<string, true>;
-  /** 工具执行中点了「立即发送」的队列项 id：工具跑完、模型开始下一步时再停止当前回合并发出它 */
-  sendNowBySession: Record<string, string>;
   retryCompaction(sessionId: string): Promise<void>;
   /** 手动压缩请求在途（只到 ACK 为止，之后由会话状态与压缩事件接管） */
   compactRequests: Record<string, true>;
@@ -139,16 +158,18 @@ export interface SessionsState extends ChatProjection {
    */
   send(text: string): Promise<boolean>;
   /**
-   * 立即发送：取队列项 `queuedId`，否则最新一条队列项，否则草稿（文字、图片、附件）。会话空闲时作为普通
-   * prompt 发出；运行中先把它移到队首：模型在思考、输出或等审批时立刻停止当前回合（同 Stop），工具执行中
-   * 则记入 sendNowBySession，等工具跑完再停止，结算后作为下一条 prompt 发出；worker 会话运行中仍走
-   * pi steer 插话，避免中断把尝试判为失败。没有可发内容、停止或投递失败时返回 false
+   * 立即发送（对应 Claude Code 的 Ctrl+Enter），作用于整个队列：草稿先排到队尾。会话空闲时照常发出队首；
+   * 运行中先把本地项交给 pi，再在模型思考、输出或等审批时停止当前回合，结算后排队消息接着发出；
+   * 工具执行中或 worker 会话不打断，消息在工具执行完后由 pi 交给模型。没有可发内容、停止中、
+   * 等待上下文恢复或停止失败时返回 false
    */
-  steer(sessionId: string, queuedId?: string): Promise<boolean>;
-  /** Drop a queued message */
-  removeQueued(sessionId: string, queuedId: string): void;
-  /** Restore an unsent queued message only into an empty draft, atomically with its removal */
-  recallQueued(sessionId: string, queuedId: string): RecallQueuedResult;
+  steer(sessionId: string): Promise<boolean>;
+  /** 删除一条排队消息；已交给 pi 的先全部撤回再删 */
+  removeQueued(sessionId: string, queuedId: string): Promise<void>;
+  /** 把一条排队消息撤回到空草稿；已交给 pi 的先全部撤回 */
+  recallQueued(sessionId: string, queuedId: string): Promise<RecallQueuedResult>;
+  /** 撤回全部排队消息（对应 Claude Code 的 Up）：文字每条一行放在草稿之前，图片、附件按顺序并入草稿 */
+  recallAllQueued(sessionId: string): Promise<RecallAllResult>;
   abort(): Promise<void>;
   respondApproval(requestId: string, decision: ApprovalDecision): Promise<void>;
   setDraft(sessionId: string, text: string): void;
@@ -399,6 +420,12 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
   let selectionVersion = 0;
   let requestSeq = 0;
   let queueSeq = 0;
+  /** 正在把队列项 steer 给 pi 的会话：同一会话串行交出，撤回前等它停下 */
+  const pumps = new Map<string, Promise<void>>();
+  /** 本轮交出失败的会话：剩下的留到本轮结束后由 drain 发出，结算时清除 */
+  const handFailed = new Set<string>();
+  /** 正在撤回已交出消息的会话：期间不再交出 */
+  const takingBack = new Set<string>();
 
   return create<SessionsState>()((set, get) => {
     /** 推进这个会话的建议代数，并作废所有在途回包 */
@@ -563,24 +590,41 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         if (!failedSettlements.has(envelope)) normal.set(sessionId, event.seq);
         settled.add(sessionId);
       }
-      // 回合自己结束了，「立即发送」的标记作废，队首由下面的 drain 照常发出
+      // 模型读到的已交出消息移出队列（先于结算处理）；结算时剩下的：正常结束前 pi 已投递完，视为已交付；
+      // 中断时宿主已丢弃它们，恢复为本地项，保持原顺序接着发出
       for (const { sessionId, event } of batch)
-        if (event.type === 'agent_settled') clearSendNow(sessionId);
+        if (event.type === 'message_end' && event.role === 'user')
+          markDelivered(sessionId, event.text);
+      for (const { sessionId, event } of batch) {
+        if (event.type !== 'agent_settled') continue;
+        handFailed.delete(sessionId);
+        if (!queueOf(sessionId).some((item) => item.handed !== undefined)) continue;
+        setQueue(sessionId, (queue) =>
+          event.aborted ? queue.map(asLocal) : queue.filter((item) => item.handed === undefined)
+        );
+      }
       // Normal, failed and stopped turns alike continue with the next queued message.
       for (const sessionId of settled) drainQueue(sessionId);
-      fireSendNow();
+      for (const sessionId of new Set(batch.map((envelope) => envelope.sessionId)))
+        void pump(sessionId);
       // 队列真的空了、状态仍 idle 才请求；drainQueue 发了下一条时这里会看到 running
       for (const [sessionId, roundId] of normal) maybeRequestSuggestion(sessionId, roundId);
     }
 
     function recoveryBlocked(sessionId: string): boolean {
+      return (
+        recoveryHeld(sessionId) || Boolean(get().runtimeBySession[sessionId]?.pendingPromptCount)
+      );
+    }
+
+    /** 真正的恢复阻塞：不看 pendingPromptCount，自己交出的 steer 也会让它大于 0 */
+    function recoveryHeld(sessionId: string): boolean {
       const runtime = get().runtimeBySession[sessionId];
       return Boolean(
         get().recoveringCompaction[sessionId] ||
           recoveryRequests.has(sessionId) ||
           compactionActive(runtime?.compaction) ||
-          runtime?.recoveryRequired ||
-          runtime?.pendingPromptCount
+          runtime?.recoveryRequired
       );
     }
 
@@ -593,28 +637,168 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       );
     }
 
-    function clearSendNow(sessionId: string, queuedId?: string): void {
-      const marked = get().sendNowBySession[sessionId];
-      if (marked === undefined || (queuedId !== undefined && marked !== queuedId)) return;
-      set((state) => ({ sendNowBySession: omitKey(state.sendNowBySession, sessionId) }));
+    /**
+     * 运行中、回合已开始（没有未确认的回显、没有 prompt 在途）、不在停止或撤回中、没有恢复阻塞时才交出。
+     * 斜杠命令执行中不是模型回合（没有 agent_settled），不交出，等 command_end 后由 drain 发出
+     */
+    function canHand(sessionId: string): boolean {
+      const state = get();
+      const lastUser = (state.messagesBySession[sessionId] ?? []).findLast(
+        (message) => message.role === 'user'
+      );
+      return (
+        !lastUser?.command &&
+        isBusy(statusOf(state, sessionId)) &&
+        !sending.has(sessionId) &&
+        !state.stopping[sessionId] &&
+        !takingBack.has(sessionId) &&
+        !handFailed.has(sessionId) &&
+        !recoveryHeld(sessionId) &&
+        !(state.messagesBySession[sessionId] ?? []).some(
+          (message) => message.optimistic && !message.failed
+        )
+      );
     }
 
-    /** 工具跑完、模型开始下一步时，停止带「立即发送」标记的回合；结算后由 drainQueue 发出队首 */
-    function fireSendNow(): void {
-      for (const [sessionId, queuedId] of Object.entries(get().sendNowBySession)) {
-        if (!queueOf(sessionId).some((item) => item.id === queuedId)) {
-          clearSendNow(sessionId);
-          continue;
+    /**
+     * 把本地队列项按顺序逐条 steer 给 pi，串行等 ACK；命令（`/` 开头）留到本轮结束后由 drain 发出。
+     * 先标为 handed 再请求，在途时删除或撤回也会先去宿主撤回；失败的恢复为本地项，本轮不再交出
+     */
+    function pump(sessionId: string): Promise<void> {
+      const running = pumps.get(sessionId);
+      if (running) return running;
+      if (!canHand(sessionId)) return Promise.resolve();
+      // 没碰到 await 就结束时 finally 先于 set 执行，不能把已结束的 promise 留在表里
+      let done = false;
+      const run = (async () => {
+        try {
+          for (;;) {
+            if (!canHand(sessionId)) return;
+            const item = queueOf(sessionId).find(
+              (candidate) => candidate.handed === undefined && !candidate.text.startsWith('/')
+            );
+            if (!item) return;
+            const text = appendChatFiles(item.text, item.files);
+            setQueue(sessionId, (queue) =>
+              queue.map((candidate) =>
+                candidate.id === item.id ? { ...candidate, handed: text } : candidate
+              )
+            );
+            const result = await safely(() =>
+              api.steer({
+                sessionId,
+                text,
+                ...(item.images.length > 0 ? { images: item.images } : {}),
+              })
+            );
+            if (result.ok) continue;
+            handFailed.add(sessionId);
+            setQueue(sessionId, (queue) =>
+              queue.map((candidate) => (candidate.id === item.id ? asLocal(candidate) : candidate))
+            );
+            return;
+          }
+        } finally {
+          done = true;
+          pumps.delete(sessionId);
+        }
+      })();
+      if (!done) pumps.set(sessionId, run);
+      return run;
+    }
+
+    /** 模型读到了一条已交出的消息：按交出时的正文匹配（图片提示行的处理同 reducer 确认回显），移出队列 */
+    function markDelivered(sessionId: string, text: string): void {
+      const item = queueOf(sessionId).find(
+        (candidate) =>
+          candidate.handed !== undefined &&
+          (candidate.handed === text ||
+            (candidate.images.length > 0 && stripImageHints(text) === candidate.handed))
+      );
+      if (item)
+        setQueue(sessionId, (queue) => queue.filter((candidate) => candidate.id !== item.id));
+    }
+
+    /**
+     * 从宿主撤回所有已交出、模型还没读到的消息：按返回的原文顺序匹配 handed 项，匹配上的恢复为本地项，
+     * 没匹配上的视为已交付并移除。调用方先把会话放进 takingBack，期间不再交出。失败时提示、不改队列
+     */
+    async function takeBack(sessionId: string): Promise<boolean> {
+      await pumps.get(sessionId);
+      if (!queueOf(sessionId).some((item) => item.handed !== undefined)) return true;
+      const result = await safely(() => api.takeBackQueued(sessionId));
+      flushEvents();
+      if (!result.ok) {
+        set({ notice: translate('sessions.errors.takeBackFailed', { error: result.error }) });
+        return false;
+      }
+      let next = 0;
+      setQueue(sessionId, (queue) =>
+        queue.flatMap((item) => {
+          if (item.handed === undefined) return [item];
+          const found = result.texts.indexOf(item.handed, next);
+          if (found < 0) return [];
+          next = found + 1;
+          return [asLocal(item)];
+        })
+      );
+      return true;
+    }
+
+    /** 把一条本地队列项撤回到空草稿，与移出队列原子完成 */
+    function recallLocal(sessionId: string, queuedId: string): RecallQueuedResult {
+      let result: RecallQueuedResult = 'missing';
+      set((state) => {
+        const queue = state.queuedBySession[sessionId] ?? [];
+        const item = queue.find((candidate) => candidate.id === queuedId);
+        // A drain/steer or deletion may have taken it since the row was rendered.
+        if (!item || removedSessions.has(sessionId) || !findSession(state, sessionId)) {
+          return state;
         }
         if (
-          !isBusy(statusOf(get(), sessionId)) ||
-          toolRunning(sessionId) ||
-          get().stopping[sessionId] ||
-          recoveryBlocked(sessionId)
-        )
-          continue;
-        clearSendNow(sessionId);
-        void stopTurn(sessionId);
+          (state.drafts[sessionId] ?? '') !== '' ||
+          (state.draftImages[sessionId]?.length ?? 0) > 0 ||
+          (state.draftFiles[sessionId]?.length ?? 0) > 0
+        ) {
+          result = 'draft-exists';
+          return state;
+        }
+        const rest = queue.filter((candidate) => candidate.id !== queuedId);
+        // Invalidate visible and pending suggestions without a second store update.
+        const suggestion = state.replySuggestions[sessionId];
+        if (suggestion) suggestionIgnored.set(sessionId, suggestion.roundId);
+        bumpSuggestionVersion(sessionId);
+        result = 'recalled';
+        return {
+          queuedBySession:
+            rest.length > 0
+              ? { ...state.queuedBySession, [sessionId]: rest }
+              : omitKey(state.queuedBySession, sessionId),
+          drafts: item.text
+            ? { ...state.drafts, [sessionId]: item.text }
+            : omitKey(state.drafts, sessionId),
+          draftImages:
+            item.images.length > 0
+              ? { ...state.draftImages, [sessionId]: item.images }
+              : omitKey(state.draftImages, sessionId),
+          draftFiles:
+            item.files.length > 0
+              ? { ...state.draftFiles, [sessionId]: item.files }
+              : omitKey(state.draftFiles, sessionId),
+          replySuggestions: omitKey(state.replySuggestions, sessionId),
+        };
+      });
+      return result;
+    }
+
+    /** 撤回已交出的消息后再做 `update`；结束后其余本地项由 pump 重新交出 */
+    async function withTakeBack<T>(sessionId: string, update: (ok: boolean) => T): Promise<T> {
+      takingBack.add(sessionId);
+      try {
+        return update(await takeBack(sessionId));
+      } finally {
+        takingBack.delete(sessionId);
+        void pump(sessionId);
       }
     }
 
@@ -697,7 +881,10 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         // settled may arrive before the prompt ACK; it could not drain while sending.
         // A rejected prompt is not retried here, or a persistently failing session would loop:
         // the queue continues on the next settlement, a new message or "send now".
-        if (!rejected) drainQueue(sessionId);
+        if (!rejected) {
+          drainQueue(sessionId);
+          void pump(sessionId);
+        }
       }
     }
 
@@ -715,8 +902,7 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       )
         return;
       const [next] = queueOf(sessionId);
-      if (!next) return;
-      clearSendNow(sessionId, next.id);
+      if (!next || next.handed !== undefined) return;
       setQueue(sessionId, (queue) => queue.filter((item) => item.id !== next.id));
       void deliver(sessionId, next.text, next.images, next.files, (state) => {
         // Put it back in front; deliver does not retry it right away so a broken session does not loop
@@ -847,7 +1033,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
       recoveringCompaction: {},
       compactRequests: {},
       stopping: {},
-      sendNowBySession: {},
       loadingHistory: {},
       listErrors: {},
       approvalSubmissions: {},
@@ -1084,6 +1269,8 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           }));
           // Idle behind older messages (e.g. after a rejected prompt): send the oldest now
           drainQueue(sessionId);
+          // 运行中：交给 pi，当前工具调用结束后由模型在同一轮读到
+          await pump(sessionId);
           return true;
         }
         set(clearDraft);
@@ -1105,115 +1292,47 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }));
       },
 
-      async steer(sessionId, queuedId) {
+      async steer(sessionId) {
         flushEvents();
         if (get().stopping[sessionId]) return false;
-        // Never hand a steer to the SDK while it is compacting/recovering: it may discard it.
-        if (recoveryBlocked(sessionId)) {
-          if (queuedId || queueOf(sessionId).length > 0) return false;
-          if (get().activeSessionId !== sessionId) return false;
-          return get().send(get().drafts[sessionId] ?? '');
-        }
-        clearSuggestion(sessionId);
-        const queue = queueOf(sessionId);
-        const item = queuedId
-          ? queue.find((candidate) => candidate.id === queuedId)
-          : queue[queue.length - 1];
-        if (queuedId && !item) return false;
-        if (item) clearSendNow(sessionId, item.id);
-        const draftText = get().drafts[sessionId] ?? '';
-        const message: QueuedMessage | undefined =
-          item ??
-          (() => {
-            const text = normalizePrompt(draftText);
-            const images = get().draftImages[sessionId] ?? [];
-            const files = get().draftFiles[sessionId] ?? [];
-            return text.trim() || images.length > 0 || files.length > 0
-              ? { id: '', text, images, files }
-              : undefined;
-          })();
-        if (!message) return false;
-        const fromQueue = item !== undefined;
-        const take = (state: SessionsState): Partial<SessionsState> =>
-          fromQueue
-            ? {
-                queuedBySession: (() => {
-                  const rest = (state.queuedBySession[sessionId] ?? []).filter(
-                    (candidate) => candidate.id !== message.id
-                  );
-                  return rest.length > 0
-                    ? { ...state.queuedBySession, [sessionId]: rest }
-                    : omitKey(state.queuedBySession, sessionId);
-                })(),
-              }
-            : {
-                drafts: omitKey(state.drafts, sessionId),
-                draftImages: omitKey(state.draftImages, sessionId),
-                draftFiles: omitKey(state.draftFiles, sessionId),
-              };
-        const index = queue.indexOf(message);
-        const putBack = (state: SessionsState): Partial<SessionsState> => {
-          if (fromQueue) {
-            const current = [...(state.queuedBySession[sessionId] ?? [])];
-            current.splice(Math.min(index, current.length), 0, message);
-            return { queuedBySession: { ...state.queuedBySession, [sessionId]: current } };
-          }
-          return {
-            drafts: state.drafts[sessionId]
-              ? state.drafts
-              : { ...state.drafts, [sessionId]: draftText },
-            draftImages:
-              message.images.length === 0 || state.draftImages[sessionId]
-                ? state.draftImages
-                : { ...state.draftImages, [sessionId]: message.images },
-            draftFiles:
-              message.files.length === 0 || state.draftFiles[sessionId]
-                ? state.draftFiles
-                : { ...state.draftFiles, [sessionId]: message.files },
-          };
-        };
-        set(take);
-        // Idle: nothing to steer, send it as a normal prompt
-        if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
-          return deliver(sessionId, message.text, message.images, message.files, putBack);
-        }
-        // 非 worker 会话：放到队首。模型在思考、输出或等审批时立刻停止当前回合；工具执行中不杀工具，
-        // 记下标记，等工具跑完由 fireSendNow 停止。aborted 结算后由 drainQueue 作为下一条 prompt 发出；
-        // 停止失败或本轮自己结束时，消息留在队首照常发出
-        if (findSession(get(), sessionId)?.dispatchId === undefined) {
-          const head: QueuedMessage = fromQueue
-            ? message
-            : { ...message, id: `queued-${++queueSeq}` };
+        // 输入框里的草稿排在已排队的消息后面
+        const text = normalizePrompt(get().drafts[sessionId] ?? '');
+        const images = get().draftImages[sessionId] ?? [];
+        const files = get().draftFiles[sessionId] ?? [];
+        const drafted = Boolean(text.trim()) || images.length > 0 || files.length > 0;
+        if (drafted) {
+          const item: QueuedMessage = { id: `queued-${++queueSeq}`, text, images, files };
           set((state) => ({
+            drafts: omitKey(state.drafts, sessionId),
+            draftImages: omitKey(state.draftImages, sessionId),
+            draftFiles: omitKey(state.draftFiles, sessionId),
             queuedBySession: {
               ...state.queuedBySession,
-              [sessionId]: [head, ...(state.queuedBySession[sessionId] ?? [])],
+              [sessionId]: [...(state.queuedBySession[sessionId] ?? []), item],
             },
           }));
-          if (toolRunning(sessionId)) {
-            set((state) => ({
-              sendNowBySession: { ...state.sendNowBySession, [sessionId]: head.id },
-            }));
-            return true;
-          }
-          clearSendNow(sessionId);
-          return stopTurn(sessionId);
         }
-        // worker 会话中断会被判为尝试失败，仍走 pi steer。
-        // No echo: pi injects it into the run and the transcript shows it once it is delivered
-        const result = await safely(() =>
-          api.steer({
-            sessionId,
-            text: appendChatFiles(message.text, message.files),
-            ...(message.images.length > 0 ? { images: message.images } : {}),
-          })
-        );
-        if (result.ok) return true;
-        set((state) => ({
-          ...putBack(state),
-          notice: translate('sessions.errors.steerFailed', { error: result.error }),
-        }));
-        return false;
+        if (queueOf(sessionId).length === 0) return false;
+        clearSuggestion(sessionId);
+        // 空闲：照常发出队首
+        if (!sending.has(sessionId) && !isBusy(statusOf(get(), sessionId))) {
+          drainQueue(sessionId);
+          return true;
+        }
+        // 上下文恢复中不交出也不打断，排队等恢复完成
+        if (recoveryHeld(sessionId)) return drafted;
+        await pump(sessionId);
+        // 工具执行中（pi 不能把它转到后台）或 worker 会话（中断会把尝试判为失败）不打断：
+        // 已交出的消息在当前工具执行完后由 pi 交给模型
+        if (
+          findSession(get(), sessionId)?.dispatchId !== undefined ||
+          toolRunning(sessionId) ||
+          get().stopping[sessionId] ||
+          recoveryHeld(sessionId)
+        )
+          return true;
+        // 模型在思考、输出或等审批：打断本轮，中断结算后排队消息接着发出
+        return stopTurn(sessionId);
       },
 
       async retryCompaction(sessionId) {
@@ -1280,64 +1399,76 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }));
       },
 
-      removeQueued(sessionId, queuedId) {
-        clearSendNow(sessionId, queuedId);
-        setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
+      async removeQueued(sessionId, queuedId) {
+        const drop = () =>
+          setQueue(sessionId, (queue) => queue.filter((item) => item.id !== queuedId));
+        const item = queueOf(sessionId).find((candidate) => candidate.id === queuedId);
+        if (item?.handed === undefined) {
+          drop();
+          return;
+        }
+        // 已交给 pi：先全部撤回再删，其余的随后重新交出
+        await withTakeBack(sessionId, (ok) => {
+          if (ok) drop();
+        });
       },
 
-      recallQueued(sessionId, queuedId) {
-        let result: RecallQueuedResult = 'missing';
-        set((state) => {
-          const queue = state.queuedBySession[sessionId] ?? [];
-          const item = queue.find((candidate) => candidate.id === queuedId);
-          // A drain/steer or deletion may have taken it since the row was rendered.
-          if (!item || removedSessions.has(sessionId) || !findSession(state, sessionId)) {
-            return state;
-          }
-          if (
-            (state.drafts[sessionId] ?? '') !== '' ||
-            (state.draftImages[sessionId]?.length ?? 0) > 0 ||
-            (state.draftFiles[sessionId]?.length ?? 0) > 0
-          ) {
-            result = 'draft-exists';
-            return state;
-          }
-          const rest = queue.filter((candidate) => candidate.id !== queuedId);
-          // Invalidate visible and pending suggestions without a second store update.
-          const suggestion = state.replySuggestions[sessionId];
-          if (suggestion) suggestionIgnored.set(sessionId, suggestion.roundId);
-          bumpSuggestionVersion(sessionId);
-          result = 'recalled';
-          return {
-            sendNowBySession:
-              state.sendNowBySession[sessionId] === queuedId
-                ? omitKey(state.sendNowBySession, sessionId)
-                : state.sendNowBySession,
-            queuedBySession:
-              rest.length > 0
-                ? { ...state.queuedBySession, [sessionId]: rest }
-                : omitKey(state.queuedBySession, sessionId),
-            drafts: item.text
-              ? { ...state.drafts, [sessionId]: item.text }
-              : omitKey(state.drafts, sessionId),
+      async recallQueued(sessionId, queuedId) {
+        const item = queueOf(sessionId).find((candidate) => candidate.id === queuedId);
+        if (item?.handed === undefined) return recallLocal(sessionId, queuedId);
+        const state = get();
+        if (
+          (state.drafts[sessionId] ?? '') !== '' ||
+          (state.draftImages[sessionId]?.length ?? 0) > 0 ||
+          (state.draftFiles[sessionId]?.length ?? 0) > 0
+        )
+          return 'draft-exists';
+        return withTakeBack(sessionId, (ok) => (ok ? recallLocal(sessionId, queuedId) : 'failed'));
+      },
+
+      async recallAllQueued(sessionId) {
+        if (queueOf(sessionId).length === 0) return 'empty';
+        return withTakeBack(sessionId, (ok): RecallAllResult => {
+          if (!ok) return 'failed';
+          const queue = queueOf(sessionId);
+          if (queue.length === 0 || removedSessions.has(sessionId)) return 'empty';
+          const state = get();
+          const images = [
+            ...queue.flatMap((item) => item.images),
+            ...(state.draftImages[sessionId] ?? []),
+          ];
+          const files = [
+            ...queue.flatMap((item) => item.files),
+            ...(state.draftFiles[sessionId] ?? []),
+          ];
+          if (overDraftLimits(images, files)) return 'too-many';
+          // 每条一行，放在已输入的文字之前
+          const draft = state.drafts[sessionId] ?? '';
+          const text = [...queue.map((item) => item.text), draft]
+            .filter((line) => line !== '')
+            .join('\n');
+          clearSuggestion(sessionId);
+          set((current) => ({
+            queuedBySession: omitKey(current.queuedBySession, sessionId),
+            drafts: text
+              ? { ...current.drafts, [sessionId]: text }
+              : omitKey(current.drafts, sessionId),
             draftImages:
-              item.images.length > 0
-                ? { ...state.draftImages, [sessionId]: item.images }
-                : omitKey(state.draftImages, sessionId),
+              images.length > 0
+                ? { ...current.draftImages, [sessionId]: images }
+                : omitKey(current.draftImages, sessionId),
             draftFiles:
-              item.files.length > 0
-                ? { ...state.draftFiles, [sessionId]: item.files }
-                : omitKey(state.draftFiles, sessionId),
-            replySuggestions: omitKey(state.replySuggestions, sessionId),
-          };
+              files.length > 0
+                ? { ...current.draftFiles, [sessionId]: files }
+                : omitKey(current.draftFiles, sessionId),
+          }));
+          return 'recalled';
         });
-        return result;
       },
 
       abort() {
         const sessionId = get().activeSessionId;
         if (!sessionId || get().stopping[sessionId]) return Promise.resolve();
-        clearSendNow(sessionId);
         // 直接返回 stopTurn 的 promise，不多包一层 await，保持与原实现相同的结算时序
         return stopTurn(sessionId) as Promise<unknown> as Promise<void>;
       },
@@ -1725,7 +1856,6 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
           ...lists,
           recoveringCompaction: omitKey(before.recoveringCompaction, sessionId),
           stopping: omitKey(before.stopping, sessionId),
-          sendNowBySession: omitKey(before.sendNowBySession, sessionId),
           drafts: omitKey(before.drafts, sessionId),
           draftImages: omitKey(before.draftImages, sessionId),
           draftFiles: omitKey(before.draftFiles, sessionId),

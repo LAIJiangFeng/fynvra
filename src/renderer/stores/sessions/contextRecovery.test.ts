@@ -42,7 +42,8 @@ async function setup(schedule: (flush: () => void) => void = (flush) => flush())
   if (!created.ok) throw new Error(created.error);
   const id = created.session.id;
   const prompt = vi.spyOn(api, 'prompt').mockResolvedValue({ ok: true });
-  const steer = vi.spyOn(api, 'steer').mockResolvedValue({ ok: true });
+  // 这里验证恢复与结算后的 drain：运行中交出（steer）失败的消息留在本地队列，结算后作为 prompt 发出
+  const steer = vi.spyOn(api, 'steer').mockResolvedValue({ ok: false, error: 'not handed' });
   const retry = vi.spyOn(api, 'retryCompaction').mockResolvedValue({ ok: true });
   vi.spyOn(api, 'abort').mockResolvedValue({ ok: true });
   const store = createSessionsStore(api, { schedule, now: () => 2_000 });
@@ -618,7 +619,8 @@ describe('context recovery and renderer queue ownership', () => {
     expect(await store.getState().steer(id)).toBe(true);
     expect(queue()).toEqual(['later']);
     const queued = store.getState().queuedBySession[id][0];
-    expect(await store.getState().steer(id, queued.id)).toBe(false);
+    expect(queued.handed).toBeUndefined();
+    expect(await store.getState().steer(id)).toBe(false);
     expect(queue()).toEqual(['later']);
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(steer).not.toHaveBeenCalled();
@@ -654,6 +656,8 @@ describe('context recovery and renderer queue ownership', () => {
     emit({ type: 'message_end', role: 'user', text: 'original' });
     emit({ type: 'message_end', role: 'assistant', text: 'done', stopReason: 'stop' });
     emit({ type: 'context_runtime', snapshot: snapshot() });
+    // 恢复解锁后本地项会尝试交出；等交出失败回到本地，再结算
+    await new Promise((resolve) => setTimeout(resolve, 0));
     emit({ type: 'agent_settled', aborted: false });
     expect(prompt).toHaveBeenCalledTimes(2);
     expect(prompt).toHaveBeenLastCalledWith({ sessionId: id, text: 'queued' });
