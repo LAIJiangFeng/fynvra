@@ -124,12 +124,10 @@ describe('plugins 市场 IPC', () => {
     expect(mocks.http).not.toHaveBeenCalled();
   });
 
-  it('与安装 / 删除共用串行锁；未配置时安装返回可读错误', async () => {
-    const install = () =>
-      call(IPC_CHANNELS.PLUGINS_MARKET_INSTALL, { pluginId: 'fynvra.demo', version: '1.0.0' });
-    // 启动时的待清理目录清理可能还占着锁，占着时返回 busy
-    await vi.waitFor(async () => {
-      expect(await install()).toEqual(expect.objectContaining({ ok: false, code: 'invalid' }));
-    }, 10_000);
+  it('与安装 / 删除共用排队；未配置时安装返回可读错误', async () => {
+    // 启动时的待清理目录清理可能还在队列里，安装排在它后面执行
+    expect(
+      await call(IPC_CHANNELS.PLUGINS_MARKET_INSTALL, { pluginId: 'fynvra.demo', version: '1.0.0' })
+    ).toEqual(expect.objectContaining({ ok: false, code: 'invalid' }));
   });
 });

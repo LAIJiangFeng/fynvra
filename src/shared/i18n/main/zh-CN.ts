@@ -217,7 +217,6 @@ export const mainZhCN = {
     invalidSource:
       '无效的插件来源：仅支持 npm:<包名>[@版本]、git:<主机>/<路径>[@ref] 或 https:// 仓库地址，最长 500 字符',
     alreadyRegistered: '该插件已登记为「{name}」',
-    busy: '正在安装或移除另一个插件，请稍后再试',
     installFailed: '安装插件失败：{error}',
     uninstallFailed: '卸载插件失败：{error}',
     installedPathMissing: '安装完成但找不到安装目录',

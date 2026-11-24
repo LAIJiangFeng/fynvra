@@ -42,9 +42,10 @@ export const MAX_UNZIPPED_BYTES = 200 * 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 20_000;
 const MAX_INDEX_BYTES = 2 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 4 * 1024;
-const REFRESH_THROTTLE_MS = 60 * 60 * 1000;
+/** 与 Renderer 的 MARKET_STALE_MS 保持一致 */
+const REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 const FIRST_CHECK_DELAY_MS = 60 * 1000;
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const MAX_README_CACHE = 50;
 const MANIFEST = 'fynvra-plugin.json';
 
@@ -88,7 +89,7 @@ export interface PluginMarket {
   /** id 为 fynvra-plugins.json 里的插件 id：换目录后重启进程 */
   updateApp(input: { id: string }): Promise<AppPluginActionResult>;
   readme(input: { pluginId: string; version: string }): Promise<MarketReadmeResult>;
-  /** 启动 60 秒后强制刷新一次，之后每 24 小时一次；未配置公钥时什么也不做 */
+  /** 启动 60 秒后强制刷新一次，之后每 4 小时一次；未配置公钥时什么也不做 */
   start(): void;
   stop(): void;
 }

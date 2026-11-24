@@ -45,7 +45,7 @@ import { showDesktopNotification } from '../services/notifications/desktop';
 import { readPluginReadme } from '../services/plugins/pluginReadme';
 import { rememberReadme } from '../services/plugins/readmeImages';
 import { sendToAllWindows } from '../windows/createAppWindow';
-import { busyResult, exclusive, getPluginMarket, pluginCopyRoot } from './plugins';
+import { exclusive, getPluginMarket, pluginCopyRoot } from './plugins';
 import { getSettingsFile } from './settings';
 import { getWorkspaceService } from './workspaces';
 
@@ -154,7 +154,7 @@ export interface AppPluginHandlerDeps {
   updateViaMarket: (id: string) => Promise<AppPluginActionResult>;
   isPackaged: () => boolean;
   pickDirectory: (sender: Electron.WebContents) => Promise<string | null>;
-  exclusive: <T>(onBusy: () => T, task: () => Promise<T>) => Promise<T>;
+  exclusive: <T>(task: () => Promise<T>) => Promise<T>;
   uiStore: () => PluginUiStore;
   /** 调插件 handle 注册的方法；不在运行或超时（RPC 默认 30 秒）时 reject */
   callPlugin: (id: string, name: string, args: unknown) => Promise<unknown>;
@@ -169,7 +169,7 @@ export function createAppPluginHandlers(deps: AppPluginHandlerDeps): Record<stri
     error: translate('common.invalidArgs'),
   });
   const guarded = <T>(task: () => Promise<T>, onError: (error: unknown) => T) =>
-    deps.exclusive<T | ReturnType<typeof busyResult>>(busyResult, async () => {
+    deps.exclusive<T>(async () => {
       try {
         return await task();
       } catch (error) {
