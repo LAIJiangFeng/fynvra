@@ -79,7 +79,7 @@ export interface PluginsApi {
   setManualProviders(input: SetPluginManualProvidersInput): Promise<PluginSetManualProvidersResult>;
   /** 缓存的市场状态，不发网络请求 */
   marketState(): Promise<PluginMarketStateResult>;
-  /** 拉取并验签索引；force 为 false 时 1 小时内直接返回缓存 */
+  /** 拉取并验签索引；force 为 false 时 5 分钟内直接返回缓存 */
   marketRefresh(input?: { force?: boolean }): Promise<PluginMarketStateResult>;
   /** 从市场安装；pluginId 是市场 id（如 `fynvra.example`） */
   marketInstall(input: { pluginId: string; version: string }): Promise<PluginMarketInstallResult>;
