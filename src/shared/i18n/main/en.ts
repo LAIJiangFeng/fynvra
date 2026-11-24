@@ -232,7 +232,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     invalidSource:
       'Invalid plugin source: use npm:<name>[@version], git:<host>/<path>[@ref] or an https:// repository URL, up to 500 characters',
     alreadyRegistered: 'This plugin is already registered as "{name}"',
-    busy: 'Another plugin is being installed or removed; try again later',
     installFailed: 'Failed to install plugin: {error}',
     uninstallFailed: 'Failed to uninstall plugin: {error}',
     installedPathMissing: 'Installation finished but the install directory was not found',

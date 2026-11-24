@@ -4,13 +4,13 @@ import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { PluginReadmeResult } from '@shared/types/plugins';
 
 export type AppPluginListResult = IpcResult<{ plugins: AppPluginView[] }>;
-/** busy：已有插件安装 / 删除在进行（与 PI 插件共用串行锁）；canceled：取消了选择框 */
+/** canceled：取消了选择框 */
 export type AppPluginActionResult =
   | { ok: true; plugin: AppPluginView }
-  | { ok: false; code: 'invalid' | 'busy' | 'failed' | 'canceled'; error: string };
+  | { ok: false; code: 'invalid' | 'failed' | 'canceled'; error: string };
 export type AppPluginRemoveResult =
   | { ok: true }
-  | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+  | { ok: false; code: 'invalid' | 'failed'; error: string };
 export type AppPluginUiResult = IpcResult<{ ui: PluginUi | null }>;
 export type AppPluginUiActionResult = UiActionResult;
 

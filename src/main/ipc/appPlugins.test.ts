@@ -7,6 +7,7 @@ import { createPluginUiStore } from '../services/appPlugins/api/ui';
 import { createPluginConnection } from '../services/appPlugins/connection';
 import type { AppPluginService } from '../services/appPlugins/service';
 import { type AppPluginHandlerDeps, createAppPluginHandlers } from './appPlugins';
+import { exclusive } from './plugins';
 
 vi.mock('../windows/createAppWindow', () => ({ sendToAllWindows: vi.fn() }));
 
@@ -36,7 +37,7 @@ function setup(patch: Partial<AppPluginHandlerDeps> = {}) {
     updateViaMarket: vi.fn(async () => ({ ok: true as const, plugin: view })),
     isPackaged: () => false,
     pickDirectory: vi.fn(async () => '/src/plugin'),
-    exclusive: (_onBusy, task) => task(),
+    exclusive: (task) => task(),
     uiStore: () => uiStore,
     callPlugin: vi.fn(async () => undefined),
     openExternal: vi.fn(async () => undefined),
@@ -120,13 +121,33 @@ describe('appPlugins IPC', () => {
     expect(service.addLocal).not.toHaveBeenCalled();
   });
 
-  it('删除 / 更新 / 复制走串行锁，忙时返回 busy', async () => {
-    const { service, call } = setup({ exclusive: (onBusy) => Promise.resolve(onBusy()) });
-    expect(await call(IPC_CHANNELS.APP_PLUGINS_REMOVE, { id: 'fynvra.demo' })).toMatchObject({
-      ok: false,
-      code: 'busy',
+  it('同时发起两个更新：排队依次执行，都成功', async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const updateViaMarket = vi.fn(async (id: string) => {
+      log.push(`start ${id}`);
+      if (id === 'fynvra.a') await gate;
+      log.push(`end ${id}`);
+      return { ok: true as const, plugin: { ...view, id } };
     });
-    expect(service.remove).not.toHaveBeenCalled();
+    const { call } = setup({ exclusive, updateViaMarket });
+    const first = call(IPC_CHANNELS.APP_PLUGINS_UPDATE, { id: 'fynvra.a' });
+    const second = call(IPC_CHANNELS.APP_PLUGINS_UPDATE, { id: 'fynvra.b' });
+    await vi.waitFor(() => expect(log).toEqual(['start fynvra.a']));
+    release();
+    expect(await first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: true });
+    expect(log).toEqual(['start fynvra.a', 'end fynvra.a', 'start fynvra.b', 'end fynvra.b']);
+  });
+
+  it('前一个任务抛错不卡住队列，后一个照常执行', async () => {
+    const failed = exclusive(async () => {
+      throw new Error('boom');
+    });
+    const next = exclusive(async () => 'ok');
+    await expect(failed).rejects.toThrow('boom');
+    expect(await next).toBe('ok');
   });
 
   it('ui-get：返回最新描述，没有时为 null；入参收窄', async () => {
