@@ -129,7 +129,7 @@ export function PluginMarketTab() {
   const t = useT();
   const locale = useLocale();
 
-  // 首次进入：先读缓存，为空或超过 1 小时再刷新一次（不强制）
+  // 首次进入：先读缓存，为空或超过 5 分钟再刷新一次（不强制）
   useEffect(() => {
     let active = true;
     void (async () => {

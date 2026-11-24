@@ -58,7 +58,7 @@ import { useProvidersStore } from '@/stores/providers';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { AppPluginDetail, AppPluginsSection } from './AppPluginsSection';
 import { EmptyState, InlineMessage, SectionHeader } from './common';
-import { marketViewOf } from './marketView';
+import { marketNeedsRefresh, marketViewOf } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid, PluginHeader } from './PluginCard';
 import { PluginImportDialog } from './PluginImportDialog';
 import {
@@ -83,6 +83,7 @@ type PluginsTab = 'installed' | 'market';
 export function PluginsSettings() {
   const t = useT();
   const loadMarket = usePluginsStore((state) => state.loadMarket);
+  const refreshMarket = usePluginsStore((state) => state.refreshMarket);
   const [tab, setTab] = useState<PluginsTab>('installed');
   // 正在看哪个 Fynvra 插件的详情；settingsRequest 每次从菜单选「设置」加一，详情页切到设置标签
   const [openApp, setOpenApp] = useState<{ id: string; settingsRequest: number } | null>(null);
@@ -112,10 +113,19 @@ export function PluginsSettings() {
     if (openPi && piLoaded && !piPlugin) setOpenPi(null);
   }, [openPi, piLoaded, piPlugin]);
 
-  // 已安装页也要市场视图来显示「有更新」；只读缓存，不联网
+  // 进入插件页就检查更新：先读缓存，为空或超过 5 分钟再刷新一次（不强制）。
+  // 市场标签里同样的逻辑保留，切过去时缓存已新鲜则不联网；并发请求由 Main 合并
   useEffect(() => {
-    void loadMarket();
-  }, [loadMarket]);
+    let active = true;
+    void (async () => {
+      await loadMarket();
+      const state = usePluginsStore.getState().market;
+      if (active && state && marketNeedsRefresh(state, Date.now())) await refreshMarket(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loadMarket, refreshMarket]);
 
   if (openApp && appPlugin) {
     return (
