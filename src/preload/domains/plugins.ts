@@ -18,19 +18,19 @@ export type PluginListResult = IpcResult<{
 }>;
 export type PluginSetProviderMappingResult = IpcResult<{ providerMap: PluginProviderMap }>;
 export type PluginSetManualProvidersResult = IpcResult<{ plugin: PluginEntry }>;
-/** busy：已有安装 / 卸载在进行；canceled：取消了选择框 */
+/** canceled：取消了选择框 */
 export type PluginAddResult =
   | { ok: true; plugin: PluginEntry }
-  | { ok: false; code: 'canceled' | 'invalid' | 'busy' | 'failed'; error: string };
+  | { ok: false; code: 'canceled' | 'invalid' | 'failed'; error: string };
 /** warning：登记已删，但目录暂时删不掉（已进待清理列表，重启后清理） */
 export type PluginRemoveResult =
   | { ok: true; warning?: string }
-  | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+  | { ok: false; code: 'invalid' | 'failed'; error: string };
 export type PluginToggleResult = IpcResult<{ plugin: PluginEntry }>;
-/** 重新复制 / 转为副本：busy 表示已有安装、卸载或复制在进行 */
+/** 重新复制 / 转为副本 */
 export type PluginActionResult =
   | { ok: true; plugin: PluginEntry }
-  | { ok: false; code: 'invalid' | 'busy' | 'failed'; error: string };
+  | { ok: false; code: 'invalid' | 'failed'; error: string };
 /** 市场安装：PI 插件返回 plugin（plugins.json 条目），Fynvra 插件返回 appPlugin */
 export type PluginMarketInstallResult =
   | PluginActionResult

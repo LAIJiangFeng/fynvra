@@ -151,26 +151,20 @@ function agentDir(): string {
   return join(app.getPath('userData'), 'agent');
 }
 
-/** 安装 / 卸载（以及登记本地插件）同一时刻只跑一个；进行中再来的请求直接返回 busy */
-let busy = false;
+/** 插件操作串行排队：同一时刻只跑一个，后来的等前面的做完 */
+let tail: Promise<unknown> = Promise.resolve();
 
-/** Fynvra 插件（ipc/appPlugins.ts）的安装 / 更新 / 删除也走这把锁 */
-export async function exclusive<T>(onBusy: () => T, task: () => Promise<T>): Promise<T> {
-  if (busy) return onBusy();
-  busy = true;
-  try {
-    return await task();
-  } finally {
-    busy = false;
-  }
+/** Fynvra 插件（ipc/appPlugins.ts）的安装 / 更新 / 删除也走这条队列 */
+export function exclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = tail.then(task);
+  // 前一个失败不能卡住队列
+  tail = run.catch(() => undefined);
+  return run;
 }
 
 export function registerPluginHandlers(): void {
   // 启动时清理上次删除时被占用的目录；此时还没有会话加载插件
-  void exclusive(
-    () => undefined,
-    () => cleanPendingDeletes()
-  );
+  void exclusive(() => cleanPendingDeletes());
   // 插件市场：启动 60 秒后检查一次，之后每 24 小时（未配置公钥时不启动）
   getPluginMarket().start();
   registerMarketHandlers();
@@ -194,7 +188,7 @@ export function registerPluginHandlers(): void {
       if (!isEmptyArgs(raw)) {
         return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
       }
-      return exclusive(busyResult, async () => {
+      return exclusive(async () => {
         try {
           return await addLocal(event.sender);
         } catch (error) {
@@ -213,7 +207,7 @@ export function registerPluginHandlers(): void {
           ? parseRemotePluginSource(record.source)
           : null;
       if (!parsed) return { ok: false, code: 'invalid', error: translate('plugins.invalidSource') };
-      return exclusive(busyResult, async () => {
+      return exclusive(async () => {
         try {
           return await installRemote(parsed.source, parsed.kind);
         } catch (error) {
@@ -253,10 +247,7 @@ export function registerPluginHandlers(): void {
     async (_event, raw: unknown): Promise<PluginImportResult> => {
       const ids = parseImportIds(raw);
       if (!ids) return { ok: false, error: translate('common.invalidArgs') };
-      return exclusive(
-        () => ({ ok: false, error: translate('plugins.busy') }),
-        () => importCandidates(ids)
-      );
+      return exclusive(() => importCandidates(ids));
     }
   );
 
@@ -266,7 +257,7 @@ export function registerPluginHandlers(): void {
       if (!isRegistryId(rawId)) {
         return { ok: false, code: 'invalid', error: translate('plugins.invalidId') };
       }
-      return exclusive(busyResult, async () => {
+      return exclusive(async () => {
         try {
           return await removePlugin(rawId);
         } catch (error) {
@@ -433,7 +424,7 @@ export function registerPluginHandlers(): void {
       if (!isRegistryId(rawId)) {
         return { ok: false, code: 'invalid', error: translate('plugins.invalidId') };
       }
-      return exclusive(busyResult, async () => {
+      return exclusive(async () => {
         try {
           return await recopy(rawId);
         } catch (error) {
@@ -449,7 +440,7 @@ export function registerPluginHandlers(): void {
       if (!isRegistryId(rawId)) {
         return { ok: false, code: 'invalid', error: translate('plugins.invalidId') };
       }
-      return exclusive(busyResult, async () => {
+      return exclusive(async () => {
         try {
           return await convertToCopy(rawId);
         } catch (error) {
@@ -492,7 +483,7 @@ function registerMarketHandlers(): void {
     async (_event, raw: unknown): Promise<PluginMarketInstallResult> => {
       const input = parseMarketVersionInput(raw);
       if (!input) return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
-      return exclusive<PluginMarketInstallResult>(busyResult, async () => {
+      return exclusive<PluginMarketInstallResult>(async () => {
         try {
           return await getPluginMarket().install(input);
         } catch (error) {
@@ -510,7 +501,7 @@ function registerMarketHandlers(): void {
         return { ok: false, code: 'invalid', error: translate('common.invalidArgs') };
       }
       const id = record.id;
-      return exclusive<PluginActionResult>(busyResult, async () => {
+      return exclusive<PluginActionResult>(async () => {
         try {
           return await getPluginMarket().update({ id });
         } catch (error) {
@@ -586,7 +577,7 @@ export function installPlugin(source: string): Promise<PluginAddResult> {
       error: translate('plugins.invalidSource'),
     });
   }
-  return exclusive(busyResult, async () => {
+  return exclusive(async () => {
     try {
       if (remote) return await installRemote(remote.source, remote.kind);
       const result = await registerLocal(source);
@@ -688,7 +679,7 @@ function parseImportIds(raw: unknown): string[] | null {
 }
 
 /**
- * 在 exclusive 锁内逐个导入：本地候选走与「添加本地插件」相同的复制流程，npm / git 走 installRemote。
+ * 在 exclusive 队列内逐个导入：本地候选走与「添加本地插件」相同的复制流程，npm / git 走 installRemote。
  * 某项失败不影响其他项；全部结束后有成功的才广播一次 plugins:changed。错误里不带完整路径。
  */
 async function importCandidates(ids: readonly string[]): Promise<PluginImportResult> {
@@ -795,10 +786,6 @@ async function makeCopy(source: string, base: string) {
 async function expectedId(name: string): Promise<string> {
   const ids = (await getPluginRegistry().list()).map((entry) => entry.id);
   return uniqueId(toSlug(name.trim() || 'plugin', 'plugin'), ids);
-}
-
-export function busyResult(): { ok: false; code: 'busy'; error: string } {
-  return { ok: false, code: 'busy', error: translate('plugins.busy') };
 }
 
 /**
