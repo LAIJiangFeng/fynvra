@@ -58,7 +58,7 @@ export interface PluginsState {
   marketRefreshing: boolean;
   /** 读缓存，不联网 */
   loadMarket(): Promise<void>;
-  /** 拉取索引；force 为 false 时 1 小时内 Main 直接返回缓存 */
+  /** 拉取索引；force 为 false 时 5 分钟内 Main 直接返回缓存 */
   refreshMarket(force: boolean): Promise<void>;
   marketInstall(pluginId: string, version: string): Promise<PluginMarketInstallResult>;
   /** id 是 plugins.json 里的 id */

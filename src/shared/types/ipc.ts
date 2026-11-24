@@ -222,7 +222,7 @@ export const IPC_CHANNELS = {
   PLUGINS_SET_MANUAL_PROVIDERS: 'plugins:set-manual-providers',
   /** 无参数（或 `{}`）：缓存的插件市场状态 `{ state }`，不发网络请求 */
   PLUGINS_MARKET_STATE: 'plugins:market-state',
-  /** `{ force?: boolean }`：拉取并验签索引（非强制时 1 小时内直接用缓存）→ `{ state }` */
+  /** `{ force?: boolean }`：拉取并验签索引（非强制时 5 分钟内直接用缓存）→ `{ state }` */
   PLUGINS_MARKET_REFRESH: 'plugins:market-refresh',
   /** `{ pluginId, version }`：从市场安装指定版本 */
   PLUGINS_MARKET_INSTALL: 'plugins:market-install',

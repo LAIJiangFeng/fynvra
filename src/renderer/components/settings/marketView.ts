@@ -30,9 +30,10 @@ export function filterMarketPlugins(
   );
 }
 
-export const MARKET_STALE_MS = 60 * 60 * 1000;
+/** 与 Main 的 REFRESH_THROTTLE_MS 保持一致 */
+export const MARKET_STALE_MS = 5 * 60 * 1000;
 
-/** 首次进入市场时是否要再拉一次：已配置，且缓存为空或超过 1 小时 */
+/** 进入插件页时是否要再拉一次：已配置，且缓存为空或超过 5 分钟 */
 export function marketNeedsRefresh(state: MarketStateView, now: number): boolean {
   if (!state.configured) return false;
   return (

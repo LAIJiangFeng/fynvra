@@ -165,7 +165,7 @@ export function exclusive<T>(task: () => Promise<T>): Promise<T> {
 export function registerPluginHandlers(): void {
   // 启动时清理上次删除时被占用的目录；此时还没有会话加载插件
   void exclusive(() => cleanPendingDeletes());
-  // 插件市场：启动 60 秒后检查一次，之后每 24 小时（未配置公钥时不启动）
+  // 插件市场：启动 60 秒后检查一次，之后每 4 小时（未配置公钥时不启动）
   getPluginMarket().start();
   registerMarketHandlers();
 

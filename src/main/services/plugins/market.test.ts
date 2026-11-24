@@ -198,7 +198,7 @@ describe('刷新与缓存', () => {
     const reloaded = makeMarket();
     http.mockClear();
     expect((await reloaded.state()).sequence).toBe(5);
-    // 1 小时内非强制刷新直接用缓存
+    // 5 分钟内非强制刷新直接用缓存
     await reloaded.refresh();
     expect(http).not.toHaveBeenCalled();
     // 换了公钥后缓存验不过，不用

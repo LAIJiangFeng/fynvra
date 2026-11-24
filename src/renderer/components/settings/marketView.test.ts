@@ -81,6 +81,12 @@ describe('marketNeedsRefresh', () => {
       )
     ).toBe(true);
   });
+  it('4 分钟内不刷新，6 分钟后刷新', () => {
+    const minute = 60 * 1000;
+    const at = (ago: number) => ({ configured: true, plugins: [view()], fetchedAt: now - ago });
+    expect(marketNeedsRefresh(at(4 * minute), now)).toBe(false);
+    expect(marketNeedsRefresh(at(6 * minute), now)).toBe(true);
+  });
 });
 
 describe('marketViewOf', () => {
