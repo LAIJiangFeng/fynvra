@@ -10,7 +10,7 @@ import { registerIpcHandlers } from './ipc';
 import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
-import { getAgentHost } from './ipc/sessions';
+import { getAgentHost, getSessionAttachments, getSessionStore } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { getWorkspaceService } from './ipc/workspaces';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
@@ -38,6 +38,16 @@ import { createQuitGuard } from './windows/quitGuard';
 
 /** 退出时等 agent worker 关闭会话（MCP 连接、bash 进程组）的上限 */
 const AGENT_SHUTDOWN_TIMEOUT_MS = 5_000;
+/** 渠道会话附件副本的定期清理间隔 */
+const CHANNEL_COPY_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** 对所有渠道会话（带 profile）逐个清理附件副本；prune 自身不抛异常 */
+async function pruneChannelCopies(): Promise<void> {
+  const copies = getSessionAttachments();
+  for (const stored of getSessionStore().all()) {
+    if (stored.profile) await copies.prune(stored.id);
+  }
+}
 
 // dev 与打包版分开 userData，开发时不会改坏正式数据。
 // FYNVRA_USER_DATA_DIR 只在 dev 生效，供自动化验证使用隔离的数据目录。
@@ -180,6 +190,7 @@ if (!app.requestSingleInstanceLock()) {
           filePath: join(app.getPath('userData'), 'fynvra-plugin-sessions.json'),
         }),
         agentHost,
+        attachments: getSessionAttachments(),
         workspaces: getWorkspaceService(),
         snapshot,
         cleanCheckout,
@@ -205,6 +216,14 @@ if (!app.requestSingleInstanceLock()) {
         .start()
         .catch((error: unknown) => console.error('[fynvra] 渠道宿主启动失败', error));
       agentHost.start();
+      // 会话记录已加载：先清一次渠道副本，之后每 6 小时一次
+      void pruneChannelCopies();
+      const pruneTimer = setInterval(
+        () => void pruneChannelCopies(),
+        CHANNEL_COPY_PRUNE_INTERVAL_MS
+      );
+      pruneTimer.unref();
+      app.on('will-quit', () => clearInterval(pruneTimer));
       // Fynvra 插件：每个启用的插件一个后台进程
       void startAppPlugins().catch((error: unknown) =>
         console.error('[fynvra] Fynvra 插件启动失败', error)

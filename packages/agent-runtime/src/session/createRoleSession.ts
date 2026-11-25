@@ -86,6 +86,8 @@ export interface CreateRoleSessionOptions {
   role: Role;
   /** 会话工作目录：orchestrator 为工作区仓库，worker 为它的 worktree */
   cwd: string;
+  /** 只读根（如会话的聊天附件副本目录）：可读（档位会话也可），改文件的工具一律拦下（见审批门） */
+  readonlyRoots?: readonly string[];
   model: ResolvedModel;
   sessionManager: SessionManager;
   /** `tools: 'orchestrator'` 必须提供；其他策略传 null */
@@ -244,7 +246,9 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
     ...(directPlanMode ? { planMode: directPlanMode } : {}),
     // 插件扩展注册的工具按 plugin 类别审批；loader 在下方创建，check 只在会话运行后发生
     pluginTools: () => pluginTools(),
-    ...(options.profile ? { profile: () => options.profile, cwd } : {}),
+    ...(options.profile ? { profile: () => options.profile } : {}),
+    ...(options.profile || options.readonlyRoots?.length ? { cwd } : {}),
+    ...(options.readonlyRoots?.length ? { readonlyRoots: options.readonlyRoots } : {}),
   });
   const extensionFactories: InlineExtension[] = [
     // 第一个注册：拦截在其他扩展的 tool_call 处理之前

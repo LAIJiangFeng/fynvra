@@ -5,12 +5,15 @@ import { dirname, join } from 'node:path';
 import {
   type ChatFileExtractors,
   type ChatFileRejection,
+  chatFileCopyNote,
   extractChatFileText,
   startsWith,
 } from '@shared/chatFileText';
+import { errorMessage } from '@shared/guards';
 import type { ChannelAttachment, ChannelAttachmentRejection } from '@shared/types/appPluginApi';
 import {
   type ChatFile,
+  type ChatFileCopy,
   type ChatImage,
   type ChatImageMimeType,
   MAX_CHAT_FILE_BYTES,
@@ -24,6 +27,9 @@ import { type ExtractChatFile, isolatedExtractor } from './docIsolation';
 
 /** 一次 channel.prompt 处理附件的总预算：须明显短于插件 RPC 的 30 秒超时，免得插件误判失败重试造成重复投递 */
 export const ATTACHMENTS_BUDGET_MS = 20_000;
+
+/** 把文档文字（UTF-8 字节）存成会话的只读副本（生产为 SessionAttachments.save） */
+export type SaveAttachmentCopy = (name: string, content: Uint8Array) => Promise<ChatFileCopy>;
 
 export interface LoadedAttachments {
   files: ChatFile[];
@@ -71,6 +77,7 @@ async function readAttachment(dir: string, file: string): Promise<Uint8Array | C
 
 /**
  * 逐个读取并分类附件（file 与 name 已在 API 入口校验清洗）；上限全部沿用输入框（MAX_CHAT_*），超出的那个及之后同类的记为 size。
+ * 文档文字合计超过内联上限时，有 saveCopy 就把那个文档存成副本、只放路径说明；没有或保存失败才记为 size。
  * 文档默认在隔离 worker 里解析；总预算 budgetMs 用完后，剩下的附件不再处理，记为 unreadable。
  * extractors 可传进程内抽取器（测试用），或按截止时间构造抽取器的函数。
  */
@@ -78,7 +85,8 @@ export async function loadAttachments(
   dataDir: string,
   attachments: readonly ChannelAttachment[],
   extractors: ChatFileExtractors | ((deadline: number) => ExtractChatFile) = isolatedExtractor,
-  budgetMs = ATTACHMENTS_BUDGET_MS
+  budgetMs = ATTACHMENTS_BUDGET_MS,
+  saveCopy?: SaveAttachmentCopy
 ): Promise<LoadedAttachments> {
   const loaded: LoadedAttachments = { files: [], images: [], rejected: [] };
   if (attachments.length === 0) return loaded;
@@ -130,11 +138,33 @@ export async function loadAttachments(
       continue;
     }
     if (chars + result.file.text.length > MAX_CHAT_FILES_TOTAL_CHARS) {
-      reject('size');
+      // 路径说明只有几百字：不计入内联合计
+      const note = saveCopy ? await copyNote(saveCopy, name, result.file.text) : null;
+      if (!note) {
+        reject('size');
+        continue;
+      }
+      loaded.files.push(note);
       continue;
     }
     chars += result.file.text.length;
     loaded.files.push(result.file);
   }
   return loaded;
+}
+
+/** 存副本并生成路径说明块；UTF-8 超过 32 MiB 或保存失败返回 null */
+async function copyNote(
+  saveCopy: SaveAttachmentCopy,
+  name: string,
+  text: string
+): Promise<ChatFile | null> {
+  const content = new TextEncoder().encode(text);
+  if (content.length > MAX_CHAT_FILE_BYTES) return null;
+  try {
+    return chatFileCopyNote(name, await saveCopy(name, content));
+  } catch (error) {
+    console.warn(`[channels] 保存附件副本失败：${errorMessage(error)}`);
+    return null;
+  }
 }

@@ -18,6 +18,7 @@ import type { OrchestrationSnapshotView } from '@shared/types/orchestration';
 import type { Workspace } from '@shared/types/workspace';
 import type { AgentHostService } from '../agentHost/agentHost';
 import { type LocalInfoContext, sanitizeLocalInfo, scanSecrets } from '../secrets';
+import type { SessionAttachments } from '../sessions/attachments';
 import { loadAttachments } from './attachments';
 import type { CleanCheckout } from './cleanCheckout';
 import type { ChannelStore } from './store';
@@ -38,6 +39,8 @@ export interface ChannelHostDeps {
     | 'profileDefaultModel'
     | 'checkThinking'
   >;
+  /** 文档文字超过内联上限时存会话副本（生产为 SessionAttachments）；不传则超限的记为 size */
+  attachments?: Pick<SessionAttachments, 'save' | 'prune'>;
   workspaces: { get(id: string): Workspace | undefined };
   snapshot(
     workspaceId: string
@@ -302,9 +305,18 @@ export function createChannelHost(deps: ChannelHostDeps): ChannelHost {
     },
     async prompt(pluginId, sessionId, text, attachments) {
       ownSession(pluginId, sessionId);
+      const copies = deps.attachments;
       const { files, images, rejected } = attachments
-        ? await loadAttachments(attachments.dataDir, attachments.items, deps.attachmentExtractors)
+        ? await loadAttachments(
+            attachments.dataDir,
+            attachments.items,
+            deps.attachmentExtractors,
+            undefined,
+            copies ? (name, content) => copies.save(sessionId, name, content) : undefined
+          )
         : { files: [], images: [], rejected: [] };
+      // 群里发来的副本会一直累积：存完就按渠道规则清一次（新副本最新，不会被删）
+      if (attachments && copies) await copies.prune(sessionId);
       const finalText = withAttachmentBlocks(text, files);
       // 正文为空且附件全被拒：没有可发的内容
       if (!finalText.trim() && images.length === 0) return { delivered: false, rejected };

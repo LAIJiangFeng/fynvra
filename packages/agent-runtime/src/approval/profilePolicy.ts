@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   checkRestrictedCommand,
   isProtectedPath,
@@ -35,7 +37,8 @@ export async function profileRefusal(
   cwd: string | undefined,
   toolName: string,
   input: unknown,
-  kind: ApprovalKind | null
+  kind: ApprovalKind | null,
+  readonlyRoots: readonly string[] = []
 ): Promise<string | undefined> {
   const label = `${profile} session`;
   if (kind === 'network' || kind === 'mcp' || kind === 'plugin') {
@@ -79,6 +82,8 @@ export async function profileRefusal(
   }
   if (cwd === undefined) return `${label}: the working directory is unknown`;
   for (const target of targets) {
+    // 只读根（聊天附件副本）里的路径只许读；写照旧按 cwd 之外拒绝
+    if (!write && (await insideReadonlyRoot(readonlyRoots, cwd, target, false))) continue;
     const refusal = await pathRefusal(label, cwd, target, write);
     if (refusal) return refusal;
   }
@@ -136,6 +141,58 @@ export async function confinedPath(cwd: string, target: string): Promise<Confine
   } catch {
     return 'outside';
   }
+}
+
+/**
+ * target 是否落在某个只读根之内（按解析后的路径与真实路径各比一次，任一命中即是）。
+ * `lenient` 为 true（判断要不要拦写入）时像 pi 一样去掉 `@` 前缀、展开 `~`、解析 file:// ，宁可多拦；
+ * 为 false（判断能不能放行读取）时这些写法一律不算，宁可少放。永不抛异常
+ */
+export async function insideReadonlyRoot(
+  roots: readonly string[],
+  cwd: string | undefined,
+  target: string,
+  lenient: boolean
+): Promise<boolean> {
+  if (roots.length === 0 || target === '') return false;
+  let resolved = target;
+  if (lenient) {
+    resolved = resolved.replace(/^@/, '');
+    if (resolved === '~' || /^~[\\/]/.test(resolved)) {
+      resolved = path.join(os.homedir(), resolved.slice(1));
+    } else if (/^file:/i.test(resolved)) {
+      try {
+        resolved = fileURLToPath(resolved);
+      } catch {
+        return false;
+      }
+    }
+  } else if (/^[~@]/.test(target) || /^file:/i.test(target) || UNICODE_SPACES.test(target)) {
+    return false;
+  }
+  const absolute = path.resolve(cwd ?? process.cwd(), resolved);
+  let real: string | undefined;
+  try {
+    real = await realpathOfNearest(absolute);
+  } catch {
+    real = undefined;
+  }
+  for (const root of roots) {
+    const base = path.resolve(root);
+    const lexical = !isOutside(path.relative(base, absolute));
+    if (lexical && lenient) return true;
+    if (real === undefined) continue;
+    let realBase = base;
+    try {
+      realBase = await fs.realpath(base);
+    } catch {
+      // 根目录还不存在：只按解析后的路径比
+    }
+    const realInside = !isOutside(path.relative(realBase, real));
+    // 放行读取要求两者都在根内（链接指向根外的不算）；拦写入任一命中即拦
+    if (lenient ? realInside : lexical && realInside) return true;
+  }
+  return false;
 }
 
 function isOutside(relative: string): boolean {

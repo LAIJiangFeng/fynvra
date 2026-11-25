@@ -102,6 +102,17 @@ describe('createSessionsApi', () => {
     expect(Object.keys(api)).not.toContain('invoke');
   });
 
+  it('saveAttachment passes the session id, display name and bytes only', async () => {
+    const { ipc, invoke } = fakeIpc();
+    const content = new Uint8Array([104, 105]);
+    await createSessionsApi(ipc).saveAttachment({ sessionId: 's-1', name: 'big.log', content });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT, {
+      sessionId: 's-1',
+      name: 'big.log',
+      content,
+    });
+  });
+
   it('delivers pushes to the callbacks and returns the unsubscribe handle', () => {
     const { ipc, listeners, unsubscribe } = fakeIpc();
     const api = createSessionsApi(ipc);

@@ -508,6 +508,35 @@ async function createSession(env: ReturnType<typeof setup>, roleId = 'worker') {
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+describe('chat attachment copies', () => {
+  it('spawn 带会话的副本目录，删除会话时一并删掉', async () => {
+    const remove = vi.fn(async (_sessionId: string) => {});
+    const env = setup({ attachments: { dirOf: (id) => join('/copies', id), remove } });
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    const [spawn] = env.sent('spawn-session');
+    expect(spawn?.type === 'spawn-session' && spawn.spec.attachmentsDir).toBe(
+      join('/copies', session.id)
+    );
+    expect(await env.host.remove(session.id)).toEqual({ ok: true });
+    await flush();
+    expect(remove).toHaveBeenCalledWith(session.id);
+  });
+
+  it('副本删除失败只记日志，不阻塞删除会话', async () => {
+    const log = vi.fn();
+    const remove = vi.fn(async () => {
+      throw new Error('busy');
+    });
+    const env = setup({ attachments: { dirOf: (id) => join('/copies', id), remove }, log });
+    const session = await createSession(env);
+    expect(await env.host.remove(session.id)).toEqual({ ok: true });
+    expect(env.store.get(session.id)).toBeUndefined();
+    await flush();
+    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('attachment copies'));
+  });
+});
+
 describe('explicit abandoned-worker error cleanup', () => {
   function launcher(env: ReturnType<typeof setup>) {
     return env.host.implementsLauncher();

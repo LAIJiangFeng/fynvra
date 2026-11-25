@@ -2,6 +2,7 @@ import type { ApprovalMode, ContextRuntimeSnapshot } from '@fynvra/core';
 import type {
   ApprovalDecision,
   ApprovalRequest,
+  ChatFileCopy,
   ChatImage,
   ChatMessage,
   ContextRecoveryHint,
@@ -35,6 +36,15 @@ export interface SessionsApi {
    * 有一张图片不合法就整条拒绝
    */
   prompt(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
+  /**
+   * 把超过内联上限的文档文字（UTF-8 字节，≤ 32 MiB）存成会话的只读副本；name 只是显示名（不含路径），
+   * 副本位置与文件名由 Main 决定
+   */
+  saveAttachment(input: {
+    sessionId: string;
+    name: string;
+    content: Uint8Array;
+  }): Promise<IpcResult<{ copy: ChatFileCopy }>>;
   /** Steer the running turn right away (pi steer); same input as prompt. Acts as prompt when idle */
   steer(input: { sessionId: string; text: string; images?: ChatImage[] }): Promise<IpcResult>;
   /** Accept an explicit recovery attempt; progress and failure arrive through session events. */
@@ -125,6 +135,7 @@ export function createSessionsApi(ipc: PreloadIpc): SessionsApi {
       ),
     worktreeBlocked: (sessionIds) => ipc.invoke(IPC_CHANNELS.SESSIONS_WORKTREE_BLOCKED, sessionIds),
     prompt: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_PROMPT, input),
+    saveAttachment: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT, input),
     steer: (input) => ipc.invoke(IPC_CHANNELS.SESSIONS_STEER, input),
     retryCompaction: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_RETRY_COMPACTION, sessionId),
     compact: (sessionId) => ipc.invoke(IPC_CHANNELS.SESSIONS_COMPACT, sessionId),

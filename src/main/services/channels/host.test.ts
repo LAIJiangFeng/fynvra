@@ -245,6 +245,36 @@ describe('会话归属', () => {
     );
   });
 
+  it('prompt 超长附件存成副本后，对这个会话清理一次副本', async () => {
+    const order: string[] = [];
+    const attachments = {
+      save: vi.fn(async () => {
+        order.push('save');
+        return { path: 'copy.txt', bytes: 1, lines: 1 };
+      }),
+      prune: vi.fn(async () => {
+        order.push('prune');
+      }),
+    };
+    const h = harness({ attachments });
+    await h.host.start();
+    const { sessionId } = await h.host.createSession('p.a', {
+      workspaceId: 'ws1',
+      profile: 'triage',
+      title: 't',
+    });
+    const dataDir = join(dir, 'p.a');
+    await mkdir(join(dataDir, 'attachments'), { recursive: true });
+    await writeFile(join(dataDir, 'attachments', '1.txt'), 'x'.repeat(300_000));
+    await h.host.prompt('p.a', sessionId, 'big', {
+      dataDir,
+      items: [{ file: '1.txt', name: 'big.log' }],
+    });
+    expect(attachments.save).toHaveBeenCalledWith(sessionId, 'big.log', expect.any(Uint8Array));
+    expect(attachments.prune).toHaveBeenCalledWith(sessionId);
+    expect(order).toEqual(['save', 'prune']);
+  });
+
   it('prompt 附件全被拒且正文为空时不投递', async () => {
     const h = harness();
     await h.host.start();
