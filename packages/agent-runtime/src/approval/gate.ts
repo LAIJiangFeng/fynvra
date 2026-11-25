@@ -22,9 +22,6 @@ import { isReadOnlyCommand } from './readonlyCommand';
 
 /** 默认等待上限：10 分钟没有答复按 deny（fail-closed） */
 export const APPROVAL_TIMEOUT_DEFAULT_MS = 10 * 60_000;
-/** 值班协调者的 `pnpm test` 没有获批（拒绝、超时、中止或出错）时给模型的工具结果 */
-export const RESTRICTED_TESTS_REFUSAL =
-  "The maintainer did not approve running the tests locally (or did not answer in time), so `pnpm test` was not run. Do not request it again for this task. The tests run in the pull request's CI checks: continue and deliver with open_pull_request.";
 /** setTimeout 能表示的最大延迟 */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -39,8 +36,6 @@ export interface ApprovalGateRequest {
   args: unknown;
   /** 命中的保护底线（如 `git push`）：任何档位都要人确认，allowSession 不豁免 */
   protectedAction?: string;
-  /** 值班（restricted）协调者申请在本机跑 `pnpm test`：界面换标题并附风险说明；allowSession 只算这一次 */
-  note?: 'restricted-tests';
   /** epoch ms：到期没有答复按 deny */
   expiresAt: number;
 }
@@ -90,7 +85,7 @@ export interface ApprovalGateOptions extends ApprovalPolicyHooks {
   pluginTools?: () => ReadonlySet<string>;
   /**
    * 会话档位（实时读取，写法同 planMode）：有值时每个工具调用只直接放行或直接拒绝（见 {@link profileRefusal}），
-   * 不受档位与 allowSession 影响；唯一例外是 restricted 会话的 run_checks `pnpm test`，每次都问人、不记住。
+   * 不受档位与 allowSession 影响；档位会话的每个工具调用只直接放行或直接拒绝，没有例外。
    * 读取失败按 restricted 处理（fail-closed）
    */
   profile?: () => SessionProfile | undefined;
@@ -178,9 +173,7 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
         (error: unknown) =>
           `${profile} session: the call could not be checked (${errorMessage(error)}), so it was refused`
       );
-      if (reason === undefined) return undefined;
-      if (typeof reason === 'string') return { block: true, reason };
-      return askRestrictedTests(call, reason.command, signal);
+      return reason === undefined ? undefined : { block: true, reason };
     }
     if (!kind) return undefined;
     const planning = planModeOn();
@@ -232,34 +225,6 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
       return undefined;
     }
     return { block: true, reason: refusal(request, outcome, timeoutMs) };
-  }
-
-  /**
-   * 值班协调者申请在本机跑 `pnpm test`：每次都问维护者。allowSession 只算这一次（值班会话长期存在、
-   * 处理很多条反馈，不能一次允许就永久放行）；拒绝、超时、中止、出错都让模型改走 PR 的 CI。
-   */
-  async function askRestrictedTests(
-    call: GatedToolCall,
-    command: string,
-    signal: AbortSignal | undefined
-  ): Promise<ToolCallBlock | undefined> {
-    const request: ApprovalGateRequest = {
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      kind: 'command',
-      title: call.toolName,
-      detail: command,
-      args: call.input,
-      note: 'restricted-tests',
-      expiresAt: now() + timeoutMs,
-    };
-    const answer = await ask(request, signal);
-    const approved =
-      !signal?.aborted &&
-      now() < request.expiresAt &&
-      answer.type === 'decision' &&
-      answer.decision !== 'deny';
-    return approved ? undefined : { block: true, reason: RESTRICTED_TESTS_REFUSAL };
   }
 
   /** 开关读取失败按开着处理（fail-closed）：check 永不抛异常 */

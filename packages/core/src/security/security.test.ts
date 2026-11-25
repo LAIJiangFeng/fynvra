@@ -258,11 +258,8 @@ describe('checkRestrictedCommand', () => {
     expect(checkRestrictedCommand(command, { mode: 'checks' }).ok).toBe(false);
   });
 
-  it('checks 里单独的 pnpm test 放行但需要维护者批准', () => {
-    expect(checkRestrictedCommand('pnpm test', { mode: 'checks' })).toEqual({
-      ok: true,
-      needsApproval: true,
-    });
+  it('checks 里单独、不带参数的 pnpm test 直接放行', () => {
+    expect(checkRestrictedCommand('pnpm test', { mode: 'checks' })).toEqual({ ok: true });
   });
 
   it.each([

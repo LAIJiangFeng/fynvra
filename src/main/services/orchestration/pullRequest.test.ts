@@ -29,7 +29,7 @@ describe('buildPullRequestBody 的「验证」段', () => {
     );
   });
 
-  it('受限任务经批准跑过 pnpm test：只说构建由 Checks 负责', () => {
+  it('受限任务在本机跑过 pnpm test：只说构建由 Checks 负责', () => {
     const checks = ['pnpm typecheck && pnpm lint', 'pnpm test'];
     expect(verify(buildPullRequestBody({ ...base, checks, restricted: true }))).toBe(
       `- \`pnpm typecheck && pnpm lint\`\n- \`pnpm test\`\n${PR_BODY_BUILD_CI_NOTE}\n`

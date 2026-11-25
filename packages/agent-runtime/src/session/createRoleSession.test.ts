@@ -1195,12 +1195,13 @@ describe('createRoleSession restricted coordinator', () => {
     }
     const [restricted, normal] = prompts;
     expect(restricted).toContain(RESTRICTED_COORDINATOR_PROMPT.trim());
-    // pnpm test 每个任务最多申请一次，被拒或超时不重试，直接用 open_pull_request 交付
-    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/request `pnpm test`.*at most once per task/);
-    expect(RESTRICTED_COORDINATOR_PROMPT).toMatch(/do not retry; deliver with open_pull_request/);
+    // typecheck / lint / 单独的 pnpm test 直接跑，都通过后用 open_pull_request 交付，构建交给 CI
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain('`pnpm test` run on its own without arguments');
     expect(RESTRICTED_COORDINATOR_PROMPT).toContain(
-      "the pull request's CI checks run the tests and the build"
+      'Once all three pass, deliver with open_pull_request'
     );
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain("the pull request's CI checks run the build");
+    expect(RESTRICTED_COORDINATOR_PROMPT).toContain('Test output may contain local paths');
     expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
     expect(normal).not.toContain('# Restricted session');
   });

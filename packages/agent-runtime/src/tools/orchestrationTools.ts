@@ -308,7 +308,7 @@ export function createOrchestrationTools(
         const input = parseTextArgs(params, 'command');
         if (!input.ok) return errorResult('run_checks', input.error);
         if (options.restricted) {
-          // `pnpm test` 返回 ok + needsApproval：这里放行，问维护者由审批门负责——模型调用工具只有经过审批门这一条路
+          // 放行 pnpm typecheck / pnpm lint 和单独、不带参数的 pnpm test，不问人；环境变量由 Main 去掉密钥
           const checked = checkRestrictedCommand(input.value.text, { mode: 'checks' });
           if (!checked.ok)
             return errorResult('run_checks', `restricted session: ${checked.reason}`);
