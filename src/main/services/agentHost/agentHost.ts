@@ -1375,7 +1375,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     if (method === 'runChecks') {
       const command = asRecord(input)?.command;
       if (typeof command !== 'string') return 'runChecks needs a command';
-      // `pnpm test`（ok + needsApproval）在这里放行：模型调用工具只有经过 agent 端审批门这一条路，由它问维护者
+      // 单独、不带参数的 `pnpm test` 直接放行；运行时环境变量按 pickRestrictedEnv 去掉密钥
       const checked = checkRestrictedCommand(command, { mode: 'checks' });
       return checked.ok ? undefined : `restricted session: ${checked.reason}`;
     }
@@ -1419,20 +1419,16 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 审批门的请求：记为待审批，推给 Renderer 的审批条（kind / 标题 / 详情 / 到期时间以 worker 为准） */
   function announceApproval(identity: SessionIdentity, request: AgentApprovalRequest): void {
     const { sessionId, generation } = identity;
-    const { requestId, kind, title, detail, protectedAction, note, expiresAt } = request;
+    const { requestId, kind, title, detail, protectedAction, expiresAt } = request;
     approvals.set(requestId, { sessionId, generation, expiresAt });
-    const restrictedTests = note === 'restricted-tests';
     const pushed: ApprovalRequest = {
       id: requestId,
       sessionId,
       kind,
-      title: restrictedTests
-        ? translate('agent.restrictedTestsTitle')
-        : protectedAction
-          ? translate('agent.protectedTitle', { title, action: protectedAction })
-          : title,
-      // 说明放在末尾：第一行仍是命令（通知摘要取它）
-      detail: restrictedTests ? `${detail}\n\n${translate('agent.restrictedTestsNote')}` : detail,
+      title: protectedAction
+        ? translate('agent.protectedTitle', { title, action: protectedAction })
+        : title,
+      detail,
       expiresAt,
     };
     deps.broadcast(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST, pushed);
