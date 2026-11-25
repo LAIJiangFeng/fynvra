@@ -123,6 +123,8 @@ Package guides: [Core domain](packages/core/README.md) · [Agent runtime](packag
 
 ## Community
 
+Join the [Fynvra Telegram group](https://t.me/+LKOO6MPWsbo0YTEx).
+
 Scan the QR code below with WeChat to join the Fynvra user group.
 
 <img src="docs/assets/wechat-group-qr.png" alt="QR code for the Fynvra WeChat user group" width="320" />
