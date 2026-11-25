@@ -121,6 +121,14 @@ Fynvra 的使用方法请参阅[官方使用文档](https://jfengl.cn/zh/docs/)�
 
 包文档：[核心领域](packages/core/README.md) · [Agent 运行时](packages/agent-runtime/README.md)。
 
+## 社区
+
+加入 [Fynvra Telegram 交流群](https://t.me/+LKOO6MPWsbo0YTEx)。
+
+用微信扫描下方二维码，加入 Fynvra 用户群。
+
+<img src="docs/assets/wechat-group-qr.png" alt="Fynvra 微信用户群二维码" width="320" />
+
 ## 许可证
 
 Fynvra 基于 [Apache-2.0](LICENSE) 开源。第三方依赖遵循各自的许可证。

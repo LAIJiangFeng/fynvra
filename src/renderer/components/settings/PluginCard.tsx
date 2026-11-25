@@ -34,6 +34,8 @@ export function PluginAuthor({
 
 export interface PluginFaceProps {
   icon: LucideIcon;
+  /** 品牌图标地址（彩色原图），有则代替 icon 显示 */
+  logo?: string;
   name: string;
   badges?: ReactNode;
   description: ReactNode;
@@ -48,6 +50,7 @@ export interface PluginFaceProps {
  */
 export function PluginHeader({
   icon: Icon,
+  logo,
   name,
   badges,
   description,
@@ -59,7 +62,11 @@ export function PluginHeader({
     <div className="grid gap-3">
       <div className="flex items-start gap-3">
         <span className="grid size-11 shrink-0 place-items-center rounded-lg border bg-muted">
-          <Icon className="size-5 text-muted-foreground" />
+          {logo ? (
+            <img src={logo} alt="" aria-hidden draggable={false} className="size-6" />
+          ) : (
+            <Icon className="size-5 text-muted-foreground" />
+          )}
         </span>
         <div className="grid min-w-0 flex-1 gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -83,6 +90,7 @@ export function PluginHeader({
  */
 export function PluginCard({
   icon: Icon,
+  logo,
   name,
   badges,
   description,
@@ -110,7 +118,11 @@ export function PluginCard({
       )}
       <div className="flex min-w-0 items-center gap-2.5">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-muted">
-          <Icon className="size-4.5 text-muted-foreground" />
+          {logo ? (
+            <img src={logo} alt="" aria-hidden draggable={false} className="size-5" />
+          ) : (
+            <Icon className="size-4.5 text-muted-foreground" />
+          )}
         </span>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="truncate font-medium text-sm" title={name}>
