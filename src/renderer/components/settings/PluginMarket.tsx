@@ -45,6 +45,7 @@ import { EmptyState, InlineMessage, SectionHeader } from './common';
 import { filterMarketPlugins, marketAction, marketNeedsRefresh } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid } from './PluginCard';
 import { ReadmeLoading, ReadmeView } from './PluginReadme';
+import { pluginBrandLogo } from './pluginBrand';
 import { pluginSourceIconKind } from './pluginSource';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -350,6 +351,7 @@ function MarketCard({
   return (
     <PluginCard
       icon={plugin.kind === 'fynvra' ? Blocks : Puzzle}
+      logo={pluginBrandLogo(plugin.id)}
       name={plugin.name}
       onOpen={onOpen}
       badges={

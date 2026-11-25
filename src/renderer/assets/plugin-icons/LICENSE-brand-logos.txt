@@ -1,0 +1,3 @@
+telegram.svg: from https://github.com/gilbarbara/logos (logos/telegram.svg), CC0 1.0 Universal.
+feishu.svg: the official Feishu (飞书) logo; only a <title> element was added.
+Telegram and Feishu names and logos are trademarks of their respective owners (Telegram FZ-LLC; Beijing Feishu Technology Co., Ltd.), used here only to identify the official Fynvra plugins for these services.
