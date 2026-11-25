@@ -1,7 +1,35 @@
 // 聊天附件的文本抽取规则（输入框与渠道插件共用，ARCHITECTURE §7.12）：与运行环境无关的部分。
 // PDF / docx / xlsx 的具体解析器由调用方注入（Renderer 用浏览器版，Main 用 Node 可用的版本）。
 import type { unzipSync, zipSync } from 'fflate';
-import { type ChatFile, MAX_CHAT_FILE_BYTES, MAX_CHAT_FILES_TOTAL_CHARS } from './types/chat';
+import {
+  type ChatFile,
+  type ChatFileCopy,
+  MAX_CHAT_FILE_BYTES,
+  MAX_CHAT_FILES_TOTAL_CHARS,
+} from './types/chat';
+
+/**
+ * 抽出文字的上限（字符）：超过消息内联上限 {@link MAX_CHAT_FILES_TOTAL_CHARS} 的文档不再拒绝，改由 Main 保存副本；
+ * 这里只挡异常大的抽取结果（与原始文件大小上限同值），PDF / xlsx 抽取超过它就提前停
+ */
+export const MAX_CHAT_FILE_TEXT_CHARS = MAX_CHAT_FILE_BYTES;
+
+/**
+ * 超过内联上限的文档在正文里的说明块：附件块的内容不放全文，只写文件名、大小、行数与 Main 保存的只读副本路径，
+ * 提示 agent 用读文件 / 搜索工具分段查看。仍以 `<file name="…">` 块拼进正文（同样的转义与不可信内容边界），气泡照常显示为文件标签
+ */
+export function chatFileCopyNote(name: string, copy: ChatFileCopy): ChatFile {
+  return {
+    name,
+    text: [
+      `[Attachment too large to include inline (over ${MAX_CHAT_FILES_TOTAL_CHARS.toLocaleString('en-US')} characters of text).]`,
+      'Its full text was saved as a read-only UTF-8 copy:',
+      `path: ${copy.path}`,
+      `size: ${copy.bytes} bytes, ${copy.lines} lines`,
+      'Read it in parts with the read tool (offset / limit) or search it with grep; do not load it all at once. The copy is read-only.',
+    ].join('\n'),
+  };
+}
 
 export type ChatFileRejection = 'unsupported' | 'empty' | 'unreadable' | 'size';
 export type ReadChatFileResult =
@@ -127,10 +155,10 @@ export function sheetsToText(sheets: readonly XlsxSheet[]): string {
       const line = cells.join('\t');
       lines.push(line);
       total += line.length + 1;
-      if (total > MAX_CHAT_FILES_TOTAL_CHARS) break;
+      if (total > MAX_CHAT_FILE_TEXT_CHARS) break;
     }
     if (lines.length > 0) blocks.push(`## Sheet: ${sheet}\n${lines.join('\n')}`);
-    if (total > MAX_CHAT_FILES_TOTAL_CHARS) break;
+    if (total > MAX_CHAT_FILE_TEXT_CHARS) break;
   }
   return blocks.join('\n\n');
 }
@@ -172,7 +200,7 @@ export interface PdfTextDocument {
 export async function pdfDocumentText(doc: PdfTextDocument): Promise<string> {
   const pages: string[] = [];
   let total = 0;
-  for (let n = 1; n <= doc.numPages && total <= MAX_CHAT_FILES_TOTAL_CHARS; n++) {
+  for (let n = 1; n <= doc.numPages && total <= MAX_CHAT_FILE_TEXT_CHARS; n++) {
     const page = await doc.getPage(n);
     const content = await page.getTextContent();
     let text = '';
@@ -201,6 +229,7 @@ async function extract(
 /**
  * 按扩展名与魔数分派，抽出附件的纯文本：PDF、Word .docx、Excel .xlsx、文本（UTF-8 / UTF-16 / GBK）；
  * 其他格式（旧版 .doc / .xls、二进制等）不支持。`name` 只用于取扩展名和作为结果的文件名。
+ * 文字超过内联上限不在这里拒绝（由调用方改存副本），只有超过 {@link MAX_CHAT_FILE_TEXT_CHARS} 才记为 size。
  */
 export async function extractChatFileText(
   name: string,
@@ -222,6 +251,6 @@ export async function extractChatFileText(
   }
   if (typeof text !== 'string') return { ok: false, reason: text.reason };
   if (!text.trim()) return { ok: false, reason: 'empty' };
-  if (text.length > MAX_CHAT_FILES_TOTAL_CHARS) return { ok: false, reason: 'size' };
+  if (text.length > MAX_CHAT_FILE_TEXT_CHARS) return { ok: false, reason: 'size' };
   return { ok: true, file: { name, text } };
 }

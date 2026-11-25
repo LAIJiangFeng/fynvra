@@ -151,6 +151,11 @@ export interface SpawnSessionSpec {
   cwd: string;
   /** pi 会话 jsonl 的绝对路径（Main 决定；不存在时新建，存在时续写） */
   sessionFile: string;
+  /**
+   * 会话的聊天附件副本目录（绝对路径，Main 决定）：对 agent 是只读根——读文件 / 搜索工具可读（档位会话也可），
+   * write / edit 等改文件的工具一律拦下
+   */
+  attachmentsDir?: string;
   /** API key 只在这一跳从 Main 交给 worker */
   model: ResolvedModelSpec;
   /** 已解析的 skill 目录或 SKILL.md 路径 */
@@ -949,6 +954,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   if (!isNonEmptyString(cwd) || !isNonEmptyString(sessionFile) || typeof worker !== 'boolean') {
     return null;
   }
+  if (!isOptional(record.attachmentsDir, isNonEmptyString)) return null;
   if (!isOptional(shellPath, isNonEmptyString) || !isOptional(inPlace, isBoolean)) return null;
   if (!isOptional(planMode, isBoolean)) return null;
   const { profile } = record;
@@ -961,6 +967,9 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     role: role.role,
     cwd,
     sessionFile,
+    ...(record.attachmentsDir !== undefined
+      ? { attachmentsDir: record.attachmentsDir as string }
+      : {}),
     model,
     skills,
     mcpServers,

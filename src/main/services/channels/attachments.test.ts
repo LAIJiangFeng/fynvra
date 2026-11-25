@@ -193,6 +193,48 @@ describe('loadAttachments', () => {
     expect(text.rejected).toEqual([{ name: 'small.txt', reason: 'size' }]);
   });
 
+  it('有 saveCopy 时合计超限的文档存副本、只放路径说明，不再拒绝', async () => {
+    const log = 'line\n'.repeat(60_000);
+    writeFileSync(join(dir, 'serial.log'), log);
+    writeFileSync(join(dir, 'small.txt'), 'b'.repeat(20));
+    const saved: Array<{ name: string; content: Uint8Array }> = [];
+    const loaded = await loadAttachments(
+      dataDir,
+      [
+        { file: 'serial.log', name: 'serial.log' },
+        { file: 'small.txt', name: 'small.txt' },
+      ],
+      MAIN_EXTRACTORS,
+      undefined,
+      async (name, content) => {
+        saved.push({ name, content });
+        return { path: '/copies/s-1/0000-serial.log', bytes: content.length, lines: 60_000 };
+      }
+    );
+    expect(loaded.rejected).toEqual([]);
+    expect(saved).toHaveLength(1);
+    expect(new TextDecoder().decode(saved[0]?.content)).toBe(log);
+    expect(loaded.files.map((f) => f.name)).toEqual(['serial.log', 'small.txt']);
+    expect(loaded.files[0]?.text).toContain('path: /copies/s-1/0000-serial.log');
+    expect(loaded.files[0]?.text).toContain('60000 lines');
+    expect(loaded.files[0]?.text.length).toBeLessThan(1_000);
+  });
+
+  it('副本保存失败时仍记为 size', async () => {
+    writeFileSync(join(dir, 'big.txt'), 'a'.repeat(MAX_CHAT_FILES_TOTAL_CHARS + 1));
+    const loaded = await loadAttachments(
+      dataDir,
+      [{ file: 'big.txt', name: 'big.txt' }],
+      MAIN_EXTRACTORS,
+      undefined,
+      async () => {
+        throw new Error('disk full');
+      }
+    );
+    expect(loaded.files).toEqual([]);
+    expect(loaded.rejected).toEqual([{ name: 'big.txt', reason: 'size' }]);
+  });
+
   it('单张图片超过 20 MB 进 rejected', async () => {
     const big = new Uint8Array(21 * 1024 * 1024);
     big.set(PNG);

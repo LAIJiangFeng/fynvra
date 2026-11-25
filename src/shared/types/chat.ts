@@ -100,8 +100,15 @@ export interface ChatFile {
 export const MAX_CHAT_FILES = 10;
 /** 读进内存前的原始大小上限（与文件预览一致） */
 export const MAX_CHAT_FILE_BYTES = 32 * 1024 * 1024;
-/** 一条消息附件文字合计上限 */
+/** 一条消息内联的附件文字合计上限；超出的文档改存副本、正文只放路径说明（见 chatFileCopyNote） */
 export const MAX_CHAT_FILES_TOTAL_CHARS = 200_000;
+
+/** Main 为超过内联上限的文档保存的只读副本：绝对路径、UTF-8 字节数与行数 */
+export interface ChatFileCopy {
+  path: string;
+  bytes: number;
+  lines: number;
+}
 
 const FILE_OPEN = '<file name="';
 const FILE_CLOSE = '\n</file>';

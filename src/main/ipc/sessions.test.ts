@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentHostService } from '../services/agentHost/agentHost';
 import type { SessionArchive } from '../services/sessions/archive';
 import type { ArchiveSweeper } from '../services/sessions/archiveSweeper';
+import type { SessionAttachments } from '../services/sessions/attachments';
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -57,6 +58,17 @@ const host = {
   setApprovalMode: vi.fn(async () => ({ ok: true })),
   suggestReply: vi.fn(async () => ({ ok: true, suggestion: null })),
   refreshBranches: vi.fn(),
+  get: vi.fn((sessionId: string): SessionSummary | undefined =>
+    sessionId === 's-1' ? summary(sessionId) : undefined
+  ),
+};
+
+const attachments = {
+  save: vi.fn(async (sessionId: string, name: string, content: Uint8Array) => ({
+    path: `/copies/${sessionId}/0000-${name}`,
+    bytes: content.length,
+    lines: 1,
+  })),
 };
 
 const archive = {
@@ -80,11 +92,13 @@ beforeAll(async () => {
   registerSessionHandlers(
     () => host as unknown as AgentHostService,
     () => archive as unknown as SessionArchive,
-    () => sweeper as unknown as ArchiveSweeper
+    () => sweeper as unknown as ArchiveSweeper,
+    () => attachments as unknown as SessionAttachments
   );
 });
 
 beforeEach(() => {
+  attachments.save.mockClear();
   for (const fn of [...Object.values(host), ...Object.values(archive), sweeper.sweep]) {
     fn.mockClear();
   }
@@ -105,6 +119,67 @@ function summary(id: string, patch: Partial<SessionSummary> = {}): SessionSummar
     ...patch,
   };
 }
+
+describe('sessions:save-attachment', () => {
+  const content = new TextEncoder().encode('boot\nready');
+
+  it('parseSaveAttachmentInput 收窄入参：会话 id、显示名与内容，不带其他字段', async () => {
+    const { parseSaveAttachmentInput } = await import('./sessions');
+    expect(parseSaveAttachmentInput({ sessionId: 's-1', name: 'a.log', content })).toEqual({
+      sessionId: 's-1',
+      name: 'a.log',
+      content,
+    });
+    // ArrayBuffer 也可以
+    expect(
+      parseSaveAttachmentInput({ sessionId: 's-1', name: 'a.log', content: content.slice().buffer })
+        ?.content
+    ).toEqual(content);
+    for (const bad of [
+      undefined,
+      { sessionId: '../s-1', name: 'a.log', content },
+      { sessionId: 's/1', name: 'a.log', content },
+      { sessionId: 's-1', name: '../a.log', content },
+      { sessionId: 's-1', name: 'a\nb', content },
+      { sessionId: 's-1', name: 'x'.repeat(256), content },
+      { sessionId: 's-1', name: 'a.log', content: 'text' },
+      { sessionId: 's-1', name: 'a.log', content: [1, 2] },
+      { sessionId: 's-1', name: 'a.log', content: new Uint8Array() },
+      { sessionId: 's-1', name: 'a.log', content: new Uint8Array(32 * 1024 * 1024 + 1) },
+      { sessionId: 's-1', name: 'a.log', content, path: '/etc/passwd' },
+    ]) {
+      expect(parseSaveAttachmentInput(bad)).toBeNull();
+    }
+  });
+
+  it('合法入参交给副本服务；不存在的会话与非法入参不写', async () => {
+    expect(
+      await invoke(IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT, {
+        sessionId: 's-1',
+        name: 'a.log',
+        content,
+      })
+    ).toEqual({ ok: true, copy: { path: '/copies/s-1/0000-a.log', bytes: 10, lines: 1 } });
+    expect(attachments.save).toHaveBeenCalledWith('s-1', 'a.log', content);
+
+    attachments.save.mockClear();
+    expect(
+      await invoke(IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT, {
+        sessionId: 's-2',
+        name: 'a.log',
+        content,
+      })
+    ).toMatchObject({ ok: false });
+    expect(
+      await invoke(IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT, {
+        sessionId: 's-1',
+        name: 'a/b',
+        content,
+      })
+    ).toMatchObject({ ok: false });
+    expect(attachments.save).not.toHaveBeenCalled();
+  });
+});
 
 describe('parsePromptInput', () => {
   let parsePromptInput: typeof import('./sessions').parsePromptInput;

@@ -160,10 +160,11 @@ describe('readChatFile', () => {
     ).toEqual({ ok: false, reason: 'unsupported' });
   });
 
-  it('超过字数上限是 size', async () => {
-    expect(await readChatFile(new File(['a'.repeat(200_001)], 'big.log'))).toEqual({
-      ok: false,
-      reason: 'size',
+  it('超过内联字数上限的文本照常读出（由 store 存副本）', async () => {
+    const text = 'a'.repeat(200_001);
+    expect(await readChatFile(new File([text], 'big.log'))).toEqual({
+      ok: true,
+      file: { name: 'big.log', text },
     });
   });
 });

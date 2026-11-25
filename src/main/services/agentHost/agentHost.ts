@@ -63,6 +63,7 @@ import {
 import type { Workspace } from '@shared/types/workspace';
 import { mainLocale, translate } from '../../i18n';
 import { isInsideDirectory } from '../orchestration/worktreesRoot';
+import type { SessionAttachments } from '../sessions/attachments';
 import type { BranchTracker } from '../sessions/branches';
 import { readHistory, readHistoryProjection, sessionFilePath } from '../sessions/history';
 import type { LastModelStore } from '../sessions/lastModels';
@@ -94,6 +95,10 @@ export interface AgentHostDeps {
   /** userData/agent：pi 的 agentDir，会话 jsonl 在它的 sessions/ 下 */
   agentDir: string;
   store: SessionStore;
+  /**
+   * 超过内联上限的聊天附件副本：spawn 时把会话的副本目录作为只读根交给 worker，删除会话时一并删掉。缺省不带
+   */
+  attachments?: Pick<SessionAttachments, 'dirOf' | 'remove'>;
   workspaces: { get(id: string): Workspace | undefined };
   roles: RoleSource;
   models: ModelResolver;
@@ -739,6 +744,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       });
       // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
       const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
+      const attachmentsDir = deps.attachments?.dirOf(stored.id);
       return {
         ok: true,
         ref: resolved.ref,
@@ -747,6 +753,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           role: { ...role, approvalMode: stored.approvalMode },
           cwd: stored.cwd,
           sessionFile: sessionFilePath(deps.agentDir, stored.id),
+          ...(attachmentsDir ? { attachmentsDir } : {}),
           model,
           skills: resources.skills,
           ...(resources.instructionFile ? { instructionFile: resources.instructionFile } : {}),
@@ -1951,6 +1958,18 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     live.delete(stored.id);
     // 只删注册表记录；pi jsonl 保留（会话正文的权威源，误删可从文件恢复）
     deps.store.remove(stored.id);
+    // 附件副本不是权威源，随会话删除；失败只记日志，不阻塞删除
+    if (deps.attachments) {
+      const attachments = deps.attachments;
+      void Promise.resolve()
+        .then(() => attachments.remove(stored.id))
+        .catch((error: unknown) =>
+          log(
+            'warn',
+            `session ${stored.id}: removing attachment copies failed: ${errorMessage(error)}`
+          )
+        );
+    }
     wakeRounds();
     announceFailure(stored.id);
     changed(stored.workspaceId);

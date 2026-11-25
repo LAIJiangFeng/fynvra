@@ -10,7 +10,7 @@ import { registerIpcHandlers } from './ipc';
 import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
-import { getAgentHost } from './ipc/sessions';
+import { getAgentHost, getSessionAttachments } from './ipc/sessions';
 import { getSettingsFile } from './ipc/settings';
 import { getWorkspaceService } from './ipc/workspaces';
 import { getWorkspaceUiService, prepareWorkspaceWindowClose } from './ipc/workspaceUi';
@@ -180,6 +180,7 @@ if (!app.requestSingleInstanceLock()) {
           filePath: join(app.getPath('userData'), 'fynvra-plugin-sessions.json'),
         }),
         agentHost,
+        attachments: getSessionAttachments(),
         workspaces: getWorkspaceService(),
         snapshot,
         cleanCheckout,

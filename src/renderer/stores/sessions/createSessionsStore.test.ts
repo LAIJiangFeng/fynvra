@@ -2,6 +2,7 @@ import type { ApprovalMode, FynvraSessionEventBody } from '@fynvra/core';
 import type {
   ApprovalRequest,
   ChatFile,
+  ChatFileCopy,
   ChatImage,
   ChatMessage,
   ModelOptions,
@@ -203,6 +204,20 @@ function fakeApi(initial: SessionSummary[] = [summary('s1')]) {
       })
     ),
     suggestReply: vi.fn(async () => ({ ok: true as const, suggestion: null })),
+    saveAttachment: vi.fn(
+      async (input: {
+        sessionId: string;
+        name: string;
+        content: Uint8Array;
+      }): Promise<IpcResult<{ copy: ChatFileCopy }>> => ({
+        ok: true,
+        copy: {
+          path: `/data/session-attachments/${input.sessionId}/0000-${input.name}`,
+          bytes: input.content.length,
+          lines: 1,
+        },
+      })
+    ),
     onEvent: on(listeners.event),
     onSessionsChanged: on(listeners.changed),
     onApprovalRequest: on(listeners.approval),
@@ -1266,7 +1281,7 @@ describe('createSessionsStore · 文档附件', () => {
     const { store, api } = await setup();
     const state = () => store.getState();
     await state().selectSession('s1');
-    expect(state().attachFiles('s1', [DOC, CSV])).toBeUndefined();
+    expect(await state().attachFiles('s1', [DOC, CSV])).toBeUndefined();
     expect(selectDraftFilesOf('s1')(state())).toEqual([DOC, CSV]);
 
     expect(await state().send('总结')).toBe(true);
@@ -1282,7 +1297,7 @@ describe('createSessionsStore · 文档附件', () => {
     const { store, api } = await setup();
     const state = () => store.getState();
     await state().selectSession('s1');
-    state().attachFiles('s1', [DOC]);
+    await state().attachFiles('s1', [DOC]);
     api.prompt.mockResolvedValueOnce({ ok: false, error: '没有可用的模型' });
     expect(await state().send('')).toBe(false);
     expect(api.prompt).toHaveBeenCalledWith({
@@ -1299,7 +1314,7 @@ describe('createSessionsStore · 文档附件', () => {
     await state().send('first');
     emitEvent(1, { type: 'message_end', role: 'user', text: 'first' });
 
-    state().attachFiles('s1', [DOC]);
+    await state().attachFiles('s1', [DOC]);
     await state().send('second');
     const [queued] = selectQueueOf('s1')(state());
     expect(queued).toEqual(expect.objectContaining({ text: 'second', files: [DOC] }));
@@ -1309,7 +1324,7 @@ describe('createSessionsStore · 文档附件', () => {
     expect(api.steer).toHaveBeenLastCalledWith({ sessionId: 's1', text: handed });
 
     // 草稿里还有附件时不撤回
-    state().attachFiles('s1', [CSV]);
+    await state().attachFiles('s1', [CSV]);
     expect(await state().recallQueued('s1', queued?.id ?? '')).toBe('draft-exists');
     state().removeDraftFile('s1', 0);
     api.takeBackQueued.mockResolvedValueOnce({ ok: true, texts: [handed] });
@@ -1323,20 +1338,44 @@ describe('createSessionsStore · 文档附件', () => {
     expect(api.prompt).toHaveBeenLastCalledWith({ sessionId: 's1', text: handed });
   });
 
-  it('超过个数或合计字数上限的不加并给出原因，放得下的照加', async () => {
-    const { store } = await setup();
+  it('超过个数上限的不加；合计字数放不下的存副本，草稿里换成路径说明', async () => {
+    const { store, api } = await setup();
     const state = () => store.getState();
     const many = Array.from({ length: 12 }, (_, at) => ({ name: `${at}.txt`, text: 'x' }));
-    expect(state().attachFiles('s1', many)).toBe('count');
+    expect(await state().attachFiles('s1', many)).toBe('count');
     expect(selectDraftFilesOf('s1')(state())).toHaveLength(10);
+    expect(api.saveAttachment).not.toHaveBeenCalled();
 
     const half = { name: 'half.txt', text: 'x'.repeat(100_000) };
-    expect(state().attachFiles('s2', [half, half, DOC])).toBe('size');
-    expect(selectDraftFilesOf('s2')(state())).toEqual([half, half]);
-    expect(state().attachFiles('s3', [half, { name: 'big', text: 'x'.repeat(100_001) }, DOC])).toBe(
-      'size'
-    );
-    expect(selectDraftFilesOf('s3')(state())).toEqual([half, DOC]);
+    expect(await state().attachFiles('s2', [half, half, DOC])).toBeUndefined();
+    const s2 = selectDraftFilesOf('s2')(state());
+    expect(s2.slice(0, 2)).toEqual([half, half]);
+    expect(s2[2]?.name).toBe('a.md');
+    expect(s2[2]?.text).toContain('path: /data/session-attachments/s2/0000-a.md');
+    expect(api.saveAttachment).toHaveBeenLastCalledWith({
+      sessionId: 's2',
+      name: 'a.md',
+      content: new TextEncoder().encode(DOC.text),
+    });
+
+    const big = { name: 'big.log', text: 'x'.repeat(250_000) };
+    expect(await state().attachFiles('s3', [half, big, DOC])).toBeUndefined();
+    const s3 = selectDraftFilesOf('s3')(state());
+    expect(s3).toHaveLength(3);
+    expect(s3[0]).toEqual(half);
+    expect(s3[1]?.name).toBe('big.log');
+    expect(s3[1]?.text).toContain('size: 250000 bytes');
+    expect(s3[1]?.text).not.toContain('xxxx');
+    expect(s3[2]).toEqual(DOC);
+  });
+
+  it('副本保存失败的不加，原因是 copy', async () => {
+    const { store, api } = await setup();
+    const state = () => store.getState();
+    api.saveAttachment.mockResolvedValueOnce({ ok: false, error: 'disk full' });
+    const big = { name: 'big.log', text: 'x'.repeat(250_000) };
+    expect(await state().attachFiles('s1', [big, DOC])).toBe('copy');
+    expect(selectDraftFilesOf('s1')(state())).toEqual([DOC]);
   });
 });
 

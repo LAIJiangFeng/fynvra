@@ -100,6 +100,11 @@ export const IPC_CHANNELS = {
   /** 会话 id 数组 → 其中 worktree 有未合并或未提交改动的会话 id（删除确认框用） */
   SESSIONS_WORKTREE_BLOCKED: 'sessions:worktree-blocked',
   SESSIONS_PROMPT: 'sessions:prompt',
+  /**
+   * `{ sessionId, name, content }`：把超过内联上限的文档文字（UTF-8 字节，≤ 32 MiB）存成会话的只读副本；
+   * name 只是显示名（不含路径），副本文件名与目录由 Main 决定，返回副本绝对路径、字节数与行数
+   */
+  SESSIONS_SAVE_ATTACHMENT: 'sessions:save-attachment',
   /** 运行中插话（入参同 sessions:prompt），立即注入当前回合；会话空闲时等同 prompt */
   SESSIONS_STEER: 'sessions:steer',
   SESSIONS_RETRY_COMPACTION: 'sessions:retry-compaction',

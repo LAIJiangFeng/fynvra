@@ -5,8 +5,10 @@ import { asRecord, errorMessage } from '@shared/guards';
 import { resolveBaseUrl } from '@shared/modelCatalog';
 import { isApprovalDecision, type PluginProviderSpec } from '@shared/types/agent';
 import {
+  type ChatFileCopy,
   type ChatImage,
   type ChatMessage,
+  MAX_CHAT_FILE_BYTES,
   type ModelOptions,
   parseChatImages,
   type ReplySuggestion,
@@ -47,6 +49,12 @@ import {
   type ArchiveSweepResult,
   createArchiveSweeper,
 } from '../services/sessions/archiveSweeper';
+import {
+  createSessionAttachments,
+  isValidAttachmentName,
+  SESSION_ATTACHMENTS_DIR,
+  type SessionAttachments,
+} from '../services/sessions/attachments';
 import { createBranchTracker, readGitBranch } from '../services/sessions/branches';
 import { createLastModelStore } from '../services/sessions/lastModels';
 import {
@@ -74,6 +82,15 @@ let agentHost: AgentHostService | null = null;
 let sessionStore: SessionStore | null = null;
 let sessionArchive: SessionArchive | null = null;
 let archiveSweeper: ArchiveSweeper | null = null;
+let sessionAttachments: SessionAttachments | null = null;
+
+/** 超过内联上限的聊天附件副本：`<userData>/session-attachments/<sessionId>/`（IPC、渠道附件与会话删除共用） */
+export function getSessionAttachments(): SessionAttachments {
+  sessionAttachments ??= createSessionAttachments({
+    root: join(app.getPath('userData'), SESSION_ATTACHMENTS_DIR),
+  });
+  return sessionAttachments;
+}
 
 /** Main 内唯一的会话 / agent worker 管理者；userData 路径在启动早期才确定，所以延迟创建 */
 export function getAgentHost(): AgentHostService {
@@ -134,6 +151,7 @@ function createAppAgentHost(): AgentHostService {
       forkAgentWorker(agentDir, compactionThresholdTokensOf(getSettingsFile().read().preferences)),
     agentDir,
     store: getSessionStore(),
+    attachments: getSessionAttachments(),
     workspaces: getWorkspaceService(),
     roles: getRoleStore(),
     models: createModelResolver(),
@@ -253,7 +271,8 @@ async function resolvePluginProviders(): Promise<PluginProviderSpec[]> {
 export function registerSessionHandlers(
   host: () => AgentHostService = getAgentHost,
   archive: () => SessionArchive = getSessionArchive,
-  sweeper: () => ArchiveSweeper = getArchiveSweeper
+  sweeper: () => ArchiveSweeper = getArchiveSweeper,
+  attachments: () => SessionAttachments = getSessionAttachments
 ): void {
   ipcMain.handle(
     IPC_CHANNELS.SESSIONS_LIST,
@@ -328,6 +347,20 @@ export function registerSessionHandlers(
       ? invalid(blocked)
       : guard(() => host().prompt(input.sessionId, input.text, input.images));
   });
+
+  // 超过内联上限的文档：存成会话的只读副本，正文只放路径说明
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_SAVE_ATTACHMENT,
+    (_event, raw: unknown): Promise<IpcResult<{ copy: ChatFileCopy }>> => {
+      const input = parseSaveAttachmentInput(raw);
+      if (!input) return invalid(translate('common.invalidArgs'));
+      if (!host().get(input.sessionId)) return invalid(translate('common.sessionNotFound'));
+      return guard(async () => ({
+        ok: true,
+        copy: await attachments().save(input.sessionId, input.name, input.content),
+      }));
+    }
+  );
 
   // 运行中插话：入参与 sessions:prompt 相同
   ipcMain.handle(IPC_CHANNELS.SESSIONS_STEER, (_event, raw: unknown) => {
@@ -570,6 +603,24 @@ export function parsePromptInput(
   if (record?.images === undefined) return text.trim() ? { sessionId, text } : null;
   const images = parseChatImages(record.images);
   return images ? { sessionId, text, images } : null;
+}
+
+/**
+ * `{ sessionId, name, content }`：content 是非空的 Uint8Array / ArrayBuffer，不超过 32 MiB；
+ * name 是显示名（长度受限、不含路径分隔符与控制字符），不带其他字段
+ */
+export function parseSaveAttachmentInput(
+  raw: unknown
+): { sessionId: string; name: string; content: Uint8Array } | null {
+  const record = strictRecord(raw, ['sessionId', 'name', 'content']);
+  const sessionId = parseSessionId(record?.sessionId);
+  const name = record?.name;
+  if (!sessionId || !isValidAttachmentName(name)) return null;
+  const data = record?.content;
+  const content =
+    data instanceof Uint8Array ? data : data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+  if (!content || content.length === 0 || content.length > MAX_CHAT_FILE_BYTES) return null;
+  return { sessionId, name, content };
 }
 
 export function parseRespondApprovalInput(raw: unknown): RespondApprovalInput | null {

@@ -151,6 +151,8 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
       created = await createRoleSession({
         role: roleWithShellPrompt(spec.role, spec.shellPath),
         cwd: spec.cwd,
+        // 聊天附件副本目录：只读可访问
+        ...(spec.attachmentsDir ? { readonlyRoots: [spec.attachmentsDir] } : {}),
         model,
         sessionManager,
         host,
