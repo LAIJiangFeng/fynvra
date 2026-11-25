@@ -1,4 +1,5 @@
 import type { ApprovalMode } from '@fynvra/core';
+import { chatFileCopyNote } from '@shared/chatFileText';
 import { errorMessage } from '@shared/guards';
 import {
   type ApprovalDecision,
@@ -8,6 +9,7 @@ import {
   type ChatFile,
   type ChatImage,
   isChatImageMimeType,
+  MAX_CHAT_FILE_BYTES,
   MAX_CHAT_FILES,
   MAX_CHAT_FILES_TOTAL_CHARS,
   MAX_CHAT_IMAGE_BYTES,
@@ -46,8 +48,11 @@ import { findSession, isBusy, statusOf } from './selectors';
  * `invalid` 不是可用的图片（空的、不是 base64、格式不在白名单里）
  */
 export type ImageRejection = 'count' | 'size' | 'invalid';
-/** 文档附件没加进草稿的原因：`count` 超过个数上限，`size` 附件文字合计超限 */
-export type FileRejection = 'count' | 'size';
+/**
+ * 文档附件没加进草稿的原因：`count` 超过个数上限，`size` 文字大到连副本都存不下（UTF-8 超过 32 MiB），
+ * `copy` 超过内联上限、但 Main 没能保存副本
+ */
+export type FileRejection = 'count' | 'size' | 'copy';
 
 /**
  * A message typed while the session was running. Kept in memory only (not in the transcript, which is a
@@ -190,10 +195,10 @@ export interface SessionsState extends ChatProjection {
   /** 恢复已发送或保存的草稿附件：原样替换，不重新检查上限 */
   setDraftFiles(sessionId: string, files: ChatFile[]): void;
   /**
-   * 往会话的草稿里加文档附件：按顺序收下放得下的（个数、合计字数在上限内），其余不加。
-   * 返回第一个没加进去的原因；都加进去时为 undefined
+   * 往会话的草稿里加文档附件：按顺序收下（个数在上限内）。文字合计放得下的内联；放不下的那个经 Main 存成只读副本，
+   * 草稿里换成带副本路径的说明块（chatFileCopyNote）。返回第一个没加进去的原因；都加进去时为 undefined
    */
-  attachFiles(sessionId: string, files: readonly ChatFile[]): FileRejection | undefined;
+  attachFiles(sessionId: string, files: readonly ChatFile[]): Promise<FileRejection | undefined>;
   /** 从会话的草稿里移除第 index 个附件 */
   removeDraftFile(sessionId: string, index: number): void;
   dismissNotice(): void;
@@ -1578,24 +1583,50 @@ export function createSessionsStore(api: SessionsApi, options: SessionsStoreOpti
         }));
       },
 
-      attachFiles(sessionId, files) {
-        const current = get().draftFiles[sessionId] ?? [];
-        let total = current.reduce((sum, file) => sum + file.text.length, 0);
-        const added: ChatFile[] = [];
+      async attachFiles(sessionId, files) {
+        const draftOf = () => get().draftFiles[sessionId] ?? [];
+        const charsOf = (list: readonly ChatFile[]) =>
+          list.reduce((sum, file) => sum + file.text.length, 0);
         let rejected: FileRejection | undefined;
         for (const file of files) {
-          if (current.length + added.length >= MAX_CHAT_FILES) {
+          if (draftOf().length >= MAX_CHAT_FILES) {
             rejected ??= 'count';
-          } else if (total + file.text.length > MAX_CHAT_FILES_TOTAL_CHARS) {
-            rejected ??= 'size';
-          } else {
-            added.push(file);
-            total += file.text.length;
+            continue;
           }
-        }
-        if (added.length > 0) {
+          let next = file;
+          const inline = charsOf(draftOf()) + file.text.length <= MAX_CHAT_FILES_TOTAL_CHARS;
+          if (!inline) {
+            // 内联放不下：存成会话的只读副本，正文只放路径说明
+            const content = new TextEncoder().encode(file.text);
+            if (content.length > MAX_CHAT_FILE_BYTES) {
+              rejected ??= 'size';
+              continue;
+            }
+            const saved = await safely(() =>
+              api.saveAttachment({ sessionId, name: file.name, content })
+            );
+            if (!saved.ok) {
+              rejected ??= 'copy';
+              continue;
+            }
+            next = chatFileCopyNote(file.name, saved.copy);
+          }
+          // 保存副本期间草稿可能变了：按最新的草稿再核一次
+          const current = draftOf();
+          if (current.length >= MAX_CHAT_FILES) {
+            rejected ??= 'count';
+            continue;
+          }
+          // 路径说明只有几百字，总是收下；内联的在等待期间被挤超限就不加
+          if (inline && charsOf(current) + next.text.length > MAX_CHAT_FILES_TOTAL_CHARS) {
+            rejected ??= 'size';
+            continue;
+          }
           set((state) => ({
-            draftFiles: { ...state.draftFiles, [sessionId]: [...current, ...added] },
+            draftFiles: {
+              ...state.draftFiles,
+              [sessionId]: [...(state.draftFiles[sessionId] ?? []), next],
+            },
           }));
         }
         return rejected;

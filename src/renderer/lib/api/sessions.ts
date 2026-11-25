@@ -595,6 +595,22 @@ export function createMockSessionsApi(options: MockSessionsOptions = {}): Sessio
 
     prompt,
 
+    // mock 不写磁盘：给一个假路径，行数按字节里的换行算
+    async saveAttachment({ sessionId, name, content }) {
+      if (!sessions.has(sessionId)) return missing();
+      let lines = 0;
+      for (const byte of content) if (byte === 0x0a) lines++;
+      if (content.length > 0 && content[content.length - 1] !== 0x0a) lines++;
+      return {
+        ok: true,
+        copy: {
+          path: `(mock)/session-attachments/${sessionId}/${name}`,
+          bytes: content.length,
+          lines,
+        },
+      };
+    },
+
     async steer(input) {
       const session = sessions.get(input.sessionId);
       if (!session) return missing();

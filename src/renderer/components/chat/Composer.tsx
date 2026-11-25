@@ -5,7 +5,6 @@ import {
   isChatImageMimeType,
   MAX_CHAT_FILE_BYTES,
   MAX_CHAT_FILES,
-  MAX_CHAT_FILES_TOTAL_CHARS,
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGES_TOTAL_BYTES,
@@ -198,11 +197,9 @@ function fileProblem(problem: ChatFileRejection | FileRejection, name: string, t
     case 'count':
       return t('chat.filesTooMany', { max: MAX_CHAT_FILES });
     case 'size':
-      return t('chat.fileTooLarge', {
-        name,
-        single: MAX_CHAT_FILE_BYTES / MiB,
-        total: MAX_CHAT_FILES_TOTAL_CHARS.toLocaleString('en-US'),
-      });
+      return t('chat.fileTooLarge', { name, single: MAX_CHAT_FILE_BYTES / MiB });
+    case 'copy':
+      return t('chat.fileCopyFailed', { name });
     case 'unsupported':
       return t('chat.fileUnsupported', { name });
     case 'empty':
@@ -449,19 +446,19 @@ export function Composer({ sessionId }: { sessionId: string }) {
     const reading = (delta: number) =>
       setReadingFiles((counts) => ({ ...counts, [sessionId]: (counts[sessionId] ?? 0) + delta }));
     reading(1);
-    let read: Awaited<ReturnType<typeof readChatFile>>[];
+    const previousFiles = useSessionsStore.getState().draftFiles[sessionId];
+    let hint: string | undefined;
     try {
-      read = await Promise.all(picked.map((file) => readChatFile(file)));
+      const read = await Promise.all(picked.map((file) => readChatFile(file)));
+      // 逐个加，提示里才知道是哪个文件没放下；超过内联上限的由 store 存副本（仍算在「正在读取」里）
+      for (const [index, result] of read.entries()) {
+        const problem = result.ok ? await attachFiles(sessionId, [result.file]) : result.reason;
+        if (problem && hint === undefined)
+          hint = fileProblem(problem, picked[index]?.name ?? '', t);
+      }
     } finally {
       reading(-1);
     }
-    const previousFiles = useSessionsStore.getState().draftFiles[sessionId];
-    let hint: string | undefined;
-    read.forEach((result, index) => {
-      // 逐个加，提示里才知道是哪个文件没放下
-      const problem = result.ok ? attachFiles(sessionId, [result.file]) : result.reason;
-      if (problem && hint === undefined) hint = fileProblem(problem, picked[index]?.name ?? '', t);
-    });
     const state = useSessionsStore.getState();
     if (state.activeSessionId === sessionId && state.draftFiles[sessionId] !== previousFiles) {
       history.current = null;

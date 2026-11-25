@@ -408,8 +408,8 @@ export const zhCN = {
     readingFiles: '正在读取文件…',
     removeFile: '移除文件 {name}',
     filesTooMany: '每条消息最多 {max} 个文件',
-    fileTooLarge:
-      '{name} 太大：单个文件不超过 {single} MB，每条消息的附件文字合计不超过 {total} 字符',
+    fileCopyFailed: '{name} 的文字太长，需要保存副本供 agent 分段读取，但副本保存失败',
+    fileTooLarge: '{name} 太大：单个文件不超过 {single} MB',
     fileUnsupported:
       '不支持 {name}：只支持文本文件（UTF-8、GBK、UTF-16 编码的代码、Markdown、CSV、JSON、日志等）、PDF、Word .docx 和 Excel .xlsx',
     fileEmpty: '{name} 没有可读的文字（可能是扫描版 PDF）',

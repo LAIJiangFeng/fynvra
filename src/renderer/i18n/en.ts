@@ -430,8 +430,9 @@ export const en: MessagesShape<typeof zhCN> = {
     readingFiles: 'Reading files…',
     removeFile: 'Remove file {name}',
     filesTooMany: 'Up to {max} files per message',
-    fileTooLarge:
-      '{name} is too large: up to {single} MB per file and {total} characters of attached text per message',
+    fileCopyFailed:
+      '{name} has too much text to include inline and needs a copy the agent can read in parts, but saving the copy failed',
+    fileTooLarge: '{name} is too large: up to {single} MB per file',
     fileUnsupported:
       '{name} is not supported: only text files (UTF-8, GBK or UTF-16 code, Markdown, CSV, JSON, logs…), PDF, Word .docx and Excel .xlsx',
     fileEmpty: '{name} has no readable text (scanned PDF?)',

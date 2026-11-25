@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   type ChatFileExtractors,
   ChatFileTooLargeError,
+  chatFileCopyNote,
   extractChatFileText,
+  MAX_CHAT_FILE_TEXT_CHARS,
 } from './chatFileText';
 import { MAX_CHAT_FILE_BYTES, MAX_CHAT_FILES_TOTAL_CHARS } from './types/chat';
 
@@ -47,11 +49,33 @@ describe('extractChatFileText', () => {
     });
   });
 
-  it('超过字数上限或字节上限为 size', async () => {
+  it('超过内联上限的文本照常抽出（由调用方存副本），超过字节上限或文字上限为 size', async () => {
     const long = new TextEncoder().encode('a'.repeat(MAX_CHAT_FILES_TOTAL_CHARS + 1));
-    expect(await extractChatFileText('a.txt', long, none)).toEqual({ ok: false, reason: 'size' });
+    const result = await extractChatFileText('a.txt', long, none);
+    expect(result.ok && result.file.text.length).toBe(MAX_CHAT_FILES_TOTAL_CHARS + 1);
     const huge = new Uint8Array(MAX_CHAT_FILE_BYTES + 1);
     expect(await extractChatFileText('a.txt', huge, none)).toEqual({ ok: false, reason: 'size' });
+    const extracted: ChatFileExtractors = {
+      ...none,
+      pdf: async () => 'p'.repeat(MAX_CHAT_FILE_TEXT_CHARS + 1),
+    };
+    const pdf = new TextEncoder().encode('%PDF-1.4');
+    expect(await extractChatFileText('a.pdf', pdf, extracted)).toEqual({
+      ok: false,
+      reason: 'size',
+    });
+  });
+
+  it('超限文档的说明块只带文件名、大小、行数与副本路径', () => {
+    const note = chatFileCopyNote('serial.log', {
+      path: '/data/session-attachments/s-1/ab12-serial.log',
+      bytes: 2_097_152,
+      lines: 40_000,
+    });
+    expect(note.name).toBe('serial.log');
+    expect(note.text).toContain('path: /data/session-attachments/s-1/ab12-serial.log');
+    expect(note.text).toContain('size: 2097152 bytes, 40000 lines');
+    expect(note.text).toContain('read tool');
   });
 
   it('按扩展名与魔数分派到抽取器，抽取器异常分别记为 size / unreadable', async () => {

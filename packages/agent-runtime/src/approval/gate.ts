@@ -16,7 +16,7 @@ import {
   fileTargetsOf,
   modeRequiresApproval,
 } from './policy';
-import { profileRefusal } from './profilePolicy';
+import { insideReadonlyRoot, profileRefusal } from './profilePolicy';
 import { protectedAction } from './protectedCommand';
 import { isReadOnlyCommand } from './readonlyCommand';
 
@@ -89,8 +89,13 @@ export interface ApprovalGateOptions extends ApprovalPolicyHooks {
    * 读取失败按 restricted 处理（fail-closed）
    */
   profile?: () => SessionProfile | undefined;
-  /** 会话工作目录：档位会话的路径都必须在它的真实路径之内 */
+  /** 会话工作目录：档位会话的路径都必须在它的真实路径之内；也用来解析只读根判定里的相对路径 */
   cwd?: string;
+  /**
+   * 只读根（如会话的聊天附件副本目录）：改文件的工具（file-write / file-edit）写目标在里面就直接拒绝，
+   * 任何档位、allowSession 都不豁免；档位会话的 read / grep / find / ls 可以读它（其他会话本就不限读取路径）
+   */
+  readonlyRoots?: readonly string[];
 }
 
 /** pi `tool_call` 事件里审批门用到的部分 */
@@ -161,6 +166,11 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
     }
     const kind =
       approvalKindOf(call.toolName, call.input) ?? (isPluginTool(call.toolName) ? 'plugin' : null);
+    const readonlyRoots = options.readonlyRoots ?? [];
+    if (readonlyRoots.length > 0 && (kind === 'file-write' || kind === 'file-edit')) {
+      const refused = await readonlyRefusal(call.toolName, call.input, readonlyRoots, options.cwd);
+      if (refused) return { block: true, reason: refused };
+    }
     const profile = profileOf();
     if (profile) {
       const reason = await profileRefusal(
@@ -168,7 +178,8 @@ export function createApprovalGate(options: ApprovalGateOptions): ApprovalGate {
         options.cwd,
         call.toolName,
         call.input,
-        kind
+        kind,
+        readonlyRoots
       ).catch(
         (error: unknown) =>
           `${profile} session: the call could not be checked (${errorMessage(error)}), so it was refused`
@@ -341,6 +352,22 @@ function validTimeout(timeoutMs: number | undefined): number {
     return APPROVAL_TIMEOUT_DEFAULT_MS;
   }
   return Math.min(Math.floor(timeoutMs), MAX_TIMER_MS);
+}
+
+/** 写目标落在只读根里时给模型的拒绝文本；都不在返回 undefined。判定出错按拒绝处理（fail-closed） */
+async function readonlyRefusal(
+  toolName: string,
+  input: unknown,
+  roots: readonly string[],
+  cwd: string | undefined
+): Promise<string | undefined> {
+  for (const target of fileTargetsOf(toolName, input)) {
+    const inside = await insideReadonlyRoot(roots, cwd, target, true).catch(() => true);
+    if (inside) {
+      return `${target} is a read-only attachment copy: ${toolName} was refused and not run. Read it with the read or grep tools; write any results to another file.`;
+    }
+  }
+  return undefined;
 }
 
 /** 计划模式下改文件的工具被直接拒绝时给模型的工具结果 */
