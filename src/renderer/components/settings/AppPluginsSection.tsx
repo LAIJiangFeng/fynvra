@@ -30,6 +30,7 @@ import { marketViewOf } from './marketView';
 import { PluginAuthor, PluginCard, PluginGrid, PluginHeader } from './PluginCard';
 import { MarketRevokedNote, MarketTierBadge, MarketUpdateButton } from './PluginMarket';
 import { InstalledReadme, PluginDetailTabs } from './PluginReadme';
+import { pluginBrandLogo } from './pluginBrand';
 import { pluginSourceIconKind } from './pluginSource';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -220,6 +221,7 @@ function AppPluginFace({
 
   const face = {
     icon: Blocks,
+    logo: pluginBrandLogo(plugin.id),
     name: plugin.name,
     badges: (
       <>
