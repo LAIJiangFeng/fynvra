@@ -2181,23 +2181,6 @@ describe('createAgentHost approvals', () => {
     });
   });
 
-  it('gives the on-call tests request a localized title and appends the risk note', async () => {
-    const env = await pending({
-      toolName: 'run_checks',
-      kind: 'command',
-      title: 'run_checks',
-      detail: 'pnpm test',
-      note: 'restricted-tests',
-    });
-    expect(env.pushed(IPC_CHANNELS.SESSIONS_APPROVAL_REQUEST)[0]?.[0]).toMatchObject({
-      kind: 'command',
-      title: '值班请求在本机运行测试',
-      detail: expect.stringMatching(
-        /^pnpm test\n\n测试代码由 AI 根据群消息修改.*10 分钟内不处理按拒绝。$/
-      ),
-    });
-  });
-
   it('does not push anything for an approval_request event alone', async () => {
     const env = setup();
     const session = await createSession(env);
@@ -3685,7 +3668,7 @@ describe('createAgentHost profile sessions', () => {
     });
     await flush();
     expect(host.runChecks).toHaveBeenCalledTimes(1);
-    // 单独的 pnpm test 在 Main 放行：维护者批准由 agent 端审批门负责
+    // 单独的 pnpm test 在 Main 直接放行，不问人
     invoke(env, coordinator.id, 'orchestration', 'runChecks', {
       dispatchId: 'd1',
       command: 'pnpm test',

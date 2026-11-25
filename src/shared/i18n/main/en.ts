@@ -125,9 +125,6 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     describeTimeout:
       'Timed out reading thinking levels: the agent worker did not answer; try again shortly',
     protectedTitle: '{title} (protected: {action})',
-    restrictedTestsTitle: 'On-call asks to run the tests on this computer',
-    restrictedTestsNote:
-      "The test code was changed by AI based on chat messages and will run on your computer: secrets are removed from the environment variables, but it can still read and write your files and access the network. If in doubt, deny; the tests still run in the pull request's GitHub Checks. No answer within 10 minutes counts as deny.",
     describeCrashed:
       'Agent worker exited unexpectedly (code {code}) before reading thinking levels; try again',
     crashedRestarting:

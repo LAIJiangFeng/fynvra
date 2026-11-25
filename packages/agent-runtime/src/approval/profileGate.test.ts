@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ApprovalMode, SessionProfile } from '@fynvra/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { type ApprovalRequestFn, createApprovalGate, RESTRICTED_TESTS_REFUSAL } from './gate';
+import { type ApprovalRequestFn, createApprovalGate } from './gate';
 import { filterSensitiveResults } from './profilePolicy';
 
 let root: string;
@@ -124,73 +124,22 @@ describe('approval gate: restricted profile', () => {
     expect(env.request).not.toHaveBeenCalled();
   });
 
-  describe('run_checks pnpm test needs the maintainer', () => {
-    const tests = { dispatch_id: 'd', command: 'pnpm test' };
-    const gateWith = (request: ApprovalRequestFn, timeoutMs?: number) =>
-      createApprovalGate({
-        mode: 'full',
-        request,
-        profile: () => 'restricted',
-        cwd,
-        ...(timeoutMs ? { timeoutMs } : {}),
-      });
-
-    it('asks with note restricted-tests and runs once allowed', async () => {
-      const request = vi.fn<ApprovalRequestFn>(async () => 'allow');
-      const gate = gateWith(request);
+  it('runs run_checks pnpm test right away without asking in a restricted session', async () => {
+    for (const mode of ['supervised', 'full'] as const) {
+      const env = setup(mode);
       expect(
-        await gate.check({ toolCallId: 'c', toolName: 'run_checks', input: tests })
+        await env.check('run_checks', { dispatch_id: 'd', command: 'pnpm test' })
       ).toBeUndefined();
-      expect(request).toHaveBeenCalledWith(
-        expect.objectContaining({
-          toolName: 'run_checks',
-          kind: 'command',
-          detail: 'pnpm test',
-          note: 'restricted-tests',
-        }),
-        expect.anything()
-      );
-    });
-
-    it('does not remember allowSession: the next run asks again', async () => {
-      const request = vi.fn<ApprovalRequestFn>(async () => 'allowSession');
-      const gate = gateWith(request);
-      const call = { toolCallId: 'c', toolName: 'run_checks', input: tests };
-      expect(await gate.check(call)).toBeUndefined();
-      expect(await gate.check(call)).toBeUndefined();
-      expect(request).toHaveBeenCalledTimes(2);
-    });
-
-    it('refuses with the CI hand-off text when denied, timed out or failed', async () => {
-      const call = { toolCallId: 'c', toolName: 'run_checks', input: tests };
-      const denied = await gateWith(async () => 'deny').check(call);
-      const timedOut = await gateWith(() => new Promise(() => {}), 20).check(call);
-      const failed = await gateWith(async () => {
-        throw new Error('no window');
-      }).check(call);
-      for (const result of [denied, timedOut, failed]) {
-        expect(result).toEqual({ block: true, reason: RESTRICTED_TESTS_REFUSAL });
-      }
-    });
-
-    it('leaves normal sessions alone', async () => {
-      const request = vi.fn<ApprovalRequestFn>(async () => 'allowSession');
-      const call = { toolCallId: 'c', toolName: 'run_checks', input: tests };
-      expect(await createApprovalGate({ mode: 'full', request, cwd }).check(call)).toBeUndefined();
-      expect(request).not.toHaveBeenCalled();
-      // 普通会话照旧按档位问人：不带 note，allowSession 照旧记住
-      const supervised = createApprovalGate({ mode: 'supervised', request, cwd });
-      expect(await supervised.check(call)).toBeUndefined();
-      expect(await supervised.check(call)).toBeUndefined();
-      expect(request).toHaveBeenCalledTimes(1);
-      expect(request.mock.calls[0]?.[0].note).toBeUndefined();
-    });
-
-    it('refuses pnpm test in a triage session without asking', async () => {
-      const env = setup('full', 'triage');
-      expect((await env.check('run_checks', tests))?.reason).toMatch(/^triage session: /);
       expect(env.request).not.toHaveBeenCalled();
-    });
+    }
+  });
+
+  it('refuses pnpm test in a triage session without asking', async () => {
+    const env = setup('full', 'triage');
+    expect(
+      (await env.check('run_checks', { dispatch_id: 'd', command: 'pnpm test' }))?.reason
+    ).toMatch(/^triage session: /);
+    expect(env.request).not.toHaveBeenCalled();
   });
 
   it('refuses network, MCP and Fynvra configuration tools', async () => {

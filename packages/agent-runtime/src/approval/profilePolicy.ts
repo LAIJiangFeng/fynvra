@@ -28,16 +28,9 @@ const COMMAND_DIR_KEYS = [
 // pi 会把这些空白规整成普通空格（`.env\u00a0` 在 Windows 上就是 .env），直接拒绝
 const UNICODE_SPACES = /[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]/;
 
-/** 档位判定要求问人：只有 restricted 会话的 run_checks `pnpm test` */
-export interface ProfileNeedsApproval {
-  needsApproval: true;
-  command: string;
-}
-
 /**
- * triage / restricted 会话的工具调用判定（§5 会话档位）：与审批档位无关，几乎都是直接放行或拒绝。
- * 放行返回 undefined，拒绝返回给模型看的英文原因（写明原因与替代做法）；
- * 唯一的例外是 restricted 会话的 run_checks `pnpm test`，返回 {@link ProfileNeedsApproval}，由审批门问维护者。永不抛异常。
+ * triage / restricted 会话的工具调用判定（§5 会话档位）：与审批档位无关，只直接放行或拒绝、不问人。
+ * 放行返回 undefined，拒绝返回给模型看的英文原因（写明原因与替代做法）。永不抛异常。
  */
 export async function profileRefusal(
   profile: SessionProfile,
@@ -46,7 +39,7 @@ export async function profileRefusal(
   input: unknown,
   kind: ApprovalKind | null,
   readonlyRoots: readonly string[] = []
-): Promise<string | ProfileNeedsApproval | undefined> {
+): Promise<string | undefined> {
   const label = `${profile} session`;
   if (kind === 'network' || kind === 'mcp' || kind === 'plugin') {
     return `${label}: ${toolName} is not allowed (no network, MCP or plugin tools); work only with the files in the working directory`;
@@ -68,10 +61,12 @@ export async function profileRefusal(
       mode: toolName === 'run_checks' ? 'checks' : 'worker',
     });
     if (!checked.ok) return `${label}: ${checked.reason}`;
-    if (!checked.needsApproval) return undefined;
-    return profile === 'restricted'
-      ? { needsApproval: true, command: command.trim() }
-      : `${label}: ${toolName} is not allowed`;
+    // checks 模式里单独的 `pnpm test` 只给 restricted 协调者；其他档位再过一遍 worker 白名单（不含 pnpm test）
+    if (toolName === 'run_checks' && profile !== 'restricted') {
+      const strict = checkRestrictedCommand(command, { mode: 'worker' });
+      if (!strict.ok) return `${label}: ${strict.reason}`;
+    }
+    return undefined;
   }
   if (kind === 'command') return `${label}: ${toolName} is not allowed`;
   const write = kind === 'file-write' || kind === 'file-edit';

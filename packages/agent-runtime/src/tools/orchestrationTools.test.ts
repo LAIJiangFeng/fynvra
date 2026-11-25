@@ -761,7 +761,7 @@ describe('restricted coordinator', () => {
     });
     expect(allowed.isError).toBe(false);
     expect(host.runChecks).toHaveBeenCalledTimes(1);
-    // 单独的 pnpm test 放行：问维护者由审批门负责
+    // 单独的 pnpm test 直接放行，不问人
     const tests = await runTool(toolByName(tools, 'run_checks'), {
       dispatch_id: 'd1',
       command: 'pnpm test',
