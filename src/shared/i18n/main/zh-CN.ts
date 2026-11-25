@@ -111,9 +111,6 @@ export const mainZhCN = {
     describeMismatch: 'agent worker 回答的模型数与查询不一致',
     describeTimeout: '读取模型的思考档位超时：agent worker 没有回答，请稍后重试',
     protectedTitle: '{title}（保护底线：{action}）',
-    restrictedTestsTitle: '值班请求在本机运行测试',
-    restrictedTestsNote:
-      '测试代码由 AI 根据群消息修改，会在你的电脑上运行：环境变量里的密钥已经去掉，但它仍能读写你的文件、访问网络。拿不准就点拒绝，测试会照常交给 PR 的 GitHub Checks。10 分钟内不处理按拒绝。',
     describeCrashed: 'agent worker 进程意外退出（code {code}），没能读到模型的思考档位，请重试',
     crashedRestarting:
       'agent worker 进程意外退出（code {code}），正在重启；这一轮已中断，可以重新发送',
