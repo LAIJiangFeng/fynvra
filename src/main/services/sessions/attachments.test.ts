@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { MAX_CHAT_FILE_BYTES } from '@shared/types/chat';
@@ -93,5 +102,69 @@ describe('createSessionAttachments', () => {
     expect(existsSync(join(root, 's-1'))).toBe(false);
     expect(existsSync(join(root, 's-2'))).toBe(true);
     await expect(attachments.remove('s-1')).resolves.toBeUndefined();
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = Date.UTC(2026, 0, 10);
+  /** 写一份副本并把修改时间设到 now - ageMs */
+  const copyAt = (name: string, ageMs: number, bytes = 1) => {
+    const path = join(root, 's-1', name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'x'.repeat(bytes));
+    const time = (now - ageMs) / 1000;
+    utimesSync(path, time, time);
+    return path;
+  };
+
+  it('prune 删掉超过 7 天的副本，新的留下；删空了连目录一起删', async () => {
+    const attachments = createSessionAttachments({ root });
+    const old = copyAt('old.txt', 8 * DAY);
+    const fresh = copyAt('fresh.txt', 6 * DAY);
+    await attachments.prune('s-1', { now });
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    await attachments.prune('s-1', { now: now + 2 * DAY });
+    expect(existsSync(join(root, 's-1'))).toBe(false);
+  });
+
+  it('prune 在总大小超限时从最旧的删起', async () => {
+    const attachments = createSessionAttachments({ root });
+    const a = copyAt('a.txt', 3000, 10);
+    const b = copyAt('b.txt', 2000, 10);
+    const c = copyAt('c.txt', 1000, 10);
+    await attachments.prune('s-1', { now, maxBytes: 15 });
+    expect([a, b, c].map((path) => existsSync(path))).toEqual([false, false, true]);
+  });
+
+  it('prune 不进子目录', async () => {
+    const attachments = createSessionAttachments({ root });
+    const nested = copyAt(join('sub', 'old.txt'), 30 * DAY);
+    await attachments.prune('s-1', { now, maxBytes: 0 });
+    expect(existsSync(nested)).toBe(true);
+  });
+
+  it('prune 不跟随也不删符号链接', async (context) => {
+    const attachments = createSessionAttachments({ root });
+    const outside = join(dirname(root), 'outside.txt');
+    writeFileSync(outside, 'keep');
+    const time = (now - 30 * DAY) / 1000;
+    utimesSync(outside, time, time);
+    mkdirSync(join(root, 's-1'), { recursive: true });
+    const link = join(root, 's-1', 'link.txt');
+    try {
+      symlinkSync(outside, link, 'file');
+    } catch {
+      // 没有创建符号链接的权限（Windows 非开发者模式）
+      context.skip();
+    }
+    await attachments.prune('s-1', { now, maxBytes: 0 });
+    expect(existsSync(link)).toBe(true);
+    expect(readFileSync(outside, 'utf8')).toBe('keep');
+  });
+
+  it('prune 目录不存在或会话 id 非法时不抛异常', async () => {
+    const attachments = createSessionAttachments({ root });
+    await expect(attachments.prune('s-404')).resolves.toBeUndefined();
+    await expect(attachments.prune('../s-1')).resolves.toBeUndefined();
   });
 });

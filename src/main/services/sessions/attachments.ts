@@ -2,7 +2,7 @@
 // `<userData>/session-attachments/<sessionId>/`，正文只放路径说明，agent 用读文件 / 搜索工具分段读取。
 // 副本不进用户工作区、不用用户原始路径；文件名由 Main 生成，agent 对该目录只读（审批门拦写入）。
 import { randomBytes } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { ChatFileCopy } from '@shared/types/chat';
 import { MAX_CHAT_FILE_BYTES } from '@shared/types/chat';
@@ -16,6 +16,16 @@ export const MAX_ATTACHMENT_NAME_CHARS = 255;
 const MAX_STEM_CHARS = 80;
 /** 这些格式存的是抽出的纯文本：副本再加 `.txt`，免得读文件工具按原格式处理 */
 const EXTRACTED_EXTS = new Set(['pdf', 'docx', 'xlsx']);
+/** 渠道会话（triage / restricted）的副本：修改时间超过 7 天就删 */
+export const CHANNEL_COPY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** 渠道会话的副本总大小上限：超出时从最旧的删起 */
+export const CHANNEL_COPY_MAX_BYTES = 512 * 1024 * 1024;
+
+export interface PruneOptions {
+  maxAgeMs?: number;
+  maxBytes?: number;
+  now?: number;
+}
 
 export interface SessionAttachments {
   /** 会话的副本目录（不保证已存在）；会话 id 不合法时抛错 */
@@ -24,6 +34,11 @@ export interface SessionAttachments {
   save(sessionId: string, name: string, content: Uint8Array): Promise<ChatFileCopy>;
   /** 删掉会话的副本目录（不存在也算成功） */
   remove(sessionId: string): Promise<void>;
+  /**
+   * 按渠道规则清理会话的副本：删掉过期的，再从最旧的删到总大小不超上限，删空了连目录一起删。
+   * 只看目录第一层的普通文件（lstat，不跟随符号链接、不进子目录）。永不抛异常，出错只记 warn。
+   */
+  prune(sessionId: string, options?: PruneOptions): Promise<void>;
 }
 
 /** 显示名：非空、长度有限、不含路径分隔符与控制字符，不是 `.` / `..` */
@@ -99,6 +114,44 @@ export function createSessionAttachments(options: {
     },
     async remove(sessionId) {
       await rm(dirOf(sessionId), { recursive: true, force: true });
+    },
+    async prune(sessionId, options = {}) {
+      const now = options.now ?? Date.now();
+      const maxAgeMs = options.maxAgeMs ?? CHANNEL_COPY_MAX_AGE_MS;
+      const maxBytes = options.maxBytes ?? CHANNEL_COPY_MAX_BYTES;
+      try {
+        const dir = dirOf(sessionId);
+        let names: string[];
+        try {
+          names = await readdir(dir);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+          throw error;
+        }
+        const files: { path: string; size: number; mtime: number }[] = [];
+        for (const name of names) {
+          const path = join(dir, name);
+          const info = await lstat(path).catch(() => undefined);
+          if (info?.isFile()) files.push({ path, size: info.size, mtime: info.mtimeMs });
+        }
+        files.sort((a, b) => a.mtime - b.mtime);
+        let total = files.reduce((sum, file) => sum + file.size, 0);
+        let left = names.length;
+        for (const file of files) {
+          // 从旧到新：这一份没过期且总量已在上限内，后面更新的也都留下
+          if (now - file.mtime <= maxAgeMs && total <= maxBytes) break;
+          try {
+            await rm(file.path, { force: true });
+            total -= file.size;
+            left--;
+          } catch (error) {
+            console.warn('[attachments] 删除附件副本失败', error);
+          }
+        }
+        if (left === 0) await rmdir(dir).catch(() => undefined);
+      } catch (error) {
+        console.warn('[attachments] 清理附件副本失败', error);
+      }
     },
   };
 }
