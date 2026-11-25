@@ -271,6 +271,7 @@ describe('sessions IPC', () => {
         'sessions:prompt',
         'sessions:remove',
         'sessions:respond-approval',
+        'sessions:save-attachment',
         'sessions:set-model',
         'sessions:set-approval-mode',
         'sessions:set-plan-mode',
