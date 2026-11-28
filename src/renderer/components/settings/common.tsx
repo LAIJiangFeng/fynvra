@@ -8,9 +8,75 @@ import { INLINE_WARNING_LIMIT, warningLine } from './warnings';
 /** 设置页里一组内容的标题，右侧放操作按钮。只有标题，不加说明。 */
 export function SectionHeader({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h3 className="min-w-0 font-medium">{title}</h3>
+    <div className="mb-3 flex min-h-8 flex-wrap items-center justify-between gap-3">
+      <h3 className="min-w-0 font-semibold text-[15px]">{title}</h3>
       {children && <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>}
+    </div>
+  );
+}
+
+/** 设置页的一个小节：标题（右侧可放操作按钮）+ 内容，内容通常是一张 {@link SettingsCard} */
+export function SettingsSection({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section aria-label={title}>
+      <SectionHeader title={title}>{actions}</SectionHeader>
+      {children}
+    </section>
+  );
+}
+
+/** 一类设置的卡片外壳：行与行之间用分隔线隔开 */
+export function SettingsCard({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cn('divide-y rounded-xl border bg-card', className)}>{children}</div>;
+}
+
+/**
+ * 卡片里的一行设置：左边名称 + 始终显示的说明，右边控件；标签经 htmlFor 关联到控件 id。
+ * children 渲染在这一行下方、占满整行（展开的表单、提示等）。
+ */
+export function SettingsRow({
+  label,
+  description,
+  htmlFor,
+  control,
+  children,
+}: {
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  htmlFor?: string;
+  control?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between gap-6">
+        <div className="min-w-0">
+          {htmlFor ? (
+            <label htmlFor={htmlFor} className="font-medium text-sm">
+              {label}
+            </label>
+          ) : (
+            <div className="font-medium text-sm">{label}</div>
+          )}
+          {description && <div className="mt-0.5 text-muted-foreground text-xs">{description}</div>}
+        </div>
+        {control && <div className="shrink-0">{control}</div>}
+      </div>
+      {children && <div className="mt-3 grid gap-2">{children}</div>}
     </div>
   );
 }
