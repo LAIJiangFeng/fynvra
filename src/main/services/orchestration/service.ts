@@ -444,7 +444,11 @@ export function createOrchestrationService(
           branch === undefined &&
           workspace.vcs === 'git' &&
           !(await hasGitHead(workspace.repoPath)) &&
-          (await options.refreshVcs?.()) === 'none'
+          // 刷新失败（如写 settings 的 I/O 错误）按「没变成 none」处理：lookup 不能 reject，否则失败会被缓存
+          (await options.refreshVcs?.().catch((error: unknown) => {
+            log(`refresh vcs of ${workspace.repoPath} failed: ${errorMessage(error)}`);
+            return undefined;
+          })) === 'none'
         ) {
           // shortcut: 降级只作用于这个 Host，服务与工作流引擎仍按 git 隔离，期间派工作流任务会失败；需要时再让引擎跟随新 vcs
           hostWorkspace = { ...workspace, vcs: 'none' };

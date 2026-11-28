@@ -584,6 +584,25 @@ describe('createOrchestrationService', () => {
     expect(refreshVcs).toHaveBeenCalledTimes(1);
   });
 
+  it('重新检测抛错：本次报错不抛且不缓存，下一次派发重新检测后原地成功', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi
+      .fn<() => Promise<'git' | 'none' | undefined>>()
+      .mockRejectedValueOnce(new Error('EPERM'))
+      .mockResolvedValueOnce('none');
+    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
+    const host = service.hostFor('session_coord');
+    expect(await host.dispatchTask(TASK)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('detached HEAD'),
+    });
+    const second = await host.dispatchTask(TASK);
+    expect(second).toMatchObject({ ok: true, dispatch: { mode: 'in-place', worktreeId: '' } });
+    expect(refreshVcs).toHaveBeenCalledTimes(2);
+  });
+
   it('.git/HEAD 还在（git 暂时读不了）：不重新检测，照旧报错', async () => {
     const repoPath = join(dir, 'repo');
     mkdirSync(join(repoPath, '.git'), { recursive: true });
