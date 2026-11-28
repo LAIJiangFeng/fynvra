@@ -1,13 +1,16 @@
 import { errorMessage } from '@shared/guards';
 import type { GitStatus } from '@shared/types/git';
-import { Download, RefreshCw, Save } from 'lucide-react';
+import { Download, GitBranch, RefreshCw, Save } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/i18n/I18nProvider';
 import { runPendingGitInit } from '@/lib/gitInit';
+import { cn } from '@/lib/utils';
 import { Field, InlineMessage, SectionHeader } from './common';
 import { GitCompatibilitySection, GitWorktreeSettings } from './GitWorktreeSettings';
+import { PluginHeader } from './PluginCard';
 
 type Message = { tone: 'error' | 'success' | 'muted'; text: string };
 
@@ -93,64 +96,101 @@ export function GitSettings() {
     if (available) void runPendingGitInit();
   }, [available]);
   const identityDisabled = !available || saving;
+  const missing = status !== null && !available;
+  const canInstall = missing && (platform === 'win32' || platform === 'darwin');
 
   return (
     <div className="grid gap-8">
       <section aria-label={t('settings.git.statusTitle')}>
-        <SectionHeader title={t('settings.git.statusTitle')}>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={checking || installing}
-            onClick={() => void check()}
-          >
-            <RefreshCw className={checking ? 'animate-spin' : undefined} />
-            {t('settings.git.recheck')}
-          </Button>
-          {status && !available && (platform === 'win32' || platform === 'darwin') && (
-            <Button size="sm" disabled={installing} onClick={() => void install()}>
-              <Download />
-              {installing
-                ? t('settings.git.installing')
-                : t(
-                    platform === 'win32' ? 'settings.git.installWindows' : 'settings.git.installMac'
-                  )}
-            </Button>
-          )}
-        </SectionHeader>
-        <div className="grid gap-2 rounded-lg border px-4 py-3">
-          <p className="font-medium text-sm" role="status">
-            {!status
-              ? t('common.loading')
-              : available
-                ? t('settings.git.available', {
-                    version: status.version ?? '',
-                    source: t(
+        <SectionHeader title={t('settings.git.statusTitle')} />
+        <div
+          className={cn('rounded-xl border bg-card p-4', missing && 'border-amber-500/40')}
+          role="status"
+        >
+          <PluginHeader
+            icon={GitBranch}
+            name={t('settings.git.cardName')}
+            badges={
+              status &&
+              (available ? (
+                <>
+                  <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    {t('settings.git.badgeInstalled')}
+                  </Badge>
+                  <Badge variant="outline">
+                    {t(
                       status.source === 'bundled'
                         ? 'settings.git.sourceBundled'
                         : 'settings.git.sourceSystem'
-                    ),
-                  })
-                : t('settings.git.missing')}
-          </p>
-          {status && !available && platform === 'win32' && (
-            <p className="text-muted-foreground text-xs">{t('settings.git.windowsHint')}</p>
-          )}
-          {status && !available && platform === 'linux' && (
-            <div className="grid gap-1">
-              <p className="text-muted-foreground text-xs">{t('settings.git.linuxHint')}</p>
-              {LINUX_COMMANDS.map((command) => (
-                <code key={command} className="select-all font-mono text-xs">
-                  {command}
-                </code>
-              ))}
-            </div>
-          )}
-          {installMessage && (
-            <InlineMessage tone={installMessage.tone} className="break-all">
-              {installMessage.text}
-            </InlineMessage>
-          )}
+                    )}
+                  </Badge>
+                </>
+              ) : (
+                <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  {t('settings.git.badgeMissing')}
+                </Badge>
+              ))
+            }
+            author={
+              <span className="text-muted-foreground text-xs">
+                {!status
+                  ? t('common.loading')
+                  : available && t('settings.git.versionLine', { version: status.version ?? '' })}
+              </span>
+            }
+            description={
+              status && t(available ? 'settings.git.installedDesc' : 'settings.git.missingDesc')
+            }
+            actions={
+              <>
+                {canInstall && (
+                  <Button size="sm" disabled={installing} onClick={() => void install()}>
+                    <Download />
+                    {installing
+                      ? t('settings.git.installing')
+                      : t(
+                          platform === 'win32'
+                            ? 'settings.git.installWindows'
+                            : 'settings.git.installMac'
+                        )}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={checking || installing}
+                  onClick={() => void check()}
+                >
+                  <RefreshCw className={checking ? 'animate-spin' : undefined} />
+                  {t('settings.git.recheck')}
+                </Button>
+              </>
+            }
+            extra={
+              (missing && (platform === 'win32' || platform === 'linux')) || installMessage ? (
+                <>
+                  {missing && platform === 'win32' && (
+                    <p className="text-muted-foreground text-xs">{t('settings.git.windowsHint')}</p>
+                  )}
+                  {missing && platform === 'linux' && (
+                    <div className="grid gap-1">
+                      <p className="text-muted-foreground text-xs">{t('settings.git.linuxHint')}</p>
+                      {LINUX_COMMANDS.map((command) => (
+                        <code key={command} className="select-all font-mono text-xs">
+                          {command}
+                        </code>
+                      ))}
+                    </div>
+                  )}
+                  {installMessage && (
+                    <InlineMessage tone={installMessage.tone} className="break-all">
+                      {installMessage.text}
+                    </InlineMessage>
+                  )}
+                </>
+              ) : undefined
+            }
+          />
         </div>
       </section>
 
