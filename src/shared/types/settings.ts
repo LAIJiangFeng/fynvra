@@ -14,6 +14,7 @@ import {
 } from '../terminalColorSchemes';
 import type { SessionModelRef } from './chat';
 import type { IpcResult } from './ipc';
+import { MEMORY_EXPIRE_DAYS_MAX, MEMORY_EXPIRE_DAYS_MIN } from './memory';
 import { parseWorkspace, parseWorkspaceId, type Workspace } from './workspace';
 
 export const SETTINGS_VERSION = 1;
@@ -187,6 +188,9 @@ export interface Preferences {
   // --- watchdog ---
   /** 会话守护；没配置过时按 {@link DEFAULT_WATCHDOG_PREFERENCES}（读取用 watchdogPreferencesOf） */
   watchdog?: WatchdogPreferences;
+  // --- memory ---
+  /** 项目记忆；没配置过时按 {@link DEFAULT_MEMORY_PREFERENCES}（读取用 memoryPreferencesOf） */
+  memory?: MemoryPreferences;
   // --- keybindings ---
   /** 快捷键覆盖表：只存改过的动作，值是规整过的按键串（`mod` 原样保留，Renderer 按平台展开） */
   keybindings?: KeybindingOverrides;
@@ -589,6 +593,7 @@ export function parsePreferences(raw: unknown): Preferences {
   const lastModelByWorkspace = parseLastModels(record?.lastModelByWorkspace);
   const notifications = parseNotificationPreferences(record?.notifications);
   const watchdog = parseWatchdogPreferences(record?.watchdog);
+  const memory = parseMemoryPreferences(record?.memory);
   // --- keybindings ---
   const keybindings = parseKeybindingOverrides(record?.keybindings);
   // --- language ---
@@ -619,6 +624,7 @@ export function parsePreferences(raw: unknown): Preferences {
     ...(lastModelByWorkspace ? { lastModelByWorkspace } : {}),
     ...(notifications ? { notifications } : {}),
     ...(watchdog ? { watchdog } : {}),
+    ...(memory ? { memory } : {}),
     // --- keybindings ---
     ...(keybindings ? { keybindings } : {}),
     // --- language ---
@@ -731,6 +737,12 @@ export function parsePreferencesPatch(raw: unknown): Partial<Preferences> | null
         const watchdog = parseWatchdogPreferencesPatch(value);
         if (!watchdog) return null;
         patch.watchdog = watchdog;
+        break;
+      }
+      case 'memory': {
+        const memory = parseMemoryPreferencesPatch(value);
+        if (!memory) return null;
+        patch.memory = memory;
         break;
       }
       // --- keybindings ---：整张覆盖表一起换，空表是全部重置
@@ -958,4 +970,82 @@ function parseWatchdogPreferencesPatch(raw: unknown): WatchdogPreferences | null
   if (!intKeys.every((key) => isWatchdogInt(key, record[key]))) return null;
   if (!isWatchdogScope(record.scope)) return null;
   return parseWatchdogPreferences(record);
+}
+
+// --- memory ---
+
+/** 项目记忆（§7.15）：跨会话、多 agent 共用的长期记忆。 */
+export interface MemoryPreferences {
+  /** 总开关：关闭后不注入、工具拒绝、不提炼，已有数据保留 */
+  enabled: boolean;
+  /** 任务验收后自动提炼 */
+  autoExtract: boolean;
+  /** 提炼用的模型；缺省跟随会话的模型 */
+  model?: { providerId: string; modelId: string };
+  /** 多少天没被确认使用就过期，整数 7–365（与 memory.ts 的 MEMORY_EXPIRE_DAYS_* 一致） */
+  expireDays: number;
+}
+
+export const DEFAULT_MEMORY_PREFERENCES: Readonly<MemoryPreferences> = Object.freeze({
+  enabled: true,
+  autoExtract: true,
+  expireDays: 28,
+});
+
+const MEMORY_PREF_KEYS = ['enabled', 'autoExtract', 'model', 'expireDays'];
+
+function isMemoryExpireDays(value: unknown): value is number {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= MEMORY_EXPIRE_DAYS_MIN &&
+    (value as number) <= MEMORY_EXPIRE_DAYS_MAX
+  );
+}
+
+/** 提炼模型引用：复用 parseModelRef，只留 providerId 与 modelId。 */
+function parseMemoryModel(raw: unknown): MemoryPreferences['model'] | null {
+  const ref = parseModelRef(raw);
+  return ref ? { providerId: ref.providerId, modelId: ref.modelId } : null;
+}
+
+/** 生效的记忆设置（副本）：settings.json 里没有这一块时为默认值。 */
+export function memoryPreferencesOf(preferences: Pick<Preferences, 'memory'>): MemoryPreferences {
+  const memory = preferences.memory ?? DEFAULT_MEMORY_PREFERENCES;
+  return { ...memory, ...(memory.model ? { model: { ...memory.model } } : {}) };
+}
+
+/** 宽松收窄：不是对象时 null；逐项取合法值，缺失或非法的项用默认值，未知键丢弃。 */
+function parseMemoryPreferences(raw: unknown): MemoryPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  const model = parseMemoryModel(record.model);
+  return {
+    enabled:
+      typeof record.enabled === 'boolean' ? record.enabled : DEFAULT_MEMORY_PREFERENCES.enabled,
+    autoExtract:
+      typeof record.autoExtract === 'boolean'
+        ? record.autoExtract
+        : DEFAULT_MEMORY_PREFERENCES.autoExtract,
+    ...(model ? { model } : {}),
+    expireDays: isMemoryExpireDays(record.expireDays)
+      ? record.expireDays
+      : DEFAULT_MEMORY_PREFERENCES.expireDays,
+  };
+}
+
+/** `settings:update` 里的 memory：整块替换，必填项都得合法；model 可省（跟随会话），只能带两个 id；有未知键就作废。 */
+function parseMemoryPreferencesPatch(raw: unknown): MemoryPreferences | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+  if (!Object.keys(record).every((key) => MEMORY_PREF_KEYS.includes(key))) return null;
+  if (typeof record.enabled !== 'boolean' || typeof record.autoExtract !== 'boolean') return null;
+  if (!isMemoryExpireDays(record.expireDays)) return null;
+  if (record.model !== undefined) {
+    const model = asRecord(record.model);
+    if (!model || Object.keys(model).some((key) => key !== 'providerId' && key !== 'modelId')) {
+      return null;
+    }
+    if (!parseMemoryModel(model)) return null;
+  }
+  return parseMemoryPreferences(record);
 }
