@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createGitSetup,
@@ -31,14 +31,14 @@ afterEach(() => {
 
 function setup(overrides: Partial<GitSetupDeps> = {}) {
   const env: NodeJS.ProcessEnv = { PATH: 'C:\\Windows', SystemRoot: 'C:\\Windows' };
-  const cmdDir = win32.join(userData, 'git', 'MinGit-2.56.1-x64', 'cmd');
+  const cmdDir = join(userData, 'git', 'MinGit-2.56.1-x64', 'cmd');
   const fetch = vi.fn(async (_url: string) => new Response(ZIP));
   const exec = vi.fn(
     async (file: string, args: readonly string[], options?: ExecOptions): Promise<string> => {
       if (file.endsWith('tar.exe')) {
         const dir = args[3] as string;
-        mkdirSync(win32.join(dir, 'cmd'), { recursive: true });
-        writeFileSync(win32.join(dir, 'cmd', 'git.exe'), '');
+        mkdirSync(join(dir, 'cmd'), { recursive: true });
+        writeFileSync(join(dir, 'cmd', 'git.exe'), '');
         return '';
       }
       if (file.endsWith('git.exe')) return 'git version 2.56.1.windows.1\n';
@@ -87,9 +87,9 @@ describe('gitSetup', () => {
       expect.arrayContaining(['-xf']),
       expect.anything()
     );
-    expect(existsSync(win32.join(cmdDir, 'git.exe'))).toBe(true);
+    expect(existsSync(join(cmdDir, 'git.exe'))).toBe(true);
     // 临时文件与临时目录都已清理
-    expect(readdirSync(win32.join(userData, 'git'))).toEqual(['MinGit-2.56.1-x64']);
+    expect(readdirSync(join(userData, 'git'))).toEqual(['MinGit-2.56.1-x64']);
   });
 
   it('校验不过删临时文件换源，全部失败则报错且不解压', async () => {
@@ -98,7 +98,7 @@ describe('gitSetup', () => {
     await expect(git.install()).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(exec.mock.calls.some(([file]) => file.endsWith('tar.exe'))).toBe(false);
-    expect(readdirSync(win32.join(userData, 'git'))).toEqual([]);
+    expect(readdirSync(join(userData, 'git'))).toEqual([]);
   });
 
   it('并发安装只跑一次', async () => {

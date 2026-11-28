@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
-import { win32 } from 'node:path';
+import { join, win32 } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { errorMessage } from '@shared/guards';
 import type { GitIdentityInput, GitStatus } from '@shared/types/git';
@@ -93,12 +93,13 @@ function parseVersion(stdout: string): string {
 }
 
 export function createGitSetup(deps: GitSetupDeps) {
-  const root = win32.join(deps.userDataPath, 'git');
+  // 文件系统路径用平台 join：生产只在 win32 上安装/注入，此时与 win32.join 等价；测试在 Linux 上也能落到正确目录
+  const root = join(deps.userDataPath, 'git');
   const arch = deps.arch in MINGIT_FILES ? (deps.arch as MinGitArch) : undefined;
   // 不支持的架构也给一个目录名，只用于判断「不存在」
-  const finalDir = win32.join(root, `MinGit-${MINGIT_VERSION}-${deps.arch}`);
-  const cmdDir = win32.join(finalDir, 'cmd');
-  const bundledGit = win32.join(cmdDir, 'git.exe');
+  const finalDir = join(root, `MinGit-${MINGIT_VERSION}-${deps.arch}`);
+  const cmdDir = join(finalDir, 'cmd');
+  const bundledGit = join(cmdDir, 'git.exe');
   let installing: Promise<GitStatus> | undefined;
 
   const pathEntries = (path: string | undefined) => (path ?? '').split(';').filter(Boolean);
@@ -167,8 +168,8 @@ export function createGitSetup(deps: GitSetupDeps) {
     await mkdir(root, { recursive: true });
     if (!existsSync(bundledGit)) {
       const id = randomUUID();
-      const zip = win32.join(root, `.download-${id}.zip`);
-      const extractDir = win32.join(root, `.extract-${id}`);
+      const zip = join(root, `.download-${id}.zip`);
+      const extractDir = join(root, `.extract-${id}`);
       try {
         let lastError: unknown;
         let downloaded = false;
@@ -189,7 +190,7 @@ export function createGitSetup(deps: GitSetupDeps) {
         const tar = win32.join(deps.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
         await deps.exec(tar, ['-xf', zip, '-C', extractDir], { timeout: EXTRACT_TIMEOUT_MS });
         try {
-          await deps.exec(win32.join(extractDir, 'cmd', 'git.exe'), ['--version']);
+          await deps.exec(join(extractDir, 'cmd', 'git.exe'), ['--version']);
         } catch (error) {
           throw new Error(translate('git.verifyFailed', { error: errorMessage(error) }));
         }
