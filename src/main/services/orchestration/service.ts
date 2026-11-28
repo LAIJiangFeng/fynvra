@@ -439,32 +439,28 @@ export function createOrchestrationService(
         // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
         branch =
           workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
-        // .git 被删或只剩空壳（没有 HEAD）时重新检测；HEAD 还在说明只是 git 暂时读不了，不能降成原地改用户目录
-        if (
-          branch === undefined &&
-          workspace.vcs === 'git' &&
-          !(await hasGitHead(workspace.repoPath)) &&
-          // 刷新失败（如写 settings 的 I/O 错误）按「没变成 none」处理：lookup 不能 reject，否则失败会被缓存
-          (await options.refreshVcs?.().catch((error: unknown) => {
-            log(`refresh vcs of ${workspace.repoPath} failed: ${errorMessage(error)}`);
-            return undefined;
-          })) === 'none'
-        ) {
-          // shortcut: 降级只作用于这个 Host，服务与工作流引擎仍按 git 隔离，期间派工作流任务会失败；需要时再让引擎跟随新 vcs
+        // 读不到分支（detached HEAD、git 读不了或没装、.git 失效）时派发不能卡住：降成原地派发
+        if (branch === undefined) {
+          // .git 被删或只剩空壳（没有 HEAD）时才重新检测并记为 none；其余情况不改 vcs 记录
+          // 刷新失败（如写 settings 的 I/O 错误）只记日志：lookup 不能 reject，否则失败会被缓存
+          if (workspace.vcs === 'git' && !(await hasGitHead(workspace.repoPath))) {
+            await options.refreshVcs?.().catch((error: unknown) => {
+              log(`refresh vcs of ${workspace.repoPath} failed: ${errorMessage(error)}`);
+            });
+          }
+          log(`no branch readable in ${workspace.repoPath}; dispatching in place`);
+          // shortcut: 降级只作用于这个 Host 且随 Host 缓存，服务与工作流引擎仍按 git 隔离，期间工作流任务直接拒绝；需要时再让引擎跟随新 vcs
           hostWorkspace = { ...workspace, vcs: 'none' };
           branch = '';
         }
-      }
-      if (branch === undefined) {
-        return fail(
-          `the workspace repository ${workspace.repoPath} has no checked-out branch (detached HEAD) or git cannot read it, so nothing was dispatched. Tell the user to check out the branch the orchestrator should work on or to repair the repository (git status in that folder shows the problem); do not work around it.`
-        );
       }
       const host = createOrchestrationHost({
         workspace: hostWorkspace,
         coordinatorSessionId,
         coordinatorBranch: branch,
         restricted,
+        ...(hostWorkspace !== workspace ? { workflowsUnavailable: true } : {}),
+        log,
         store,
         git,
         inbox,

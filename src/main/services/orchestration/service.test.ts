@@ -547,18 +547,14 @@ describe('createOrchestrationService', () => {
     expect(service.workerHostFor('session_w1')).not.toBeNull();
   });
 
-  it('hostFor：仓库处于 detached HEAD 时报错且不缓存，切回分支后即可使用', async () => {
-    let head: { code: number; stdout: string } = { code: 1, stdout: '' };
-    fake.respond(({ args }) => (args[0] === 'symbolic-ref' ? head : undefined));
-    const host = make().hostFor('session_coord');
-    expect(await host.listWorkers()).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('detached HEAD'),
-    });
-    head = { code: 0, stdout: 'main\n' };
-    expect(await host.listWorkers()).toEqual({ ok: true, workers: [] });
+  it('hostFor：仓库处于 detached HEAD 时不报错，原地派发且不建 worktree', async () => {
+    fake.respond(({ args }) => (args[0] === 'symbolic-ref' ? { code: 1, stdout: '' } : undefined));
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
   });
-
   it('.git 已失效（没有 .git/HEAD）且重新检测为 none：这一次派发原地成功，不建 worktree', async () => {
     fake.respond(({ args }) =>
       args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
@@ -571,39 +567,39 @@ describe('createOrchestrationService', () => {
     expect(refreshVcs).toHaveBeenCalledTimes(1);
   });
 
-  it('没有 .git/HEAD 但重新检测仍是 git：照旧报错', async () => {
+  it('没有 .git/HEAD 且重新检测仍是 git：照样原地派发成功，不建 worktree', async () => {
     fake.respond(({ args }) =>
       args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
     );
     const refreshVcs = vi.fn(async () => 'git' as const);
     const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
-    expect(await service.hostFor('session_coord').dispatchTask(TASK)).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('detached HEAD'),
-    });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
     expect(refreshVcs).toHaveBeenCalledTimes(1);
   });
 
-  it('重新检测抛错：本次报错不抛且不缓存，下一次派发重新检测后原地成功', async () => {
+  it('重新检测抛错：只记日志，照样原地派发成功', async () => {
     fake.respond(({ args }) =>
       args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
     );
     const refreshVcs = vi
       .fn<() => Promise<'git' | 'none' | undefined>>()
-      .mockRejectedValueOnce(new Error('EPERM'))
-      .mockResolvedValueOnce('none');
-    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
-    const host = service.hostFor('session_coord');
-    expect(await host.dispatchTask(TASK)).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('detached HEAD'),
+      .mockRejectedValueOnce(new Error('EPERM'));
+    const log = vi.fn();
+    const service = make({
+      workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') },
+      refreshVcs,
+      log,
     });
-    const second = await host.dispatchTask(TASK);
-    expect(second).toMatchObject({ ok: true, dispatch: { mode: 'in-place', worktreeId: '' } });
-    expect(refreshVcs).toHaveBeenCalledTimes(2);
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('EPERM'));
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
   });
 
-  it('.git/HEAD 还在（git 暂时读不了）：不重新检测，照旧报错', async () => {
+  it('.git/HEAD 还在（git 暂时读不了）：不重新检测，原地派发成功', async () => {
     const repoPath = join(dir, 'repo');
     mkdirSync(join(repoPath, '.git'), { recursive: true });
     writeFileSync(join(repoPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
@@ -612,13 +608,11 @@ describe('createOrchestrationService', () => {
     );
     const refreshVcs = vi.fn(async () => 'none' as const);
     const service = make({ workspace: { ...WORKSPACE, repoPath }, refreshVcs });
-    expect(await service.hostFor('session_coord').dispatchTask(TASK)).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('detached HEAD'),
-    });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
     expect(refreshVcs).not.toHaveBeenCalled();
   });
-
   it('主 agent 的分支在首次使用时确定：之后仓库换了分支，worktree 仍从原分支切出、合并被拒绝', async () => {
     const service = make();
     const host = service.hostFor('session_coord');

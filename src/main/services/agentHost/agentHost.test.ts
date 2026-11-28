@@ -1606,6 +1606,29 @@ describe('createAgentHost sessions', () => {
     expect(gitSpawn?.type === 'spawn-session' && gitSpawn.spec).not.toHaveProperty('inPlace');
   });
 
+  it('git 工作区里没有 worktree 的 worker 会话带 inPlace，有 worktree 的不带', async () => {
+    const repo = { id: 'ws-1', name: 'repo', repoPath: '/repo', vcs: 'git' as const };
+    const env = setup({ workspaces: { get: (id) => (id === repo.id ? repo : undefined) } });
+    const coordinator = await createSession(env, 'orchestrator');
+    env.host.setCoordinatorLookup(() => coordinator.id);
+    const spawnOf = async (dispatchId: string, worktreeId?: string) => {
+      const created = await env.host.implementsLauncher().createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId,
+        roleId: 'worker',
+        cwd: worktreeId ? `/worktrees/${dispatchId}` : repo.repoPath,
+        ...(worktreeId ? { worktreeId } : {}),
+        brief: '# Create hello.txt',
+      });
+      if (!created.ok) throw new Error(created.error);
+      const spawned = env.sent('spawn-session').at(-1);
+      return spawned?.type === 'spawn-session' ? spawned.spec : undefined;
+    };
+    expect(await spawnOf('dsp_1')).toMatchObject({ worker: true, inPlace: true });
+    expect(await spawnOf('dsp_2', 'wt_1')).not.toHaveProperty('inPlace');
+  });
+
   it('re-stamps worker events per session and drops stale generations and duplicate seqs', async () => {
     const env = setup();
     const session = await createSession(env);

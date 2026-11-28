@@ -232,12 +232,13 @@ describe('dispatchTask', () => {
     }
   );
 
-  it('建 worktree 失败：不起会话，返回 git 的错误', async () => {
+  it('受限 Host 建 worktree 失败：不起会话，返回 git 的错误', async () => {
     fake.respond(({ args }) =>
       args[0] === 'worktree' && args[1] === 'add'
         ? { code: 128, stderr: 'fatal: disk full' }
         : undefined
     );
+    host = makeHost({ restricted: true });
     const result = await host.dispatchTask({
       title: 'Add toggle',
       spec: 'S',
@@ -1372,5 +1373,86 @@ describe('普通目录（vcs: none）：原地编排，不调用 git', () => {
     expect(listed.ok && listed.workers[1]?.dispatch).toMatchObject({ mode: 'in-place' });
     expect(launcher.created().map((input) => input.cwd)).toEqual(['/notes', '/notes']);
     expectNoGit();
+  });
+});
+
+describe('dispatchTask：git 工作区用不了 worktree', () => {
+  const WORKFLOW = {
+    id: 'review',
+    name: 'Review',
+    maxRounds: 3,
+    steps: [{ id: 'dev', name: 'Dev', roleId: 'worker', instructions: 'Do it.', needs: [] }],
+  };
+  const noCommit = () =>
+    fake.respond(({ args }) => (args[0] === 'rev-parse' ? { code: 1, stdout: '' } : undefined));
+
+  it('非受限 Host 建 worktree 失败：照样派发成功，原地进行', async () => {
+    noCommit();
+    const log = vi.fn();
+    host = makeHost({ log });
+    const result = await dispatch();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('in place'));
+    expect(result.dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(store.worktrees.list()).toEqual([]);
+    expect(launcher.created()[0]).toMatchObject({ cwd: '/repo' });
+    expect(launcher.created()[0]).not.toHaveProperty('worktreeId');
+  });
+
+  it('受限 Host 建 worktree 失败：仍然失败，不起会话', async () => {
+    noCommit();
+    host = makeHost({ restricted: true });
+    expect(
+      await host.dispatchTask({
+        title: 'Add toggle',
+        spec: 'Do it.',
+        roleId: 'worker',
+        dependsOn: [],
+      })
+    ).toMatchObject({ ok: false, error: expect.stringContaining('could not create a worktree') });
+    expect(launcher.created()).toEqual([]);
+  });
+
+  it('降级的原地 Host 上派工作流任务：直接报错，不建 Task', async () => {
+    host = makeHost({
+      workspace: { ...WORKSPACE, vcs: 'none' },
+      coordinatorBranch: '',
+      workflowsUnavailable: true,
+      workflows: { list: async () => [WORKFLOW] },
+    });
+    expect(
+      await host.dispatchTask({
+        title: 'Add toggle',
+        spec: 'Do it.',
+        workflowId: 'review',
+        roleId: '',
+        dependsOn: [],
+      })
+    ).toEqual({
+      ok: false,
+      error: expect.stringContaining('dispatch this task again without a workflow'),
+    });
+    expect(store.tasks.list()).toEqual([]);
+    expect(launcher.created()).toEqual([]);
+  });
+
+  it('git Host 建不了工作流的集成 worktree：报同样的错，不建 Task', async () => {
+    noCommit();
+    host = makeHost({
+      workflows: { list: async () => [WORKFLOW] },
+      workflowEngine: {} as NonNullable<OrchestrationHostDeps['workflowEngine']>,
+    });
+    expect(
+      await host.dispatchTask({
+        title: 'Add toggle',
+        spec: 'Do it.',
+        workflowId: 'review',
+        roleId: '',
+        dependsOn: [],
+      })
+    ).toEqual({
+      ok: false,
+      error: expect.stringContaining('dispatch this task again without a workflow'),
+    });
+    expect(store.tasks.list()).toEqual([]);
   });
 });
