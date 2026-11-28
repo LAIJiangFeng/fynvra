@@ -1048,6 +1048,85 @@ describe('worker attempt lifecycle', () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a dispatched worker attempt alive after a model error, but not after abort or a fatal error', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    const modelError = (seq: number) => {
+      env.worker().emit({
+        type: 'session-event',
+        identity: env.identity,
+        seq,
+        event: { type: 'error', source: 'model', message: 'Connection error.', seq },
+      });
+      env.worker().emit({ type: 'session-status', identity: env.identity, status: 'error' });
+    };
+    modelError(100);
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    expect(changed).not.toHaveBeenCalled();
+    expect(env.host.get(sessionId)?.status).toBe('error');
+    // send_to_worker（普通 promptSession）在同一会话里开始新的一轮
+    const prompts = env.sent('prompt').length;
+    expect(await env.launcher.promptSession(sessionId, 'continue')).toEqual({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(prompts + 1);
+    expect(env.sent('prompt').at(-1)).toMatchObject({ identity: env.identity, text: 'continue' });
+    expect(env.host.get(sessionId)?.status).toBe('running');
+    // 用户中止仍判 interrupted
+    env.worker().emit({
+      type: 'session-event',
+      identity: env.identity,
+      seq: 101,
+      event: { type: 'agent_settled', aborted: true, seq: 101 },
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('aborted');
+  });
+
+  it('still interrupts a dispatched worker on a fatal session error or a non-model error', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    env.worker().emit({
+      type: 'session-event',
+      identity: env.identity,
+      seq: 100,
+      event: { type: 'error', source: 'model', message: 'Connection error.', seq: 100 },
+    });
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: true,
+      error: 'Session could not start',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('Session could not start');
+
+    const other = await dispatched();
+    other.worker().emit({
+      type: 'session-event',
+      identity: other.identity,
+      seq: 100,
+      event: { type: 'error', source: 'compaction', message: 'summary failed', seq: 100 },
+    });
+    other.worker().emit({ type: 'session-status', identity: other.identity, status: 'error' });
+    expect(other.launcher.sessionFailure?.(other.identity.sessionId)).toContain('summary failed');
+  });
+
+  it('still interrupts a non-dispatched session on a model error', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hello');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 100,
+      event: { type: 'error', source: 'model', message: 'Connection error.', seq: 100 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'error' });
+    expect(env.host.implementsLauncher().sessionFailure?.(session.id)).toContain(
+      'Connection error.'
+    );
+  });
+
   it('records a running worker process crash without mistaking automatic respawn for recovery', async () => {
     const env = await dispatched();
     const changed = vi.fn();

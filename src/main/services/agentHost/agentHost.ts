@@ -374,6 +374,8 @@ interface LiveSession {
   workerHost: WorkerHost | null;
   interruption?: string;
   lastError?: string;
+  /** lastError 来自模型请求（error 事件 source === 'model'） */
+  lastErrorFromModel?: boolean;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
   /** Invalidates requests waiting to spawn when abandoned-worker cleanup explicitly clears error. */
@@ -1090,6 +1092,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (state.lastError !== result.error)
         deliver(sessionId, state, { type: 'error', source: 'compaction', message: result.error });
       state.lastError = result.error;
+      state.lastErrorFromModel = false;
       setStatus(sessionId, 'error');
     } else {
       setStatus(
@@ -1171,6 +1174,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const { sessionId } = event.identity;
         if (event.event.type === 'error') {
           state.lastError = event.event.message;
+          state.lastErrorFromModel = event.event.source === 'model';
           if (event.event.source === 'model') learnModelLimits(state, event.event.message);
         }
         if (event.event.type === 'agent_settled' && event.event.aborted) {
@@ -1200,7 +1204,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const state = currentOf(event.identity);
         if (!state) return;
         state.running = event.status === 'running' || event.status === 'waiting-approval';
-        if (event.status === 'error') {
+        // 派发出去的 worker 在 pi 自动重试用完后仍是模型错误：不判失败，保留会话与这次尝试，
+        // 由编排侧通知主 agent 用 send_to_worker 在原会话里继续（见 coordinatorWake / workerErrored）
+        const keepAttempt =
+          state.lastError !== undefined &&
+          state.lastErrorFromModel === true &&
+          deps.store.get(event.identity.sessionId)?.dispatchId !== undefined;
+        if (event.status === 'error' && !keepAttempt) {
           interrupted(
             event.identity.sessionId,
             state,
@@ -1235,6 +1245,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!state) return;
         const { sessionId } = event.identity;
         state.lastError = event.error;
+        state.lastErrorFromModel = false;
         state.lastSettledSeq = 0;
         cancelSuggestions(sessionId, false);
         if (event.fatal) {

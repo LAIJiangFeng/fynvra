@@ -80,6 +80,8 @@ export interface OrchestrationRegistry {
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
   /** worker 会话一轮正常结束且已空闲：转给各服务，当前尝试未汇报的通知主 agent。协调者唤醒器用。 */
   workerRunEnded(sessionId: string): void;
+  /** worker 会话因模型错误停在 error：转给各服务，尝试未结算的通知主 agent 让原 worker 继续。协调者唤醒器用。 */
+  workerErrored(sessionId: string, error: string): void;
   /** 收件箱里发给该会话、未确认的消息（跨工作区查找，不消费）。协调者唤醒器用。 */
   pendingMessagesTo(sessionId: string): Message[];
   /** Read current actionable messages and unresolved successful attempts, without consuming either. */
@@ -315,6 +317,9 @@ export function createOrchestrationRegistry(
     },
     workerRunEnded(sessionId) {
       for (const service of services.values()) service.workerRunEnded(sessionId);
+    },
+    workerErrored(sessionId, error) {
+      for (const service of services.values()) service.workerErrored(sessionId, error);
     },
     pendingMessagesTo(sessionId: string): Message[] {
       for (const service of services.values()) {

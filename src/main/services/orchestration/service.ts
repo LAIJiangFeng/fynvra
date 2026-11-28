@@ -122,6 +122,11 @@ export interface OrchestrationService {
    * escalation（同 dispatch 未确认的不重复投）。不改任何状态，空闲不算失败。
    */
   workerRunEnded(sessionId: string): void;
+  /**
+   * worker 会话在自动重试后仍因模型错误停在 error：尝试未结算时给主 agent 投一条 escalation，
+   * 提示用 send_to_worker 让原会话继续（去重规则同 workerRunEnded）。不改任何状态。
+   */
+  workerErrored(sessionId: string, error: string): void;
   readWorkerOutput(input: {
     dispatchId: string;
     cursor: number;
@@ -514,6 +519,50 @@ export function createOrchestrationService(
     };
   };
 
+  /**
+   * worker 会话停下但尝试未结算（当前尝试或运行中的工作流节点）：给主 agent 投一条 escalation，不改任何状态。
+   * 同一 dispatch、同一 subject 的 escalation 还在收件箱里未投递时不重复投。
+   */
+  const escalateUnsettledWorker = (
+    sessionId: string,
+    subject: string,
+    body: (task: Task, dispatch: Dispatch) => string
+  ): void => {
+    if (!loaded) return;
+    const dispatch = dispatchOfSession(sessionId);
+    if (dispatch === undefined || isDispatchSettled(dispatch)) return;
+    const task = store.tasks.get(dispatch.taskId);
+    const run = task && store.runs.get(task.runId);
+    if (task?.status !== 'in-progress' || run === undefined) return;
+    if (task.workflow !== undefined) {
+      if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
+    } else if (
+      store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
+    ) {
+      return;
+    }
+    const coordinator = run.coordinatorSessionId;
+    const duplicate = inbox
+      .peek({ to: coordinator })
+      .some(
+        (message) =>
+          message.type === 'escalation' &&
+          message.from === 'fynvra' &&
+          message.dispatchId === dispatch.id &&
+          message.subject === subject
+      );
+    if (duplicate) return;
+    inbox.post({
+      runId: run.id,
+      dispatchId: dispatch.id,
+      from: 'fynvra',
+      to: coordinator,
+      type: 'escalation',
+      subject,
+      body: body(task, dispatch),
+    });
+  };
+
   const activeCoordinators = (): Set<string> => {
     if (!loaded) return new Set();
     const runIds = new Set(store.tasks.list(isActiveTask).map((task) => task.runId));
@@ -547,38 +596,22 @@ export function createOrchestrationService(
     reconcileWorkers,
 
     workerRunEnded(sessionId) {
-      if (!loaded) return;
-      const dispatch = dispatchOfSession(sessionId);
-      if (dispatch === undefined || isDispatchSettled(dispatch)) return;
-      const task = store.tasks.get(dispatch.taskId);
-      const run = task && store.runs.get(task.runId);
-      if (task?.status !== 'in-progress' || run === undefined) return;
-      if (task.workflow !== undefined) {
-        if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
-      } else if (
-        store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
-      ) {
-        return;
-      }
-      const coordinator = run.coordinatorSessionId;
-      const duplicate = inbox
-        .peek({ to: coordinator })
-        .some(
-          (message) =>
-            message.type === 'escalation' &&
-            message.from === 'fynvra' &&
-            message.dispatchId === dispatch.id
-        );
-      if (duplicate) return;
-      inbox.post({
-        runId: run.id,
-        dispatchId: dispatch.id,
-        from: 'fynvra',
-        to: coordinator,
-        type: 'escalation',
-        subject: 'worker stopped without report_done',
-        body: `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`,
-      });
+      escalateUnsettledWorker(
+        sessionId,
+        'worker stopped without report_done',
+        (task, dispatch) =>
+          `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`
+      );
+    },
+
+    workerErrored(sessionId, error) {
+      const detail = error.length > 500 ? `${error.slice(0, 500)}…` : error;
+      escalateUnsettledWorker(
+        sessionId,
+        'worker interrupted by a model error',
+        (task, dispatch) =>
+          `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, stopped because its model request failed after automatic retries: ${detail}\nIts session, worktree and attempt are all kept; the attempt is still unsettled. Use send_to_worker on dispatch ${dispatch.id} to have the same worker continue (for example "continue"). Only if it really cannot continue, use reject_work or cleanup_worktree with abandon: true. Do not dispatch the same task again.`
+      );
     },
 
     async snapshot({ reconcile = true } = {}) {

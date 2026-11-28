@@ -1,5 +1,5 @@
 import type { Message, MessageType } from '@fynvra/core';
-import type { SessionStatus, SessionSummary } from '@shared/types/chat';
+import type { SessionEventEnvelope, SessionStatus, SessionSummary } from '@shared/types/chat';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingCoordinatorReview } from '../orchestration/service';
 import type { AgentHostService, SessionObserver } from './agentHost';
@@ -68,6 +68,7 @@ function fakes(status: SessionStatus = 'idle') {
     },
     coordinatorWork: vi.fn(() => ({ messages: [...inbox], reviews: [...reviews] })),
     workerRunEnded: vi.fn(),
+    workerErrored: vi.fn(),
     ackMessages: (ids: readonly string[]) => {
       acked.push(...ids);
       for (let i = inbox.length - 1; i >= 0; i--) {
@@ -97,6 +98,9 @@ function fakes(status: SessionStatus = 'idle') {
       }
       session.status = 'idle';
       activity('idle');
+    },
+    emit: (event: SessionEventEnvelope['event']) => {
+      for (const observer of observers) observer.event?.({ sessionId: COORD, event });
     },
     exists: (next: boolean) => {
       exists = next;
@@ -142,6 +146,26 @@ describe('worker run end', () => {
     f.settle();
     f.session.status = 'running';
     vi.advanceTimersByTime(2_000);
+    expect(f.registry.workerRunEnded).not.toHaveBeenCalled();
+  });
+
+  it('reports a run that ended on a model error and stayed errored', () => {
+    const f = fakes();
+    install(f);
+    // 一轮以模型错误结束：error 事件在 agent_settled 之前，会话随后停在 error
+    f.emit({ type: 'error', source: 'model', message: 'Connection error.', seq: 1 });
+    f.emit({ type: 'agent_settled', aborted: false, seq: 2 });
+    f.session.status = 'error';
+    vi.advanceTimersByTime(2_000);
+    expect(f.registry.workerErrored).toHaveBeenCalledTimes(1);
+    expect(f.registry.workerErrored).toHaveBeenCalledWith(COORD, 'Connection error.');
+    expect(f.registry.workerRunEnded).not.toHaveBeenCalled();
+
+    // 非模型错误的 error 状态不通知（由失败结算处理）
+    f.emit({ type: 'error', source: 'compaction', message: 'summary failed', seq: 3 });
+    f.emit({ type: 'agent_settled', aborted: false, seq: 4 });
+    vi.advanceTimersByTime(2_000);
+    expect(f.registry.workerErrored).toHaveBeenCalledTimes(1);
     expect(f.registry.workerRunEnded).not.toHaveBeenCalled();
   });
 });
