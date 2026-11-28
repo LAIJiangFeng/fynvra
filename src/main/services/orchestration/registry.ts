@@ -20,6 +20,7 @@ import type { WorkerSessionLauncher } from './launcher';
 import { nodeExec } from './nodeExec';
 import type { PullRequestGateDeps } from './pullRequest';
 import {
+  type AcceptedTask,
   type CoordinatorWork,
   createOrchestrationService,
   type OrchestrationService,
@@ -98,6 +99,11 @@ export interface OrchestrationRegistry {
    * 监听器抛异常只记日志。返回取消订阅。
    */
   onMessage(listener: (workspaceId: string, message: Message) => void): () => void;
+  /**
+   * 订阅各工作区任务被验收（原地、merge 含无改动、PR；放弃不算），记忆提炼用。
+   * 在验收之后的下一个 tick 调用；监听器抛异常只记日志。返回取消订阅。
+   */
+  onTaskAccepted(listener: (task: AcceptedTask) => void): () => void;
 }
 
 export const UNWIRED_LAUNCHER_ERROR =
@@ -168,6 +174,17 @@ export function createOrchestrationRegistry(
   const messageListeners = new Set<(workspaceId: string, message: Message) => void>();
   const log = options.log ?? ((message: string) => console.warn(`[orchestration] ${message}`));
 
+  const acceptedListeners = new Set<(task: AcceptedTask) => void>();
+  const announceAccepted = (task: AcceptedTask): void => {
+    for (const listener of acceptedListeners) {
+      try {
+        listener(task);
+      } catch (error) {
+        log(`task accepted listener failed: ${errorMessage(error)}`);
+      }
+    }
+  };
+
   const announce = (workspaceId: string, message: Message): void => {
     for (const listener of messageListeners) {
       try {
@@ -207,6 +224,7 @@ export function createOrchestrationRegistry(
         checkActiveWork(workspaceId);
       },
       onMessagePosted: (message) => announce(workspace.id, message),
+      onTaskAccepted: announceAccepted,
       checkPolicy: options.checkPolicy,
       ...(options.workflows ? { workflows: options.workflows } : {}),
       canLaunch: () => launcher !== unwiredLauncher,
@@ -351,6 +369,12 @@ export function createOrchestrationRegistry(
       messageListeners.add(listener);
       return () => {
         messageListeners.delete(listener);
+      };
+    },
+    onTaskAccepted(listener) {
+      acceptedListeners.add(listener);
+      return () => {
+        acceptedListeners.delete(listener);
       };
     },
   };
