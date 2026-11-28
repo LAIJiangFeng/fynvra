@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
   HostResult,
   OrchestrationHost,
@@ -81,6 +82,8 @@ export interface OrchestrationServiceOptions {
   pullRequestGate?: PullRequestGateDeps;
   /** 主 agent 会话是否受限（受限的从公开基线 origin/<默认分支> 切出、推送闸门查保护路径）；缺省都不受限 */
   isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
+  /** 重新检测本工作区的 vcs 并返回检测后的值；工作区已不存在时返回 undefined。缺省不重新检测 */
+  refreshVcs?: () => Promise<Workspace['vcs'] | undefined>;
 }
 
 /** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
@@ -426,6 +429,7 @@ export function createOrchestrationService(
       await ready;
       const restricted = options.isRestrictedCoordinator?.(coordinatorSessionId) ?? false;
       let branch: string | undefined;
+      let hostWorkspace = workspace;
       if (restricted) {
         // 受限协调者只从公开基线切出：本地分支上可能有用户没推送的私有提交，不能带进公开 PR；拿不到基线就拒绝
         const base = await publicBaseRef(options.exec, workspace);
@@ -435,14 +439,29 @@ export function createOrchestrationService(
         // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
         branch =
           workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
+        // .git 被删或只剩空壳（没有 HEAD）时重新检测；HEAD 还在说明只是 git 暂时读不了，不能降成原地改用户目录
+        if (
+          branch === undefined &&
+          workspace.vcs === 'git' &&
+          !(await hasGitHead(workspace.repoPath)) &&
+          // 刷新失败（如写 settings 的 I/O 错误）按「没变成 none」处理：lookup 不能 reject，否则失败会被缓存
+          (await options.refreshVcs?.().catch((error: unknown) => {
+            log(`refresh vcs of ${workspace.repoPath} failed: ${errorMessage(error)}`);
+            return undefined;
+          })) === 'none'
+        ) {
+          // shortcut: 降级只作用于这个 Host，服务与工作流引擎仍按 git 隔离，期间派工作流任务会失败；需要时再让引擎跟随新 vcs
+          hostWorkspace = { ...workspace, vcs: 'none' };
+          branch = '';
+        }
       }
       if (branch === undefined) {
         return fail(
-          `the workspace repository ${workspace.repoPath} is not on a branch (detached HEAD) or cannot be read; check out the branch the orchestrator should work on`
+          `the workspace repository ${workspace.repoPath} has no checked-out branch (detached HEAD) or git cannot read it, so nothing was dispatched. Tell the user to check out the branch the orchestrator should work on or to repair the repository (git status in that folder shows the problem); do not work around it.`
         );
       }
       const host = createOrchestrationHost({
-        workspace,
+        workspace: hostWorkspace,
         coordinatorSessionId,
         coordinatorBranch: branch,
         restricted,
@@ -718,4 +737,14 @@ export function createOrchestrationService(
       for (const id of ids) inbox.ack(id);
     },
   };
+}
+
+/** `<repoPath>/.git/HEAD` 是否存在；.git 不存在、是文件或没有 HEAD 都算不存在 */
+async function hasGitHead(repoPath: string): Promise<boolean> {
+  try {
+    await lstat(join(repoPath, '.git', 'HEAD'));
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -54,6 +54,8 @@ export interface OrchestrationRegistryOptions {
   pullRequestGate?: PullRequestGateDeps;
   /** 主 agent 会话是否受限，原样传给各服务；缺省都不受限，直到 {@link OrchestrationRegistry.setRestrictedCoordinatorLookup} */
   isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
+  /** 重新检测工作区的 vcs 并写回记录（派发时 .git 已失效用）；缺省不重新检测 */
+  refreshVcs?: (workspaceId: string) => Promise<void>;
 }
 
 /** Main 内所有工作区的 OrchestrationService；agent-host 的两个工厂与 orchestration IPC 都经它查找。 */
@@ -209,6 +211,14 @@ export function createOrchestrationRegistry(
       log: options.log,
       pullRequestGate,
       isRestrictedCoordinator: (sessionId) => isRestrictedCoordinator(sessionId),
+      ...(options.refreshVcs
+        ? {
+            refreshVcs: async () => {
+              await options.refreshVcs?.(workspace.id);
+              return findWorkspace(workspace.id)?.vcs;
+            },
+          }
+        : {}),
     });
     services.set(workspace.id, service);
     return service;

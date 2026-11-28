@@ -58,7 +58,7 @@ export function registerWorkspaceHandlers(): void {
   registerWorkspaceMenuHandlers();
   ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, async (): Promise<WorkspaceListResult> => {
     try {
-      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时发现
+      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时与派发时读不到分支发现
       return { ok: true, workspaces: getWorkspaceService().list() };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };

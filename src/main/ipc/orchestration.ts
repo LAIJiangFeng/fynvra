@@ -46,6 +46,8 @@ export function getOrchestrationRegistry(): OrchestrationRegistry {
       roles: getRoleStore(),
       worktreesRoot: () => getSettingsFile().read().preferences.worktreesRoot,
       workflows: getWorkflowRegistry(),
+      // 派发时读不到分支且 .git/HEAD 已不在：立即重新检测（写 settings、同步监视器、广播）
+      refreshVcs: (id) => getWorkspaceService().refreshVcs(id, { force: true }),
       notifyChanged: (workspaceId) => {
         sendToAllWindows(IPC_CHANNELS.ORCHESTRATION_CHANGED, workspaceId);
         // 渠道插件：只推给在该工作区有 run 的插件
