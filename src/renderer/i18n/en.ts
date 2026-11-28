@@ -886,10 +886,16 @@ export const en: MessagesShape<typeof zhCN> = {
     git: {
       statusTitle: 'Git environment',
       recheck: 'Check again',
-      available: 'git {version} installed ({source})',
+      cardName: 'Git',
+      badgeInstalled: 'Installed',
+      badgeMissing: 'Not installed',
+      versionLine: 'git {version}',
+      installedDesc:
+        'Fynvra uses it to give each task its own working copy (worktree) and to commit and merge worker changes',
+      missingDesc:
+        'Fynvra still works without git: dispatched tasks run directly in the folder, but with no separate copy and no way to roll back',
       sourceSystem: 'system',
       sourceBundled: 'bundled with Fynvra',
-      missing: 'git was not found',
       installWindows: 'Install',
       installMac: 'Install Command Line Developer Tools',
       installing: 'Downloading and installing…',
