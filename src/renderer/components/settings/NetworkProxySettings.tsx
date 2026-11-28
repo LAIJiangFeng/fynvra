@@ -9,11 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { createNetworkProxyStore } from '@/stores/createNetworkProxyStore';
 import { InlineMessage, SectionHeader } from './common';
 
+/** 网络代理；Git 兼容模式的开关在 Git 页，这里的草稿只把已保存的 gitCompatibility 原样带回 */
 export function NetworkProxySettings() {
   const [useStore] = useState(() => createNetworkProxyStore(window.fynvra.settings));
   const state = useStore();
@@ -99,22 +99,6 @@ export function NetworkProxySettings() {
             )}
           </>
         )}
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <label htmlFor={`${id}-compat`} className="text-sm">
-              {t('settings.network.compatibility')}
-            </label>
-            <p className="mt-1 text-muted-foreground text-xs">
-              {t('settings.network.compatibilityHint')}
-            </p>
-          </div>
-          <Switch
-            id={`${id}-compat`}
-            checked={draft.gitCompatibility}
-            disabled={disabled}
-            onCheckedChange={(gitCompatibility) => edit({ ...draft, gitCompatibility })}
-          />
-        </div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="mr-auto text-muted-foreground text-xs">{t('settings.network.effective')}</p>
           <Button

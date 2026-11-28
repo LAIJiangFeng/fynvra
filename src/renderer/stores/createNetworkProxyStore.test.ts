@@ -57,9 +57,35 @@ describe('network settings draft lifecycle', () => {
     await store.getState().save();
     expect(api.update).toHaveBeenLastCalledWith({ networkProxy: config });
     await store.getState().save(true);
+    expect(api.update).toHaveBeenLastCalledWith({
+      networkProxy: { ...DEFAULT_NETWORK_PROXY, gitCompatibility: true },
+    });
+    disconnect();
+  });
+  it('恢复默认时保留已开启的 Git 兼容模式', async () => {
+    const { store, api } = setup();
+    api.get.mockResolvedValue({
+      ok: true,
+      preferences: { ...DEFAULT_PREFERENCES, networkProxy: config },
+    });
+    store.getState().connect();
+    await vi.waitFor(() => expect(store.getState().loaded).toBe(true));
+    await store.getState().save(true);
+    expect(api.update).toHaveBeenLastCalledWith({
+      networkProxy: { ...DEFAULT_NETWORK_PROXY, gitCompatibility: true },
+    });
+  });
+  it('Git 兼容模式关闭时恢复默认照旧清空代理设置', async () => {
+    const { store, api } = setup();
+    api.get.mockResolvedValue({
+      ok: true,
+      preferences: { ...DEFAULT_PREFERENCES, networkProxy: { ...config, gitCompatibility: false } },
+    });
+    store.getState().connect();
+    await vi.waitFor(() => expect(store.getState().loaded).toBe(true));
+    await store.getState().save(true);
     expect(api.update).toHaveBeenLastCalledWith({ networkProxy: undefined });
     expect(store.getState().draft).toEqual(DEFAULT_NETWORK_PROXY);
-    disconnect();
   });
   it.each(['edit', 'cancel', 'external', 'unmount'] as const)(
     'discards a late result after %s',
