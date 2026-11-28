@@ -559,6 +559,47 @@ describe('createOrchestrationService', () => {
     expect(await host.listWorkers()).toEqual({ ok: true, workers: [] });
   });
 
+  it('.git 已失效（没有 .git/HEAD）且重新检测为 none：这一次派发原地成功，不建 worktree', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
+  });
+
+  it('没有 .git/HEAD 但重新检测仍是 git：照旧报错', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'git' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
+    expect(await service.hostFor('session_coord').dispatchTask(TASK)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('detached HEAD'),
+    });
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
+  });
+
+  it('.git/HEAD 还在（git 暂时读不了）：不重新检测，照旧报错', async () => {
+    const repoPath = join(dir, 'repo');
+    mkdirSync(join(repoPath, '.git'), { recursive: true });
+    writeFileSync(join(repoPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath }, refreshVcs });
+    expect(await service.hostFor('session_coord').dispatchTask(TASK)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('detached HEAD'),
+    });
+    expect(refreshVcs).not.toHaveBeenCalled();
+  });
+
   it('主 agent 的分支在首次使用时确定：之后仓库换了分支，worktree 仍从原分支切出、合并被拒绝', async () => {
     const service = make();
     const host = service.hostFor('session_coord');
