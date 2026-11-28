@@ -33,7 +33,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { DEFAULT_UI_FONT_FAMILY } from '@/lib/appearance';
 import { cn } from '@/lib/utils';
 import { useAppearanceStore, useSettingsStore } from '@/stores/settings';
-import { InlineMessage, SectionHeader } from './common';
+import { InlineMessage, SettingsCard, SettingsRow, SettingsSection } from './common';
 
 const THEMES: { value: ThemeMode; icon: LucideIcon }[] = [
   { value: 'light', icon: Sun },
@@ -103,8 +103,7 @@ function ThemeSection() {
   const t = useT();
 
   return (
-    <section>
-      <SectionHeader title={t('settings.appearance.theme')} />
+    <SettingsSection title={t('settings.appearance.theme')}>
       <div className="grid grid-cols-3 gap-3">
         {THEMES.map(({ value, icon: Icon }) => (
           <button
@@ -122,7 +121,7 @@ function ThemeSection() {
           </button>
         ))}
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -131,14 +130,16 @@ function InterfaceSection() {
   const update = useAppearanceStore((state) => state.update);
   const t = useT();
   return (
-    <section>
-      <SectionHeader title={t('settings.appearance.interface')}>
+    <SettingsSection
+      title={t('settings.appearance.interface')}
+      actions={
         <ResetButton
           disabled={isDefault(appearance, UI_KEYS)}
           onClick={() => void update(resetPatch(UI_KEYS))}
         />
-      </SectionHeader>
-      <ul className="divide-y rounded-lg border">
+      }
+    >
+      <SettingsCard>
         <SettingRow
           label={t('settings.appearance.font')}
           hint={t('settings.appearance.uiFontHint')}
@@ -177,8 +178,8 @@ function InterfaceSection() {
             />
           )}
         </SettingRow>
-      </ul>
-    </section>
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 
@@ -187,14 +188,16 @@ function TerminalSection() {
   const update = useAppearanceStore((state) => state.update);
   const t = useT();
   return (
-    <section>
-      <SectionHeader title={t('settings.appearance.terminal')}>
+    <SettingsSection
+      title={t('settings.appearance.terminal')}
+      actions={
         <ResetButton
           disabled={isDefault(appearance, TERMINAL_KEYS)}
           onClick={() => void update(resetPatch(TERMINAL_KEYS))}
         />
-      </SectionHeader>
-      <ul className="divide-y rounded-lg border">
+      }
+    >
+      <SettingsCard>
         <SettingRow label={t('settings.appearance.colorScheme')}>
           {(id) => (
             <ColorSchemeSelect
@@ -248,8 +251,8 @@ function TerminalSection() {
             />
           )}
         </SettingRow>
-      </ul>
-    </section>
+      </SettingsCard>
+    </SettingsSection>
   );
 }
 
@@ -263,7 +266,7 @@ function ResetButton({ disabled, onClick }: { disabled: boolean; onClick: () => 
   );
 }
 
-/** 一行设置：左边是控件名（说明在悬停提示里），右边是控件；标签经 htmlFor 关联到控件 */
+/** {@link SettingsRow} 加上自己生成的控件 id：说明始终显示，标签经 htmlFor 关联到控件 */
 function SettingRow({
   label,
   hint,
@@ -274,14 +277,7 @@ function SettingRow({
   children: (id: string) => ReactNode;
 }) {
   const id = useId();
-  return (
-    <li className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
-      <label htmlFor={id} title={hint} className="min-w-0 text-sm">
-        {label}
-      </label>
-      {children(id)}
-    </li>
-  );
+  return <SettingsRow label={label} description={hint} htmlFor={id} control={children(id)} />;
 }
 
 /**

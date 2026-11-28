@@ -164,7 +164,7 @@ export function AppPluginSettings({ id }: { id: string }) {
 
 /** 原生设置页的一行：左边名称，右边控件 */
 const ROW = 'flex min-h-12 items-center justify-between gap-4 px-4 py-2';
-const CARD = 'divide-y rounded-lg border';
+const CARD = 'divide-y rounded-xl border bg-card';
 
 /** 一组同级节点按 layoutNodes 排成卡片 / 分组 / 列表，末尾显示该容器的操作错误 */
 function Nodes({
@@ -240,7 +240,7 @@ function SectionView({
       {nested ? (
         <h4 className="mb-2 font-medium text-muted-foreground text-sm">{section.title}</h4>
       ) : (
-        <h3 className="mb-3 font-medium">{section.title}</h3>
+        <h3 className="mb-3 font-semibold text-[15px]">{section.title}</h3>
       )}
       <div className="grid gap-3">
         <Nodes

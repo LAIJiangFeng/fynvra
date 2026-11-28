@@ -16,7 +16,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { instructionCall, instructionsApi } from '@/lib/api/instructions';
 import { useInstructionsStore } from '@/stores/instructions';
 import type { InstructionEntry } from '../../../preload/domains/instructions';
-import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { EmptyState, InlineMessage, SettingsCard, SettingsSection } from './common';
 import { InstructionEditorDialog, InstructionImportDialog } from './InstructionDialogs';
 import { instructionSize, instructionSourceLabel } from './instructions';
 
@@ -52,17 +52,21 @@ export function InstructionsSettings() {
   };
   const active = entries.find((entry) => entry.enabled);
   return (
-    <section>
-      <SectionHeader title={t('settings.instructions.title')}>
-        <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
-          <ScanSearch />
-          {t('settings.instructions.import')}
-        </Button>
-        <Button size="sm" onClick={() => setEditing({ entry: null })}>
-          <Plus />
-          {t('settings.instructions.add')}
-        </Button>
-      </SectionHeader>
+    <SettingsSection
+      title={t('settings.instructions.title')}
+      actions={
+        <>
+          <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+            <ScanSearch />
+            {t('settings.instructions.import')}
+          </Button>
+          <Button size="sm" onClick={() => setEditing({ entry: null })}>
+            <Plus />
+            {t('settings.instructions.add')}
+          </Button>
+        </>
+      }
+    >
       <p className="text-muted-foreground text-sm">{t('settings.instructions.subtitle')}</p>
       <p className="mt-1 text-muted-foreground text-xs">
         {t('settings.instructions.exclusiveHint')}
@@ -83,75 +87,79 @@ export function InstructionsSettings() {
       {loaded && entries.length === 0 ? (
         <EmptyState icon={FileText} title={t('settings.instructions.empty')} />
       ) : (
-        <ul className="divide-y rounded-lg border">
-          {entries.map((entry) => (
-            <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`font-medium text-sm ${entry.enabled ? '' : 'text-muted-foreground line-through'}`}
-                  >
-                    {entry.name}
-                  </span>
-                  <Badge variant="outline">{instructionSourceLabel(entry.source, t)}</Badge>
-                  <Badge>
-                    {t(
-                      entry.kind === 'linked'
-                        ? 'settings.instructions.linked'
-                        : 'settings.instructions.local'
-                    )}
-                  </Badge>
+        <SettingsCard>
+          <ul className="divide-y">
+            {entries.map((entry) => (
+              <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`font-medium text-sm ${entry.enabled ? '' : 'text-muted-foreground line-through'}`}
+                    >
+                      {entry.name}
+                    </span>
+                    <Badge variant="outline">{instructionSourceLabel(entry.source, t)}</Badge>
+                    <Badge>
+                      {t(
+                        entry.kind === 'linked'
+                          ? 'settings.instructions.linked'
+                          : 'settings.instructions.local'
+                      )}
+                    </Badge>
+                  </div>
+                  {(entry.kind === 'linked' || entry.importedFrom) && (
+                    <p className="mt-1 break-all font-mono text-muted-foreground text-xs">
+                      {entry.kind === 'linked'
+                        ? entry.path
+                        : t('settings.instructions.importedFrom', {
+                            path: entry.importedFrom ?? '',
+                          })}
+                    </p>
+                  )}
+                  <p className="mt-1 text-muted-foreground text-xs">
+                    {instructionSize(entry.size)} ·{' '}
+                    {t('settings.instructions.chars', { count: entry.charCount })}
+                  </p>
+                  {entry.warning && (
+                    <p className="mt-1 break-all text-destructive text-xs" title={entry.warning}>
+                      {t('settings.instructions.unreadable')} {entry.warning}
+                    </p>
+                  )}
                 </div>
-                {(entry.kind === 'linked' || entry.importedFrom) && (
-                  <p className="mt-1 break-all font-mono text-muted-foreground text-xs">
-                    {entry.kind === 'linked'
-                      ? entry.path
-                      : t('settings.instructions.importedFrom', { path: entry.importedFrom ?? '' })}
-                  </p>
-                )}
-                <p className="mt-1 text-muted-foreground text-xs">
-                  {instructionSize(entry.size)} ·{' '}
-                  {t('settings.instructions.chars', { count: entry.charCount })}
-                </p>
-                {entry.warning && (
-                  <p className="mt-1 break-all text-destructive text-xs" title={entry.warning}>
-                    {t('settings.instructions.unreadable')} {entry.warning}
-                  </p>
-                )}
-              </div>
-              <Switch
-                className="mt-1"
-                checked={entry.enabled}
-                disabled={busy}
-                aria-label={t('common.enableItem', { name: entry.name })}
-                onCheckedChange={(enabled) =>
-                  void mutate(() => instructionsApi.toggle({ id: entry.id, enabled }))
-                }
-              />
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                disabled={busy}
-                aria-label={t('settings.instructions.editItem', { name: entry.name })}
-                onClick={() => setEditing({ entry })}
-              >
-                <Pencil />
-              </Button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                disabled={busy}
-                aria-label={t('common.removeItem', { name: entry.name })}
-                onClick={() => {
-                  setError(null);
-                  setRemoving(entry);
-                }}
-              >
-                <Trash2 />
-              </Button>
-            </li>
-          ))}
-        </ul>
+                <Switch
+                  className="mt-1"
+                  checked={entry.enabled}
+                  disabled={busy}
+                  aria-label={t('common.enableItem', { name: entry.name })}
+                  onCheckedChange={(enabled) =>
+                    void mutate(() => instructionsApi.toggle({ id: entry.id, enabled }))
+                  }
+                />
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={busy}
+                  aria-label={t('settings.instructions.editItem', { name: entry.name })}
+                  onClick={() => setEditing({ entry })}
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={busy}
+                  aria-label={t('common.removeItem', { name: entry.name })}
+                  onClick={() => {
+                    setError(null);
+                    setRemoving(entry);
+                  }}
+                >
+                  <Trash2 />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </SettingsCard>
       )}
       {editing && (
         <InstructionEditorDialog
@@ -194,6 +202,6 @@ export function InstructionsSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </SettingsSection>
   );
 }
