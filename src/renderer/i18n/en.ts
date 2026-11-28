@@ -338,13 +338,13 @@ export const en: MessagesShape<typeof zhCN> = {
     message: 'Message',
     placeholder: 'Message',
     placeholderOrchestrator:
-      "Tell me what you need and I'll split it into tasks for workers, e.g. add search to the sidebar\nType @ to choose which role does it, / to run a workflow; you can also paste or drop images and files",
+      "Tell me what you need and I'll split it into tasks for workers, e.g. add search to the sidebar. Type @ to choose which role does it, / to run a workflow; you can also paste or drop images and files",
     placeholderOrchestratorPlan:
-      "Tell me what you need and I'll write a plan or document for you to review first, e.g. add export to Settings\nType @ to choose which role does it, / to run a workflow; you can also paste or drop images and files",
+      "Tell me what you need and I'll write a plan or document for you to review first, e.g. add export to Settings. Type @ to choose which role does it, / to run a workflow; you can also paste or drop images and files",
     placeholderOtherRole:
-      'Tell me what to do, e.g. fix the login page error or explain a function\nYou can paste or drop images and files',
+      'Tell me what to do, e.g. fix the login page error or explain a function. You can also paste or drop images and files',
     placeholderOtherRolePlan:
-      "Tell me what to do; I'll investigate and write a plan or document, then act after your review, e.g. refactor the user module\nYou can paste or drop images and files",
+      "Tell me what to do; I'll investigate and write a plan or document, then act after your review, e.g. refactor the user module. You can also paste or drop images and files",
     composerHint: '{send} to send, {newline} for a new line, {prev} / {next} for history',
     stop: 'Stop',
     send: 'Send',
