@@ -833,7 +833,7 @@ Main 后台串行队列，只在 `enabled && autoExtract` 时运行。
   - `memory:update { workspaceId, id, content?, category?, pinned?, status?('active'|'disabled') }`：至少一项；改内容时去密钥、重算哈希（与其他条冲突则报错）。
   - `memory:remove { workspaceId, id }`：硬删除。
   - `memory:clear { workspaceId }`：清空该工作区所属项目（共用的工作区一并清空，界面先提示）。
-  - 推送 `memory:changed { workspaceIds?: string[] }`：任一写入路径（工具、提炼、界面、过期清理）之后广播，Renderer 重拉列表。
+  - 推送 `memory:changed { workspaceIds: string[] }`：任一写入路径（工具、提炼、界面、过期清理）之后广播，Renderer 重拉列表。
 - `id` 不属于该工作区项目时按不存在处理。Renderer 只传 id，不传路径或项目标识。三件事同步：通道常量（`ipc.ts`）/ Main handler（`ipc/memory.ts`）/ preload（`domains/memory.ts`）。
 - 第二期 · 升级为项目规则：`memory:promote-preview` / `memory:promote` 把一条记忆追加到 pi 实际加载的那个仓库根上下文文件（顺序同上，都没有才新建 AGENTS.md）的 `## 项目记忆（Fynvra）` 小节，预览后由用户确认、带版本哈希校验，不自动提交；成功后停用该记忆并记 `promoted_at`。
 
