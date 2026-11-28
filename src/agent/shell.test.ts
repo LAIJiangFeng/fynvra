@@ -25,6 +25,8 @@ describe('shell prompt append', () => {
   });
 });
 
+const RETRY = { enabled: true, maxRetries: 10, baseDelayMs: 2000, maxAgentDelayMs: 60_000 };
+
 describe('createSessionSettings', () => {
   it('gives the bash tool the shell from the spawn spec', () => {
     const settings = createSessionSettings('D:\\Software\\Git\\bin\\bash.exe');
@@ -33,7 +35,12 @@ describe('createSessionSettings', () => {
       enableInstallTelemetry: false,
       shellPath: 'D:\\Software\\Git\\bin\\bash.exe',
       compaction: { enabled: false },
+      retry: RETRY,
     });
+  });
+
+  it('retries a dropped model request within the same turn for several minutes', () => {
+    expect(createSessionSettings(undefined).getRetrySettings()).toEqual(RETRY);
   });
 
   it('leaves the shell to pi and disables native compaction for the default Magic policy', () => {
@@ -43,6 +50,7 @@ describe('createSessionSettings', () => {
     expect(settings.getGlobalSettings()).toEqual({
       enableInstallTelemetry: false,
       compaction: { enabled: false },
+      retry: RETRY,
     });
   });
 

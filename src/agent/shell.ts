@@ -21,6 +21,8 @@ export function createSessionSettings(
     enableInstallTelemetry: false,
     ...(shellPath ? { shellPath } : {}),
     compaction: { enabled: compactionStrategy === 'native' },
+    // 断网/服务抖动时同一轮内多撑一会：退避 2,4,8,16,32,60×5 秒，共约 6 分钟（pi 默认 3 次约 14 秒）
+    retry: { enabled: true, maxRetries: 10, baseDelayMs: 2000, maxAgentDelayMs: 60_000 },
   });
   if (compactionThresholdTokens === undefined) return settings;
   const reserveOf = settings.getCompactionReserveTokens.bind(settings);

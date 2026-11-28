@@ -283,6 +283,76 @@ describe('createOrchestrationService', () => {
     });
   });
 
+  describe('workerErrored', () => {
+    const escalations = async (service: ReturnType<typeof make>) =>
+      (await service.snapshot({ reconcile: false })).messages.filter(
+        (message) => message.type === 'escalation'
+      );
+
+    it('escalates once per pending message without changing state, and again after delivery', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      const before = await service.snapshot({ reconcile: false });
+      const longError = `Connection error. ${'x'.repeat(800)}`;
+      service.workerErrored(dispatch.workerSessionId, longError);
+      service.workerErrored(dispatch.workerSessionId, 'Connection error.');
+      const sent = await escalations(service);
+      expect(sent).toEqual([
+        expect.objectContaining({
+          from: 'fynvra',
+          to: 'session_coord',
+          dispatchId: dispatch.id,
+          subject: 'worker interrupted by a model error',
+        }),
+      ]);
+      expect(sent[0]?.body).toContain('Connection error.');
+      expect(sent[0]?.body).toContain(`send_to_worker on dispatch ${dispatch.id}`);
+      expect(sent[0]?.body.length).toBeLessThan(1_200);
+      const after = await service.snapshot();
+      expect(after.tasks).toEqual(before.tasks);
+      expect(after.dispatches).toEqual(before.dispatches);
+
+      // 主 agent 收到后（已确认），再次出错还能再投一条
+      service.ackMessages(sent.map((message) => message.id));
+      service.workerErrored(dispatch.workerSessionId, 'fetch failed');
+      expect(service.coordinatorWork('session_coord').messages).toEqual([
+        expect.objectContaining({ body: expect.stringContaining('fetch failed') }),
+      ]);
+    });
+
+    it('keeps a workflow node running and the workflow in progress', async () => {
+      const service = make({
+        workflows: {
+          list: async () => [
+            {
+              id: 'review',
+              name: 'Review',
+              maxRounds: 3,
+              steps: [
+                { id: 'dev', name: 'Dev', roleId: 'worker', instructions: 'Do it.', needs: [] },
+              ],
+            },
+          ],
+        },
+      });
+      expect(
+        await service
+          .hostFor('session_coord')
+          .dispatchTask({ ...TASK, workflowId: 'review', roleId: '' })
+      ).toMatchObject({ ok: true });
+      await vi.waitFor(async () => expect((await service.snapshot()).dispatches).toHaveLength(1));
+      const node = (await service.snapshot()).dispatches[0];
+      if (!node) throw new Error('no workflow node');
+      service.workerErrored(node.workerSessionId, 'Service temporarily unavailable');
+      expect(await escalations(service)).toEqual([
+        expect.objectContaining({ dispatchId: node.id }),
+      ]);
+      const after = await service.snapshot();
+      expect(after.tasks[0]?.status).toBe('in-progress');
+      expect(after.dispatches[0]?.outcome).toBeUndefined();
+    });
+  });
+
   it('list/wait reconcile missing sessions without requiring a panel snapshot', async () => {
     const service = make();
     await dispatchOn(service);
