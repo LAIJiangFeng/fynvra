@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useT } from '@/i18n/I18nProvider';
-import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { EmptyState, InlineMessage, SettingsCard, SettingsSection } from './common';
 import {
   templateWorkflow,
   WORKFLOW_TEMPLATES,
@@ -122,23 +122,26 @@ export function WorkflowsSettings() {
   }
 
   return (
-    <section>
-      <SectionHeader title={t('settings.workflows.title')}>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!!loadError}
-          onClick={() => setChoosing(true)}
-        >
-          <LayoutTemplate />
-          {t('settings.workflows.newFromPreset')}
-        </Button>
-        <Button size="sm" disabled={!!loadError} onClick={() => openDraft('blank')}>
-          <Plus />
-          {t('settings.workflows.new')}
-        </Button>
-      </SectionHeader>
-
+    <SettingsSection
+      title={t('settings.workflows.title')}
+      actions={
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!!loadError}
+            onClick={() => setChoosing(true)}
+          >
+            <LayoutTemplate />
+            {t('settings.workflows.newFromPreset')}
+          </Button>
+          <Button size="sm" disabled={!!loadError} onClick={() => openDraft('blank')}>
+            <Plus />
+            {t('settings.workflows.new')}
+          </Button>
+        </>
+      }
+    >
       {status && (
         <InlineMessage tone={status.tone} className="mb-3 break-all">
           {status.text}
@@ -163,54 +166,56 @@ export function WorkflowsSettings() {
         </EmptyState>
       ) : (
         workflows.length > 0 && (
-          <ul className="divide-y rounded-lg border">
-            {workflows.map((workflow) => (
-              <li key={workflow.id} className="flex items-start gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium text-sm">{workflow.name}</span>
-                  {workflow.description && (
-                    <p className="line-clamp-2 text-muted-foreground text-xs">
-                      {workflow.description}
+          <SettingsCard>
+            <ul className="divide-y">
+              {workflows.map((workflow) => (
+                <li key={workflow.id} className="flex items-start gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <span className="font-medium text-sm">{workflow.name}</span>
+                    {workflow.description && (
+                      <p className="line-clamp-2 text-muted-foreground text-xs">
+                        {workflow.description}
+                      </p>
+                    )}
+                    <p
+                      className="truncate text-muted-foreground text-xs"
+                      title={summarizeWorkflow(workflow.steps)}
+                    >
+                      <span className="tabular-nums">
+                        {t('settings.workflows.nodeCount', { count: workflow.steps.length })}
+                      </span>
+                      {' · '}
+                      {summarizeWorkflow(workflow.steps)}
                     </p>
-                  )}
-                  <p
-                    className="truncate text-muted-foreground text-xs"
-                    title={summarizeWorkflow(workflow.steps)}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t('common.editItem', { name: workflow.name })}
+                    title={t('common.edit')}
+                    onClick={() => {
+                      setStatus(null);
+                      setEditing({ kind: 'existing', id: workflow.id });
+                    }}
                   >
-                    <span className="tabular-nums">
-                      {t('settings.workflows.nodeCount', { count: workflow.steps.length })}
-                    </span>
-                    {' · '}
-                    {summarizeWorkflow(workflow.steps)}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t('common.editItem', { name: workflow.name })}
-                  title={t('common.edit')}
-                  onClick={() => {
-                    setStatus(null);
-                    setEditing({ kind: 'existing', id: workflow.id });
-                  }}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t('common.deleteItem', { name: workflow.name })}
-                  title={t('common.delete')}
-                  onClick={() => {
-                    setRemoveError(null);
-                    setRemoving(workflow);
-                  }}
-                >
-                  <Trash2 />
-                </Button>
-              </li>
-            ))}
-          </ul>
+                    <Pencil />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t('common.deleteItem', { name: workflow.name })}
+                    title={t('common.delete')}
+                    onClick={() => {
+                      setRemoveError(null);
+                      setRemoving(workflow);
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </SettingsCard>
         )
       )}
 
@@ -281,6 +286,6 @@ export function WorkflowsSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </SettingsSection>
   );
 }

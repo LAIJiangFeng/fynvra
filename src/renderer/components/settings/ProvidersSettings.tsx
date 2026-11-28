@@ -14,7 +14,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { useProvidersStore } from '@/stores/providers';
-import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { EmptyState, InlineMessage, SettingsSection } from './common';
 import { ProviderDialog, type ProviderEditing } from './ProviderDialog';
 import { type ImportStatus, ProviderImportDialog } from './ProviderImportDialog';
 import {
@@ -49,8 +49,9 @@ export function ProvidersSettings() {
   };
 
   return (
-    <section>
-      <SectionHeader title={t('settings.providers.title')}>
+    <SettingsSection
+      title={t('settings.providers.title')}
+      actions={
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button size="sm" />}>
             <Plus />
@@ -70,8 +71,8 @@ export function ProvidersSettings() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </SectionHeader>
-
+      }
+    >
       {importStatus && (
         <InlineMessage tone={importStatus.tone} className="mb-3 break-all">
           {importStatus.text}
@@ -114,7 +115,7 @@ export function ProvidersSettings() {
         onClose={() => setImportSession(null)}
         onImported={setImportStatus}
       />
-    </section>
+    </SettingsSection>
   );
 }
 

@@ -17,7 +17,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { KEY_PLATFORM } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
 import { useKeybindingsStore } from '@/stores/settings';
-import { InlineMessage, SectionHeader } from './common';
+import { InlineMessage, SettingsCard, SettingsSection } from './common';
 
 /** 分组标题在字典 settings.keybindings.<作用域> */
 const SCOPES: readonly KeyScope[] = ['global', 'composer', 'files'];
@@ -39,9 +39,11 @@ export function KeybindingsSettings() {
   return (
     <div className="grid gap-8">
       {SCOPES.map((scope, index) => (
-        <section key={scope}>
-          <SectionHeader title={t(`settings.keybindings.${scope}`)}>
-            {index === 0 && (
+        <SettingsSection
+          key={scope}
+          title={t(`settings.keybindings.${scope}`)}
+          actions={
+            index === 0 && (
               <Button
                 size="sm"
                 variant="outline"
@@ -58,19 +60,22 @@ export function KeybindingsSettings() {
                 <RotateCcw />
                 {t('settings.keybindings.resetAll')}
               </Button>
-            )}
-          </SectionHeader>
-          <ul className="divide-y rounded-lg border">
-            {ACTION_IDS.filter((action) => KEY_ACTIONS[action].scope === scope).map((action) => (
-              <KeyRow
-                key={action}
-                action={action}
-                recording={recording === action}
-                onRecordingChange={(next) => setRecording(next ? action : null)}
-              />
-            ))}
-          </ul>
-        </section>
+            )
+          }
+        >
+          <SettingsCard>
+            <ul className="divide-y">
+              {ACTION_IDS.filter((action) => KEY_ACTIONS[action].scope === scope).map((action) => (
+                <KeyRow
+                  key={action}
+                  action={action}
+                  recording={recording === action}
+                  onRecordingChange={(next) => setRecording(next ? action : null)}
+                />
+              ))}
+            </ul>
+          </SettingsCard>
+        </SettingsSection>
       ))}
     </div>
   );
@@ -140,7 +145,7 @@ function KeyRow({
   };
 
   return (
-    <li className="flex min-h-11 items-center gap-3 px-3 py-1.5">
+    <li className="flex min-h-11 items-center gap-3 px-4 py-1.5">
       <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
       {message && (
         <InlineMessage tone="error" className="shrink-0">

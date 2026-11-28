@@ -8,8 +8,8 @@ import { Input } from '@/components/ui/input';
 import { useT } from '@/i18n/I18nProvider';
 import { runPendingGitInit } from '@/lib/gitInit';
 import { cn } from '@/lib/utils';
-import { Field, InlineMessage, SectionHeader } from './common';
-import { GitCompatibilitySection, GitWorktreeSettings } from './GitWorktreeSettings';
+import { InlineMessage, SettingsCard, SettingsRow, SettingsSection } from './common';
+import { GitWorktreeSettings } from './GitWorktreeSettings';
 import { PluginHeader } from './PluginCard';
 
 type Message = { tone: 'error' | 'success' | 'muted'; text: string };
@@ -101,8 +101,7 @@ export function GitSettings() {
 
   return (
     <div className="grid gap-8">
-      <section aria-label={t('settings.git.statusTitle')}>
-        <SectionHeader title={t('settings.git.statusTitle')} />
+      <SettingsSection title={t('settings.git.statusTitle')}>
         <div
           className={cn('rounded-xl border bg-card p-4', missing && 'border-amber-500/40')}
           role="status"
@@ -192,27 +191,45 @@ export function GitSettings() {
             }
           />
         </div>
-      </section>
+      </SettingsSection>
 
-      <section aria-label={t('settings.git.identityTitle')}>
-        <SectionHeader title={t('settings.git.identityTitle')}>
+      <SettingsSection
+        title={t('settings.git.identityTitle')}
+        actions={
           <Button size="sm" disabled={identityDisabled} onClick={() => void save()}>
             <Save />
             {t('settings.git.save')}
           </Button>
-        </SectionHeader>
-        <fieldset disabled={!available} className="grid gap-4 sm:grid-cols-2">
-          <Field label={t('settings.git.userName')} htmlFor={nameId}>
-            <Input id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
-          </Field>
-          <Field label={t('settings.git.userEmail')} htmlFor={emailId}>
-            <Input
-              id={emailId}
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+        }
+      >
+        <fieldset disabled={!available} className="min-w-0">
+          <SettingsCard>
+            <SettingsRow
+              label={t('settings.git.userName')}
+              htmlFor={nameId}
+              control={
+                <Input
+                  id={nameId}
+                  className="w-64"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              }
             />
-          </Field>
+            <SettingsRow
+              label={t('settings.git.userEmail')}
+              htmlFor={emailId}
+              control={
+                <Input
+                  id={emailId}
+                  className="w-64"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              }
+            />
+          </SettingsCard>
         </fieldset>
         {available && (!status?.userName || !status.userEmail) && (
           <InlineMessage className="mt-2">{t('settings.git.identityHint')}</InlineMessage>
@@ -222,9 +239,8 @@ export function GitSettings() {
             {identityMessage.text}
           </InlineMessage>
         )}
-      </section>
+      </SettingsSection>
 
-      <GitCompatibilitySection />
       <GitWorktreeSettings />
     </div>
   );

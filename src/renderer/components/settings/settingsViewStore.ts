@@ -2,8 +2,11 @@ import { create } from 'zustand';
 
 export const SETTINGS_SECTIONS = [
   'general',
-  'git',
+  'chat',
+  'appearance',
   'notifications',
+  'keybindings',
+  'usage',
   'providers',
   'roles',
   'workflows',
@@ -11,9 +14,7 @@ export const SETTINGS_SECTIONS = [
   'skills',
   'mcp',
   'plugins',
-  'appearance',
-  'keybindings',
-  'usage',
+  'git',
 ] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
