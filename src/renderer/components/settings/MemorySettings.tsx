@@ -11,7 +11,7 @@ import {
   type MemoryView,
 } from '@shared/types/memory';
 import type { MemoryPreferences } from '@shared/types/settings';
-import { Brain, Pencil, Plus, Power, PowerOff, RotateCcw, Trash2 } from 'lucide-react';
+import { Brain, Pencil, Plus, Power, PowerOff, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { formatRelativeTime } from '@/components/chat/format';
 import { Badge } from '@/components/ui/badge';
@@ -261,6 +261,7 @@ function ExpireDaysRow({
             variant="outline"
             disabled={!valid || saving || days === saved}
           >
+            <Save />
             {t('common.save')}
           </Button>
         </form>

@@ -1,4 +1,5 @@
 import { parseNetworkProxy, type SystemProxyStatus } from '@shared/networkProxy';
+import { Loader2, RotateCcw, Save, Zap } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,10 +54,12 @@ export function NetworkProxySettings() {
             disabled={disabled}
             onClick={() => void state.save(true)}
           >
+            <RotateCcw />
             {t('settings.general.resetDefault')}
           </Button>
           {state.testing ? (
             <Button size="sm" variant="outline" onClick={state.cancel}>
+              <Loader2 className="animate-spin" />
               {t('common.cancel')}
             </Button>
           ) : (
@@ -67,10 +70,12 @@ export function NetworkProxySettings() {
               title={t('settings.network.testHint')}
               onClick={() => void state.test()}
             >
+              <Zap />
               {t('settings.network.test')}
             </Button>
           )}
           <Button size="sm" disabled={disabled || !valid} onClick={() => void state.save()}>
+            <Save />
             {t('common.save')}
           </Button>
         </>

@@ -1122,7 +1122,7 @@ export const zhCN = {
       noRoles: '文件里没有角色',
       invalidNth: '第 {index} 个角色无效：{error}',
       invalid: '角色无效：{error}',
-      builtinEditable: '内置配置仅供参考，可直接修改；保存后用于新启动的会话，ID 固定且不可删除',
+      builtinEditable: '内置角色，可直接修改；保存后对新启动的会话生效，ID 固定且不可删除',
       resetDefaults: '恢复默认',
       resetTitle: '恢复内置默认配置？',
       resetHint: '将还原提示词、模型、工具策略、审批档位、技能和 MCP 等全部配置，点击保存后才生效',

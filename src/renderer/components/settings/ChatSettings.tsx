@@ -12,6 +12,7 @@ import {
   type TimelinePreferences,
   type WatchdogPreferences,
 } from '@shared/types/settings';
+import { Save } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -273,6 +274,7 @@ function CompactionThresholdRow({ disabled }: { disabled: boolean }) {
             variant="outline"
             disabled={!valid || saving || disabled || tokens === threshold}
           >
+            <Save />
             {t('common.save')}
           </Button>
         </form>
@@ -328,6 +330,7 @@ function CompactionTimeoutRow() {
             variant="outline"
             disabled={!valid || saving || ms === timeout}
           >
+            <Save />
             {t('common.save')}
           </Button>
         </form>
