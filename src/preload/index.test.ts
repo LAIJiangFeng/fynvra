@@ -32,6 +32,7 @@ describe('preload bridge', () => {
       'git',
       'instructions',
       'mcp',
+      'memory',
       'notifications',
       'orchestration',
       'plugins',

@@ -65,6 +65,7 @@ import {
 import { sendToAllWindows } from '../windows/createAppWindow';
 import { getInstructionRegistry } from './instructions';
 import { getMcpRegistry } from './mcp';
+import { getMemoryService } from './memory';
 import { getOrchestrationRegistry } from './orchestration';
 import { getPluginRegistry, installPlugin, setPluginEnabled } from './plugins';
 import { getModelLimitsProber, getProviderStore } from './providers';
@@ -195,6 +196,11 @@ function createAppAgentHost(): AgentHostService {
         .catch(() => undefined);
     },
     listWorkflows: () => getWorkflowRegistry().list(),
+    // 项目记忆：箭头函数延迟取用服务，用到时才创建（不在模块加载时碰 userData）
+    memory: {
+      specFor: (caller) => getMemoryService().specFor(caller),
+      handle: (...args) => getMemoryService().handle(...args),
+    },
     config: createConfigHost({
       skills: getSkillRegistry(),
       roles: getRoleStore(),

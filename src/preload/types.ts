@@ -72,6 +72,7 @@ export interface FynvraApi {
   skills: import('./domains/skills').SkillsApi;
   instructions: import('./domains/instructions').InstructionsApi;
   mcp: import('./domains/mcp').McpApi;
+  memory: import('./domains/memory').MemoryApi;
   plugins: import('./domains/plugins').PluginsApi;
   appPlugins: import('./domains/appPlugins').AppPluginsApi;
   notifications: import('./domains/notifications').NotificationsApi;

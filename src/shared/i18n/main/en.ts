@@ -416,4 +416,12 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     argsPlace: 'command arguments',
     listSeparator: ', ',
   },
+  memory: {
+    unavailable: 'Project memory is unavailable',
+    workspace: 'Workspace not found',
+    notFound: 'Memory not found',
+    duplicate: 'A memory with the same content already exists',
+    limit: 'This project has reached the limit of 500 memories',
+    secrets: 'Cannot read known secrets, project memory writes are paused',
+  },
 };

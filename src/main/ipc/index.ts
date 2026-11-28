@@ -4,6 +4,7 @@ import { registerFilesHandlers } from './files';
 import { registerGitHandlers } from './git';
 import { registerInstructionHandlers } from './instructions';
 import { registerMcpHandlers } from './mcp';
+import { registerMemoryHandlers } from './memory';
 import { registerNotificationHandlers } from './notifications';
 import { registerOrchestrationHandlers } from './orchestration';
 import { registerPluginHandlers } from './plugins';
@@ -39,6 +40,7 @@ export function registerIpcHandlers(): void {
   registerSkillHandlers();
   registerInstructionHandlers();
   registerMcpHandlers();
+  registerMemoryHandlers();
   registerPluginHandlers();
   registerAppPluginHandlers();
   registerNotificationHandlers();

@@ -205,6 +205,20 @@ export const IPC_CHANNELS = {
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
 
+  // --- memory（项目记忆，§7.15；入参见 @shared/types/memory 的 parseMemory*Input） ---
+  /** `{ workspaceId }` → `MemoryListView` */
+  MEMORY_LIST: 'memory:list',
+  /** `{ workspaceId, category, content }` → `{ memory }`；记为 user、pinned */
+  MEMORY_CREATE: 'memory:create',
+  /** `{ workspaceId, id, content?, category?, pinned?, status? }` → `{ memory }` */
+  MEMORY_UPDATE: 'memory:update',
+  /** `{ workspaceId, id }` */
+  MEMORY_REMOVE: 'memory:remove',
+  /** `{ workspaceId }` → `{ removed }`；清空该工作区所属项目 */
+  MEMORY_CLEAR: 'memory:clear',
+  /** Main → Renderer：`{ workspaceIds: string[] }` 这些工作区的记忆变了 */
+  MEMORY_CHANGED: 'memory:changed',
+
   // --- plugins ---
   PLUGINS_LIST: 'plugins:list',
   /** 无参数（或 `{}`）：Main 弹框选目录或扩展文件，复制到副本目录后登记；Renderer 不传路径 */

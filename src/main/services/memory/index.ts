@@ -6,6 +6,7 @@ import type {
   MemoryView,
 } from '@shared/types/memory';
 import { memoryPreferencesOf, type Preferences } from '@shared/types/settings';
+import { translate } from '../../i18n';
 import { type GitRunner, runGit } from '../gitRepository';
 import { redactSecrets } from '../secrets';
 import { type MemoryDb, type MemoryDbOpenResult, openMemoryDb } from './db';
@@ -61,17 +62,18 @@ export interface MemoryServiceDeps {
   onChanged?: (workspaceIds: string[]) => void;
 }
 
-// shortcut: IPC 错误文案先写死中文，T6 接 IPC 时移进 src/shared/i18n/main
-const MESSAGES = {
-  unavailable: '记忆库不可用',
-  workspace: '工作区不存在',
-  'not-found': '记忆不存在',
-  duplicate: '已有内容相同的记忆',
-  limit: '本项目记忆已达 500 条上限',
-  secrets: '无法读取已知密钥，暂不能写入记忆',
+const STORE_ERROR_KEYS = {
+  'not-found': 'memory.notFound',
+  duplicate: 'memory.duplicate',
+  limit: 'memory.limit',
 } as const;
 
-class SecretsUnavailableError extends Error {}
+/** 已知密钥读不到：工具路径直接把 message 交给 agent，所以要有可读的说明 */
+class SecretsUnavailableError extends Error {
+  constructor() {
+    super('cannot read known secrets, project memory writes are paused');
+  }
+}
 
 export type MemoryService = ReturnType<typeof createMemoryService>;
 
@@ -81,6 +83,8 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   const prefs = () => memoryPreferencesOf(deps.preferences());
 
   let opening: Promise<MemoryDbOpenResult> | undefined;
+  /** 进程内项目标识缓存，键为 workspaceId + path + vcs：免得每次调用都跑 git */
+  const projectKeys = new Map<string, string>();
   let store: MemoryStore | undefined;
   /** null = 最近一次读取失败，此时任何写入都拒绝 */
   let known: readonly string[] | null = [];
@@ -88,8 +92,14 @@ export function createMemoryService(deps: MemoryServiceDeps) {
 
   async function database(): Promise<MemoryDb | undefined> {
     opening ??= openMemoryDb(deps.dbPath, now);
-    const result = await opening;
-    if (!result.ok) return undefined;
+    const pending = opening;
+    const result = await pending;
+    if (!result.ok) {
+      // 失败不缓存：偶发的文件锁不该让记忆整个运行期都不可用，下次调用重试
+      if (opening === pending) opening = undefined;
+      console.warn(`[memory] 打开记忆库失败：${result.error}`);
+      return undefined;
+    }
     store ??= createMemoryStore(result.db, {
       now,
       redact: (text) => {
@@ -105,15 +115,23 @@ export function createMemoryService(deps: MemoryServiceDeps) {
     workspaceId: string
   ): Promise<MemoryProjectHandle | { error: string }> {
     const db = await database();
-    if (!db || !store) return { error: MESSAGES.unavailable };
+    if (!db || !store) return { error: translate('memory.unavailable') };
     const workspace = await deps.workspace(workspaceId);
-    if (!workspace) return { error: MESSAGES.workspace };
+    if (!workspace) return { error: translate('memory.workspace') };
     known = await deps.knownSecrets().catch(() => null);
-    const projectKey = await resolveProjectKey(
-      db,
-      { id: workspaceId, ...workspace },
-      { runGit: git, now }
-    );
+    const cacheKey = JSON.stringify([workspaceId, workspace.path, workspace.vcs]);
+    let projectKey = projectKeys.get(cacheKey);
+    if (!projectKey) {
+      projectKey = await resolveProjectKey(
+        db,
+        { id: workspaceId, ...workspace },
+        { runGit: git, now }
+      );
+      // git 失败时退回的 dir 键不缓存，下次重试
+      if (projectKey.startsWith('git:') || workspace.vcs === 'none') {
+        projectKeys.set(cacheKey, projectKey);
+      }
+    }
     return { store, projectKey };
   }
 
@@ -125,8 +143,8 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   }
 
   function errorText(error: unknown): string {
-    if (error instanceof MemoryStoreError) return MESSAGES[error.code];
-    if (error instanceof SecretsUnavailableError) return MESSAGES.secrets;
+    if (error instanceof MemoryStoreError) return translate(STORE_ERROR_KEYS[error.code]);
+    if (error instanceof SecretsUnavailableError) return translate('memory.secrets');
     return error instanceof Error ? error.message : String(error);
   }
 
