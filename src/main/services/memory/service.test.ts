@@ -327,3 +327,85 @@ describe('IPC 接口', () => {
     expect(result(await service.handle(main, 'search', {})).total).toBe(0);
   });
 });
+
+describe('T3 审查修复', () => {
+  it('(a) 同一工作区连续 openProject 只跑一次 git；vcs 变化后重新解析；git 失败不缓存', async () => {
+    let calls = 0;
+    let fail = false;
+    let vcs: 'git' | 'none' = 'git';
+    const counting = createMemoryService({
+      dbPath: join(dir, 'count', 'memory.db'),
+      runGit: async (args, cwd) => {
+        calls++;
+        return fail ? { ok: false, stdout: '', stderr: 'x' } : runGit(args, cwd);
+      },
+      preferences: () => ({ memory: prefs }),
+      workspace: () => ({ path: join(dir, 'w1'), vcs }),
+      recentUserMessages: async () => [],
+      knownSecrets: async () => [],
+    });
+    try {
+      vcs = 'none';
+      const dirKey = await counting.openProject('w1');
+      expect(dirKey).toMatchObject({ projectKey: expect.stringMatching(/^dir:/) });
+      expect(calls).toBe(0);
+      vcs = 'git';
+      fail = true;
+      await counting.openProject('w1');
+      await counting.openProject('w1');
+      expect(calls).toBe(2);
+      fail = false;
+      expect(await counting.openProject('w1')).toMatchObject({ projectKey: `git:${SHA_A}` });
+      expect(await counting.openProject('w1')).toMatchObject({ projectKey: `git:${SHA_A}` });
+      expect(calls).toBe(3);
+    } finally {
+      (await counting.database())?.close();
+    }
+  });
+
+  it('(b) 去掉空白不足 4 个字符的 quote 不能钉住记忆，4 个字符以上可以', async () => {
+    userMessages = ['好的 就这样 记住吧'];
+    const short = result(
+      await write(main, { action: 'add', category: 'rule', content: '短引用', quote: '记 住吧' })
+    ).memory;
+    expect(short).toMatchObject({ pinned: false, source: { kind: 'agent' } });
+    const long = result(
+      await write(main, { action: 'add', category: 'rule', content: '长引用', quote: '就这样 记住' })
+    ).memory;
+    expect(long).toMatchObject({ pinned: true, source: { kind: 'user' } });
+  });
+
+  it('(c) 读不到已知密钥时，工具报错有可读的说明', async () => {
+    knownFails = true;
+    const response = await write(main, { action: 'add', category: 'rule', content: 'x' });
+    expect(response).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('cannot read known secrets'),
+    });
+  });
+
+  it('(d) 库第一次打开失败后，下次调用重试并成功', async () => {
+    const dbPath = join(dir, 'retry', 'memory.db');
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(dbPath, { recursive: true });
+    const retry = createMemoryService({
+      dbPath,
+      runGit,
+      preferences: () => ({ memory: prefs }),
+      workspace: () => ({ path: join(dir, 'w1'), vcs: 'git' }),
+      recentUserMessages: async () => [],
+      knownSecrets: async () => [],
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      expect(await retry.database()).toBeUndefined();
+      rmSync(dbPath, { recursive: true, force: true });
+      const db = await retry.database();
+      expect(db).toBeDefined();
+      db?.close();
+    } finally {
+      console.warn = warn;
+    }
+  });
+});

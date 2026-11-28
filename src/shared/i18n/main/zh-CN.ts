@@ -394,4 +394,12 @@ export const mainZhCN = {
     argsPlace: '命令参数',
     listSeparator: '、',
   },
+  memory: {
+    unavailable: '记忆库不可用',
+    workspace: '工作区不存在',
+    notFound: '记忆不存在',
+    duplicate: '已有内容相同的记忆',
+    limit: '本项目记忆已达 500 条上限',
+    secrets: '无法读取已知密钥，暂不能写入记忆',
+  },
 };

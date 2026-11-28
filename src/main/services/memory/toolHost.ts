@@ -46,6 +46,8 @@ export interface MemoryToolContext {
 /** add 时关键词相似的阈值 */
 const SIMILAR_THRESHOLD = 0.5;
 const QUOTE_MESSAGES = 20;
+/** quote 去掉空白后至少这么多个字符（Unicode 码点）：太短的子串几乎总能匹配上 */
+const QUOTE_MIN_CHARS = 4;
 
 const brief = (row: MemoryRow) => ({
   id: row.id,
@@ -90,9 +92,9 @@ function storeError(error: unknown, id?: number): string {
 }
 
 export function createMemoryToolHost(ctx: MemoryToolContext) {
-  /** quote 去首尾空白后逐字出现在本会话最近 20 条用户消息里才算通过 */
+  /** quote 去首尾空白后逐字出现在本会话最近 20 条用户消息里，且去掉空白后不少于 4 个字符才算通过 */
   async function verifyQuote(sessionId: string, quote: string | undefined): Promise<boolean> {
-    if (!quote) return false;
+    if (!quote || [...quote.replace(/\s/g, '')].length < QUOTE_MIN_CHARS) return false;
     try {
       const messages = await ctx.recentUserMessages(sessionId);
       return messages.slice(-QUOTE_MESSAGES).some((message) => message.includes(quote));
