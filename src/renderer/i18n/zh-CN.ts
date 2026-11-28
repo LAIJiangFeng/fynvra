@@ -325,11 +325,14 @@ export const zhCN = {
   chat: {
     message: '消息',
     placeholder: '输入消息',
-    placeholderOrchestrator: '说出你的需求，我拆成任务派给 worker 去做，例如：给侧栏加搜索功能',
-    placeholderOrchestratorPlan: '说出你的需求，我先写计划或文档给你审阅，例如：给设置页加导出功能',
-    placeholderOtherRole: '说出你要做的事，例如：修复登录页的报错，或解释某个函数',
+    placeholderOrchestrator:
+      '说出你的需求，我拆成任务派给 worker 去做，例如：给侧栏加搜索功能\n输入 @ 指定由哪个角色来做，输入 / 调用工作流；也可以粘贴或拖入图片、文件',
+    placeholderOrchestratorPlan:
+      '说出你的需求，我先写计划或文档给你审阅，例如：给设置页加导出功能\n输入 @ 指定由哪个角色来做，输入 / 调用工作流；也可以粘贴或拖入图片、文件',
+    placeholderOtherRole:
+      '说出你要做的事，例如：修复登录页的报错，或解释某个函数\n可以粘贴或拖入图片、文件',
     placeholderOtherRolePlan:
-      '说出你要做的事，我先调查并写好计划或文档，审阅后再动手，例如：重构用户模块',
+      '说出你要做的事，我先调查并写好计划或文档，审阅后再动手，例如：重构用户模块\n可以粘贴或拖入图片、文件',
     composerHint: '{send} 发送，{newline} 换行，{prev} / {next} 翻历史消息',
     stop: '停止',
     send: '发送',
