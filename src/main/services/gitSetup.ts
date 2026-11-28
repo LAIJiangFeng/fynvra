@@ -207,7 +207,8 @@ export function createGitSetup(deps: GitSetupDeps) {
   return {
     /** 启动时同步调用：自带 git 已安装就追加进 PATH，须在任何 git 调用与 worker fork 之前 */
     injectBundledPath(): void {
-      if (deps.platform === 'win32' && existsSync(bundledGit)) appendPath();
+      // 目录还不存在也追加：worker 在启动时 fork 并继承当时的 PATH，装完后无需重启就能找到 git
+      if (deps.platform === 'win32' && arch) appendPath();
     },
     status,
     /** Windows 返回安装后的状态；macOS 只调起系统安装窗口 */

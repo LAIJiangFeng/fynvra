@@ -108,13 +108,21 @@ describe('gitSetup', () => {
     expect(a).toEqual(b);
   });
 
-  it('启动注入只在已安装时追加，且不重复', async () => {
+  it('启动注入：win32 支持的架构目录不存在也追加且不重复，其他不追加', () => {
     const { git, env, cmdDir } = setup();
+    expect(existsSync(cmdDir)).toBe(false);
     git.injectBundledPath();
-    expect(env.PATH).toBe('C:\\Windows');
-    await git.install();
     git.injectBundledPath();
     expect(env.PATH).toBe(`C:\\Windows;${cmdDir}`);
+    for (const overrides of [
+      { platform: 'darwin' as const },
+      { platform: 'linux' as const },
+      { arch: 'ia32' },
+    ]) {
+      const other = setup(overrides);
+      other.git.injectBundledPath();
+      expect(other.env.PATH).toBe('C:\\Windows');
+    }
   });
 
   it('身份校验拒绝空值、换行、超长、没有 @ 的邮箱', () => {
