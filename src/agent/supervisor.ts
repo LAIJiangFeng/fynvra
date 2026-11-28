@@ -3,6 +3,7 @@ import type {
   ApprovalGateRequest,
   ApprovalPolicyHooks,
   ConfigHost,
+  MemoryHost,
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
@@ -20,6 +21,7 @@ import {
   redactToolArgs,
   type SessionIdentity,
   type SpawnSessionSpec,
+  type TextCompletedResult,
 } from '@shared/types/agent';
 import {
   type ApprovalDecision,
@@ -35,6 +37,7 @@ import {
   type HostCall,
   type HostInvoker,
   type HostInvokerOptions,
+  memoryHostProxy,
   orchestrationHostProxy,
   type TriageHost,
   triageHostProxy,
@@ -94,6 +97,8 @@ export interface OpenSessionInput {
   configHost?: ConfigHost | null;
   /** 仅 `spec.profile === 'triage'` 的会话有：triage_report 经 host-invoke（kind: 'telegram'）转给 Main */
   triageHost?: TriageHost | null;
+  /** spec 带 memory 且不是档位会话时才有：project_memory_* 经 host-invoke（kind: 'memory'）转给 Main */
+  memoryHost?: MemoryHost | null;
   /** 审批门的人工审批通道；supervisor 提供，缺失时需审批的工具调用一律拒绝。 */
   approval?: ApprovalPolicyHooks;
   /** 端点拒绝 max_tokens 后会话已降到它报的上限并静默重发：报给 Main 写回设置，不在界面上显示 */
@@ -107,10 +112,17 @@ export interface SupervisorOptions {
   openSession: OpenSession;
   /** describe-models：按 pi 内置目录算模型的思考档位，结果与 queries 一一对应 */
   describeModels?: (queries: ModelQuery[]) => Promise<ModelThinkingCapability[]>;
+  /** complete-text：独立的无工具文本补全，返回模型文本；失败抛错，signal 到时中止 */
+  completeText?: (input: CompleteTextInput, signal: AbortSignal) => Promise<string>;
   hostCalls?: HostInvokerOptions;
   /** 审批等待上限，默认 10 分钟，超时按 deny。 */
   approvalTimeoutMs?: number;
 }
+
+export type CompleteTextInput = Omit<
+  Extract<AgentCommand, { type: 'complete-text' }>,
+  'type' | 'requestId' | 'timeoutMs'
+>;
 
 interface ManagedSession {
   identity: SessionIdentity;
@@ -143,6 +155,7 @@ export class SessionSupervisor {
   readonly #post: (event: AgentWorkerEvent) => void;
   readonly #open: OpenSession;
   readonly #describeModels: SupervisorOptions['describeModels'];
+  readonly #completeText: SupervisorOptions['completeText'];
   readonly #invoker: HostInvoker;
   readonly #approvals = new ApprovalBroker();
   readonly #approvalTimeoutMs: number;
@@ -155,6 +168,7 @@ export class SessionSupervisor {
     this.#post = options.post;
     this.#open = options.openSession;
     this.#describeModels = options.describeModels;
+    this.#completeText = options.completeText;
     this.#invoker = createHostInvoker(options.post, options.hostCalls);
     const timeout = options.approvalTimeoutMs;
     this.#approvalTimeoutMs =
@@ -233,6 +247,9 @@ export class SessionSupervisor {
       }
       case 'describe-models':
         void this.#describe(command.requestId, command.models);
+        return;
+      case 'complete-text':
+        void this.#complete(command);
         return;
       case 'shutdown':
         void this.shutdown();
@@ -366,6 +383,8 @@ export class SessionSupervisor {
         // 档位会话没有 fynvra_config
         configHost: spec.profile ? null : configHostProxy(call('config')),
         triageHost: spec.profile === 'triage' ? triageHostProxy(call('telegram')) : null,
+        // 档位会话一律没有记忆（与 agent-runtime 的拦截互为纵深防御）
+        memoryHost: spec.memory && !spec.profile ? memoryHostProxy(call('memory')) : null,
         approval: {
           request: (request, signal) => this.requestApproval(identity, request, signal),
           timeoutMs: this.#approvalTimeoutMs,
@@ -687,6 +706,32 @@ export class SessionSupervisor {
     this.#post({ type: 'models-described', requestId, result });
   }
 
+  /** 进程级文本补全：总是回一条 text-completed；到 timeoutMs 中止，错误文本去掉 key */
+  async #complete(command: Extract<AgentCommand, { type: 'complete-text' }>): Promise<void> {
+    const { requestId, timeoutMs, model, systemPrompt, prompt, maxTokens } = command;
+    const input: CompleteTextInput = { model, systemPrompt, prompt, maxTokens };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let result: TextCompletedResult;
+    try {
+      if (!this.#completeText) throw new Error('this agent worker cannot complete text');
+      const text = await this.#completeText(input, controller.signal);
+      result = controller.signal.aborted
+        ? { ok: false, error: `text completion timed out after ${timeoutMs} ms` }
+        : { ok: true, text };
+    } catch (error) {
+      result = {
+        ok: false,
+        error: controller.signal.aborted
+          ? `text completion timed out after ${timeoutMs} ms`
+          : withoutSecret(errorMessage(error), model.apiKey),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+    this.#post({ type: 'text-completed', requestId, result });
+  }
+
   async #retryCompaction(identity: SessionIdentity, requestId: string): Promise<void> {
     const finish = (error?: string) =>
       this.#post({
@@ -875,4 +920,9 @@ export class SessionSupervisor {
   #log(level: LogLevel, message: string): void {
     this.#post({ type: 'log', level, message });
   }
+}
+
+/** 错误文本里出现的 key 换成掩码（端点有时把请求头回显在错误里） */
+function withoutSecret(message: string, secret: string | undefined): string {
+  return secret ? message.split(secret).join('***') : message;
 }
