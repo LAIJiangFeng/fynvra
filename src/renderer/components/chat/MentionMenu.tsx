@@ -202,7 +202,7 @@ export function MentionHighlight({
       aria-hidden="true"
       className="pointer-events-none absolute top-0 left-0 z-0 overflow-hidden px-4 py-3 text-base md:text-sm"
     >
-      <div ref={layer} className="whitespace-pre-wrap break-words text-transparent">
+      <div ref={layer} className="whitespace-pre-wrap break-all text-transparent">
         {segments.map((segment, index) =>
           segment.type === 'text' ? (
             segment.text

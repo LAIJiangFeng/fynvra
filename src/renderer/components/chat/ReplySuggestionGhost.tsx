@@ -55,7 +55,7 @@ export function ReplySuggestionGhost({
       aria-hidden="true"
       className="pointer-events-none absolute top-0 left-0 z-0 overflow-hidden px-4 py-3 text-base md:text-sm"
     >
-      <div ref={layer} className="whitespace-pre-wrap break-words">
+      <div ref={layer} className="whitespace-pre-wrap break-all">
         <span className="text-transparent">{draft}</span>
         <span className="text-muted-foreground/70">{suffix}</span>
         <span className="ml-1 text-[0.8em] text-muted-foreground/60">→</span>
