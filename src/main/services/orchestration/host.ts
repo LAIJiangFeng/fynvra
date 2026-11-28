@@ -101,6 +101,10 @@ export interface OrchestrationHostDeps {
    * 不能合并，open_pull_request 的推送闸门加查保护路径、符号链接与子模块。
    */
   restricted: boolean;
+  /** git 工作区用不了 worktree、本 Host 降成原地派发：工作流引擎仍按 git 隔离，工作流任务直接拒绝。 */
+  workflowsUnavailable?: boolean;
+  /** 诊断日志，默认 console.warn。 */
+  log?: (message: string) => void;
   store: OrchestrationStore;
   git: GitWorktreeManager;
   inbox: Inbox;
@@ -128,6 +132,9 @@ export interface OrchestrationHostDeps {
   /** open_pull_request 推送闸门的数据；缺省时该工具一律拒绝（宁可不推也不带着未检查的内容推）。 */
   pullRequestGate?: PullRequestGateDeps;
 }
+
+const WORKFLOWS_UNAVAILABLE =
+  'git worktrees are unavailable in this workspace right now, so workflow tasks cannot run; dispatch this task again without a workflow';
 
 const GH_MISSING =
   'the GitHub CLI (gh) is not installed or cannot run; install it from https://cli.github.com and run `gh auth login`, then try again';
@@ -220,6 +227,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   const repoPath = workspace.repoPath;
   const inPlace = workspace.vcs === 'none';
   const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((message: string) => console.warn(`[orchestration] ${message}`));
   const policy = deps.checkPolicy ?? DEFAULT_CHECK_COMMAND_POLICY;
   /** 本宿主里 run_checks 退出码为 0 的命令（dispatch id → 命令），写进 PR 正文「验证」段 */
   const passedChecks = new Map<string, string[]>();
@@ -360,15 +368,11 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
   async function launch(task: Task): Promise<HostResult<Launched>> {
     let worktree: Worktree | undefined;
     if (!inPlace) {
-      const created = await git.create({
-        repoPath,
-        workspaceId: workspace.id,
-        slug: task.title,
-        baseRef: coordinatorBranch,
-        worktreesRoot: await deps.resolveWorktreesRoot(workspace),
-      });
-      if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
-      worktree = created.worktree;
+      const created = await createWorktree(task);
+      if (created.ok) worktree = created.worktree;
+      // 受限协调者不能原地改用户目录；其余建不了 worktree（如还没有提交的仓库）时派发不能卡住，改为原地
+      else if (deps.restricted) return created;
+      else log(`${created.error}; dispatching task ${task.id} in place`);
     }
     const dispatchId = newId('dispatch');
     const brief = renderWorkerBrief({ title: task.title, spec: task.spec, dispatchId });
@@ -389,18 +393,29 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return recordAttempt(store, task, launched, isNew);
   }
 
-  /** 建任务的集成 worktree（普通目录不建）。 */
+  /** 从协调者分支切出 worktree；解析根目录抛错也按失败返回。 */
+  async function createWorktree(task: Task): Promise<HostResult<{ worktree: Worktree }>> {
+    try {
+      const created = await git.create({
+        repoPath,
+        workspaceId: workspace.id,
+        slug: task.title,
+        baseRef: coordinatorBranch,
+        worktreesRoot: await deps.resolveWorktreesRoot(workspace),
+      });
+      if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
+      return { ok: true, worktree: created.worktree };
+    } catch (error) {
+      return fail(`could not create a worktree: ${errorMessage(error)}`);
+    }
+  }
+
+  /** 建任务的集成 worktree（普通目录不建）；建不了时让主 agent 不带工作流重派。 */
   async function createTaskWorktree(task: Task): Promise<HostResult<{ worktree?: Worktree }>> {
     if (inPlace) return { ok: true };
-    const created = await git.create({
-      repoPath,
-      workspaceId: workspace.id,
-      slug: task.title,
-      baseRef: coordinatorBranch,
-      worktreesRoot: await deps.resolveWorktreesRoot(workspace),
-    });
-    if (!created.ok) return fail(`could not create a worktree: ${created.error}`);
-    return { ok: true, worktree: created.worktree };
+    const created = await createWorktree(task);
+    if (created.ok || deps.restricted) return created;
+    return fail(`${WORKFLOWS_UNAVAILABLE} (${created.error})`);
   }
 
   /**
@@ -530,6 +545,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (input.workflowId !== undefined) {
       const found = await findWorkflow(input.workflowId);
       if (!found.ok) return found;
+      if (deps.workflowsUnavailable) return fail(WORKFLOWS_UNAVAILABLE);
       workflow = snapshotTaskWorkflow(found.workflow);
       roleId = workflow.steps[0]?.roleId ?? '';
     } else {

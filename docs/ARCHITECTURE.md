@@ -314,7 +314,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 必改文件：core `types.ts` 与状态迁移；agent-runtime `host.ts`、`tools/orchestrationTools.ts`、`prompts/orchestratorPrompt.ts`；Main `agentHost/hostDispatch.ts`、`orchestration/{host,service,worktreeCleanup}.ts`；Renderer 任务卡片。不做：自动合并、更新已有 PR 的标题正文、force-push。
 
 **没有 git 的工作区（`vcs: 'none'`）**：编排原地进行，Main 不调用任何 git。
-- `.git` 失效：git 工作区派发时读不到分支，且 `.git/HEAD` 已不在 → 重新检测；已不是仓库就记为 none 并原地派发，服务空闲后按新 vcs 重开（`.git/HEAD` 还在时照旧报错，不降级）。
+- git 用不了时派发不卡住：git 工作区派发时用不了 worktree（读不到分支、git 读不了或没装、建 worktree 失败）→ 原地派发，不改 vcs 记录；`.git/HEAD` 已不在时还会重新检测，已不是仓库就记为 none，服务空闲后按新 vcs 重开。受限协调者照旧拒绝；工作流任务此时报错，让主 agent 不带工作流重派；没有 worktree 的 worker 会话用原地契约。
 - 挂入：任意目录都能挂；git 仓库的子目录先问用户（改挂仓库根目录 / 仍然按普通目录挂入该子目录 / 取消）。
 - `dispatch_task` 不建 worktree，worker 的 cwd 是工作区目录（并行的 worker 共用它，工具结果建议一次只派一个），
   Dispatch 记 `mode: 'in-place'`；`review_diff` 没有 diff，给出 worker 在 `report_done` 里汇报的改动文件；

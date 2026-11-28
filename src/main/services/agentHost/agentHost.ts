@@ -742,8 +742,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const compactionThresholdTokens = compactionThresholdTokensOf({
         compactionThresholdTokens: deps.resolveCompactionThresholdTokens?.(),
       });
-      // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
-      const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
+      // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约；
+      // git 工作区里用不了 worktree 而原地派发的 worker 没有 worktree，也按原地契约
+      const inPlace =
+        deps.workspaces.get(stored.workspaceId)?.vcs === 'none' ||
+        (stored.dispatchId !== undefined && stored.worktreeId === undefined);
       const attachmentsDir = deps.attachments?.dirOf(stored.id);
       return {
         ok: true,
