@@ -178,10 +178,11 @@ export function InstructionsSettings() {
           </DialogHeader>
           {error && <InlineMessage tone="error">{error}</InlineMessage>}
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => setRemoving(null)}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setRemoving(null)}>
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               variant="destructive"
               disabled={busy}
               onClick={() => {

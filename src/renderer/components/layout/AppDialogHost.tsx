@@ -72,7 +72,7 @@ export function AppDialogHost() {
       >
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-start gap-2 leading-snug">
-            {TypeIcon && <TypeIcon className={cn('mt-0.5 size-5 shrink-0', icon.className)} />}
+            {TypeIcon && <TypeIcon className={cn('mt-0.5 size-4 shrink-0', icon.className)} />}
             <span className="min-w-0 whitespace-pre-wrap break-words">
               {shown.title || shown.message}
             </span>

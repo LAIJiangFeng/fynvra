@@ -112,7 +112,7 @@ export function NewSessionButton({
                 title={t('sessions.new')}
               />
             ) : (
-              <Button />
+              <Button size="sm" />
             )
           }
         >
@@ -201,8 +201,10 @@ export function NewSessionButton({
           )}
         </div>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
-          <Button disabled={creating || !selected} onClick={() => void submit()}>
+          <DialogClose render={<Button size="sm" variant="outline" />}>
+            {t('common.cancel')}
+          </DialogClose>
+          <Button size="sm" disabled={creating || !selected} onClick={() => void submit()}>
             {t('sessions.create')}
           </Button>
         </DialogFooter>

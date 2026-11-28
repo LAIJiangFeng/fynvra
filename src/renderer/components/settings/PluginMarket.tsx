@@ -736,10 +736,10 @@ function InstallContent({
       )}
 
       <DialogFooter>
-        <DialogClose disabled={busy} render={<Button variant="outline" />}>
+        <DialogClose disabled={busy} render={<Button size="sm" variant="outline" />}>
           {t('common.cancel')}
         </DialogClose>
-        <Button disabled={busy} onClick={() => void run()}>
+        <Button size="sm" disabled={busy} onClick={() => void run()}>
           {busy && <Loader2 className="animate-spin" />}
           {t(busy ? 'settings.plugins.market.installing' : 'settings.plugins.market.install')}
         </Button>

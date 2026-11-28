@@ -116,14 +116,14 @@ export function InstructionEditorDialog({
         {error && <InlineMessage tone="error">{error}</InlineMessage>}
         <DialogFooter>
           {!entry && (
-            <Button variant="outline" disabled={busy} onClick={() => void pick()}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick()}>
               {t('settings.instructions.pick')}
             </Button>
           )}
-          <Button variant="outline" disabled={busy} onClick={onClose}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!ready || busy || !name.trim()} onClick={() => void save()}>
+          <Button size="sm" disabled={!ready || busy || !name.trim()} onClick={() => void save()}>
             {t(busy ? 'common.saving' : 'common.save')}
           </Button>
         </DialogFooter>
@@ -222,10 +222,10 @@ export function InstructionImportDialog({
         ))}
         {error && <InlineMessage tone="error">{error}</InlineMessage>}
         <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={busy || selected.length === 0} onClick={() => void submit()}>
+          <Button size="sm" disabled={busy || selected.length === 0} onClick={() => void submit()}>
             {t('settings.instructions.importSelected', { count: selected.length })}
           </Button>
         </DialogFooter>

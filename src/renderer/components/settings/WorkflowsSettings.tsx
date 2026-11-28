@@ -261,6 +261,7 @@ export function WorkflowsSettings() {
           )}
           <DialogFooter>
             <Button
+              size="sm"
               type="button"
               variant="outline"
               disabled={busy}
@@ -269,6 +270,7 @@ export function WorkflowsSettings() {
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               type="button"
               variant="destructive"
               disabled={busy}

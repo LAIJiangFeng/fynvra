@@ -215,13 +215,13 @@ function ImportedProviderModels({
         />
         {error && <InlineMessage tone="error">{error}</InlineMessage>}
         <DialogFooter>
-          <Button variant="ghost" onClick={onSkipAll}>
+          <Button size="sm" variant="ghost" onClick={onSkipAll}>
             {t('settings.providers.skipAllModels')}
           </Button>
-          <Button variant="outline" onClick={onSkip}>
+          <Button size="sm" variant="outline" onClick={onSkip}>
             {t('settings.providers.skipModels')}
           </Button>
-          <Button disabled={!added || busy} onClick={() => void save()}>
+          <Button size="sm" disabled={!added || busy} onClick={() => void save()}>
             {t(busy ? 'common.saving' : 'settings.providers.saveModelsAndContinue')}
           </Button>
         </DialogFooter>
@@ -385,10 +385,11 @@ function ImportContent({
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" disabled={importing} />}>
+        <DialogClose render={<Button size="sm" variant="outline" disabled={importing} />}>
           {t('common.cancel')}
         </DialogClose>
         <Button
+          size="sm"
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >
