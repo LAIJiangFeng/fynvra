@@ -4,6 +4,10 @@ import type { OrchestrationRegistry } from '../orchestration/registry';
 import type { PendingCoordinatorReview } from '../orchestration/service';
 import type { AgentHostService } from './agentHost';
 
+/** 编排通知的固定开头：以 user 消息送进主 agent 会话，但不是用户原话 */
+export const ORCHESTRATION_NOTICE_PREFIX =
+  '[Fynvra orchestration] Automated notification — not a message from the user.';
+
 const WAKE_TYPES: ReadonlySet<string> = new Set(['worker_done', 'question', 'escalation']);
 const BODY_MAX_CHARS = 6_000;
 /** Initial delivery plus one continuation per attempt; a new user turn can explicitly resume. */
@@ -46,7 +50,7 @@ export function wakePrompt(
   reviews: readonly PendingCoordinatorReview[] = []
 ): string {
   return [
-    '[Fynvra orchestration] Automated notification — not a message from the user.',
+    ORCHESTRATION_NOTICE_PREFIX,
     '',
     ...(messages.length
       ? [`New worker messages (${messages.length}):`, messages.map(entry).join('\n\n')]
