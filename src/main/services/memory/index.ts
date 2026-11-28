@@ -91,7 +91,8 @@ export function createMemoryService(deps: MemoryServiceDeps) {
   let timer: ReturnType<typeof setInterval> | undefined;
 
   async function database(): Promise<MemoryDb | undefined> {
-    const pending = (opening ??= openMemoryDb(deps.dbPath, now));
+    opening ??= openMemoryDb(deps.dbPath, now);
+    const pending = opening;
     const result = await pending;
     if (!result.ok) {
       // 失败不缓存：偶发的文件锁不该让记忆整个运行期都不可用，下次调用重试

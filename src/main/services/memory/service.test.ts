@@ -337,7 +337,7 @@ describe('T3 审查修复', () => {
       dbPath: join(dir, 'count', 'memory.db'),
       runGit: async (args, cwd) => {
         calls++;
-        return fail ? { ok: false, stdout: '', stderr: 'x' } : runGit(args, cwd);
+        return fail ? { ok: false, error: 'x' } : runGit(args, cwd);
       },
       preferences: () => ({ memory: prefs }),
       workspace: () => ({ path: join(dir, 'w1'), vcs }),
@@ -370,7 +370,12 @@ describe('T3 审查修复', () => {
     ).memory;
     expect(short).toMatchObject({ pinned: false, source: { kind: 'agent' } });
     const long = result(
-      await write(main, { action: 'add', category: 'rule', content: '长引用', quote: '就这样 记住' })
+      await write(main, {
+        action: 'add',
+        category: 'rule',
+        content: '长引用',
+        quote: '就这样 记住',
+      })
     ).memory;
     expect(long).toMatchObject({ pinned: true, source: { kind: 'user' } });
   });
