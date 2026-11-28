@@ -393,8 +393,49 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     return recordAttempt(store, task, launched, isNew);
   }
 
+  /**
+   * autoCommit 工作区：把主检出目录里未提交的改动提交到协调者分支。
+   * 任何失败只记日志，绝不阻塞派发或合并。
+   */
+  async function autoSave(reason: string): Promise<void> {
+    if (workspace.autoCommit !== true || inPlace || deps.restricted) return;
+    try {
+      const branch = await currentBranch(deps.exec, repoPath);
+      if (branch !== coordinatorBranch) {
+        log(
+          `auto-save skipped: ${repoPath} is on ${branch ?? 'a detached HEAD'}, not ${coordinatorBranch}`
+        );
+        return;
+      }
+      const status = await deps.exec('git', ['status', '--porcelain'], repoPath);
+      if (status.code !== 0) {
+        log(`auto-save skipped: git status failed: ${status.stderr.trim()}`);
+        return;
+      }
+      if (status.stdout.trim() === '') return;
+      const added = await deps.exec('git', ['add', '-A'], repoPath);
+      if (added.code !== 0) {
+        log(`auto-save failed: git add failed: ${added.stderr.trim()}`);
+        return;
+      }
+      const committed = await deps.exec(
+        'git',
+        ['commit', '--no-verify', '-m', `Fynvra 自动保存：${reason}`],
+        repoPath
+      );
+      if (committed.code !== 0) {
+        log(
+          `auto-save failed: git commit failed: ${(committed.stderr || committed.stdout).trim()}`
+        );
+      }
+    } catch (error) {
+      log(`auto-save failed: ${errorMessage(error)}`);
+    }
+  }
+
   /** 从协调者分支切出 worktree；解析根目录抛错也按失败返回。 */
   async function createWorktree(task: Task): Promise<HostResult<{ worktree: Worktree }>> {
+    await autoSave(`派发「${task.title}」前`);
     try {
       const created = await git.create({
         repoPath,
@@ -875,6 +916,7 @@ export function createOrchestrationHost(deps: OrchestrationHostDeps): Orchestrat
     if (head.code !== 0 || headCommit === '') {
       return fail(`could not read the worker commit for ${worktree.branch}; merge was not started`);
     }
+    await autoSave(`合并「${task.title}」前`);
     const merged = await git.merge({ repoPath, branch: worktree.branch });
     if (!merged.ok) {
       if (merged.conflicts !== undefined && merged.conflicts.length > 0) {

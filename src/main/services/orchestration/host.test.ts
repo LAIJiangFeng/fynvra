@@ -1456,3 +1456,110 @@ describe('dispatchTask：git 工作区用不了 worktree', () => {
     expect(store.tasks.list()).toEqual([]);
   });
 });
+
+describe('autoCommit 工作区：派发和合并前自动提交主检出目录', () => {
+  const AUTO = { ...WORKSPACE, autoCommit: true };
+  const SAVE_COMMANDS = ['git status --porcelain', 'git add -A'];
+  const dirtyRepo = () =>
+    fake.respond(({ args, cwd }) =>
+      args[0] === 'status' && cwd === '/repo' ? { stdout: '?? notes.txt\n' } : undefined
+    );
+  const repoCommands = (start = 0) =>
+    fake.calls
+      .slice(start)
+      .filter((call) => call.cwd === '/repo')
+      .map((call) => [call.cmd, ...call.args].join(' '));
+
+  it('有改动：git worktree add 之前先 add -A 并提交', async () => {
+    dirtyRepo();
+    host = makeHost({ workspace: AUTO });
+    await dispatch();
+    const commands = fake.commands();
+    expect(commands.slice(0, 4)).toEqual([
+      'git symbolic-ref --quiet --short HEAD',
+      ...SAVE_COMMANDS,
+      'git commit --no-verify -m Fynvra 自动保存：派发「Add toggle」前',
+    ]);
+    expect(commands.findIndex((c) => c.startsWith('git worktree add'))).toBeGreaterThan(3);
+  });
+
+  it('没有改动：不提交', async () => {
+    host = makeHost({ workspace: AUTO });
+    await dispatch();
+    expect(fake.commands()).toContain('git status --porcelain');
+    expect(fake.commands().some((c) => c.startsWith('git add') || c.startsWith('git commit'))).toBe(
+      false
+    );
+  });
+
+  it('当前分支不是协调者分支：记日志，不提交', async () => {
+    dirtyRepo();
+    fake.respond(({ args }) => (args[0] === 'symbolic-ref' ? { stdout: 'feature\n' } : undefined));
+    const log = vi.fn();
+    host = makeHost({ workspace: AUTO, log });
+    await dispatch();
+    expect(fake.commands().some((c) => c.startsWith('git add') || c.startsWith('git commit'))).toBe(
+      false
+    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('auto-save skipped'));
+  });
+
+  it('没有标记的工作区：从不执行 status / add / commit', async () => {
+    dirtyRepo();
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    expect(
+      repoCommands().some(
+        (c) => c.startsWith('git status') || c.startsWith('git add') || c.startsWith('git commit')
+      )
+    ).toBe(false);
+  });
+
+  it('提交失败：只记日志，派发照样成功', async () => {
+    dirtyRepo();
+    fake.respond(({ args }) =>
+      args[0] === 'commit' ? { code: 128, stderr: 'Author identity unknown' } : undefined
+    );
+    const log = vi.fn();
+    host = makeHost({ workspace: AUTO, log });
+    // dispatch() 在派发失败时会抛出
+    await dispatch();
+    expect(fake.commands().some((c) => c.startsWith('git worktree add'))).toBe(true);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Author identity unknown'));
+  });
+
+  it('合并前：有改动先提交，再 merge', async () => {
+    host = makeHost({ workspace: AUTO });
+    const first = await reported();
+    dirtyRepo();
+    const start = fake.calls.length;
+    expect(await host.mergeWorktree({ dispatchId: first.dispatch.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    const commands = repoCommands(start);
+    const commit = commands.indexOf(
+      'git commit --no-verify -m Fynvra 自动保存：合并「Add toggle」前'
+    );
+    expect(commit).toBeGreaterThan(-1);
+    expect(commands.indexOf('git merge --no-ff --no-edit fynvra/add-toggle')).toBeGreaterThan(
+      commit
+    );
+  });
+
+  it('受限 Host：不自动提交', async () => {
+    dirtyRepo();
+    host = makeHost({ workspace: AUTO, restricted: true });
+    await host.dispatchTask({ title: 'Add toggle', spec: 'S', roleId: 'worker', dependsOn: [] });
+    expect(
+      repoCommands().some((c) => c.startsWith('git status') || c.startsWith('git commit'))
+    ).toBe(false);
+  });
+
+  it('原地 Host（vcs: none）：不自动提交', async () => {
+    host = makeHost({ workspace: { ...AUTO, vcs: 'none' as const, defaultBranch: undefined } });
+    const first = await reported();
+    await host.mergeWorktree({ dispatchId: first.dispatch.id });
+    expect(fake.commands()).toEqual([]);
+  });
+});
