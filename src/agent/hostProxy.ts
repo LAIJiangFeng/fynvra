@@ -2,6 +2,7 @@ import type {
   ConfigHost,
   CreateRoleSessionOptions,
   HostResult,
+  MemoryHost,
   OrchestrationHost,
   WorkerHost,
 } from '@fynvra/agent-runtime';
@@ -165,6 +166,15 @@ export function orchestrationHostProxy(call: HostCall): OrchestrationHost {
 /** fynvra_config 背后的配置宿主（kind: 'config'，method: 'configure'） */
 export function configHostProxy(call: HostCall): ConfigHost {
   return { configure: (input, signal) => forward(call('configure', input, signal)) };
+}
+
+/** project_memory_* 背后的记忆宿主（kind: 'memory'，method 与方法名相同）；权限由 Main 按会话记录判断 */
+export function memoryHostProxy(call: HostCall): MemoryHost {
+  return {
+    write: (input, signal) => forward(call('write', input, signal)),
+    search: (input, signal) => forward(call('search', input, signal)),
+    feedback: (input, signal) => forward(call('feedback', input, signal)),
+  };
 }
 
 export type TriageHost = NonNullable<CreateRoleSessionOptions['triageHost']>;

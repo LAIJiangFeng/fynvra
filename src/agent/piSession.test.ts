@@ -7,11 +7,12 @@ import type {
   ApprovalGate,
   ApprovalPolicyHooks,
   ApprovalRequestFn,
+  MemoryHost,
   ResolvedModel,
 } from '@fynvra/agent-runtime';
 import type { SpawnSessionSpec } from '@shared/types/agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPiSessionFactory, toMcpServerConfig } from './piSession';
+import { completeText, createPiSessionFactory, toMcpServerConfig } from './piSession';
 
 const mocks = vi.hoisted(() => ({ createRoleSession: vi.fn() }));
 
@@ -491,5 +492,115 @@ describe('toMcpServerConfig', () => {
       type: 'http',
       url: 'http://127.0.0.1:3000/mcp',
     });
+  });
+});
+
+describe('createPiSessionFactory 项目记忆', () => {
+  it('spec 带 memory 且有宿主时把记忆交给 createRoleSession，档位会话不交', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fynvra-pi-memory-'));
+    dirs.push(dir);
+    mocks.createRoleSession.mockReset();
+    mocks.createRoleSession.mockResolvedValue({
+      session: fakePiSession(),
+      warnings: [],
+      dispose: vi.fn(),
+    });
+    const open = createPiSessionFactory({
+      agentDir: join(dir, 'agent'),
+      resolveModel: async () => ({}) as ResolvedModel,
+    });
+    const spec: SpawnSessionSpec = {
+      role: {
+        id: 'worker',
+        name: 'Worker',
+        skillIds: [],
+        mcpServerIds: [],
+        tools: 'all',
+        approvalMode: 'auto-edits',
+      },
+      cwd: dir,
+      sessionFile: join(dir, 'agent', 'sessions', 'm1.jsonl'),
+      model: { providerId: 'p', api: 'anthropic-messages', modelId: 'm' },
+      skills: [],
+      mcpServers: [],
+      worker: true,
+      roles: [],
+      memory: { index: '- #1 [rule] 用 pnpm', write: false },
+    };
+    const memoryHost = {
+      write: vi.fn(),
+      search: vi.fn(),
+      feedback: vi.fn(),
+    } as unknown as MemoryHost;
+    const base = { host: null, workerHost: null, memoryHost };
+    await open({ identity: { sessionId: 'm1', generation: 1 }, spec, ...base });
+    await open({
+      identity: { sessionId: 'm2', generation: 1 },
+      spec: { ...spec, profile: 'triage' },
+      ...base,
+    });
+    const { memory: _memory, ...noMemory } = spec;
+    await open({ identity: { sessionId: 'm3', generation: 1 }, spec: noMemory, ...base });
+    const calls = mocks.createRoleSession.mock.calls.map((call) => call[0]);
+    expect(calls[0]?.memory).toEqual({
+      host: memoryHost,
+      index: '- #1 [rule] 用 pnpm',
+      write: false,
+    });
+    expect(calls[1]).not.toHaveProperty('memory');
+    expect(calls[2]).not.toHaveProperty('memory');
+  });
+});
+
+describe('completeText', () => {
+  const answer = (patch: Record<string, unknown>) => ({
+    content: [
+      { type: 'thinking', thinking: 'x' },
+      { type: 'text', text: 'he' },
+      { type: 'text', text: 'llo' },
+    ],
+    stopReason: 'stop',
+    ...patch,
+  });
+  const modelWith = (completeSimple: unknown) =>
+    ({ model: { id: 'm' }, runtime: { completeSimple } }) as unknown as ResolvedModel;
+
+  it('无工具、不传 reasoning、不重试，只拼接文本块', async () => {
+    const completeSimple = vi.fn(async () => answer({}));
+    const signal = new AbortController().signal;
+    await expect(
+      completeText(
+        modelWith(completeSimple),
+        { systemPrompt: 's', prompt: 'p', maxTokens: 9 },
+        signal
+      )
+    ).resolves.toBe('hello');
+    expect(completeSimple).toHaveBeenCalledWith(
+      { id: 'm' },
+      {
+        systemPrompt: 's',
+        messages: [{ role: 'user', content: 'p', timestamp: expect.any(Number) }],
+      },
+      { maxTokens: 9, maxRetries: 0, signal }
+    );
+  });
+
+  it('模型报错或中止时抛出', async () => {
+    const signal = new AbortController().signal;
+    const input = { systemPrompt: 's', prompt: 'p', maxTokens: 9 };
+    await expect(
+      completeText(
+        modelWith(async () => answer({ stopReason: 'error', errorMessage: 'boom' })),
+        input,
+        signal
+      )
+    ).rejects.toThrow('boom');
+    await expect(
+      completeText(
+        modelWith(async () => answer({ stopReason: 'aborted' })),
+        input,
+        signal
+      )
+    ).rejects.toThrow('aborted');
   });
 });

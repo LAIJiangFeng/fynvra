@@ -7,6 +7,7 @@ import {
   HOST_CALL_DEFAULT_TIMEOUT_MS,
   HOST_CALL_GRACE_MS,
   type HostCall,
+  memoryHostProxy,
   orchestrationHostProxy,
   workerHostProxy,
 } from './hostProxy';
@@ -202,5 +203,19 @@ describe('host proxies', () => {
     });
     await host.reportDone('failed', 'blocked');
     expect(call).toHaveBeenLastCalledWith('reportDone', { outcome: 'failed', summary: 'blocked' });
+  });
+
+  it('把 MemoryHost 的三个方法按名转发为 write / search / feedback，结果原样返回', async () => {
+    const call = vi.fn<HostCall>(async () => ({ ok: true, result: 'r' }));
+    const host = memoryHostProxy(call);
+    const signal = new AbortController().signal;
+    const write = { action: 'add' as const, category: 'rule' as const, content: 'pnpm' };
+    expect(await host.write(write, signal)).toEqual({ ok: true, result: 'r' });
+    expect(call).toHaveBeenLastCalledWith('write', write, signal);
+    await host.search({ query: 'pnpm' });
+    expect(call).toHaveBeenLastCalledWith('search', { query: 'pnpm' }, undefined);
+    await host.feedback({ id: 3, verdict: 'useful' }, signal);
+    expect(call).toHaveBeenLastCalledWith('feedback', { id: 3, verdict: 'useful' }, signal);
+    expect(Object.keys(host).sort()).toEqual(['feedback', 'search', 'write']);
   });
 });

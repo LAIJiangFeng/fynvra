@@ -91,6 +91,7 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
     workerHost,
     configHost,
     triageHost,
+    memoryHost,
     approval,
     onMaxOutputLearned,
   }) => {
@@ -163,6 +164,12 @@ export function createPiSessionFactory(options: PiSessionFactoryOptions): OpenSe
               profile: spec.profile,
               triageHost: triageHost ?? null,
               ...(spec.profileLanguage ? { profileLanguage: spec.profileLanguage } : {}),
+            }
+          : {}),
+        // 项目记忆：只有 spec 带了、不是档位会话且有宿主时才装配
+        ...(spec.memory && !spec.profile && memoryHost
+          ? {
+              memory: { host: memoryHost, index: spec.memory.index, write: spec.memory.write },
             }
           : {}),
         // 操作通知不依赖人工审批；钩子缺省时工具仍按角色权限执行。
@@ -404,6 +411,32 @@ async function suggestReply(
     .map((block) => block.text)
     .join('');
   return normalizeReplySuggestion(text);
+}
+
+/**
+ * complete-text：与任何会话无关的独立请求。无工具、不传 reasoning、不重试；
+ * 模型报错或被中止时抛错，否则返回拼接的文本（触到 maxTokens 也返回已生成的部分）
+ */
+export async function completeText(
+  model: ResolvedModel,
+  input: { systemPrompt: string; prompt: string; maxTokens: number },
+  signal: AbortSignal
+): Promise<string> {
+  const answer = await model.runtime.completeSimple(
+    model.model,
+    {
+      systemPrompt: input.systemPrompt,
+      messages: [{ role: 'user', content: input.prompt, timestamp: Date.now() }],
+    },
+    { maxTokens: input.maxTokens, maxRetries: 0, signal }
+  );
+  if (answer.stopReason === 'error' || answer.stopReason === 'aborted') {
+    throw new Error(answer.errorMessage || `the model request ended with ${answer.stopReason}`);
+  }
+  return answer.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
 }
 
 type PlainConversationMessage = { role: string; content?: unknown };

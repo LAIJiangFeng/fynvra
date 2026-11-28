@@ -9,6 +9,7 @@ import {
   redactToolArgs,
   type SpawnSessionSpec,
 } from './agent';
+import { MEMORY_INDEX_MAX_CHARS } from './memory';
 
 const identity = { sessionId: 'session-1', generation: 2 };
 
@@ -837,5 +838,104 @@ describe('redactToolArgs', () => {
   it('leaves other tools alone', () => {
     const args = { server: { env: { A: 'b' } } };
     expect(redactToolArgs('bash', args)).toBe(args);
+  });
+});
+
+describe('项目记忆与 complete-text 协议', () => {
+  it('spawn spec 的 memory：合法时保留，多余字段丢弃，越界或类型不对整条作废', () => {
+    const memory = { index: '- #1 [rule] 用 pnpm', write: true };
+    expect(parseAgentCommand(withSpec({ memory }))).toEqual(withSpec({ memory }));
+    expect(parseAgentCommand(withSpec({ memory: { ...memory, extra: 1 } }))).toEqual(
+      withSpec({ memory })
+    );
+    const full = { index: 'x'.repeat(MEMORY_INDEX_MAX_CHARS), write: false };
+    expect(parseAgentCommand(withSpec({ memory: full }))).toEqual(withSpec({ memory: full }));
+    for (const invalid of [
+      null,
+      { index: 'x'.repeat(MEMORY_INDEX_MAX_CHARS + 1), write: false },
+      { index: 1, write: true },
+      { index: '' },
+      { index: '', write: 'yes' },
+    ]) {
+      expect(parseAgentCommand(withSpec({ memory: invalid }))).toBeNull();
+    }
+  });
+
+  it('host-invoke 接受 kind memory', () => {
+    const event = {
+      type: 'host-invoke',
+      identity,
+      callId: 'c1',
+      kind: 'memory',
+      method: 'search',
+      input: { query: 'pnpm' },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+  });
+
+  const completeText = {
+    type: 'complete-text',
+    requestId: 'complete-1',
+    model: spec.model,
+    systemPrompt: 'sys',
+    prompt: 'hello',
+    maxTokens: 1024,
+    timeoutMs: 60_000,
+  };
+
+  it('complete-text：合法输入原样收窄，多余字段丢弃', () => {
+    expect(parseAgentCommand(completeText)).toEqual(completeText);
+    expect(parseAgentCommand({ ...completeText, identity, extra: true })).toEqual(completeText);
+    const edge = {
+      ...completeText,
+      systemPrompt: 's'.repeat(20_000),
+      prompt: 'p'.repeat(200_000),
+      maxTokens: 8192,
+      timeoutMs: 300_000,
+    };
+    expect(parseAgentCommand(edge)).toEqual(edge);
+    expect(parseAgentCommand({ ...completeText, maxTokens: 1, timeoutMs: 1 })).not.toBeNull();
+  });
+
+  it.each([
+    ['没有 requestId', { requestId: '' }],
+    ['model 不合法', { model: { api: 'x' } }],
+    ['systemPrompt 超长', { systemPrompt: 's'.repeat(20_001) }],
+    ['prompt 超长', { prompt: 'p'.repeat(200_001) }],
+    ['prompt 不是字符串', { prompt: 1 }],
+    ['maxTokens 为 0', { maxTokens: 0 }],
+    ['maxTokens 超上限', { maxTokens: 8193 }],
+    ['maxTokens 非整数', { maxTokens: 1.5 }],
+    ['timeoutMs 为 0', { timeoutMs: 0 }],
+    ['timeoutMs 超上限', { timeoutMs: 300_001 }],
+  ])('complete-text 拒绝：%s', (_name, patch) => {
+    expect(parseAgentCommand({ ...completeText, ...patch })).toBeNull();
+  });
+
+  it('text-completed：成功与失败两种结果，多余字段丢弃，形状不对拒绝', () => {
+    const ok = {
+      type: 'text-completed',
+      requestId: 'complete-1',
+      result: { ok: true, text: 'hi' },
+    };
+    const failed = {
+      type: 'text-completed',
+      requestId: 'complete-1',
+      result: { ok: false, error: 'timed out' },
+    };
+    expect(parseAgentWorkerEvent(ok)).toEqual(ok);
+    expect(parseAgentWorkerEvent(failed)).toEqual(failed);
+    expect(
+      parseAgentWorkerEvent({ ...ok, extra: 1, result: { ...ok.result, error: 'x', more: 2 } })
+    ).toEqual(ok);
+    for (const invalid of [
+      { ...ok, requestId: '' },
+      { ...ok, result: { ok: true } },
+      { ...ok, result: { ok: false } },
+      { ...ok, result: { ok: 'true', text: 'x' } },
+      { type: 'text-completed', requestId: 'r' },
+    ]) {
+      expect(parseAgentWorkerEvent(invalid)).toBeNull();
+    }
   });
 });

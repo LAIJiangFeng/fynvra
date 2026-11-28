@@ -1,7 +1,7 @@
 import { errorMessage } from '@shared/guards';
 import { type AgentWorkerEvent, parseAgentCommand } from '@shared/types/agent';
 import { createModelRegistry, createWorkerModelRuntime, type ModelRegistry } from './models';
-import { createPiSessionFactory } from './piSession';
+import { completeText, createPiSessionFactory } from './piSession';
 import { createPluginLookupTracker } from './pluginLookups';
 import { SessionSupervisor } from './supervisor';
 
@@ -79,6 +79,8 @@ const supervisor = new SessionSupervisor({
     const registry = await modelRegistry();
     return queries.map((query) => registry.describe(query));
   },
+  completeText: async ({ model, ...input }, signal) =>
+    completeText(await (await modelRegistry()).resolve(model), input, signal),
 });
 
 function endpointOf(baseUrl: string): string {
