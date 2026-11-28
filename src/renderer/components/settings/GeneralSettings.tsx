@@ -8,7 +8,7 @@ import {
   type ShellPreference,
   type ShellTarget,
 } from '@shared/types/settings';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Save } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -295,6 +295,7 @@ function ShellPreferenceRow({
               {t('settings.general.shellBrowse')}
             </Button>
             <Button type="submit" size="sm" disabled={disabled || !parsed}>
+              <Save />
               {t('common.save')}
             </Button>
           </div>

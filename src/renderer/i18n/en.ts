@@ -1173,7 +1173,7 @@ export const en: MessagesShape<typeof zhCN> = {
       invalidNth: 'Role {index} is invalid: {error}',
       invalid: 'Invalid role: {error}',
       builtinEditable:
-        'Built-in settings are editable defaults. Saved changes apply to newly started sessions; the ID is fixed and cannot be deleted',
+        'Built-in role, editable. Saved changes apply to newly started sessions; the ID is fixed and the role cannot be deleted',
       resetDefaults: 'Restore defaults',
       resetTitle: 'Restore built-in defaults?',
       resetHint:
