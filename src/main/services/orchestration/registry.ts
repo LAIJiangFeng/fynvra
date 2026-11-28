@@ -20,6 +20,7 @@ import type { WorkerSessionLauncher } from './launcher';
 import { nodeExec } from './nodeExec';
 import type { PullRequestGateDeps } from './pullRequest';
 import {
+  type AcceptedTask,
   type CoordinatorWork,
   createOrchestrationService,
   type OrchestrationService,
@@ -54,6 +55,8 @@ export interface OrchestrationRegistryOptions {
   pullRequestGate?: PullRequestGateDeps;
   /** 主 agent 会话是否受限，原样传给各服务；缺省都不受限，直到 {@link OrchestrationRegistry.setRestrictedCoordinatorLookup} */
   isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
+  /** 重新检测工作区的 vcs 并写回记录（派发时 .git 已失效用）；缺省不重新检测 */
+  refreshVcs?: (workspaceId: string) => Promise<void>;
 }
 
 /** Main 内所有工作区的 OrchestrationService；agent-host 的两个工厂与 orchestration IPC 都经它查找。 */
@@ -78,6 +81,8 @@ export interface OrchestrationRegistry {
   serviceForDispatch(dispatchId: string): Promise<OrchestrationService | undefined>;
   /** worker 会话一轮正常结束且已空闲：转给各服务，当前尝试未汇报的通知主 agent。协调者唤醒器用。 */
   workerRunEnded(sessionId: string): void;
+  /** worker 会话因模型错误停在 error：转给各服务，尝试未结算的通知主 agent 让原 worker 继续。协调者唤醒器用。 */
+  workerErrored(sessionId: string, error: string): void;
   /** 收件箱里发给该会话、未确认的消息（跨工作区查找，不消费）。协调者唤醒器用。 */
   pendingMessagesTo(sessionId: string): Message[];
   /** Read current actionable messages and unresolved successful attempts, without consuming either. */
@@ -94,6 +99,11 @@ export interface OrchestrationRegistry {
    * 监听器抛异常只记日志。返回取消订阅。
    */
   onMessage(listener: (workspaceId: string, message: Message) => void): () => void;
+  /**
+   * 订阅各工作区任务被验收（原地、merge 含无改动、PR；放弃不算），记忆提炼用。
+   * 在验收之后的下一个 tick 调用；监听器抛异常只记日志。返回取消订阅。
+   */
+  onTaskAccepted(listener: (task: AcceptedTask) => void): () => void;
 }
 
 export const UNWIRED_LAUNCHER_ERROR =
@@ -164,6 +174,17 @@ export function createOrchestrationRegistry(
   const messageListeners = new Set<(workspaceId: string, message: Message) => void>();
   const log = options.log ?? ((message: string) => console.warn(`[orchestration] ${message}`));
 
+  const acceptedListeners = new Set<(task: AcceptedTask) => void>();
+  const announceAccepted = (task: AcceptedTask): void => {
+    for (const listener of acceptedListeners) {
+      try {
+        listener(task);
+      } catch (error) {
+        log(`task accepted listener failed: ${errorMessage(error)}`);
+      }
+    }
+  };
+
   const announce = (workspaceId: string, message: Message): void => {
     for (const listener of messageListeners) {
       try {
@@ -203,12 +224,21 @@ export function createOrchestrationRegistry(
         checkActiveWork(workspaceId);
       },
       onMessagePosted: (message) => announce(workspace.id, message),
+      onTaskAccepted: announceAccepted,
       checkPolicy: options.checkPolicy,
       ...(options.workflows ? { workflows: options.workflows } : {}),
       canLaunch: () => launcher !== unwiredLauncher,
       log: options.log,
       pullRequestGate,
       isRestrictedCoordinator: (sessionId) => isRestrictedCoordinator(sessionId),
+      ...(options.refreshVcs
+        ? {
+            refreshVcs: async () => {
+              await options.refreshVcs?.(workspace.id);
+              return findWorkspace(workspace.id)?.vcs;
+            },
+          }
+        : {}),
     });
     services.set(workspace.id, service);
     return service;
@@ -306,6 +336,9 @@ export function createOrchestrationRegistry(
     workerRunEnded(sessionId) {
       for (const service of services.values()) service.workerRunEnded(sessionId);
     },
+    workerErrored(sessionId, error) {
+      for (const service of services.values()) service.workerErrored(sessionId, error);
+    },
     pendingMessagesTo(sessionId: string): Message[] {
       for (const service of services.values()) {
         const pending = service.pendingMessagesTo(sessionId);
@@ -336,6 +369,12 @@ export function createOrchestrationRegistry(
       messageListeners.add(listener);
       return () => {
         messageListeners.delete(listener);
+      };
+    },
+    onTaskAccepted(listener) {
+      acceptedListeners.add(listener);
+      return () => {
+        acceptedListeners.delete(listener);
       };
     },
   };

@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
   HostResult,
   OrchestrationHost,
@@ -81,6 +82,52 @@ export interface OrchestrationServiceOptions {
   pullRequestGate?: PullRequestGateDeps;
   /** 主 agent 会话是否受限（受限的从公开基线 origin/<默认分支> 切出、推送闸门查保护路径）；缺省都不受限 */
   isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
+  /** 重新检测本工作区的 vcs 并返回检测后的值；工作区已不存在时返回 undefined。缺省不重新检测 */
+  refreshVcs?: () => Promise<Workspace['vcs'] | undefined>;
+  /** 任务被验收（状态改为 completed）：下一个 tick 异步调用，抛错只记日志（记忆提炼用） */
+  onTaskAccepted?: (task: AcceptedTask) => void;
+}
+
+/** 验收方式：merge 合并、pull-request 开 PR、in-place 普通目录原地验收、no-change 合并时 worker 没有新提交 */
+export type AcceptedVia = 'merge' | 'pull-request' | 'in-place' | 'no-change';
+
+/** 被验收任务的一次尝试 */
+export interface AcceptedDispatch {
+  dispatchId: string;
+  sessionId: string;
+  /** 未结算为 running */
+  status: 'running' | 'succeeded' | 'failed';
+  startedAt: number;
+  settledAt?: number;
+  /** worker 的 report_done 汇报 */
+  summary?: string;
+  filesModified?: string[];
+  /** 工作流节点（只有工作流任务有） */
+  nodeId?: string;
+  nodeName?: string;
+}
+
+/** 任务被验收时同步打包的快照（ARCHITECTURE §7.15「验收提炼」） */
+export interface AcceptedTask {
+  workspaceId: string;
+  runId: string;
+  coordinatorSessionId: string;
+  /** 主 agent 会话是受限档位（restricted）：提炼跳过 */
+  coordinatorRestricted: boolean;
+  acceptedVia: AcceptedVia;
+  acceptedAt: number;
+  task: {
+    id: string;
+    title: string;
+    spec: string;
+    mergedDiff?: { baseCommit: string; headCommit: string };
+    pullRequestUrl?: string;
+    workflow: boolean;
+  };
+  /** 该任务全部尝试，按插入顺序 */
+  dispatches: AcceptedDispatch[];
+  /** 全部打回意见（inbox 里 subject 为 'review feedback' 的 instruction），按时间顺序 */
+  reviewFeedback: { dispatchId?: string; body: string; createdAt: number }[];
 }
 
 /** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
@@ -119,6 +166,11 @@ export interface OrchestrationService {
    * escalation（同 dispatch 未确认的不重复投）。不改任何状态，空闲不算失败。
    */
   workerRunEnded(sessionId: string): void;
+  /**
+   * worker 会话在自动重试后仍因模型错误停在 error：尝试未结算时给主 agent 投一条 escalation，
+   * 提示用 send_to_worker 让原会话继续（去重规则同 workerRunEnded）。不改任何状态。
+   */
+  workerErrored(sessionId: string, error: string): void;
   readWorkerOutput(input: {
     dispatchId: string;
     cursor: number;
@@ -203,11 +255,24 @@ function observe<T extends { id: string }>(
 function observeStore(
   store: OrchestrationStore,
   changed: () => void,
-  messagePosted?: (message: Message) => void
+  messagePosted?: (message: Message) => void,
+  taskCompleted?: (taskId: string) => void
 ): OrchestrationStore {
+  const tasks = observe(store.tasks, changed);
   return {
     runs: observe(store.runs, changed),
-    tasks: observe(store.tasks, changed),
+    tasks: {
+      ...tasks,
+      // 状态「改为」completed 时同步通知（原地、merge、PR 三条验收路径都经这里）
+      update: (id, patch) => {
+        const before = store.tasks.get(id)?.status;
+        const result = tasks.update(id, patch);
+        if (result.ok && patch.status === 'completed' && before !== 'completed') {
+          taskCompleted?.(id);
+        }
+        return result;
+      },
+    },
     dispatches: observe(store.dispatches, changed),
     worktrees: observe(store.worktrees, changed),
     messages: observe(store.messages, changed, messagePosted),
@@ -273,13 +338,99 @@ export function createOrchestrationService(
     });
   };
 
-  const store = observeStore(inner, changed, (message) => {
+  /** 同步打包快照（读的是内存状态），监听器放到下一个 tick；任何异常只记日志，不影响验收 */
+  const taskCompleted = (taskId: string): void => {
+    const listener = options.onTaskAccepted;
+    if (!listener) return;
+    let accepted: AcceptedTask | undefined;
     try {
-      options.onMessagePosted?.(message);
+      accepted = acceptedTaskOf(taskId);
     } catch (error) {
-      log(`message listener failed: ${errorMessage(error)}`);
+      log(`packing accepted task failed: ${errorMessage(error)}`);
     }
-  });
+    if (!accepted) return;
+    const snapshot = accepted;
+    setImmediate(() => {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        log(`task accepted listener failed: ${errorMessage(error)}`);
+      }
+    });
+  };
+  const acceptedTaskOf = (taskId: string): AcceptedTask | undefined => {
+    const task = inner.tasks.get(taskId);
+    const run = task ? inner.runs.get(task.runId) : undefined;
+    if (!task || !run) return undefined;
+    const attempts = inner.dispatches.list((entry) => entry.taskId === taskId);
+    const ids = new Set(attempts.map((entry) => entry.id));
+    const steps = task.workflow?.steps ?? [];
+    const { mergedDiff, pullRequest } = task;
+    const acceptedVia: AcceptedVia = pullRequest
+      ? 'pull-request'
+      : !mergedDiff
+        ? 'in-place'
+        : mergedDiff.baseCommit === mergedDiff.headCommit
+          ? 'no-change'
+          : 'merge';
+    return {
+      workspaceId: workspace.id,
+      runId: run.id,
+      coordinatorSessionId: run.coordinatorSessionId,
+      coordinatorRestricted: options.isRestrictedCoordinator?.(run.coordinatorSessionId) ?? false,
+      acceptedVia,
+      acceptedAt: now(),
+      task: {
+        id: task.id,
+        title: task.title,
+        spec: task.spec,
+        ...(mergedDiff ? { mergedDiff: { ...mergedDiff } } : {}),
+        ...(pullRequest ? { pullRequestUrl: pullRequest.url } : {}),
+        workflow: task.workflow !== undefined,
+      },
+      dispatches: attempts.map((entry) => {
+        const nodeName = steps.find((step) => step.id === entry.nodeId)?.name;
+        return {
+          dispatchId: entry.id,
+          sessionId: entry.workerSessionId,
+          status: entry.settledAt === undefined ? 'running' : (entry.outcome ?? 'failed'),
+          startedAt: entry.startedAt,
+          ...(entry.settledAt !== undefined ? { settledAt: entry.settledAt } : {}),
+          ...(entry.summary !== undefined ? { summary: entry.summary } : {}),
+          ...(entry.filesModified ? { filesModified: [...entry.filesModified] } : {}),
+          ...(entry.nodeId !== undefined ? { nodeId: entry.nodeId } : {}),
+          ...(nodeName !== undefined ? { nodeName } : {}),
+        };
+      }),
+      reviewFeedback: inner.messages
+        .list(
+          (message) =>
+            message.type === 'instruction' &&
+            message.subject === 'review feedback' &&
+            message.dispatchId !== undefined &&
+            ids.has(message.dispatchId)
+        )
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((message) => ({
+          ...(message.dispatchId !== undefined ? { dispatchId: message.dispatchId } : {}),
+          body: message.body,
+          createdAt: message.createdAt,
+        })),
+    };
+  };
+
+  const store = observeStore(
+    inner,
+    changed,
+    (message) => {
+      try {
+        options.onMessagePosted?.(message);
+      } catch (error) {
+        log(`message listener failed: ${errorMessage(error)}`);
+      }
+    },
+    taskCompleted
+  );
   const inbox = new Inbox({ messages: store.messages, now });
   // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
   const git = new GitWorktreeManager({
@@ -426,6 +577,7 @@ export function createOrchestrationService(
       await ready;
       const restricted = options.isRestrictedCoordinator?.(coordinatorSessionId) ?? false;
       let branch: string | undefined;
+      let hostWorkspace = workspace;
       if (restricted) {
         // 受限协调者只从公开基线切出：本地分支上可能有用户没推送的私有提交，不能带进公开 PR；拿不到基线就拒绝
         const base = await publicBaseRef(options.exec, workspace);
@@ -435,17 +587,28 @@ export function createOrchestrationService(
         // 普通目录可能是某个仓库的子目录，git 读得到外层仓库的分支，所以按 vcs 判断而不是看 git 读不读得到
         branch =
           workspace.vcs === 'none' ? '' : await currentBranch(options.exec, workspace.repoPath);
-      }
-      if (branch === undefined) {
-        return fail(
-          `the workspace repository ${workspace.repoPath} is not on a branch (detached HEAD) or cannot be read; check out the branch the orchestrator should work on`
-        );
+        // 读不到分支（detached HEAD、git 读不了或没装、.git 失效）时派发不能卡住：降成原地派发
+        if (branch === undefined) {
+          // .git 被删或只剩空壳（没有 HEAD）时才重新检测并记为 none；其余情况不改 vcs 记录
+          // 刷新失败（如写 settings 的 I/O 错误）只记日志：lookup 不能 reject，否则失败会被缓存
+          if (workspace.vcs === 'git' && !(await hasGitHead(workspace.repoPath))) {
+            await options.refreshVcs?.().catch((error: unknown) => {
+              log(`refresh vcs of ${workspace.repoPath} failed: ${errorMessage(error)}`);
+            });
+          }
+          log(`no branch readable in ${workspace.repoPath}; dispatching in place`);
+          // shortcut: 降级只作用于这个 Host 且随 Host 缓存，服务与工作流引擎仍按 git 隔离，期间工作流任务直接拒绝；需要时再让引擎跟随新 vcs
+          hostWorkspace = { ...workspace, vcs: 'none' };
+          branch = '';
+        }
       }
       const host = createOrchestrationHost({
-        workspace,
+        workspace: hostWorkspace,
         coordinatorSessionId,
         coordinatorBranch: branch,
         restricted,
+        ...(hostWorkspace !== workspace ? { workflowsUnavailable: true } : {}),
+        log,
         store,
         git,
         inbox,
@@ -499,6 +662,50 @@ export function createOrchestrationService(
     };
   };
 
+  /**
+   * worker 会话停下但尝试未结算（当前尝试或运行中的工作流节点）：给主 agent 投一条 escalation，不改任何状态。
+   * 同一 dispatch、同一 subject 的 escalation 还在收件箱里未投递时不重复投。
+   */
+  const escalateUnsettledWorker = (
+    sessionId: string,
+    subject: string,
+    body: (task: Task, dispatch: Dispatch) => string
+  ): void => {
+    if (!loaded) return;
+    const dispatch = dispatchOfSession(sessionId);
+    if (dispatch === undefined || isDispatchSettled(dispatch)) return;
+    const task = store.tasks.get(dispatch.taskId);
+    const run = task && store.runs.get(task.runId);
+    if (task?.status !== 'in-progress' || run === undefined) return;
+    if (task.workflow !== undefined) {
+      if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
+    } else if (
+      store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
+    ) {
+      return;
+    }
+    const coordinator = run.coordinatorSessionId;
+    const duplicate = inbox
+      .peek({ to: coordinator })
+      .some(
+        (message) =>
+          message.type === 'escalation' &&
+          message.from === 'fynvra' &&
+          message.dispatchId === dispatch.id &&
+          message.subject === subject
+      );
+    if (duplicate) return;
+    inbox.post({
+      runId: run.id,
+      dispatchId: dispatch.id,
+      from: 'fynvra',
+      to: coordinator,
+      type: 'escalation',
+      subject,
+      body: body(task, dispatch),
+    });
+  };
+
   const activeCoordinators = (): Set<string> => {
     if (!loaded) return new Set();
     const runIds = new Set(store.tasks.list(isActiveTask).map((task) => task.runId));
@@ -532,38 +739,22 @@ export function createOrchestrationService(
     reconcileWorkers,
 
     workerRunEnded(sessionId) {
-      if (!loaded) return;
-      const dispatch = dispatchOfSession(sessionId);
-      if (dispatch === undefined || isDispatchSettled(dispatch)) return;
-      const task = store.tasks.get(dispatch.taskId);
-      const run = task && store.runs.get(task.runId);
-      if (task?.status !== 'in-progress' || run === undefined) return;
-      if (task.workflow !== undefined) {
-        if (!workflowRunningDispatchIds(task.workflow).includes(dispatch.id)) return;
-      } else if (
-        store.dispatches.list((entry) => entry.taskId === task.id).at(-1)?.id !== dispatch.id
-      ) {
-        return;
-      }
-      const coordinator = run.coordinatorSessionId;
-      const duplicate = inbox
-        .peek({ to: coordinator })
-        .some(
-          (message) =>
-            message.type === 'escalation' &&
-            message.from === 'fynvra' &&
-            message.dispatchId === dispatch.id
-        );
-      if (duplicate) return;
-      inbox.post({
-        runId: run.id,
-        dispatchId: dispatch.id,
-        from: 'fynvra',
-        to: coordinator,
-        type: 'escalation',
-        subject: 'worker stopped without report_done',
-        body: `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`,
-      });
+      escalateUnsettledWorker(
+        sessionId,
+        'worker stopped without report_done',
+        (task, dispatch) =>
+          `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, ended its turn without calling report_done; its session is idle and the attempt is still unsettled. read_worker_output keeps reporting "worker still running" until the attempt settles. Use send_to_worker to have it finish and call report_done, or decide otherwise.`
+      );
+    },
+
+    workerErrored(sessionId, error) {
+      const detail = error.length > 500 ? `${error.slice(0, 500)}…` : error;
+      escalateUnsettledWorker(
+        sessionId,
+        'worker interrupted by a model error',
+        (task, dispatch) =>
+          `The worker of task ${task.id} ("${task.title}"), dispatch ${dispatch.id}, stopped because its model request failed after automatic retries: ${detail}\nIts session, worktree and attempt are all kept; the attempt is still unsettled. Use send_to_worker on dispatch ${dispatch.id} to have the same worker continue (for example "continue"). Only if it really cannot continue, use reject_work or cleanup_worktree with abandon: true. Do not dispatch the same task again.`
+      );
     },
 
     async snapshot({ reconcile = true } = {}) {
@@ -718,4 +909,14 @@ export function createOrchestrationService(
       for (const id of ids) inbox.ack(id);
     },
   };
+}
+
+/** `<repoPath>/.git/HEAD` 是否存在；.git 不存在、是文件或没有 HEAD 都算不存在 */
+async function hasGitHead(repoPath: string): Promise<boolean> {
+  try {
+    await lstat(join(repoPath, '.git', 'HEAD'));
+    return true;
+  } catch {
+    return false;
+  }
 }

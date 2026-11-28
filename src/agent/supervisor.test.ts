@@ -23,6 +23,7 @@ import {
   type OpenSessionInput,
   SessionSupervisor,
   type SupervisedSession,
+  type SupervisorOptions,
 } from './supervisor';
 
 /**
@@ -1095,5 +1096,114 @@ describe('SessionSupervisor describe-models', () => {
       },
     ]);
     expect(missing.of('models-described')[0]?.result).toMatchObject({ ok: false });
+  });
+});
+
+describe('SessionSupervisor 项目记忆', () => {
+  it('只给带 memory 的非档位会话 MemoryHost，调用走 kind memory', async () => {
+    const { supervisor, inputs, of } = setup();
+    const memory = { index: '- #1 [rule] 用 pnpm', write: false };
+    supervisor.handle({ type: 'spawn-session', identity: id1, spec: spec({ memory }) });
+    supervisor.handle({
+      type: 'spawn-session',
+      identity: { sessionId: 's2', generation: 1 },
+      spec: spec({ memory, profile: 'triage' }),
+    });
+    supervisor.handle({
+      type: 'spawn-session',
+      identity: { sessionId: 's3', generation: 1 },
+      spec: spec(),
+    });
+    await settle();
+    expect(inputs.map((input) => input.memoryHost != null)).toEqual([true, false, false]);
+    const search = inputs[0]?.memoryHost?.search({ query: 'pnpm' });
+    expect(of('host-invoke')[0]).toMatchObject({
+      identity: id1,
+      kind: 'memory',
+      method: 'search',
+      input: { query: 'pnpm' },
+    });
+    supervisor.handle({
+      type: 'host-result',
+      identity: id1,
+      callId: '1',
+      result: { ok: true, result: 'hit' },
+    });
+    await expect(search).resolves.toEqual({ ok: true, result: 'hit' });
+  });
+});
+
+describe('SessionSupervisor complete-text', () => {
+  const command = {
+    type: 'complete-text' as const,
+    requestId: 'c-1',
+    model: { providerId: 'p', api: 'anthropic-messages', modelId: 'm', apiKey: 'sk-secret' },
+    systemPrompt: 'sys',
+    prompt: 'hello',
+    maxTokens: 100,
+    timeoutMs: 50,
+  };
+  const create = (completeText?: SupervisorOptions['completeText']) => {
+    const posted: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      post: (event) => posted.push(event),
+      openSession: async () => new FakeSession(),
+      ...(completeText ? { completeText } : {}),
+    });
+    return { posted, supervisor };
+  };
+
+  it('把补全结果按 requestId 回 text-completed，入参不带 requestId / timeoutMs', async () => {
+    const completeText = vi.fn(async () => 'answer');
+    const { posted, supervisor } = create(completeText);
+    supervisor.handle(command);
+    await settle();
+    expect(completeText).toHaveBeenCalledWith(
+      { model: command.model, systemPrompt: 'sys', prompt: 'hello', maxTokens: 100 },
+      expect.any(AbortSignal)
+    );
+    expect(posted).toEqual([
+      { type: 'text-completed', requestId: 'c-1', result: { ok: true, text: 'answer' } },
+    ]);
+  });
+
+  it('到 timeoutMs 中止请求并回超时失败', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const { posted, supervisor } = create(
+      (_input, received) =>
+        new Promise((_resolve, reject) => {
+          signal = received;
+          received.addEventListener('abort', () => reject(new Error('aborted')));
+        })
+    );
+    supervisor.handle(command);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(signal?.aborted).toBe(true);
+    expect(posted).toEqual([
+      {
+        type: 'text-completed',
+        requestId: 'c-1',
+        result: { ok: false, error: 'text completion timed out after 50 ms' },
+      },
+    ]);
+  });
+
+  it('失败时回错误且把 key 换成掩码；没有实现时也回失败', async () => {
+    const failing = create(async () => {
+      throw new Error('401 bad key sk-secret');
+    });
+    failing.supervisor.handle(command);
+    const missing = create();
+    missing.supervisor.handle({ ...command, requestId: 'c-2' });
+    await settle();
+    expect(failing.posted).toEqual([
+      {
+        type: 'text-completed',
+        requestId: 'c-1',
+        result: { ok: false, error: '401 bad key ***' },
+      },
+    ]);
+    expect(missing.posted[0]).toMatchObject({ requestId: 'c-2', result: { ok: false } });
   });
 });

@@ -34,7 +34,7 @@ export function NoticeDialog() {
           <DialogDescription className="break-all">{shown?.message}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <DialogClose render={<Button />}>{t('common.gotIt')}</DialogClose>
+          <DialogClose render={<Button size="sm" />}>{t('common.gotIt')}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

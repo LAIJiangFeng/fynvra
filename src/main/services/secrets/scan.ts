@@ -25,6 +25,26 @@ export function scanSecrets(text: string, known: readonly string[]): SecretScanR
   return { hit: kinds.length > 0, kinds };
 }
 
+export const REDACTED_SECRET = '[已移除密钥]';
+
+/** 替换用的格式：私钥要吃掉整块（到 END 行或文本末尾），其余与 SECRET_PATTERNS 同形 */
+const REDACT_PATTERNS: readonly RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  ...SECRET_PATTERNS.filter(([kind]) => kind !== 'private-key').map(
+    ([, pattern]) => new RegExp(pattern.source, 'g')
+  ),
+];
+
+/** 把已知密钥值（精确子串，长的先换）与常见密钥格式替换为 `[已移除密钥]`。 */
+export function redactSecrets(text: string, known: readonly string[]): string {
+  let out = text;
+  for (const value of [...known].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    out = out.split(value).join(REDACTED_SECRET);
+  }
+  for (const pattern of REDACT_PATTERNS) out = out.replace(pattern, REDACTED_SECRET);
+  return out;
+}
+
 export interface LocalInfoContext {
   /** 本机绝对路径前缀：主目录、userData、各工作区、worktrees 根目录 */
   paths: readonly string[];

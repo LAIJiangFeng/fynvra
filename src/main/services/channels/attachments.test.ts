@@ -81,11 +81,12 @@ function minimalXlsx(): Uint8Array {
 describe('Main 端抽取器（Node 环境真实解析）', () => {
   it('PDF 抽出文字', async () => {
     expect((await MAIN_EXTRACTORS.pdf(minimalPdf('Hello PDF'))).trim()).toBe('Hello PDF');
-  });
+    // 全量并行负载下真实解析可能超过默认 5 秒
+  }, 20_000);
 
   it('docx 抽出文字', async () => {
     expect((await MAIN_EXTRACTORS.docx(minimalDocx('你好 docx'))).trim()).toBe('你好 docx');
-  });
+  }, 20_000);
 
   it('xlsx 转成 TSV', async () => {
     expect(await MAIN_EXTRACTORS.xlsx(minimalXlsx())).toBe('## Sheet: S\n名称\t7');

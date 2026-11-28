@@ -3,8 +3,16 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Workspace, WorkspaceAddResult, WorkspaceSummary } from '@shared/types/workspace';
+import { translate } from '../i18n';
+import { type GitInitResult, initGitRepository } from './gitInit';
 import { createGitInitWatcher } from './gitInitWatcher';
-import { type DirectoryInspection, inspectDirectory, samePath } from './gitRepository';
+import {
+  type DirectoryInspection,
+  type GitRunner,
+  inspectDirectory,
+  runGit,
+  samePath,
+} from './gitRepository';
 import type { SettingsFile } from './settingsFile';
 
 export interface WorkspaceServiceOptions {
@@ -18,6 +26,10 @@ export interface WorkspaceServiceOptions {
   onChanged?: () => void;
   /** 监视普通目录工作区根目录的 `.git` 出现（内置终端里 git init 后自动转为 git）；用完调 dispose() */
   watchGitInit?: boolean;
+  /** initGit 用的 git 执行器（测试注入假实现） */
+  run?: GitRunner;
+  /** initGit 的默认提交者名（测试注入） */
+  gitUserName?: () => string;
 }
 
 /** 同一工作区两次 vcs 重新检测的最小间隔。 */
@@ -38,6 +50,8 @@ export function createWorkspaceService({
   now = Date.now,
   onChanged,
   watchGitInit = false,
+  run = runGit,
+  gitUserName,
 }: WorkspaceServiceOptions) {
   const lastChecked = new Map<string, number>();
   const gitInit = watchGitInit
@@ -122,25 +136,60 @@ export function createWorkspaceService({
       for (const workspace of due) lastChecked.set(workspace.id, at);
       const changes = (
         await Promise.all(
-          due.map(async (workspace): Promise<Workspace | undefined> => {
+          due.map(async (workspace) => {
             const inspection = await inspect(workspace.repoPath, { plain: false });
             if (!inspection.ok || !samePath(inspection.root, workspace.repoPath, platform)) return;
             if (inspection.vcs === workspace.vcs) return;
-            const { defaultBranch: _branch, ...rest } = workspace;
-            return inspection.vcs === 'git'
-              ? { ...rest, vcs: 'git', defaultBranch: inspection.defaultBranch }
-              : { ...rest, vcs: 'none' };
+            return {
+              id: workspace.id,
+              vcs: inspection.vcs,
+              ...(inspection.vcs === 'git' ? { defaultBranch: inspection.defaultBranch } : {}),
+            };
           })
         )
-      ).filter((workspace) => workspace !== undefined);
+      ).filter((change) => change !== undefined);
       if (changes.length === 0) return;
-      const byId = new Map(changes.map((workspace) => [workspace.id, workspace]));
+      const byId = new Map(changes.map((change) => [change.id, change]));
+      // 只把检测结果合进写入时的最新记录：inspect 期间别处写入的字段（如 autoCommit）不被旧对象冲掉
       settings.update((current) => ({
         ...current,
-        workspaces: current.workspaces.map((workspace) => byId.get(workspace.id) ?? workspace),
+        workspaces: current.workspaces.map((workspace): Workspace => {
+          const change = byId.get(workspace.id);
+          if (!change) return workspace;
+          const { defaultBranch: _branch, ...rest } = workspace;
+          return { ...rest, ...change };
+        }),
       }));
       syncWatchers();
       onChanged?.();
+    },
+
+    /**
+     * 一键把普通目录工作区初始化为 git 仓库（见 gitInit.ts），成功后记 `autoCommit: true` 并转为 git 工作区。
+     * 目录本来就是仓库根目录时只刷新 vcs、不打标记（那是用户自己的仓库）。
+     */
+    async initGit(id: string): Promise<GitInitResult> {
+      const workspace = service.get(id);
+      if (!workspace) return { ok: false, error: translate('common.workspaceNotFound') };
+      if (workspace.vcs !== 'none') {
+        return { ok: false, error: translate('workspaces.gitInitNotPlain') };
+      }
+      const result = await initGitRepository(workspace.repoPath, {
+        run,
+        platform,
+        ...(gitUserName ? { userName: gitUserName } : {}),
+      });
+      if (!result.ok) return result;
+      if (!result.alreadyRepo) {
+        settings.update((current) => ({
+          ...current,
+          workspaces: current.workspaces.map((item) =>
+            item.id === id ? { ...item, autoCommit: true } : item
+          ),
+        }));
+      }
+      await service.refreshVcs(id, { force: true });
+      return result;
     },
 
     /** 只从列表移除，不触碰磁盘上的仓库；id 不存在时返回 false。 */

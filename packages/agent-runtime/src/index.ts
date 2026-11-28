@@ -47,6 +47,11 @@ export {
   type DispatchTaskOutput,
   type HostResult,
   type ListWorkersOutput,
+  type MemoryCategory,
+  type MemoryFeedbackInput,
+  type MemoryHost,
+  type MemorySearchInput,
+  type MemoryWriteInput,
   type MergeWorktreeOutput,
   type OpenPullRequestInput,
   type OpenPullRequestOutput,
@@ -69,6 +74,7 @@ export {
   type WorkerHost,
 } from './host';
 export type { McpServerConfig } from './pi/mcp';
+export { type MemoryPromptInput, memoryPrompt } from './prompts/memoryPrompt';
 export {
   buildRolePromptAppend,
   DIRECT_PLAN_MODE_PROMPT,
@@ -92,6 +98,16 @@ export {
   describeConfigAction,
 } from './tools/configTool';
 export { DOCUMENT_EXTENSIONS, isDocumentPath } from './tools/documentPath';
+export {
+  createMemoryFeedbackTool,
+  createMemorySearchTool,
+  createMemoryTools,
+  createMemoryWriteTool,
+  MEMORY_CATEGORIES,
+  MEMORY_FEEDBACK_TOOL_NAME,
+  MEMORY_SEARCH_TOOL_NAME,
+  MEMORY_WRITE_TOOL_NAME,
+} from './tools/memoryTools';
 export {
   CHECK_OUTPUT_MAX_CHARS,
   createOrchestrationTools,

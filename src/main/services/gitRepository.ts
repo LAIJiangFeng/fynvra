@@ -7,15 +7,31 @@ export type GitRunResult =
   | { ok: true; stdout: string }
   | { ok: false; error: string; missingGit?: boolean };
 
-/** 在 cwd 下执行一条 git 命令；永不 reject，便于注入假实现测试。 */
-export type GitRunner = (args: string[], cwd: string) => Promise<GitRunResult>;
+/** 长耗时命令（如初始化时的 add / commit）可放宽超时与输出上限；不传时 10 秒、execFile 默认上限 */
+export interface GitRunOptions {
+  timeoutMs?: number;
+  maxBuffer?: number;
+}
 
-export const runGit: GitRunner = (args, cwd) =>
+/** 在 cwd 下执行一条 git 命令；永不 reject，便于注入假实现测试。 */
+export type GitRunner = (
+  args: string[],
+  cwd: string,
+  options?: GitRunOptions
+) => Promise<GitRunResult>;
+
+export const runGit: GitRunner = (args, cwd, { timeoutMs = 10_000, maxBuffer } = {}) =>
   new Promise((done) => {
     execFile(
       'git',
       args,
-      { cwd, encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+      {
+        cwd,
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: timeoutMs,
+        ...(maxBuffer ? { maxBuffer } : {}),
+      },
       (error, stdout, stderr) => {
         if (!error) {
           done({ ok: true, stdout });

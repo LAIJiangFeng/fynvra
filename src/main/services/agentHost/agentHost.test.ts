@@ -25,6 +25,7 @@ import type {
 } from '@shared/types/chat';
 import { appendChatFiles } from '@shared/types/chat';
 import { IPC_CHANNELS } from '@shared/types/ipc';
+import { MEMORY_INDEX_MAX_CHARS } from '@shared/types/memory';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureMainLocale } from '../../i18n';
 import { createOrchestrationRegistry } from '../orchestration/registry';
@@ -35,7 +36,7 @@ import { BRANCH_REFRESH_THROTTLE_MS, createBranchTracker } from '../sessions/bra
 import * as historyProjection from '../sessions/history';
 import { sessionFilePath } from '../sessions/history';
 import { createSessionStore } from '../sessions/sessionStore';
-import { type AgentHostDeps, createAgentHost, titleFrom } from './agentHost';
+import { type AgentHostDeps, createAgentHost, type MemoryCaller, titleFrom } from './agentHost';
 import { connectOrchestration } from './connectOrchestration';
 import type { WorkerProcess } from './workerClient';
 
@@ -1048,6 +1049,85 @@ describe('worker attempt lifecycle', () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a dispatched worker attempt alive after a model error, but not after abort or a fatal error', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    const changed = vi.fn();
+    env.launcher.onSessionFailure?.(changed);
+    const modelError = (seq: number) => {
+      env.worker().emit({
+        type: 'session-event',
+        identity: env.identity,
+        seq,
+        event: { type: 'error', source: 'model', message: 'Connection error.', seq },
+      });
+      env.worker().emit({ type: 'session-status', identity: env.identity, status: 'error' });
+    };
+    modelError(100);
+    expect(env.launcher.sessionFailure?.(sessionId)).toBeUndefined();
+    expect(changed).not.toHaveBeenCalled();
+    expect(env.host.get(sessionId)?.status).toBe('error');
+    // send_to_worker（普通 promptSession）在同一会话里开始新的一轮
+    const prompts = env.sent('prompt').length;
+    expect(await env.launcher.promptSession(sessionId, 'continue')).toEqual({ ok: true });
+    expect(env.sent('prompt')).toHaveLength(prompts + 1);
+    expect(env.sent('prompt').at(-1)).toMatchObject({ identity: env.identity, text: 'continue' });
+    expect(env.host.get(sessionId)?.status).toBe('running');
+    // 用户中止仍判 interrupted
+    env.worker().emit({
+      type: 'session-event',
+      identity: env.identity,
+      seq: 101,
+      event: { type: 'agent_settled', aborted: true, seq: 101 },
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('aborted');
+  });
+
+  it('still interrupts a dispatched worker on a fatal session error or a non-model error', async () => {
+    const env = await dispatched();
+    const { sessionId } = env.identity;
+    env.worker().emit({
+      type: 'session-event',
+      identity: env.identity,
+      seq: 100,
+      event: { type: 'error', source: 'model', message: 'Connection error.', seq: 100 },
+    });
+    env.worker().emit({
+      type: 'session-error',
+      identity: env.identity,
+      fatal: true,
+      error: 'Session could not start',
+    });
+    expect(env.launcher.sessionFailure?.(sessionId)).toContain('Session could not start');
+
+    const other = await dispatched();
+    other.worker().emit({
+      type: 'session-event',
+      identity: other.identity,
+      seq: 100,
+      event: { type: 'error', source: 'compaction', message: 'summary failed', seq: 100 },
+    });
+    other.worker().emit({ type: 'session-status', identity: other.identity, status: 'error' });
+    expect(other.launcher.sessionFailure?.(other.identity.sessionId)).toContain('summary failed');
+  });
+
+  it('still interrupts a non-dispatched session on a model error', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hello');
+    const identity = { sessionId: session.id, generation: 1 };
+    env.worker().emit({
+      type: 'session-event',
+      identity,
+      seq: 100,
+      event: { type: 'error', source: 'model', message: 'Connection error.', seq: 100 },
+    });
+    env.worker().emit({ type: 'session-status', identity, status: 'error' });
+    expect(env.host.implementsLauncher().sessionFailure?.(session.id)).toContain(
+      'Connection error.'
+    );
+  });
+
   it('records a running worker process crash without mistaking automatic respawn for recovery', async () => {
     const env = await dispatched();
     const changed = vi.fn();
@@ -1604,6 +1684,29 @@ describe('createAgentHost sessions', () => {
     await git.host.prompt((await createSession(git, 'orchestrator')).id, 'plan');
     const gitSpawn = git.sent('spawn-session')[0];
     expect(gitSpawn?.type === 'spawn-session' && gitSpawn.spec).not.toHaveProperty('inPlace');
+  });
+
+  it('git 工作区里没有 worktree 的 worker 会话带 inPlace，有 worktree 的不带', async () => {
+    const repo = { id: 'ws-1', name: 'repo', repoPath: '/repo', vcs: 'git' as const };
+    const env = setup({ workspaces: { get: (id) => (id === repo.id ? repo : undefined) } });
+    const coordinator = await createSession(env, 'orchestrator');
+    env.host.setCoordinatorLookup(() => coordinator.id);
+    const spawnOf = async (dispatchId: string, worktreeId?: string) => {
+      const created = await env.host.implementsLauncher().createWorkerSession({
+        workspaceId: 'ws-1',
+        runId: 'run_1',
+        dispatchId,
+        roleId: 'worker',
+        cwd: worktreeId ? `/worktrees/${dispatchId}` : repo.repoPath,
+        ...(worktreeId ? { worktreeId } : {}),
+        brief: '# Create hello.txt',
+      });
+      if (!created.ok) throw new Error(created.error);
+      const spawned = env.sent('spawn-session').at(-1);
+      return spawned?.type === 'spawn-session' ? spawned.spec : undefined;
+    };
+    expect(await spawnOf('dsp_1')).toMatchObject({ worker: true, inPlace: true });
+    expect(await spawnOf('dsp_2', 'wt_1')).not.toHaveProperty('inPlace');
   });
 
   it('re-stamps worker events per session and drops stale generations and duplicate seqs', async () => {
@@ -3889,5 +3992,182 @@ describe('restricted coordinator isolation through registry wiring', () => {
     ).toMatchObject({ ok: true });
     const snapshot = await registry.serviceFor('ws-1')?.snapshot();
     expect(snapshot?.dispatches.find((entry) => entry.id === dispatchId)?.outcome).toBeUndefined();
+  });
+});
+
+describe('项目记忆桥与 completeText', () => {
+  const memorySpec = { index: '- #1 [rule] 用 pnpm', write: true };
+
+  it('buildSpec 只给 specFor 有返回的会话带记忆，超长截断；specFor 抛错时照常启动；档位会话不问', async () => {
+    const specFor = vi.fn(async (caller: MemoryCaller) => {
+      if (caller.sessionId === 'session-1') return memorySpec;
+      if (caller.sessionId === 'session-2') return undefined;
+      if (caller.sessionId === 'session-3') throw new Error('db locked');
+      return { index: 'x'.repeat(MEMORY_INDEX_MAX_CHARS + 10), write: false };
+    });
+    const env = setup({ memory: { specFor, handle: vi.fn() } });
+    const sessions = [];
+    for (let index = 0; index < 5; index++) sessions.push(await createSession(env));
+    env.store.update('session-5', { profile: 'triage' });
+    for (const session of sessions) {
+      expect(await env.host.prompt(session.id, 'hi')).toEqual({ ok: true });
+    }
+    const specs = env
+      .sent('spawn-session')
+      .map((command) => (command.type === 'spawn-session' ? command.spec : undefined));
+    expect(specs).toHaveLength(5);
+    expect(specs[0]?.memory).toEqual(memorySpec);
+    expect(specs[1]).not.toHaveProperty('memory');
+    expect(specs[2]).not.toHaveProperty('memory');
+    expect(specs[3]?.memory).toEqual({ index: 'x'.repeat(MEMORY_INDEX_MAX_CHARS), write: false });
+    expect(specs[4]).not.toHaveProperty('memory');
+    expect(specFor.mock.calls.map(([caller]) => caller.sessionId)).toEqual([
+      'session-1',
+      'session-2',
+      'session-3',
+      'session-4',
+    ]);
+  });
+
+  it('没有记忆桥时 spec 不带记忆，memory 调用返回错误', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    await env.host.prompt(session.id, 'hi');
+    expect(env.sent('spawn-session')[0]).not.toHaveProperty('spec.memory');
+    env.worker().emit({
+      type: 'host-invoke',
+      identity: { sessionId: session.id, generation: 1 },
+      callId: 'm1',
+      kind: 'memory',
+      method: 'search',
+      input: {},
+    });
+    await vi.waitFor(() =>
+      expect(env.sent('host-result').at(-1)).toMatchObject({
+        callId: 'm1',
+        result: { ok: false, error: 'project memory is unavailable' },
+      })
+    );
+  });
+
+  it('memory 调用交给桥，caller 取自会话记录：worker 会话带 dispatchId，档位会话带 profile', async () => {
+    const handle = vi.fn(async () => ({ ok: true as const, result: 'found' }));
+    const env = setup({ memory: { specFor: async () => undefined, handle } });
+    const worker = await createSession(env);
+    const triage = await createSession(env);
+    env.store.update(worker.id, { dispatchId: 'dsp_1' });
+    env.store.update(triage.id, { profile: 'triage' });
+    for (const session of [worker, triage]) {
+      await env.host.prompt(session.id, 'hi');
+      env.worker().emit({
+        type: 'host-invoke',
+        identity: { sessionId: session.id, generation: 1 },
+        callId: `call-${session.id}`,
+        kind: 'memory',
+        method: 'feedback',
+        input: { id: 1, verdict: 'useful' },
+      });
+    }
+    await vi.waitFor(() => expect(env.sent('host-result')).toHaveLength(2));
+    expect(env.sent('host-result')[0]).toMatchObject({ result: { ok: true, result: 'found' } });
+    const callers = handle.mock.calls.map((call) => (call as unknown[])[0] as MemoryCaller);
+    expect(callers[0]).toMatchObject({
+      sessionId: worker.id,
+      workspaceId: 'ws-1',
+      dispatchId: 'dsp_1',
+    });
+    expect(callers[0]).not.toHaveProperty('profile');
+    expect(callers[1]).toMatchObject({
+      sessionId: triage.id,
+      workspaceId: 'ws-1',
+      profile: 'triage',
+    });
+    expect(callers[1]).not.toHaveProperty('dispatchId');
+    expect(handle.mock.calls[0]).toEqual([
+      callers[0],
+      'feedback',
+      { id: 1, verdict: 'useful' },
+      expect.any(AbortSignal),
+    ]);
+  });
+
+  const request = { systemPrompt: 'sys', prompt: 'hello', maxTokens: 512, timeoutMs: 1_000 };
+  const completeCommands = (env: ReturnType<typeof setup>) =>
+    env
+      .sent('complete-text')
+      .flatMap((command) => (command.type === 'complete-text' ? [command] : []));
+
+  it('completeText 按 requestId 往返，给的模型解析成带 key 的 spec', async () => {
+    const env = setup();
+    const first = env.host.completeText({
+      ...request,
+      model: { providerId: 'anthropic', modelId: 'claude-haiku-5-5' },
+    });
+    const second = env.host.completeText({
+      ...request,
+      model: { providerId: 'anthropic', modelId: 'claude-sonnet-5-5' },
+    });
+    await vi.waitFor(() => expect(completeCommands(env)).toHaveLength(2));
+    const [one, two] = completeCommands(env);
+    expect(one).toMatchObject({
+      ...request,
+      model: { modelId: 'claude-haiku-5-5', apiKey: 'sk-test-secret' },
+    });
+    expect(one?.requestId).not.toBe(two?.requestId);
+    env.worker().emit({
+      type: 'text-completed',
+      requestId: two?.requestId,
+      result: { ok: true, text: 'second' },
+    });
+    env.worker().emit({
+      type: 'text-completed',
+      requestId: one?.requestId,
+      result: { ok: false, error: 'bad' },
+    });
+    expect(await first).toEqual({ ok: false, error: 'bad' });
+    expect(await second).toEqual({ ok: true, text: 'second' });
+  });
+
+  it('completeText 模型解析失败或没给时用会话当前模型，都拿不到就失败', async () => {
+    const env = setup();
+    const session = await createSession(env);
+    const pending = env.host.completeText({
+      ...request,
+      model: { providerId: 'missing', modelId: 'x' },
+      sessionId: session.id,
+    });
+    await vi.waitFor(() => expect(completeCommands(env)).toHaveLength(1));
+    expect(completeCommands(env)[0]?.model.modelId).toBe(session.model?.modelId);
+    env.worker().emit({
+      type: 'text-completed',
+      requestId: completeCommands(env)[0]?.requestId,
+      result: { ok: true, text: 'ok' },
+    });
+    expect(await pending).toEqual({ ok: true, text: 'ok' });
+    expect(await env.host.completeText(request)).toMatchObject({ ok: false });
+    expect(
+      await env.host.completeText({ ...request, model: { providerId: 'missing', modelId: 'x' } })
+    ).toMatchObject({ ok: false });
+    expect(
+      await env.host.completeText({ ...request, sessionId: session.id, maxTokens: 0 })
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(completeCommands(env)).toHaveLength(1);
+  });
+
+  it('completeText 在 worker 崩溃时失败，超时也失败', async () => {
+    const env = setup();
+    const model = { providerId: 'anthropic', modelId: 'claude-haiku-5-5' };
+    const crashed = env.host.completeText({ ...request, model });
+    await vi.waitFor(() => expect(completeCommands(env)).toHaveLength(1));
+    env.worker().exit(1);
+    expect(await crashed).toMatchObject({ ok: false });
+
+    const other = setup();
+    vi.useFakeTimers();
+    const timedOut = other.host.completeText({ ...request, model });
+    await vi.advanceTimersByTimeAsync(request.timeoutMs + 5_000);
+    expect(await timedOut).toEqual({ ok: false, error: 'text completion timed out after 1000 ms' });
   });
 });

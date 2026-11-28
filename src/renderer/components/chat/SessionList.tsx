@@ -301,10 +301,11 @@ function BulkRemoveDialog({ workspaceId, onDone }: { workspaceId: string; onDone
           </div>
         )}
         <DialogFooter>
-          <DialogClose render={<Button ref={cancel} variant="outline" />}>
+          <DialogClose render={<Button size="sm" ref={cancel} variant="outline" />}>
             {t('common.cancel')}
           </DialogClose>
           <Button
+            size="sm"
             variant="destructive"
             disabled={pending?.blocked === null}
             onClick={() => {

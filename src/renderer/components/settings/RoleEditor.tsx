@@ -374,10 +374,16 @@ export function RoleEditor({
             <DialogDescription>{t('settings.roles.resetHint')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmingReset(false)}>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmingReset(false)}
+            >
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               type="button"
               onClick={() => {
                 const defaults = getBuiltinRole(initial.id);

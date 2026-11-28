@@ -3,8 +3,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { createAppDialogApi } from './domains/appDialog';
 import { createAppPluginsApi } from './domains/appPlugins';
 import { createFilesApi } from './domains/files';
+import { createGitApi } from './domains/git';
 import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
+import { createMemoryApi } from './domains/memory';
 import { createNotificationsApi } from './domains/notifications';
 import { createOrchestrationApi } from './domains/orchestration';
 import { createPluginsApi } from './domains/plugins';
@@ -34,6 +36,7 @@ const api: FynvraApi = {
   appDialog: createAppDialogApi(ipcRenderer, subscribe),
   updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: createSettingsApi(ipcRenderer, subscribe),
+  git: createGitApi(ipcRenderer),
   workspaceUi: createWorkspaceUiApi(ipcRenderer, subscribe),
   workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),
@@ -61,6 +64,7 @@ const api: FynvraApi = {
   skills: createSkillsApi(ipcRenderer, subscribe),
   instructions: createInstructionsApi(ipcRenderer, subscribe),
   mcp: createMcpApi(ipcRenderer, subscribe),
+  memory: createMemoryApi(ipcRenderer, subscribe),
   plugins: createPluginsApi(ipcRenderer, subscribe),
   appPlugins: createAppPluginsApi(ipcRenderer, subscribe),
   notifications: createNotificationsApi(ipcRenderer, subscribe),

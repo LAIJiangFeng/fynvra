@@ -9,6 +9,11 @@ export const IPC_CHANNELS = {
   UPDATES_INSTALL: 'updates:install',
   UPDATES_CHANGED: 'updates:changed',
 
+  /** git 环境：无参检测；安装只用 Main 写死的地址与校验值；身份只收 { name, email } */
+  GIT_STATUS: 'git:status',
+  GIT_INSTALL: 'git:install',
+  GIT_SET_IDENTITY: 'git:set-identity',
+
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_TEST_NETWORK: 'settings:test-network',
@@ -32,6 +37,8 @@ export const IPC_CHANNELS = {
   WORKSPACES_OPEN_IN: 'workspaces:open-in',
   WORKSPACES_COPY: 'workspaces:copy',
   WORKSPACES_PICK_APP: 'workspaces:pick-app',
+  /** 参数 `{ workspaceId }`：把普通目录工作区一键初始化为 git 仓库；没装 git 时返回 code 'git-missing' */
+  WORKSPACES_INIT_GIT: 'workspaces:init-git',
   TERMINALS_CREATE: 'terminals:create',
   TERMINALS_WRITE: 'terminals:write',
   TERMINALS_RESIZE: 'terminals:resize',
@@ -197,6 +204,20 @@ export const IPC_CHANNELS = {
   MCP_IMPORT: 'mcp:import',
   /** Main → Renderer：MCP 服务器列表已变更 */
   MCP_CHANGED: 'mcp:changed',
+
+  // --- memory（项目记忆，§7.15；入参见 @shared/types/memory 的 parseMemory*Input） ---
+  /** `{ workspaceId }` → `MemoryListView` */
+  MEMORY_LIST: 'memory:list',
+  /** `{ workspaceId, category, content }` → `{ memory }`；记为 user、pinned */
+  MEMORY_CREATE: 'memory:create',
+  /** `{ workspaceId, id, content?, category?, pinned?, status? }` → `{ memory }` */
+  MEMORY_UPDATE: 'memory:update',
+  /** `{ workspaceId, id }` */
+  MEMORY_REMOVE: 'memory:remove',
+  /** `{ workspaceId }` → `{ removed }`；清空该工作区所属项目 */
+  MEMORY_CLEAR: 'memory:clear',
+  /** Main → Renderer：`{ workspaceIds: string[] }` 这些工作区的记忆变了 */
+  MEMORY_CHANGED: 'memory:changed',
 
   // --- plugins ---
   PLUGINS_LIST: 'plugins:list',

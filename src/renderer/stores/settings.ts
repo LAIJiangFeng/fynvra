@@ -6,6 +6,8 @@ import {
   compactionStrategyOf,
   compactionThresholdTokensOf,
   compactionTimeoutMsOf,
+  type MemoryPreferences,
+  memoryPreferencesOf,
   type PickWorktreesRootResult,
   type Preferences,
   type SessionPreferences,
@@ -162,6 +164,7 @@ type GeneralPatch = Partial<
       | 'webFetchAllowLoopback'
       | 'confirmDangerousActions'
       | 'watchdog'
+      | 'memory'
     >
 >;
 
@@ -179,6 +182,8 @@ export interface GeneralPreferencesState {
   confirmDangerousActions: boolean;
   /** 会话守护；整块写回 */
   watchdog: WatchdogPreferences;
+  /** 项目记忆；整块写回 */
+  memory: MemoryPreferences;
   /** 最近一次保存失败的原因 */
   error: string | null;
   load(): Promise<void>;
@@ -196,6 +201,7 @@ function resolveGeneral(preferences: GeneralPatch) {
     webFetchAllowLoopback: preferences.webFetchAllowLoopback === true,
     confirmDangerousActions: preferences.confirmDangerousActions === true,
     watchdog: watchdogPreferencesOf(preferences),
+    memory: memoryPreferencesOf(preferences),
   };
 }
 
@@ -230,6 +236,7 @@ export const useGeneralPreferencesStore = create<GeneralPreferencesState>()((set
           webFetchAllowLoopback: state.webFetchAllowLoopback,
           confirmDangerousActions: state.confirmDangerousActions,
           watchdog: state.watchdog,
+          memory: state.memory,
           ...patch,
         })
       );

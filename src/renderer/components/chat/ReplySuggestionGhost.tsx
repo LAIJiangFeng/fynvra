@@ -28,10 +28,10 @@ export function ReplySuggestionGhost({
     const inner = layer.current;
     if (!input || !outer || !inner) return;
     const sync = () => {
-      // 宽度对齐 textarea 的实际换行宽度；高度先按内容量，再同步给 textarea，避免长建议被单行输入框裁掉
+      // 宽度对齐 textarea 的实际换行宽度；高度先按内容量，再同步给 textarea，避免长建议被裁掉；下限 84px 与 textarea 的 min-h-21（3 行）一致
       outer.style.width = `${input.clientWidth}px`;
       outer.style.height = 'auto';
-      const needed = Math.max(44, Math.min(outer.scrollHeight, 240));
+      const needed = Math.max(84, Math.min(outer.scrollHeight, 240));
       outer.style.height = `${needed}px`;
       if (input.style.minHeight !== `${needed}px`) input.style.minHeight = `${needed}px`;
       inner.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
@@ -55,7 +55,7 @@ export function ReplySuggestionGhost({
       aria-hidden="true"
       className="pointer-events-none absolute top-0 left-0 z-0 overflow-hidden px-4 py-3 text-base md:text-sm"
     >
-      <div ref={layer} className="whitespace-pre-wrap break-words">
+      <div ref={layer} className="whitespace-pre-wrap break-all">
         <span className="text-transparent">{draft}</span>
         <span className="text-muted-foreground/70">{suffix}</span>
         <span className="ml-1 text-[0.8em] text-muted-foreground/60">→</span>

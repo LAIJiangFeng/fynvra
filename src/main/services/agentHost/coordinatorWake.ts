@@ -4,6 +4,10 @@ import type { OrchestrationRegistry } from '../orchestration/registry';
 import type { PendingCoordinatorReview } from '../orchestration/service';
 import type { AgentHostService } from './agentHost';
 
+/** 编排通知的固定开头：以 user 消息送进主 agent 会话，但不是用户原话 */
+export const ORCHESTRATION_NOTICE_PREFIX =
+  '[Fynvra orchestration] Automated notification — not a message from the user.';
+
 const WAKE_TYPES: ReadonlySet<string> = new Set(['worker_done', 'question', 'escalation']);
 const BODY_MAX_CHARS = 6_000;
 /** Initial delivery plus one continuation per attempt; a new user turn can explicitly resume. */
@@ -46,7 +50,7 @@ export function wakePrompt(
   reviews: readonly PendingCoordinatorReview[] = []
 ): string {
   return [
-    '[Fynvra orchestration] Automated notification — not a message from the user.',
+    ORCHESTRATION_NOTICE_PREFIX,
     '',
     ...(messages.length
       ? [`New worker messages (${messages.length}):`, messages.map(entry).join('\n\n')]
@@ -70,7 +74,7 @@ export interface CoordinatorWakeHosts {
   agentHost: Pick<AgentHostService, 'get' | 'promptWhenIdle' | 'observe'>;
   registry: Pick<
     OrchestrationRegistry,
-    'onMessage' | 'coordinatorWork' | 'ackMessages' | 'workerRunEnded'
+    'onMessage' | 'coordinatorWork' | 'ackMessages' | 'workerRunEnded' | 'workerErrored'
   >;
   log?(message: string): void;
 }
@@ -106,6 +110,8 @@ export function installCoordinatorWake(
   const delayMs = options.delayMs ?? 400;
   const workerIdleMs = options.workerIdleMs ?? 2_000;
   const states = new Map<string, WakeState>();
+  /** 各会话本轮最后一条 error 事件，在 agent_settled 时取走 */
+  const lastErrors = new Map<string, { source: string; message: string }>();
   const log = hosts.log ?? ((message: string) => console.warn(`[coordinator-wake] ${message}`));
   const stateOf = (sessionId: string): WakeState => {
     let state = states.get(sessionId);
@@ -222,14 +228,26 @@ export function installCoordinatorWake(
       schedule(sessionId);
     },
     event: ({ sessionId, event }) => {
+      if (event.type === 'error') {
+        lastErrors.set(sessionId, { source: event.source, message: event.message });
+        return;
+      }
       if (event.type !== 'agent_settled') return;
+      const lastError = lastErrors.get(sessionId);
+      lastErrors.delete(sessionId);
       if (event.aborted) return pause(sessionId);
       schedule(sessionId);
       // Worker that ended its run without report_done: the registry tells its coordinator.
       setTimeout(() => {
-        // Still idle: not running / waiting-approval again, not errored (failure recovery owns that), not deleted.
-        if (hosts.agentHost.get(sessionId)?.status !== 'idle') return;
+        const status = hosts.agentHost.get(sessionId)?.status;
         try {
+          // 本轮以模型错误结束且仍停在 error：agentHost 没有判失败，由注册表通知主 agent 让原 worker 继续
+          if (status === 'error' && lastError?.source === 'model') {
+            hosts.registry.workerErrored(sessionId, lastError.message);
+            return;
+          }
+          // Still idle: not running / waiting-approval again, not errored (failure recovery owns that), not deleted.
+          if (status !== 'idle') return;
           hosts.registry.workerRunEnded(sessionId);
         } catch (error) {
           log(`session ${sessionId}: worker run-end check failed: ${errorMessage(error)}`);

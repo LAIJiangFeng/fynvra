@@ -8,6 +8,8 @@ import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
+import { getGitSetup } from './ipc/git';
+import { getMemoryService, memoryWorkspace, readSessionMessages } from './ipc/memory';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost, getSessionAttachments, getSessionStore } from './ipc/sessions';
@@ -23,6 +25,7 @@ import { setChannelHost } from './services/channels/instance';
 import { collectLocalInfo } from './services/channels/localInfo';
 import { createChannelStore } from './services/channels/store';
 import { savedCommandEnvironment } from './services/commandNetwork';
+import { createExtractionRunner } from './services/memory/extraction';
 import { setPullRequestBodyExtension } from './services/orchestration/pullRequest';
 import {
   createWorktreesRootResolver,
@@ -40,6 +43,26 @@ import { createQuitGuard } from './windows/quitGuard';
 const AGENT_SHUTDOWN_TIMEOUT_MS = 5_000;
 /** 渠道会话附件副本的定期清理间隔 */
 const CHANNEL_COPY_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** 项目记忆：过期清理定时器与验收后的提炼队列；任何失败只记日志，不挡应用启动 */
+function startProjectMemory(agentHost: ReturnType<typeof getAgentHost>): void {
+  try {
+    const memory = getMemoryService();
+    const runner = createExtractionRunner({
+      memory,
+      completeText: (input) => agentHost.completeText(input),
+      readSessionMessages,
+      workspace: memoryWorkspace,
+      preferences: () => getSettingsFile().read().preferences,
+    });
+    void runner.recover();
+    memory.start();
+    getOrchestrationRegistry().onTaskAccepted((task) => runner.enqueue(task));
+    app.on('will-quit', () => memory.stop());
+  } catch (error) {
+    console.error('[fynvra] 项目记忆启动失败', error);
+  }
+}
 
 /** 对所有渠道会话（带 profile）逐个清理附件副本；prune 自身不抛异常 */
 async function pruneChannelCopies(): Promise<void> {
@@ -132,6 +155,8 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      // Fynvra 自带的便携 git 追加到 PATH 末尾（同步），须在任何 git 调用与 worker fork 之前
+      getGitSetup().injectBundledPath();
       // 先开始读登录 shell 的 PATH，fork worker 之前再等它（失败不抛错）
       const shellPathReady = loadLoginShellPath();
       // toolkit 在 dev 下会改用 electron.exe 的身份；开发版也使用独立的 Fynvra 分组。
@@ -215,6 +240,7 @@ if (!app.requestSingleInstanceLock()) {
       await channelHost
         .start()
         .catch((error: unknown) => console.error('[fynvra] 渠道宿主启动失败', error));
+      startProjectMemory(agentHost);
       agentHost.start();
       // 会话记录已加载：先清一次渠道副本，之后每 6 小时一次
       void pruneChannelCopies();

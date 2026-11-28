@@ -110,6 +110,13 @@ junction 或其他非普通文件时拒绝；缺失的父目录只在工作区�
 `.fynvra-*.tmp` 临时文件并落盘，再 rename 原子替换；目标被占用（EPERM / EACCES / EBUSY）时退回直接覆盖。内容以 UTF-8
 （无 BOM，以换行结尾）写入，最多 256 KiB。它不经 OrchestrationHost，审批类别是 `file-write`（按角色档位审批）。
 
+项目记忆：`createRoleSession({ memory: { host, index, write } })`（`host` 实现 `MemoryHost`，由 Main 的记忆服务经
+host-invoke `kind: 'memory'` 承接，method 与方法名相同）。任何工具策略都加 `project_memory_search { query?, ids?(≤20), category?, limit 1–20 }`
+与 `project_memory_feedback { id, verdict: useful|outdated, note?(≤300) }`；`write` 为 true 且不是 worker 会话时再加
+`project_memory_write { action: add|update|delete, id?, category?, content?(≤500), files?(≤10), quote?(≤300), force? }`。
+`memoryPrompt` 把 Main 生成好的索引行包成 `<project_memory>` 段，经 `fynvra-project-memory` 扩展追加在角色段之后、计划模式段之前；
+索引为空且不可写时不注入。档位会话（triage / restricted）忽略 `memory`。三个工具不属于审批门的任何类别。
+
 所有工具都是「先归一化再校验」：`prepareArguments` 在 pi 的 schema 校验前修正参数（别名、trim、
 `timeout_ms` clamp 到 [1000, 900000]、`until` 默认 `'all'`、`role` 默认 `'worker'`），`execute` 再做语义校验。
 `execute` 永不抛异常，失败以 `isError` 文本返回；`report_done` 每轮只能成功一次（新的 agent run 开始时重新开放，

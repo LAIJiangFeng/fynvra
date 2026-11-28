@@ -18,6 +18,8 @@ export interface Workspace {
   vcs: WorkspaceVcs;
   /** 普通目录没有 */
   defaultBranch?: string;
+  /** Fynvra 一键初始化的仓库：派发和合并前自动提交未提交的改动；只存 true */
+  autoCommit?: boolean;
 }
 
 /** 给 Renderer 的工作区视图：后续操作只回传 id，不含可回传的仓库路径。 */
@@ -58,9 +60,17 @@ export function parseWorkspace(raw: unknown): Workspace | null {
   const record = asRecord(raw);
   if (!record) return null;
   const id = parseWorkspaceId(record.id);
-  const { name, repoPath, vcs = 'git', defaultBranch } = record;
+  const { name, repoPath, vcs = 'git', defaultBranch, autoCommit } = record;
   if (!id || !isNonEmptyString(name) || !isNonEmptyString(repoPath)) return null;
   if (!isWorkspaceVcs(vcs)) return null;
   if (defaultBranch !== undefined && !isNonEmptyString(defaultBranch)) return null;
-  return { id, name, repoPath, vcs, ...(defaultBranch !== undefined ? { defaultBranch } : {}) };
+  return {
+    id,
+    name,
+    repoPath,
+    vcs,
+    ...(defaultBranch !== undefined ? { defaultBranch } : {}),
+    // 只保留 true，其他值丢弃（不让整条记录失效）
+    ...(autoCommit === true ? { autoCommit } : {}),
+  };
 }

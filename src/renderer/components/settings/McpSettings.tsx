@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n/I18nProvider';
 import { useMcpStore } from '@/stores/mcp';
-import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { EmptyState, InlineMessage, SettingsCard, SettingsSection } from './common';
 import { McpDialog, type McpEditing } from './McpDialog';
 import { McpImportDialog } from './McpImportDialog';
 import { draftFromServer, emptyMcpDraft, type McpDraft } from './mcpForm';
@@ -36,18 +36,21 @@ export function McpSettings() {
   };
 
   return (
-    <section>
-      <SectionHeader title={t('settings.mcp.title')}>
-        <Button size="sm" variant="outline" onClick={openImport}>
-          <HardDriveDownload />
-          {t('settings.import.fromLocal')}
-        </Button>
-        <Button size="sm" onClick={() => edit(emptyMcpDraft())}>
-          <Plus />
-          {t('settings.mcp.add')}
-        </Button>
-      </SectionHeader>
-
+    <SettingsSection
+      title={t('settings.mcp.title')}
+      actions={
+        <>
+          <Button size="sm" variant="outline" onClick={openImport}>
+            <HardDriveDownload />
+            {t('settings.import.fromLocal')}
+          </Button>
+          <Button size="sm" onClick={() => edit(emptyMcpDraft())}>
+            <Plus />
+            {t('settings.mcp.add')}
+          </Button>
+        </>
+      }
+    >
       {status && (
         <InlineMessage tone={status.tone} className="mb-3 break-all">
           {status.text}
@@ -63,16 +66,18 @@ export function McpSettings() {
           </Button>
         </EmptyState>
       ) : (
-        <ul className="divide-y rounded-lg border">
-          {servers.map((server) => (
-            <McpRow
-              key={server.id}
-              server={server}
-              onEdit={() => edit(draftFromServer(server))}
-              onError={(text) => setStatus({ tone: 'error', text })}
-            />
-          ))}
-        </ul>
+        <SettingsCard>
+          <ul className="divide-y">
+            {servers.map((server) => (
+              <McpRow
+                key={server.id}
+                server={server}
+                onEdit={() => edit(draftFromServer(server))}
+                onError={(text) => setStatus({ tone: 'error', text })}
+              />
+            ))}
+          </ul>
+        </SettingsCard>
       )}
 
       <McpDialog editing={editing} onClose={() => setEditing(null)} />
@@ -81,7 +86,7 @@ export function McpSettings() {
         onClose={() => setImportSession(null)}
         onImported={setStatus}
       />
-    </section>
+    </SettingsSection>
   );
 }
 

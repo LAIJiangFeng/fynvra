@@ -2,9 +2,12 @@ import {
   BarChart3,
   Bell,
   Boxes,
+  Brain,
   FileText,
+  GitBranch,
   Keyboard,
   type LucideIcon,
+  MessagesSquare,
   Palette,
   Plug,
   Puzzle,
@@ -14,17 +17,20 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import { type ComponentType, useEffect, useRef } from 'react';
+import { type ComponentType, Fragment, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
+import { ChatSettings } from './ChatSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { GitSettings } from './GitSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
+import { MemorySettings } from './MemorySettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PluginsSettings } from './PluginsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
@@ -43,20 +49,40 @@ interface SectionSpec {
   wide?: boolean;
 }
 
-const SECTIONS: SectionSpec[] = [
-  { value: 'general', icon: SlidersHorizontal, Component: GeneralSettings },
-  { value: 'notifications', icon: Bell, Component: NotificationSettings },
-  { value: 'providers', icon: Boxes, Component: ProvidersSettings },
-  { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
-  { value: 'workflows', icon: Workflow, Component: WorkflowsSettings, wide: true },
-  { value: 'instructions', icon: FileText, Component: InstructionsSettings },
-  { value: 'skills', icon: Sparkles, Component: SkillsSettings },
-  { value: 'mcp', icon: Plug, Component: McpSettings },
-  { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
-  { value: 'appearance', icon: Palette, Component: AppearanceSettings },
-  { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
-  { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },
+/** 侧栏分组：小标题在字典 settings.groups.<group>；第一组是常用项，不加小标题 */
+const GROUPS: { group?: 'agents' | 'extensions' | 'code'; sections: SectionSpec[] }[] = [
+  {
+    sections: [
+      { value: 'general', icon: SlidersHorizontal, Component: GeneralSettings },
+      { value: 'chat', icon: MessagesSquare, Component: ChatSettings },
+      { value: 'appearance', icon: Palette, Component: AppearanceSettings },
+      { value: 'notifications', icon: Bell, Component: NotificationSettings },
+      { value: 'keybindings', icon: Keyboard, Component: KeybindingsSettings },
+      { value: 'usage', icon: BarChart3, Component: UsageSettings, wide: true },
+    ],
+  },
+  {
+    group: 'agents',
+    sections: [
+      { value: 'providers', icon: Boxes, Component: ProvidersSettings },
+      { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },
+      { value: 'workflows', icon: Workflow, Component: WorkflowsSettings, wide: true },
+      { value: 'instructions', icon: FileText, Component: InstructionsSettings },
+      { value: 'skills', icon: Sparkles, Component: SkillsSettings },
+      { value: 'memory', icon: Brain, Component: MemorySettings },
+    ],
+  },
+  {
+    group: 'extensions',
+    sections: [
+      { value: 'mcp', icon: Plug, Component: McpSettings },
+      { value: 'plugins', icon: Puzzle, Component: PluginsSettings },
+    ],
+  },
+  { group: 'code', sections: [{ value: 'git', icon: GitBranch, Component: GitSettings }] },
 ];
+
+const SECTIONS = GROUPS.flatMap((group) => group.sections);
 
 /**
  * 设置视图：主窗口内、标题栏下方的整页视图（不是独立窗口）。
@@ -107,15 +133,24 @@ function SettingsPanel() {
             {t('settings.title')}
           </p>
           <TabsList className="w-full gap-0.5 bg-transparent p-0">
-            {SECTIONS.map(({ value, icon: Icon }) => (
-              <TabsTrigger
-                key={value}
-                value={value}
-                className="h-8 w-full flex-none justify-start gap-2 px-2 font-normal text-sidebar-foreground hover:bg-sidebar-accent data-[active]:bg-sidebar-accent data-[active]:font-medium data-[active]:text-sidebar-accent-foreground data-[active]:shadow-none dark:text-sidebar-foreground dark:data-[active]:border-transparent dark:data-[active]:bg-sidebar-accent"
-              >
-                <Icon className="text-muted-foreground" />
-                {t(`settings.sections.${value}`)}
-              </TabsTrigger>
+            {GROUPS.map(({ group, sections }) => (
+              <Fragment key={group ?? 'common'}>
+                {group && (
+                  <p className="px-2 pt-4 pb-1 text-muted-foreground text-xs">
+                    {t(`settings.groups.${group}`)}
+                  </p>
+                )}
+                {sections.map(({ value, icon: Icon }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className="h-8 w-full flex-none justify-start gap-2 px-2 font-normal text-sidebar-foreground hover:bg-sidebar-accent data-[active]:bg-sidebar-accent data-[active]:font-medium data-[active]:text-sidebar-accent-foreground data-[active]:shadow-none dark:text-sidebar-foreground dark:data-[active]:border-transparent dark:data-[active]:bg-sidebar-accent"
+                  >
+                    <Icon className="text-muted-foreground" />
+                    {t(`settings.sections.${value}`)}
+                  </TabsTrigger>
+                ))}
+              </Fragment>
             ))}
           </TabsList>
         </nav>
@@ -123,6 +158,7 @@ function SettingsPanel() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center gap-4 border-b px-6">
             <h2 className="min-w-0 flex-1 truncate font-semibold leading-tight">
+              <span className="font-normal text-muted-foreground">{t('settings.title')} / </span>
               {current && t(`settings.sections.${current.value}`)}
             </h2>
             <Button

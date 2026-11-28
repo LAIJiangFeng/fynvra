@@ -16,7 +16,11 @@ import {
   type OpenDialogOptions,
   shell,
 } from 'electron';
-import type { OpenWithAppsResult, PickAppResult } from '../../preload/domains/workspaces';
+import type {
+  InitGitResult,
+  OpenWithAppsResult,
+  PickAppResult,
+} from '../../preload/domains/workspaces';
 import { translate } from '../i18n';
 import {
   detectVsCode,
@@ -58,7 +62,7 @@ export function registerWorkspaceHandlers(): void {
   registerWorkspaceMenuHandlers();
   ipcMain.handle(IPC_CHANNELS.WORKSPACES_LIST, async (): Promise<WorkspaceListResult> => {
     try {
-      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时发现
+      // 不在这里重新检测 vcs：git init 由 .git 监视器与焦点重查发现，删掉 .git 由变更面板加载时与派发时读不到分支发现
       return { ok: true, workspaces: getWorkspaceService().list() };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
@@ -182,6 +186,24 @@ function registerWorkspaceMenuHandlers(): void {
         }
         await launchApplication(application, workspace.repoPath);
         return { ok: true };
+      } catch (error) {
+        return workspaceActionFailed(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORKSPACES_INIT_GIT,
+    async (_event, raw: unknown): Promise<InitGitResult> => {
+      const input = asRecord(raw);
+      const id = parseWorkspaceId(input?.workspaceId);
+      if (!id) return { ok: false, error: translate('common.invalidWorkspaceId') };
+      if (!input || Object.keys(input).some((key) => key !== 'workspaceId')) {
+        return { ok: false, error: translate('common.invalidArgs') };
+      }
+      try {
+        const result = await getWorkspaceService().initGit(id);
+        return result.ok ? { ok: true } : result;
       } catch (error) {
         return workspaceActionFailed(error);
       }

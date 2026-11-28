@@ -86,7 +86,12 @@ export function createNetworkProxyStore(api: ProxyApi) {
       cancel: invalidate,
       save: async (reset = false) => {
         if (get().saving) return;
-        const config = reset ? undefined : parseNetworkProxy(get().draft);
+        // 重置只管代理；Git 兼容模式开关在 Git 页，已开启时保留，避免被悄悄关掉
+        const config = reset
+          ? lastSaved.gitCompatibility
+            ? { ...DEFAULT_NETWORK_PROXY, gitCompatibility: true }
+            : undefined
+          : parseNetworkProxy(get().draft);
         if (config === null) {
           set({ error: 'invalid' });
           return;

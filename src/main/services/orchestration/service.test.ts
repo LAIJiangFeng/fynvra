@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import type { DispatchTaskInput } from '@fynvra/agent-runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  type AcceptedTask,
   createOrchestrationService,
   type OrchestrationService,
   type OrchestrationServiceOptions,
@@ -283,6 +284,76 @@ describe('createOrchestrationService', () => {
     });
   });
 
+  describe('workerErrored', () => {
+    const escalations = async (service: ReturnType<typeof make>) =>
+      (await service.snapshot({ reconcile: false })).messages.filter(
+        (message) => message.type === 'escalation'
+      );
+
+    it('escalates once per pending message without changing state, and again after delivery', async () => {
+      const service = make();
+      const dispatch = await dispatchOn(service);
+      const before = await service.snapshot({ reconcile: false });
+      const longError = `Connection error. ${'x'.repeat(800)}`;
+      service.workerErrored(dispatch.workerSessionId, longError);
+      service.workerErrored(dispatch.workerSessionId, 'Connection error.');
+      const sent = await escalations(service);
+      expect(sent).toEqual([
+        expect.objectContaining({
+          from: 'fynvra',
+          to: 'session_coord',
+          dispatchId: dispatch.id,
+          subject: 'worker interrupted by a model error',
+        }),
+      ]);
+      expect(sent[0]?.body).toContain('Connection error.');
+      expect(sent[0]?.body).toContain(`send_to_worker on dispatch ${dispatch.id}`);
+      expect(sent[0]?.body.length).toBeLessThan(1_200);
+      const after = await service.snapshot();
+      expect(after.tasks).toEqual(before.tasks);
+      expect(after.dispatches).toEqual(before.dispatches);
+
+      // 主 agent 收到后（已确认），再次出错还能再投一条
+      service.ackMessages(sent.map((message) => message.id));
+      service.workerErrored(dispatch.workerSessionId, 'fetch failed');
+      expect(service.coordinatorWork('session_coord').messages).toEqual([
+        expect.objectContaining({ body: expect.stringContaining('fetch failed') }),
+      ]);
+    });
+
+    it('keeps a workflow node running and the workflow in progress', async () => {
+      const service = make({
+        workflows: {
+          list: async () => [
+            {
+              id: 'review',
+              name: 'Review',
+              maxRounds: 3,
+              steps: [
+                { id: 'dev', name: 'Dev', roleId: 'worker', instructions: 'Do it.', needs: [] },
+              ],
+            },
+          ],
+        },
+      });
+      expect(
+        await service
+          .hostFor('session_coord')
+          .dispatchTask({ ...TASK, workflowId: 'review', roleId: '' })
+      ).toMatchObject({ ok: true });
+      await vi.waitFor(async () => expect((await service.snapshot()).dispatches).toHaveLength(1));
+      const node = (await service.snapshot()).dispatches[0];
+      if (!node) throw new Error('no workflow node');
+      service.workerErrored(node.workerSessionId, 'Service temporarily unavailable');
+      expect(await escalations(service)).toEqual([
+        expect.objectContaining({ dispatchId: node.id }),
+      ]);
+      const after = await service.snapshot();
+      expect(after.tasks[0]?.status).toBe('in-progress');
+      expect(after.dispatches[0]?.outcome).toBeUndefined();
+    });
+  });
+
   it('list/wait reconcile missing sessions without requiring a panel snapshot', async () => {
     const service = make();
     await dispatchOn(service);
@@ -547,18 +618,72 @@ describe('createOrchestrationService', () => {
     expect(service.workerHostFor('session_w1')).not.toBeNull();
   });
 
-  it('hostFor：仓库处于 detached HEAD 时报错且不缓存，切回分支后即可使用', async () => {
-    let head: { code: number; stdout: string } = { code: 1, stdout: '' };
-    fake.respond(({ args }) => (args[0] === 'symbolic-ref' ? head : undefined));
-    const host = make().hostFor('session_coord');
-    expect(await host.listWorkers()).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('detached HEAD'),
-    });
-    head = { code: 0, stdout: 'main\n' };
-    expect(await host.listWorkers()).toEqual({ ok: true, workers: [] });
+  it('hostFor：仓库处于 detached HEAD 时不报错，原地派发且不建 worktree', async () => {
+    fake.respond(({ args }) => (args[0] === 'symbolic-ref' ? { code: 1, stdout: '' } : undefined));
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+  });
+  it('.git 已失效（没有 .git/HEAD）且重新检测为 none：这一次派发原地成功，不建 worktree', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
   });
 
+  it('没有 .git/HEAD 且重新检测仍是 git：照样原地派发成功，不建 worktree', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'git' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') }, refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
+  });
+
+  it('重新检测抛错：只记日志，照样原地派发成功', async () => {
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi
+      .fn<() => Promise<'git' | 'none' | undefined>>()
+      .mockRejectedValueOnce(new Error('EPERM'));
+    const log = vi.fn();
+    const service = make({
+      workspace: { ...WORKSPACE, repoPath: join(dir, 'repo') },
+      refreshVcs,
+      log,
+    });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('EPERM'));
+    expect(refreshVcs).toHaveBeenCalledTimes(1);
+  });
+
+  it('.git/HEAD 还在（git 暂时读不了）：不重新检测，原地派发成功', async () => {
+    const repoPath = join(dir, 'repo');
+    mkdirSync(join(repoPath, '.git'), { recursive: true });
+    writeFileSync(join(repoPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    fake.respond(({ args }) =>
+      args[0] === 'symbolic-ref' ? { code: 128, stdout: '' } : undefined
+    );
+    const refreshVcs = vi.fn(async () => 'none' as const);
+    const service = make({ workspace: { ...WORKSPACE, repoPath }, refreshVcs });
+    const dispatch = await dispatchOn(service);
+    expect(dispatch).toMatchObject({ mode: 'in-place', worktreeId: '' });
+    expect(fake.commands().some((command) => command.startsWith('git worktree add'))).toBe(false);
+    expect(refreshVcs).not.toHaveBeenCalled();
+  });
   it('主 agent 的分支在首次使用时确定：之后仓库换了分支，worktree 仍从原分支切出、合并被拒绝', async () => {
     const service = make();
     const host = service.hostFor('session_coord');
@@ -881,5 +1006,151 @@ describe('createOrchestrationService', () => {
       error: `dispatch ${dispatch.id} has no diff: the workspace has no git`,
     });
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe('onTaskAccepted（任务被验收的钩子）', () => {
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const HEAD = 'head1111111111111111111111111111111111111';
+
+  function withListener(overrides: Partial<OrchestrationServiceOptions> = {}) {
+    const accepted: AcceptedTask[] = [];
+    const service = make({ onTaskAccepted: (task) => accepted.push(task), ...overrides });
+    return { service, accepted };
+  }
+
+  /** worker 分支有新提交：合并时读到的 head 与 worktree 的 baseCommit 不同 */
+  const workerCommitted = () =>
+    fake.respond(({ args }) =>
+      args.join(' ').startsWith('rev-parse --verify --quiet refs/heads/fynvra/')
+        ? { stdout: `${HEAD}\n` }
+        : undefined
+    );
+
+  it('merge：打回后再合并，快照含全部尝试与打回意见，只触发一次且在下一个 tick', async () => {
+    workerCommitted();
+    const { service, accepted } = withListener();
+    const dispatch = await dispatchOn(service);
+    const host = service.hostFor('session_coord');
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'First.');
+    expect((await host.rejectWork({ dispatchId: dispatch.id, feedback: 'Use X.' })).ok).toBe(true);
+    await service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Second.', ['src/a.ts']);
+    const retry = service.coordinatorWork('session_coord').reviews[0]?.dispatch.id ?? '';
+    expect(await host.mergeWorktree({ dispatchId: retry })).toMatchObject({ merged: true });
+    expect(accepted).toEqual([]);
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      workspaceId: 'ws_1',
+      coordinatorSessionId: 'session_coord',
+      coordinatorRestricted: false,
+      acceptedVia: 'merge',
+      task: {
+        title: 'Add toggle',
+        spec: 'S',
+        workflow: false,
+        mergedDiff: { headCommit: HEAD },
+      },
+      dispatches: [
+        { dispatchId: dispatch.id, status: 'succeeded', summary: 'First.' },
+        { dispatchId: retry, status: 'succeeded', summary: 'Second.' },
+      ],
+      reviewFeedback: [{ body: 'Use X.' }],
+    });
+    // 已完成的任务再写不会重复触发
+    await service.flush();
+    await tick();
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('无改动的合并记为 no-change', async () => {
+    const { service, accepted } = withListener();
+    const dispatch = await dispatchOn(service);
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Nothing.');
+    await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id });
+    await tick();
+    expect(accepted.map((task) => task.acceptedVia)).toEqual(['no-change']);
+  });
+
+  it('普通目录原地验收记为 in-place', async () => {
+    const { service, accepted } = withListener({
+      workspace: { id: 'ws_1', name: 'notes', repoPath: '/notes', vcs: 'none' },
+    });
+    const dispatch = await dispatchOn(service);
+    await service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Edited.', ['a.md']);
+    expect(
+      await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id })
+    ).toMatchObject({ mode: 'in-place' });
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      acceptedVia: 'in-place',
+      dispatches: [{ filesModified: ['a.md'] }],
+    });
+    expect(accepted[0]?.task.mergedDiff).toBeUndefined();
+  });
+
+  it('开 PR 记为 pull-request', async () => {
+    const PR_URL = 'https://github.com/o/r/pull/7';
+    const MB = 'mb22222222222222222222222222222222222222222';
+    workerCommitted();
+    fake.respond(({ cmd, args }) => {
+      const line = args.join(' ');
+      if (cmd === 'gh' && line.startsWith('pr list')) return { stdout: '[]\n' };
+      if (cmd === 'gh' && line.startsWith('pr create')) return { stdout: `${PR_URL}\n` };
+      if (args[0] === 'merge-base') return { stdout: `${MB}\n` };
+      if (line.startsWith('rev-list --count')) return { stdout: '1\n' };
+      if (args[0] === 'log') return { stdout: 'Add toggle\n' };
+      return undefined;
+    });
+    const { service, accepted } = withListener({
+      pullRequestGate: {
+        knownSecrets: async () => [],
+        localInfo: async () => ({ paths: [], windows: false }),
+      },
+    });
+    const dispatch = await dispatchOn(service);
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+    expect(
+      await service
+        .hostFor('session_coord')
+        .openPullRequest({ dispatchId: dispatch.id, title: 'Add toggle', summary: 'Adds it.' })
+    ).toMatchObject({ ok: true, url: PR_URL });
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      acceptedVia: 'pull-request',
+      task: { pullRequestUrl: PR_URL, mergedDiff: { headCommit: HEAD } },
+    });
+  });
+
+  it('放弃不触发；监听器抛错不影响验收结果', async () => {
+    const log = vi.fn();
+    const service = make({
+      log,
+      onTaskAccepted: () => {
+        throw new Error('boom');
+      },
+    });
+    const first = await dispatchOn(service);
+    const host = service.hostFor('session_coord');
+    await service.workerHostFor(first.workerSessionId)?.reportDone('succeeded', 'Done.');
+    await host.cleanupWorktree({ dispatchId: first.id, abandon: true });
+    await tick();
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('task accepted listener'));
+
+    const second = await service.hostFor('session_coord').dispatchTask({ ...TASK, title: 'Two' });
+    if (!second.ok || !second.dispatch) throw new Error('dispatch failed');
+    await service.workerHostFor(second.dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+    expect(await host.mergeWorktree({ dispatchId: second.dispatch.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    await tick();
+    expect(log).toHaveBeenCalledWith('task accepted listener failed: boom');
   });
 });

@@ -220,8 +220,11 @@ function ScanContent({ onRegistered }: { onRegistered: (message: string) => void
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
+        <DialogClose render={<Button size="sm" variant="outline" />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button
+          size="sm"
           disabled={!result || selected.length === 0 || registering}
           onClick={() => void register()}
         >

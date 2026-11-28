@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
 import { useSkillsStore } from '@/stores/skills';
-import { EmptyState, InlineMessage, SectionHeader } from './common';
+import { EmptyState, InlineMessage, SettingsCard, SettingsSection } from './common';
 import { SkillScanDialog } from './SkillScanDialog';
 
 type Status = { tone: 'error' | 'success'; text: string };
@@ -46,18 +46,21 @@ export function SkillsSettings() {
   };
 
   return (
-    <section>
-      <SectionHeader title={t('settings.skills.title')}>
-        <Button size="sm" variant="outline" onClick={openScan}>
-          <ScanSearch />
-          {t('settings.skills.scan')}
-        </Button>
-        <Button size="sm" disabled={adding} onClick={() => void addDirectory()}>
-          <FolderPlus />
-          {t('settings.skills.addDir')}
-        </Button>
-      </SectionHeader>
-
+    <SettingsSection
+      title={t('settings.skills.title')}
+      actions={
+        <>
+          <Button size="sm" variant="outline" onClick={openScan}>
+            <ScanSearch />
+            {t('settings.skills.scan')}
+          </Button>
+          <Button size="sm" disabled={adding} onClick={() => void addDirectory()}>
+            <FolderPlus />
+            {t('settings.skills.addDir')}
+          </Button>
+        </>
+      }
+    >
       {status && (
         <InlineMessage tone={status.tone} className="mb-3 break-all">
           {status.text}
@@ -73,15 +76,17 @@ export function SkillsSettings() {
           </Button>
         </EmptyState>
       ) : (
-        <ul className="divide-y rounded-lg border">
-          {skills.map((skill) => (
-            <SkillRow
-              key={skill.id}
-              skill={skill}
-              onError={(text) => setStatus({ tone: 'error', text })}
-            />
-          ))}
-        </ul>
+        <SettingsCard>
+          <ul className="divide-y">
+            {skills.map((skill) => (
+              <SkillRow
+                key={skill.id}
+                skill={skill}
+                onError={(text) => setStatus({ tone: 'error', text })}
+              />
+            ))}
+          </ul>
+        </SettingsCard>
       )}
 
       <SkillScanDialog
@@ -89,7 +94,7 @@ export function SkillsSettings() {
         onClose={() => setScanSession(null)}
         onRegistered={(text) => setStatus({ tone: 'success', text })}
       />
-    </section>
+    </SettingsSection>
   );
 }
 

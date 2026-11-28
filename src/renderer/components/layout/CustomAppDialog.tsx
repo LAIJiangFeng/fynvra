@@ -178,11 +178,12 @@ export function CustomAppDialog({
           </p>
         )}
         <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onClose}>
             {t('common.cancel')}
           </Button>
           {draft ? (
             <Button
+              size="sm"
               type="submit"
               form={`${id}-form`}
               disabled={busy || !loaded || !draft.name.trim() || apps.length >= MAX_OPEN_WITH_APPS}
@@ -191,6 +192,7 @@ export function CustomAppDialog({
             </Button>
           ) : (
             <Button
+              size="sm"
               disabled={busy || !loaded || apps.length >= MAX_OPEN_WITH_APPS}
               onClick={() => void pick()}
             >

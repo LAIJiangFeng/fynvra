@@ -62,10 +62,10 @@ export function ChangesActionDialog({
           </p>
         )}
         <DialogFooter>
-          <Button ref={cancel} variant="outline" disabled={busy} onClick={onCancel}>
+          <Button size="sm" ref={cancel} variant="outline" disabled={busy} onClick={onCancel}>
             {t('common.cancel')}
           </Button>
-          <Button variant="destructive" disabled={busy} onClick={onConfirm}>
+          <Button size="sm" variant="destructive" disabled={busy} onClick={onConfirm}>
             {busy && <Loader2 className="animate-spin" />}
             {title}
           </Button>

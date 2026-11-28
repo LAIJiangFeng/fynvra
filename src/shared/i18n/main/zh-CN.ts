@@ -35,6 +35,17 @@ export const mainZhCN = {
     installDetail: '正在运行的任务将停止。未保存的文件仍会单独确认，取消退出不会安装更新。',
     install: '重启并安装',
   },
+  git: {
+    unsupportedArch:
+      '当前处理器架构（{arch}）不支持一键安装，请从 https://git-scm.com/download/win 下载安装',
+    unsupportedPlatform: '当前系统不支持一键安装，请用系统的包管理器安装 git',
+    downloadFailed: 'git 下载失败：{error}',
+    checksumMismatch: '下载的文件校验不通过',
+    verifyFailed: '解压后的 git 无法运行：{error}',
+    unavailable: '未检测到可用的 git',
+    invalidName: '用户名不能为空、不能超过 200 个字符，也不能包含换行或控制字符',
+    invalidEmail: '邮箱需包含 @，不能超过 200 个字符，也不能包含换行或控制字符',
+  },
   workspaceUi: {
     failed: '无法保存或恢复标签，窗口将保留，请检查磁盘空间后重试',
     limits: '标签存储已达上限，请关闭标签或缩小草稿（每份最多 256 KiB），文本未被截断',
@@ -68,6 +79,10 @@ export const mainZhCN = {
     dirMissing: '目录不存在或无法访问：{dir}',
     repoRootUnknown: '无法解析仓库根目录：{output}',
     insideRepoAt: '所选目录位于 git 仓库 {root} 内',
+    gitMissing: '没有找到 Git，请先安装',
+    gitInitNotPlain: '只有普通文件夹工作区能初始化为 Git 仓库',
+    gitInitInsideRepo: '这个文件夹在另一个 git 仓库（{root}）里，不能单独初始化',
+    gitInitFailed: '初始化 Git 仓库失败（{command}）：{error}',
   },
   settings: {
     invalidPatch: '无效的设置项',
@@ -378,5 +393,13 @@ export const mainZhCN = {
     envPlace: '环境变量 {key}',
     argsPlace: '命令参数',
     listSeparator: '、',
+  },
+  memory: {
+    unavailable: '记忆库不可用',
+    workspace: '工作区不存在',
+    notFound: '记忆不存在',
+    duplicate: '已有内容相同的记忆',
+    limit: '本项目记忆已达 500 条上限',
+    secrets: '无法读取已知密钥，暂不能写入记忆',
   },
 };

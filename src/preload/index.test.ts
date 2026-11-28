@@ -29,8 +29,10 @@ describe('preload bridge', () => {
       'appDialog',
       'appPlugins',
       'files',
+      'git',
       'instructions',
       'mcp',
+      'memory',
       'notifications',
       'orchestration',
       'plugins',
@@ -134,6 +136,10 @@ describe('preload bridge', () => {
     });
     await api.workspaces.pickApp();
     expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_PICK_APP);
+    await api.workspaces.initGit({ workspaceId: 'ws-1', path: '/ignored' } as never);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.WORKSPACES_INIT_GIT, {
+      workspaceId: 'ws-1',
+    });
   });
 
   it('shell settings use a no-input list and target-only file picker', async () => {

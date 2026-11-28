@@ -39,6 +39,20 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
       'Running tasks will stop. Unsaved files require a separate confirmation. Canceling exit cancels installation.',
     install: 'Restart and install',
   },
+  git: {
+    unsupportedArch:
+      'One-click install is not available for this processor ({arch}). Download Git from https://git-scm.com/download/win',
+    unsupportedPlatform:
+      'One-click install is not available on this system. Install git with your package manager',
+    downloadFailed: 'Git download failed: {error}',
+    checksumMismatch: 'The downloaded file failed checksum verification',
+    verifyFailed: 'The extracted git does not run: {error}',
+    unavailable: 'No usable git was found',
+    invalidName:
+      'The name must not be empty, longer than 200 characters, or contain line breaks or control characters',
+    invalidEmail:
+      'The email must contain @, be at most 200 characters, and contain no line breaks or control characters',
+  },
   workspaceUi: {
     failed:
       'Could not save or restore tabs. The window will stay open. Check available disk space and retry.',
@@ -76,6 +90,11 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     dirMissing: 'Folder missing or not accessible: {dir}',
     repoRootUnknown: 'Could not resolve the repository root: {output}',
     insideRepoAt: 'This folder is inside git repository {root}',
+    gitMissing: 'Git was not found; install it first',
+    gitInitNotPlain: 'Only plain folder workspaces can be initialized as a Git repository',
+    gitInitInsideRepo:
+      "This folder is inside another git repository ({root}) and can't be initialized on its own",
+    gitInitFailed: 'Failed to initialize the Git repository ({command}): {error}',
   },
   settings: {
     invalidPatch: 'Invalid setting',
@@ -396,5 +415,13 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     envPlace: 'env {key}',
     argsPlace: 'command arguments',
     listSeparator: ', ',
+  },
+  memory: {
+    unavailable: 'Project memory is unavailable',
+    workspace: 'Workspace not found',
+    notFound: 'Memory not found',
+    duplicate: 'A memory with the same content already exists',
+    limit: 'This project has reached the limit of 500 memories',
+    secrets: 'Cannot read known secrets, project memory writes are paused',
   },
 };

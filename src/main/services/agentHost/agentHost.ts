@@ -38,6 +38,14 @@ import type {
   SessionIdentity,
   SpawnSessionSpec,
 } from '@shared/types/agent';
+import {
+  COMPLETE_TEXT_MAX_TOKENS,
+  COMPLETE_TEXT_PROMPT_MAX,
+  COMPLETE_TEXT_SYSTEM_PROMPT_MAX,
+  COMPLETE_TEXT_TIMEOUT_MAX_MS,
+  type SpawnMemorySpec,
+  type TextCompletedResult,
+} from '@shared/types/agent';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -55,6 +63,7 @@ import type {
 import { normalizeReplySuggestion, splitChatFiles } from '@shared/types/chat';
 import { IPC_CHANNELS, type IpcResult } from '@shared/types/ipc';
 import type { ModelEntry, ModelProviderView } from '@shared/types/llm';
+import { MEMORY_INDEX_MAX_CHARS } from '@shared/types/memory';
 import {
   type CompactionStrategy,
   compactionThresholdTokensOf,
@@ -88,6 +97,38 @@ export interface RoleResources {
   instructionFile?: SpawnSessionSpec['instructionFile'];
   /** 配置问题（如角色引用了已删除的技能 / MCP），spawn 时记进日志 */
   warnings: string[];
+}
+
+/** 记忆调用方：取自会话记录（不信任工具参数）；worker 会话带 dispatchId，档位会话带 profile */
+export interface MemoryCaller {
+  sessionId: string;
+  workspaceId: string;
+  dispatchId?: string;
+  profile?: SessionProfile;
+  title?: string;
+}
+
+/** 项目记忆桥（§7.15）：由 Main 的记忆服务提供，权限只在那里判断 */
+export interface AgentHostMemoryBridge {
+  /** 会话启动时要注入的记忆；undefined = 不注入、不注册工具 */
+  specFor(caller: MemoryCaller): Promise<SpawnMemorySpec | undefined>;
+  /** host-invoke kind 'memory'（method 为 write / search / feedback） */
+  handle(
+    caller: MemoryCaller,
+    method: string,
+    input: unknown,
+    signal?: AbortSignal
+  ): Promise<{ ok: true; result?: unknown } | { ok: false; error: string }>;
+}
+
+/** completeText 的入参：给了 model 按它解析，解析不了或没给时用 sessionId 会话当前的模型 */
+export interface CompleteTextInput {
+  model?: { providerId: string; modelId: string };
+  sessionId?: string;
+  systemPrompt: string;
+  prompt: string;
+  maxTokens: number;
+  timeoutMs: number;
 }
 
 export interface AgentHostDeps {
@@ -153,6 +194,8 @@ export interface AgentHostDeps {
   };
   /** triage_report 等 host-invoke（kind: 'telegram'）的宿主（渠道插件路由，kind 名沿用 telegram）；只有 triage 会话能调，缺省时一律失败 */
   telegram?: TelegramHostDeps;
+  /** 项目记忆桥；缺省时会话不带记忆，memory 调用一律失败 */
+  memory?: AgentHostMemoryBridge;
   /**
    * 删除带 worktree 的会话前删掉它的 worktree 与分支（生产为 OrchestrationService.removeSessionWorktree）；
    * 失败时会话保留。缺省只删注册表记录
@@ -329,6 +372,11 @@ export interface AgentHostService extends AgentHost {
   get(sessionId: string): SessionSummary | undefined;
   /** 订阅推给 Renderer 的会话事件与审批请求；观察者抛异常只记日志，不影响推送。返回取消订阅 */
   observe(observer: SessionObserver): () => void;
+  /**
+   * 独立的文本补全（验收提炼用）：发 complete-text 给 agent worker 并等 text-completed；
+   * 超时、worker 崩溃或退出都结算为失败，永不抛异常
+   */
+  completeText(input: CompleteTextInput): Promise<TextCompletedResult>;
 }
 
 interface PendingCompactionRecovery {
@@ -374,6 +422,8 @@ interface LiveSession {
   workerHost: WorkerHost | null;
   interruption?: string;
   lastError?: string;
+  /** lastError 来自模型请求（error 事件 source === 'model'） */
+  lastErrorFromModel?: boolean;
   /** Invalidates queued fresh-attempt feedback on explicit stop/removal/crash */
   roundEpoch: number;
   /** Invalidates requests waiting to spawn when abandoned-worker cleanup explicitly clears error. */
@@ -417,6 +467,10 @@ const TITLE_MAX_CHARS = 60;
 /** restricted 会话所在工作区同时未结束的任务上限（§7.14 第 12 条） */
 const MAX_RESTRICTED_OPEN_TASKS = 3;
 const DESCRIBE_TIMEOUT_MS = 15_000;
+/** complete-text：worker 自己按 timeoutMs 中止，Main 多等这么久再判超时 */
+const COMPLETE_TEXT_GRACE_MS = 5_000;
+/** 等记忆桥给出 spawn 记忆的上限：超时当没有记忆，不挡会话启动 */
+const MEMORY_SPEC_TIMEOUT_MS = 5_000;
 /** take-back-queued 等 worker 回答的上限；超时当失败，迟到的结果丢弃 */
 const TAKE_BACK_TIMEOUT_MS = 10_000;
 /** 建议请求的总上限：worker 自己 8 s 超时，这里多留一点收尾时间 */
@@ -461,6 +515,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   /** 等 worker 回答的 describe-models：requestId → 结算 */
   const describing = new Map<string, (result: ModelsDescribedResult) => void>();
   let describeSeq = 0;
+  /** 等 worker 回答的 complete-text：requestId → 结算 */
+  const completing = new Map<string, (result: TextCompletedResult) => void>();
+  let completeSeq = 0;
   /** 等 worker 回答的 take-back-queued：requestId → 结算（带会话与 generation，过期回包丢弃） */
   const takingBack = new Map<
     string,
@@ -742,9 +799,14 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       const compactionThresholdTokens = compactionThresholdTokensOf({
         compactionThresholdTokens: deps.resolveCompactionThresholdTokens?.(),
       });
-      // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约
-      const inPlace = deps.workspaces.get(stored.workspaceId)?.vcs === 'none';
+      // 普通目录（无 git）的工作区编排原地进行：提示词按此追加说明、换 worker 契约；
+      // git 工作区里用不了 worktree 而原地派发的 worker 没有 worktree，也按原地契约
+      const inPlace =
+        deps.workspaces.get(stored.workspaceId)?.vcs === 'none' ||
+        (stored.dispatchId !== undefined && stored.worktreeId === undefined);
       const attachmentsDir = deps.attachments?.dirOf(stored.id);
+      // 档位会话一律不带记忆（worker 与 agent-runtime 另有拦截）
+      const memory = profile ? undefined : await memorySpecFor(stored);
       return {
         ok: true,
         ref: resolved.ref,
@@ -784,10 +846,48 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
           ...(profile
             ? { profile, plugins: [], profileLanguage: PROFILE_LANGUAGE_NAMES[mainLocale()] }
             : {}),
+          ...(memory ? { memory } : {}),
         },
       };
     } catch (error) {
       return fail(translate('agent.startFailed', { error: errorMessage(error) }));
+    }
+  }
+
+  function memoryCallerOf(stored: StoredSession): MemoryCaller {
+    return {
+      sessionId: stored.id,
+      workspaceId: stored.workspaceId,
+      ...(stored.dispatchId !== undefined ? { dispatchId: stored.dispatchId } : {}),
+      ...(stored.profile !== undefined ? { profile: stored.profile } : {}),
+      ...(stored.title ? { title: stored.title } : {}),
+    };
+  }
+
+  /** 会话要注入的记忆；桥抛错、超时或给出坏形状都当没有记忆，只记日志，绝不挡会话启动 */
+  async function memorySpecFor(stored: StoredSession): Promise<SpawnMemorySpec | undefined> {
+    const bridge = deps.memory;
+    if (!bridge) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const spec = await Promise.race([
+        bridge.specFor(memoryCallerOf(stored)),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timed out after ${MEMORY_SPEC_TIMEOUT_MS} ms`)),
+            MEMORY_SPEC_TIMEOUT_MS
+          );
+        }),
+      ]);
+      if (!spec || typeof spec.index !== 'string' || typeof spec.write !== 'boolean') {
+        return undefined;
+      }
+      return { index: spec.index.slice(0, MEMORY_INDEX_MAX_CHARS), write: spec.write };
+    } catch (error) {
+      log('warn', `session ${stored.id}: project memory unavailable: ${errorMessage(error)}`);
+      return undefined;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -951,6 +1051,81 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
     for (const settle of [...describing.values()]) settle(fail(error));
   }
 
+  /** worker 崩溃 / 退出：在途的 complete-text 一律结算为失败 */
+  function failCompletions(error: string): void {
+    for (const settle of [...completing.values()]) settle(fail(error));
+  }
+
+  /** 给了 model 先按它解析；解析不了或没给时用 sessionId 会话当前的模型 */
+  async function completionModelOf(
+    input: CompleteTextInput
+  ): Promise<Result<{ model: ResolvedModelSpec }>> {
+    if (input.model) {
+      const resolved = await deps.models.resolve({
+        providerId: input.model.providerId,
+        modelId: input.model.modelId,
+      });
+      if (resolved.ok) return { ok: true, model: resolved.model };
+      log(
+        'warn',
+        `text completion: model ${qualifiedModelId(input.model)} unavailable, falling back to the session model`
+      );
+    }
+    const stored = input.sessionId !== undefined ? deps.store.get(input.sessionId) : undefined;
+    if (stored?.model) {
+      const resolved = await deps.models.resolve(stored.model);
+      if (resolved.ok) return { ok: true, model: resolved.model };
+    }
+    return fail('no model is available for text completion');
+  }
+
+  async function completeText(input: CompleteTextInput): Promise<TextCompletedResult> {
+    const { systemPrompt, prompt, maxTokens, timeoutMs } = input;
+    // 越界的请求 worker 会整条丢弃，在这里就拒绝，免得干等到超时
+    if (
+      typeof systemPrompt !== 'string' ||
+      systemPrompt.length > COMPLETE_TEXT_SYSTEM_PROMPT_MAX ||
+      typeof prompt !== 'string' ||
+      prompt.length > COMPLETE_TEXT_PROMPT_MAX ||
+      !isIntegerIn(maxTokens, 1, COMPLETE_TEXT_MAX_TOKENS) ||
+      !isIntegerIn(timeoutMs, 1, COMPLETE_TEXT_TIMEOUT_MAX_MS)
+    ) {
+      return fail('invalid text completion request');
+    }
+    let model: ResolvedModelSpec;
+    try {
+      const picked = await completionModelOf(input);
+      if (!picked.ok) return picked;
+      model = picked.model;
+    } catch (error) {
+      return fail(`no model is available for text completion: ${errorMessage(error)}`);
+    }
+    if (client.state === 'stopped') client.start();
+    const requestId = `complete-${++completeSeq}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(
+        () => settle(fail(`text completion timed out after ${timeoutMs} ms`)),
+        timeoutMs + COMPLETE_TEXT_GRACE_MS
+      );
+      const settle = (result: TextCompletedResult) => {
+        if (!completing.delete(requestId)) return;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      completing.set(requestId, settle);
+      const command: AgentCommand = {
+        type: 'complete-text',
+        requestId,
+        model,
+        systemPrompt,
+        prompt,
+        maxTokens,
+        timeoutMs,
+      };
+      if (!send(command)) settle(fail(translate('agent.workerUnavailable')));
+    });
+  }
+
   /** 正在跑一轮、等审批，或有 prompt 在途：这时换模型，spawn / 当前回合用的就对不上记录了 */
   function isBusy(stored: StoredSession): boolean {
     const state = live.get(stored.id);
@@ -1087,6 +1262,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       if (state.lastError !== result.error)
         deliver(sessionId, state, { type: 'error', source: 'compaction', message: result.error });
       state.lastError = result.error;
+      state.lastErrorFromModel = false;
       setStatus(sessionId, 'error');
     } else {
       setStatus(
@@ -1168,6 +1344,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const { sessionId } = event.identity;
         if (event.event.type === 'error') {
           state.lastError = event.event.message;
+          state.lastErrorFromModel = event.event.source === 'model';
           if (event.event.source === 'model') learnModelLimits(state, event.event.message);
         }
         if (event.event.type === 'agent_settled' && event.event.aborted) {
@@ -1197,7 +1374,13 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         const state = currentOf(event.identity);
         if (!state) return;
         state.running = event.status === 'running' || event.status === 'waiting-approval';
-        if (event.status === 'error') {
+        // 派发出去的 worker 在 pi 自动重试用完后仍是模型错误：不判失败，保留会话与这次尝试，
+        // 由编排侧通知主 agent 用 send_to_worker 在原会话里继续（见 coordinatorWake / workerErrored）
+        const keepAttempt =
+          state.lastError !== undefined &&
+          state.lastErrorFromModel === true &&
+          deps.store.get(event.identity.sessionId)?.dispatchId !== undefined;
+        if (event.status === 'error' && !keepAttempt) {
           interrupted(
             event.identity.sessionId,
             state,
@@ -1232,6 +1415,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
         if (!state) return;
         const { sessionId } = event.identity;
         state.lastError = event.error;
+        state.lastErrorFromModel = false;
         state.lastSettledSeq = 0;
         cancelSuggestions(sessionId, false);
         if (event.fatal) {
@@ -1276,6 +1460,9 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       case 'models-described':
         describing.get(event.requestId)?.(event.result);
         return;
+      case 'text-completed':
+        completing.get(event.requestId)?.(event.result);
+        return;
       case 'log':
         log(event.level, `[agent] ${event.message}`);
         return;
@@ -1307,6 +1494,11 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
             : deps.config
               ? await deps.config.invoke(method, input, controller.signal)
               : fail('Fynvra configuration is not available in this session');
+      } else if (kind === 'memory') {
+        // 权限只在记忆服务里按会话记录判断，这里只转发
+        result = deps.memory
+          ? await deps.memory.handle(memoryCallerOf(stored), method, input, controller.signal)
+          : fail('project memory is unavailable');
       } else if (kind === 'orchestration') {
         result = await invokeOrchestration(stored, method, input, controller.signal);
       } else if (kind === 'telegram') {
@@ -1444,6 +1636,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
 
   function handleCrash(code: number, willRestart: boolean): void {
     failDescribes(translate('agent.describeCrashed', { code }));
+    failCompletions(`the agent worker exited unexpectedly (code ${code})`);
     // 持有句柄的进程已经没了，不会再有回执
     for (const settle of [...disposals.values()]) settle();
     for (const [sessionId, state] of live) {
@@ -2119,6 +2312,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
   };
 
   return {
+    completeText,
     implementsLauncher: () => launcher,
     setOrchestrationHostFactory(factory) {
       orchestrationHostFor = factory;
@@ -2187,6 +2381,7 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       deps.store.flush();
       await client.shutdown(timeoutMs);
       failDescribes(translate('agent.workerUnavailable'));
+      failCompletions(translate('agent.workerUnavailable'));
       for (const [sessionId, state] of live) {
         if (state.running) {
           interrupted(
@@ -2431,6 +2626,10 @@ export function createAgentHost(deps: AgentHostDeps): AgentHostService {
       };
     },
   };
+}
+
+function isIntegerIn(value: unknown, min: number, max: number): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max;
 }
 
 function fail(error: string): { ok: false; error: string } {

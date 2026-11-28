@@ -22,6 +22,7 @@ import {
   type SessionStatus,
 } from './chat';
 import { parseCompactionState, parseContextRuntime, parseRetryState } from './contextRuntime';
+import { MEMORY_INDEX_MAX_CHARS } from './memory';
 import { isPluginProviderName, isRegistryId } from './plugins';
 import {
   type CompactionStrategy,
@@ -78,6 +79,21 @@ export interface ModelQuery {
 export type ModelsDescribedResult =
   | { ok: true; models: ModelThinkingCapability[] }
   | { ok: false; error: string };
+
+/** 项目记忆的注入（§7.15）：index 是 `<project_memory>` 里的正文，write 表示可注册 project_memory_write */
+export interface SpawnMemorySpec {
+  index: string;
+  write: boolean;
+}
+
+/** complete-text 的上限（§7.15 进程协议） */
+export const COMPLETE_TEXT_SYSTEM_PROMPT_MAX = 20_000;
+export const COMPLETE_TEXT_PROMPT_MAX = 200_000;
+export const COMPLETE_TEXT_MAX_TOKENS = 8192;
+export const COMPLETE_TEXT_TIMEOUT_MAX_MS = 300_000;
+
+/** complete-text 的结果（text-completed 带回） */
+export type TextCompletedResult = { ok: true; text: string } | { ok: false; error: string };
 
 /** 角色挂载的 MCP 服务器（Main 已解析；env / headers 明文只在 Main → worker 这一跳出现）。 */
 export interface AgentMcpServer {
@@ -204,13 +220,15 @@ export interface SpawnSessionSpec {
   profile?: SessionProfile;
   /** 档位会话的输出语言名（如 `Simplified Chinese`）：取自界面语言，普通会话不带 */
   profileLanguage?: string;
+  /** 项目记忆（§7.15）：只给需要注入的非档位会话带；缺省 = 不注入、不注册工具 */
+  memory?: SpawnMemorySpec;
 }
 
 /**
  * host-invoke 的目标：编排工具背后的 OrchestrationHost、worker 工具背后的 WorkerHost，
  * 或 fynvra_config 背后的 Main 配置宿主（所有会话都有）。
  */
-export type HostKind = 'orchestration' | 'worker' | 'config' | 'telegram';
+export type HostKind = 'orchestration' | 'worker' | 'config' | 'telegram' | 'memory';
 
 /** 配置 Fynvra 的 agent 工具名（与 agent-runtime 的 CONFIG_TOOL_NAME 相同） */
 export const CONFIG_TOOL_NAME = 'fynvra_config';
@@ -331,6 +349,19 @@ export type AgentCommand =
   | { type: 'cancel-suggestion'; identity: SessionIdentity; requestId: string }
   /** 查模型的思考档位（进程级，不带 identity）；worker 回同一 requestId 的 models-described */
   | { type: 'describe-models'; requestId: string; models: ModelQuery[] }
+  /**
+   * 独立的文本补全（进程级，不带 identity）：无工具、不传 reasoning、不重试，按 timeoutMs 中止；
+   * worker 回同一 requestId 的 text-completed。key 只在这一跳随 model 下发
+   */
+  | {
+      type: 'complete-text';
+      requestId: string;
+      model: ResolvedModelSpec;
+      systemPrompt: string;
+      prompt: string;
+      maxTokens: number;
+      timeoutMs: number;
+    }
   /** 关闭全部会话后退出进程（进程级，不带 identity） */
   | { type: 'shutdown' };
 
@@ -389,6 +420,8 @@ export type AgentWorkerEvent =
     }
   /** describe-models 的回答（进程级） */
   | { type: 'models-described'; requestId: string; result: ModelsDescribedResult }
+  /** complete-text 的回答（进程级）；错误文本不带密钥 */
+  | { type: 'text-completed'; requestId: string; result: TextCompletedResult }
   /** 诊断日志（进程级） */
   | { type: 'log'; level: LogLevel; message: string }
   /** 插件按名字找了一个模型服务（进程级；同一进程内每个「插件 + 名字」只报一次） */
@@ -419,6 +452,7 @@ const HOST_KIND_SET: Record<HostKind, true> = {
   worker: true,
   config: true,
   telegram: true,
+  memory: true,
 };
 const LOG_LEVEL_SET: Record<LogLevel, true> = { info: true, warn: true, error: true };
 
@@ -445,6 +479,7 @@ export function parseAgentCommand(raw: unknown): AgentCommand | null {
       ? { type: 'describe-models', requestId: record.requestId, models }
       : null;
   }
+  if (record.type === 'complete-text') return parseCompleteText(record);
   const identity = parseIdentity(record.identity);
   if (!identity) return null;
   switch (record.type) {
@@ -544,6 +579,12 @@ export function parseAgentWorkerEvent(raw: unknown): AgentWorkerEvent | null {
     const result = parseModelsDescribedResult(record.result);
     return isNonEmptyString(record.requestId) && result
       ? { type: 'models-described', requestId: record.requestId, result }
+      : null;
+  }
+  if (record.type === 'text-completed') {
+    const result = parseTextCompletedResult(record.result);
+    return isNonEmptyString(record.requestId) && result
+      ? { type: 'text-completed', requestId: record.requestId, result }
       : null;
   }
   const identity = parseIdentity(record.identity);
@@ -747,6 +788,39 @@ function parseModelSpec(raw: unknown): ResolvedModelSpec | null {
     ...(isPositiveInteger(contextWindow) ? { contextWindow } : {}),
     ...(isPositiveInteger(maxOutput) ? { maxOutput } : {}),
   };
+}
+
+function isIntegerIn(value: unknown, min: number, max: number): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max;
+}
+
+function parseCompleteText(
+  record: Record<string, unknown>
+): Extract<AgentCommand, { type: 'complete-text' }> | null {
+  const { requestId, systemPrompt, prompt, maxTokens, timeoutMs } = record;
+  const model = parseModelSpec(record.model);
+  if (!isNonEmptyString(requestId) || !model) return null;
+  if (!isString(systemPrompt) || systemPrompt.length > COMPLETE_TEXT_SYSTEM_PROMPT_MAX) return null;
+  if (!isString(prompt) || prompt.length > COMPLETE_TEXT_PROMPT_MAX) return null;
+  if (!isIntegerIn(maxTokens, 1, COMPLETE_TEXT_MAX_TOKENS)) return null;
+  if (!isIntegerIn(timeoutMs, 1, COMPLETE_TEXT_TIMEOUT_MAX_MS)) return null;
+  return { type: 'complete-text', requestId, model, systemPrompt, prompt, maxTokens, timeoutMs };
+}
+
+function parseTextCompletedResult(raw: unknown): TextCompletedResult | null {
+  const record = asRecord(raw);
+  if (record?.ok === true) return isString(record.text) ? { ok: true, text: record.text } : null;
+  if (record?.ok === false)
+    return isString(record.error) ? { ok: false, error: record.error } : null;
+  return null;
+}
+
+function parseMemorySpec(raw: unknown): SpawnMemorySpec | null {
+  const record = asRecord(raw);
+  if (!record || !isString(record.index) || record.index.length > MEMORY_INDEX_MAX_CHARS) {
+    return null;
+  }
+  return isBoolean(record.write) ? { index: record.index, write: record.write } : null;
 }
 
 function parseModelQuery(raw: unknown): ModelQuery | null {
@@ -956,6 +1030,8 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
   const { profile } = record;
   if (profile !== undefined && profile !== 'triage' && profile !== 'restricted') return null;
   if (!isOptional(record.profileLanguage, isNonEmptyString)) return null;
+  const memory = record.memory === undefined ? undefined : parseMemorySpec(record.memory);
+  if (memory === null) return null;
   return {
     ...(networkProxy ? { networkProxy } : {}),
     ...(record.webFetchAllowLoopback === true ? { webFetchAllowLoopback: true as const } : {}),
@@ -999,6 +1075,7 @@ function parseSpawnSessionSpec(raw: unknown): SpawnSessionSpec | null {
     ...(record.profileLanguage !== undefined
       ? { profileLanguage: record.profileLanguage as string }
       : {}),
+    ...(memory ? { memory } : {}),
   };
 }
 
