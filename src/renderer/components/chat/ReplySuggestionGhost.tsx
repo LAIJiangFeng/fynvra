@@ -28,10 +28,10 @@ export function ReplySuggestionGhost({
     const inner = layer.current;
     if (!input || !outer || !inner) return;
     const sync = () => {
-      // 宽度对齐 textarea 的实际换行宽度；高度先按内容量，再同步给 textarea，避免长建议被单行输入框裁掉
+      // 宽度对齐 textarea 的实际换行宽度；高度先按内容量，再同步给 textarea，避免长建议被裁掉；下限 84px 与 textarea 的 min-h-21（3 行）一致
       outer.style.width = `${input.clientWidth}px`;
       outer.style.height = 'auto';
-      const needed = Math.max(44, Math.min(outer.scrollHeight, 240));
+      const needed = Math.max(84, Math.min(outer.scrollHeight, 240));
       outer.style.height = `${needed}px`;
       if (input.style.minHeight !== `${needed}px`) input.style.minHeight = `${needed}px`;
       inner.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
