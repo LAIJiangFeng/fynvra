@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/i18n/I18nProvider';
 import { Field, InlineMessage, SectionHeader } from './common';
+import { GitCompatibilitySection, GitWorktreeSettings } from './GitWorktreeSettings';
 
 type Message = { tone: 'error' | 'success' | 'muted'; text: string };
 
 const LINUX_COMMANDS = ['sudo apt install git', 'sudo dnf install git', 'sudo pacman -S git'];
 
-/** Git：检测、一键安装（Windows 便携 MinGit / macOS 系统安装）、提交身份。路径与地址都只在 Main */
+/** Git：检测、一键安装（Windows 便携 MinGit / macOS 系统安装）、提交身份、兼容模式与 worktree。路径与地址都只在 Main */
 export function GitSettings() {
   const t = useT();
   const platform = window.fynvra.window.platform;
@@ -176,6 +177,9 @@ export function GitSettings() {
           </InlineMessage>
         )}
       </section>
+
+      <GitCompatibilitySection />
+      <GitWorktreeSettings />
     </div>
   );
 }
