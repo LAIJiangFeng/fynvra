@@ -8,6 +8,8 @@ export {
 export {
   findLocalInfo,
   type LocalInfoContext,
+  REDACTED_SECRET,
+  redactSecrets,
   type SecretScanResult,
   sanitizeLocalInfo,
   scanSecrets,
