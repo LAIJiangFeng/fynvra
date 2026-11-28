@@ -247,3 +247,42 @@ export interface ConfigHost {
     signal?: AbortSignal
   ): Promise<HostResult<{ result?: unknown }>>;
 }
+
+/** 项目记忆的类别 */
+export type MemoryCategory = 'rule' | 'workflow' | 'pitfall' | 'architecture' | 'reference';
+
+/** project_memory_write 的入参（已按 action 校验并规范化） */
+export interface MemoryWriteInput {
+  action: 'add' | 'update' | 'delete';
+  id?: number;
+  category?: MemoryCategory;
+  content?: string;
+  files?: string[];
+  quote?: string;
+  force?: boolean;
+}
+
+/** project_memory_search 的入参：ids 表示展开细节；query 与 ids 都不给时按类别或全部列出 */
+export interface MemorySearchInput {
+  query?: string;
+  ids?: number[];
+  category?: MemoryCategory;
+  limit?: number;
+}
+
+/** project_memory_feedback 的入参 */
+export interface MemoryFeedbackInput {
+  id: number;
+  verdict: 'useful' | 'outdated';
+  note?: string;
+}
+
+/** project_memory_* 工具背后的宿主（Main 的记忆服务，host-invoke kind 'memory'，method 与方法名相同）；成功时 result 是给模型看的 JSON 结果 */
+export interface MemoryHost {
+  write(input: MemoryWriteInput, signal?: AbortSignal): Promise<HostResult<{ result?: unknown }>>;
+  search(input: MemorySearchInput, signal?: AbortSignal): Promise<HostResult<{ result?: unknown }>>;
+  feedback(
+    input: MemoryFeedbackInput,
+    signal?: AbortSignal
+  ): Promise<HostResult<{ result?: unknown }>>;
+}
