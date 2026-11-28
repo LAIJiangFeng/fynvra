@@ -136,22 +136,29 @@ export function createWorkspaceService({
       for (const workspace of due) lastChecked.set(workspace.id, at);
       const changes = (
         await Promise.all(
-          due.map(async (workspace): Promise<Workspace | undefined> => {
+          due.map(async (workspace) => {
             const inspection = await inspect(workspace.repoPath, { plain: false });
             if (!inspection.ok || !samePath(inspection.root, workspace.repoPath, platform)) return;
             if (inspection.vcs === workspace.vcs) return;
-            const { defaultBranch: _branch, ...rest } = workspace;
-            return inspection.vcs === 'git'
-              ? { ...rest, vcs: 'git', defaultBranch: inspection.defaultBranch }
-              : { ...rest, vcs: 'none' };
+            return {
+              id: workspace.id,
+              vcs: inspection.vcs,
+              ...(inspection.vcs === 'git' ? { defaultBranch: inspection.defaultBranch } : {}),
+            };
           })
         )
-      ).filter((workspace) => workspace !== undefined);
+      ).filter((change) => change !== undefined);
       if (changes.length === 0) return;
-      const byId = new Map(changes.map((workspace) => [workspace.id, workspace]));
+      const byId = new Map(changes.map((change) => [change.id, change]));
+      // 只把检测结果合进写入时的最新记录：inspect 期间别处写入的字段（如 autoCommit）不被旧对象冲掉
       settings.update((current) => ({
         ...current,
-        workspaces: current.workspaces.map((workspace) => byId.get(workspace.id) ?? workspace),
+        workspaces: current.workspaces.map((workspace): Workspace => {
+          const change = byId.get(workspace.id);
+          if (!change) return workspace;
+          const { defaultBranch: _branch, ...rest } = workspace;
+          return { ...rest, ...change };
+        }),
       }));
       syncWatchers();
       onChanged?.();

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { initGitRepository } from './gitInit';
-import type { GitRunResult } from './gitRepository';
+import type { GitRunOptions, GitRunResult } from './gitRepository';
 
 let dir: string;
 
@@ -19,14 +19,20 @@ afterEach(() => {
 /** 假 GitRunner：按「命令前缀 → 结果」应答，记录调用顺序；没配置的命令成功且输出为空 */
 function fakeGit(answers: Record<string, GitRunResult> = {}) {
   const calls: string[] = [];
-  const run = async (args: string[], cwd: string): Promise<GitRunResult> => {
+  const options = new Map<string, GitRunOptions | undefined>();
+  const run = async (
+    args: string[],
+    cwd: string,
+    runOptions?: GitRunOptions
+  ): Promise<GitRunResult> => {
     expect(cwd).toBe(dir);
     const command = args.join(' ');
     calls.push(command);
+    options.set(args[0] ?? '', runOptions);
     const key = Object.keys(answers).find((prefix) => command.startsWith(prefix));
     return key ? (answers[key] as GitRunResult) : { ok: true, stdout: '' };
   };
-  return { calls, run };
+  return { calls, options, run };
 }
 
 const notRepo: GitRunResult = { ok: false, error: 'fatal: not a git repository' };
@@ -35,8 +41,14 @@ const unset: GitRunResult = { ok: false, error: '' };
 describe('initGitRepository', () => {
   it('成功路径：init → 补身份 → add → commit，按顺序执行', async () => {
     // 没配置的命令返回空输出，等同于身份未设置
-    const { calls, run } = fakeGit({ 'rev-parse': notRepo });
+    const { calls, options, run } = fakeGit({ 'rev-parse': notRepo });
     const result = await initGitRepository(dir, { run, userName: () => 'alice' });
+    // add / commit 放宽超时与输出上限，其余用默认
+    for (const command of ['add', 'commit']) {
+      expect(options.get(command)?.timeoutMs).toBeGreaterThanOrEqual(10 * 60_000);
+      expect(options.get(command)?.maxBuffer).toBeGreaterThanOrEqual(64 * 1024 * 1024);
+    }
+    expect(options.get('init')).toBeUndefined();
     expect(result).toEqual({ ok: true, alreadyRepo: false });
     expect(calls).toEqual([
       '--version',
@@ -47,7 +59,7 @@ describe('initGitRepository', () => {
       'config user.email',
       'config user.email fynvra@localhost',
       'add -A',
-      'commit --no-verify --allow-empty -m 初始化（Fynvra）',
+      'commit -q --no-verify --allow-empty -m 初始化（Fynvra）',
     ]);
   });
 

@@ -116,6 +116,33 @@ describe('createWorkspaceService', () => {
       return workspaces;
     };
 
+    it('inspect 期间别处写入的 autoCommit 不被旧记录冲掉', async () => {
+      let release: (value: DirectoryInspection) => void = () => {};
+      let inspected = 0;
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect: async () =>
+          ++inspected === 1
+            ? plainDir('/home/dev/notes')
+            : new Promise<DirectoryInspection>((resolve) => (release = resolve)),
+        newId: () => 'ws-1',
+        platform: 'linux',
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      const refreshing = workspaces.refreshVcs('ws-1', { force: true });
+      settings.update((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((item) => ({ ...item, autoCommit: true })),
+      }));
+      release(repo('/home/dev/notes', 'notes'));
+      await refreshing;
+      expect(workspaces.get('ws-1')).toMatchObject({
+        vcs: 'git',
+        defaultBranch: 'main',
+        autoCommit: true,
+      });
+    });
+
     it('目录 git init 成为仓库根目录后 none → git，并记下默认分支', async () => {
       const current = { value: plainDir('/home/dev/notes') };
       const workspaces = await mount(current);

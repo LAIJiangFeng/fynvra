@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { translate } from '../i18n';
-import { type GitRunner, runGit, samePath } from './gitRepository';
+import { type GitRunner, type GitRunOptions, runGit, samePath } from './gitRepository';
 
 export type GitInitResult =
   | { ok: true; alreadyRepo: boolean }
@@ -10,6 +10,9 @@ export type GitInitResult =
 
 /** 未设置提交身份时写进仓库本地配置的默认邮箱 */
 export const DEFAULT_GIT_EMAIL = 'fynvra@localhost';
+
+/** 文件多的目录 add / commit 慢、输出多（CRLF 警告）：被杀会留下 index.lock，重试也失败 */
+export const SLOW_GIT: GitRunOptions = { timeoutMs: 10 * 60_000, maxBuffer: 64 * 1024 * 1024 };
 
 export interface GitInitOptions {
   run?: GitRunner;
@@ -48,8 +51,8 @@ export async function initGitRepository(
     return { ok: false, error: translate('workspaces.gitInitInsideRepo', { root }) };
   }
 
-  const step = async (args: string[]): Promise<string | undefined> => {
-    const result = await run(args, dir);
+  const step = async (args: string[], options?: GitRunOptions): Promise<string | undefined> => {
+    const result = await run(args, dir, options);
     return result.ok
       ? undefined
       : translate('workspaces.gitInitFailed', { command: `git ${args[0]}`, error: result.error });
@@ -69,15 +72,12 @@ export async function initGitRepository(
     if (error) return { ok: false, error };
   }
 
-  const addError = await step(['add', '-A']);
+  const addError = await step(['add', '-A'], SLOW_GIT);
   if (addError) return { ok: false, error: addError };
-  const commitError = await step([
-    'commit',
-    '--no-verify',
-    '--allow-empty',
-    '-m',
-    '初始化（Fynvra）',
-  ]);
+  const commitError = await step(
+    ['commit', '-q', '--no-verify', '--allow-empty', '-m', '初始化（Fynvra）'],
+    SLOW_GIT
+  );
   if (commitError) return { ok: false, error: commitError };
   return { ok: true, alreadyRepo: false };
 }
