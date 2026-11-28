@@ -280,6 +280,12 @@ export interface Message {
    - 不通过：`reject_work` 把意见发回 worker，回到 3。
 5. 全部任务 settled 后向用户给出每个任务的结果、证据、未解决项。
 
+**autoCommit 工作区的自动保存**：工作区记录带 `autoCommit: true`（Fynvra 一键初始化的仓库）时，编排在建 worktree 之前
+（普通派发和工作流集成 worktree）与 `merge_worktree` 的前置检查全部通过、执行 merge 之前，把主检出目录里未提交的改动
+`git add -A` 并 `git commit --no-verify`，提交信息为「Fynvra 自动保存：派发「<任务标题>」前」/「Fynvra 自动保存：合并「<任务标题>」前」。
+只在主检出目录当前分支等于协调者分支、`git status --porcelain` 有输出时提交；受限协调者和原地模式不做。
+任何失败（无提交身份、`index.lock` 占用等）只记日志，派发和合并照常继续。没有该标记的工作区行为不变。
+
 **验收与清理**：worker 汇报 succeeded 只将任务置于 `in-review`；只有 `merge_worktree` 验收后才是 `completed`，
 包括经审查的只读 / 空改动任务（Git 可以无新增合并提交）。验收与清理要求当前 dispatch，旧尝试不能操作新的重试。
 `cleanup_worktree` 默认只清理已验收或已放弃任务；未完成时无副作用地返回错误，提示验收、打回或显式 `abandon: true` 取消。

@@ -61,6 +61,8 @@ export interface Workspace {
   vcs: WorkspaceVcs;
   /** 默认分支（如 `main`）；普通目录没有。 */
   defaultBranch?: string;
+  /** Fynvra 一键初始化的仓库：派发和合并前自动提交主检出目录里未提交的改动 */
+  autoCommit?: boolean;
 }
 
 /** agent 会话的元数据引用；会话正文的权威源是 pi jsonl。 */
