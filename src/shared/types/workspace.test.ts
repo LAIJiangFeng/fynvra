@@ -44,6 +44,13 @@ describe('parseWorkspace', () => {
     expect(parseWorkspace(plain)).toEqual(plain);
   });
 
+  it('autoCommit 只在值为 true 时保留', () => {
+    expect(parseWorkspace({ ...valid, autoCommit: true })).toEqual({ ...valid, autoCommit: true });
+    for (const autoCommit of [false, 'true', 1, null]) {
+      expect(parseWorkspace({ ...valid, autoCommit })).toEqual(valid);
+    }
+  });
+
   it.each([
     ['缺 repoPath', { ...valid, repoPath: undefined }],
     ['空名称', { ...valid, name: '' }],

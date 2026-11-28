@@ -244,7 +244,11 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
     it.each([null, 42, {}, { workspaceId: '../bad' }, { workspaceId: '' }, { workspaceId: 1 }])(
       'rejects invalid workspace input %j without side effects',
       async (raw) => {
-        for (const channel of [IPC_CHANNELS.WORKSPACES_OPEN_IN, IPC_CHANNELS.WORKSPACES_COPY]) {
+        for (const channel of [
+          IPC_CHANNELS.WORKSPACES_OPEN_IN,
+          IPC_CHANNELS.WORKSPACES_COPY,
+          IPC_CHANNELS.WORKSPACES_INIT_GIT,
+        ]) {
           expect(await invoke(channel, raw)).toMatchObject({ ok: false });
         }
         expect(mocks.openPath).not.toHaveBeenCalled();
@@ -252,6 +256,19 @@ describe.skipIf(!hasGit)('workspaces IPC', () => {
         expect(mocks.writeText).not.toHaveBeenCalled();
       }
     );
+
+    it('init-git 拒绝未知工作区与多余字段', async () => {
+      pick(directory('init-git'));
+      const added = await add();
+      const workspaceId = added.ok ? added.workspace.id : '';
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_INIT_GIT, { workspaceId: 'unknown-id' })
+      ).toMatchObject({ ok: false });
+      expect(
+        await invoke(IPC_CHANNELS.WORKSPACES_INIT_GIT, { workspaceId, path: '/elsewhere' })
+      ).toMatchObject({ ok: false });
+      expect(await listed()).toMatchObject([{ vcs: 'none' }]);
+    });
 
     it('rejects missing workspaces, unknown app ids, copy kinds and renderer-supplied paths', async () => {
       pick(directory('actions'));

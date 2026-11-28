@@ -79,6 +79,10 @@ export const mainZhCN = {
     dirMissing: '目录不存在或无法访问：{dir}',
     repoRootUnknown: '无法解析仓库根目录：{output}',
     insideRepoAt: '所选目录位于 git 仓库 {root} 内',
+    gitMissing: '没有找到 Git，请先安装',
+    gitInitNotPlain: '只有普通文件夹工作区能初始化为 Git 仓库',
+    gitInitInsideRepo: '这个文件夹在另一个 git 仓库（{root}）里，不能单独初始化',
+    gitInitFailed: '初始化 Git 仓库失败（{command}）：{error}',
   },
   settings: {
     invalidPatch: '无效的设置项',

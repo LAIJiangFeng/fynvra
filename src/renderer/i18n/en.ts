@@ -120,6 +120,15 @@ export const en: MessagesShape<typeof zhCN> = {
     copyPath: 'Copy path',
     copyName: 'Copy name',
     copyBranch: 'Copy current branch',
+    initGit: 'Initialize as Git repository',
+    installGit: 'Install Git…',
+    initGitConfirm:
+      'Initialize a Git repository in “{name}” and make an initial commit of all current files (kept on this computer only).',
+    initGitDetail:
+      'After that, Fynvra automatically commits unsaved changes before dispatching and merging, so you can roll back.',
+    initGitDone: 'Git repository initialized',
+    initGitDoneDetail: '“{name}” is now a Git workspace.',
+    initGitFailed: 'Failed to initialize the Git repository',
     copied: 'Copied',
     customApp: 'Custom application…',
     manageApps: 'Manage applications…',

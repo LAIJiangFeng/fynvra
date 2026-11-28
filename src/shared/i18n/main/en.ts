@@ -90,6 +90,11 @@ export const mainEn: MessagesShape<typeof mainZhCN> = {
     dirMissing: 'Folder missing or not accessible: {dir}',
     repoRootUnknown: 'Could not resolve the repository root: {output}',
     insideRepoAt: 'This folder is inside git repository {root}',
+    gitMissing: 'Git was not found; install it first',
+    gitInitNotPlain: 'Only plain folder workspaces can be initialized as a Git repository',
+    gitInitInsideRepo:
+      "This folder is inside another git repository ({root}) and can't be initialized on its own",
+    gitInitFailed: 'Failed to initialize the Git repository ({command}): {error}',
   },
   settings: {
     invalidPatch: 'Invalid setting',

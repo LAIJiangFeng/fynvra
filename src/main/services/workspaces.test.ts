@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DirectoryInspection } from './gitRepository';
+import type { DirectoryInspection, GitRunResult } from './gitRepository';
 import { createSettingsFile, type SettingsFile } from './settingsFile';
 import { createWorkspaceService, toDisplayPath } from './workspaces';
 
@@ -115,6 +115,33 @@ describe('createWorkspaceService', () => {
       await workspaces.addDirectory('/home/dev/notes');
       return workspaces;
     };
+
+    it('inspect 期间别处写入的 autoCommit 不被旧记录冲掉', async () => {
+      let release: (value: DirectoryInspection) => void = () => {};
+      let inspected = 0;
+      const workspaces = createWorkspaceService({
+        settings,
+        inspect: async () =>
+          ++inspected === 1
+            ? plainDir('/home/dev/notes')
+            : new Promise<DirectoryInspection>((resolve) => (release = resolve)),
+        newId: () => 'ws-1',
+        platform: 'linux',
+      });
+      await workspaces.addDirectory('/home/dev/notes');
+      const refreshing = workspaces.refreshVcs('ws-1', { force: true });
+      settings.update((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((item) => ({ ...item, autoCommit: true })),
+      }));
+      release(repo('/home/dev/notes', 'notes'));
+      await refreshing;
+      expect(workspaces.get('ws-1')).toMatchObject({
+        vcs: 'git',
+        defaultBranch: 'main',
+        autoCommit: true,
+      });
+    });
 
     it('目录 git init 成为仓库根目录后 none → git，并记下默认分支', async () => {
       const current = { value: plainDir('/home/dev/notes') };
@@ -328,5 +355,85 @@ describe.skipIf(!hasGit)('.git 监视器（真实 fs + git）', () => {
     expect(workspaces.watchedIds()).toHaveLength(1);
     workspaces.dispose();
     expect(workspaces.watchedIds()).toEqual([]);
+  });
+});
+
+describe('initGit', () => {
+  /** 假 git：rev-parse 失败（不是仓库），其余成功且输出为空（身份未设置） */
+  const fakeRun = (overrides: Record<string, GitRunResult> = {}) => {
+    const calls: string[] = [];
+    const run = async (args: string[], _cwd: string): Promise<GitRunResult> => {
+      calls.push(args.join(' '));
+      return (
+        overrides[args[0] ?? ''] ??
+        (args[0] === 'rev-parse' ? { ok: false, error: 'not a repo' } : { ok: true, stdout: '' })
+      );
+    };
+    return { calls, run };
+  };
+
+  /** 普通目录工作区；`initialized` 后 inspect 返回 git 仓库 */
+  const setup = async (run: ReturnType<typeof fakeRun>['run']) => {
+    const folder = realpathSync.native(dir);
+    let initialized = false;
+    const onChanged = vi.fn();
+    const workspaces = createWorkspaceService({
+      settings,
+      inspect: async () => (initialized ? repo(folder, 'notes') : plainDir(folder)),
+      newId: () => 'ws-1',
+      run,
+      gitUserName: () => 'alice',
+      onChanged,
+    });
+    await workspaces.addDirectory(folder);
+    return { workspaces, onChanged, markInitialized: () => (initialized = true) };
+  };
+
+  it('成功后记录带 autoCommit: true，并刷新为 git 工作区', async () => {
+    const git = fakeRun();
+    const { workspaces, onChanged, markInitialized } = await setup(async (args, cwd) => {
+      if (args[0] === 'commit') markInitialized();
+      return git.run(args, cwd);
+    });
+    expect(await workspaces.initGit('ws-1')).toEqual({ ok: true, alreadyRepo: false });
+    expect(workspaces.get('ws-1')).toMatchObject({
+      vcs: 'git',
+      defaultBranch: 'main',
+      autoCommit: true,
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(git.calls).toContain('init');
+  });
+
+  it('已经是仓库根目录：只刷新，不打标记', async () => {
+    const git = fakeRun({ 'rev-parse': { ok: true, stdout: realpathSync.native(dir) } });
+    const { workspaces, markInitialized } = await setup(git.run);
+    markInitialized();
+    expect(await workspaces.initGit('ws-1')).toEqual({ ok: true, alreadyRepo: true });
+    expect(git.calls).not.toContain('init');
+    expect(workspaces.get('ws-1')).toMatchObject({ vcs: 'git' });
+    expect(workspaces.get('ws-1')?.autoCommit).toBeUndefined();
+  });
+
+  it('git 不可用：返回 git-missing，不打标记', async () => {
+    const git = fakeRun({ '--version': { ok: false, error: 'ENOENT', missingGit: true } });
+    const { workspaces } = await setup(git.run);
+    expect(await workspaces.initGit('ws-1')).toMatchObject({ ok: false, code: 'git-missing' });
+    expect(workspaces.get('ws-1')).toMatchObject({ vcs: 'none' });
+    expect(workspaces.get('ws-1')?.autoCommit).toBeUndefined();
+  });
+
+  it('未知工作区或已是 git 工作区：报错，不调用 git', async () => {
+    const git = fakeRun();
+    const workspaces = createWorkspaceService({
+      settings,
+      inspect: async () => repo('/repos/x'),
+      newId: () => 'ws-git',
+      run: git.run,
+    });
+    await workspaces.addDirectory('/repos/x');
+    expect(await workspaces.initGit('nope')).toMatchObject({ ok: false });
+    expect(await workspaces.initGit('ws-git')).toMatchObject({ ok: false });
+    expect(git.calls).toEqual([]);
   });
 });
