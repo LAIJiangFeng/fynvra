@@ -21,6 +21,7 @@ import type { ApprovalDecision } from '../approval/policy';
 import { type FynvraSessionEvent, subscribeNormalized } from '../events/normalize';
 import { ORCHESTRATION_TOOL_METHODS, type OrchestrationHost, type WorkerHost } from '../host';
 import {
+  DIRECT_PLAN_MODE_PROMPT,
   IN_PLACE_ORCHESTRATOR_PROMPT,
   IN_PLACE_WORKER_CONTRACT_PROMPT,
   ORCHESTRATOR_PROMPT,
@@ -1204,5 +1205,136 @@ describe('createRoleSession restricted coordinator', () => {
     expect(RESTRICTED_COORDINATOR_PROMPT).toContain('Test output may contain local paths');
     expect(restricted).toContain(ORCHESTRATOR_PROMPT.trim().split('\n')[0]);
     expect(normal).not.toContain('# Restricted session');
+  });
+});
+
+describe('createRoleSession project memory', () => {
+  const MEMORY_READ = ['project_memory_search', 'project_memory_feedback'];
+  const INDEX = '- #1 [rule] MEMORY_INDEX_MARKER';
+
+  function memoryHost() {
+    const ok = async () => ({ ok: true as const, result: { done: true } });
+    return { write: vi.fn(ok), search: vi.fn(ok), feedback: vi.fn(ok) };
+  }
+
+  const memoryTools = (names: string[]) =>
+    names.filter((name) => name.startsWith('project_memory_'));
+
+  it('registers search and feedback for every tool policy, and write only when writable', async () => {
+    const host = memoryHost();
+    const orchestrator = await open({
+      role: role({ id: 'orchestrator', tools: 'orchestrator' }),
+      host: orchestrationHost(),
+      memory: { host, index: INDEX, write: true },
+    });
+    const readonly = await open({
+      role: role({ tools: 'readonly' }),
+      memory: { host, index: INDEX, write: false },
+    });
+    const all = await open({
+      role: role({ tools: 'all' }),
+      memory: { host, index: INDEX, write: true },
+    });
+    const none = await open({ role: role({ tools: 'all' }) });
+    expect(memoryTools(orchestrator.session.getActiveToolNames()).sort()).toEqual(
+      [...MEMORY_READ, 'project_memory_write'].sort()
+    );
+    expect(memoryTools(readonly.session.getActiveToolNames()).sort()).toEqual(MEMORY_READ.sort());
+    expect(memoryTools(all.session.getActiveToolNames()).sort()).toEqual(
+      [...MEMORY_READ, 'project_memory_write'].sort()
+    );
+    expect(memoryTools(none.session.getActiveToolNames())).toEqual([]);
+  });
+
+  it('never gives a worker session project_memory_write, even when the host says writable', async () => {
+    for (const tools of ['readonly', 'all'] as const) {
+      const { session } = await open({
+        role: role({ tools }),
+        workerHost: workerHost(),
+        memory: { host: memoryHost(), index: INDEX, write: true },
+      });
+      expect(memoryTools(session.getActiveToolNames()).sort()).toEqual(MEMORY_READ.sort());
+    }
+  });
+
+  it('gives triage and restricted sessions neither the tools nor the prompt', async () => {
+    const prompts: string[] = [];
+    faux.setResponses([
+      (context: TranscriptContext) => {
+        prompts.push(systemText(context));
+        return fauxAssistantMessage('ok');
+      },
+      (context: TranscriptContext) => {
+        prompts.push(systemText(context));
+        return fauxAssistantMessage('ok');
+      },
+    ]);
+    const memory = { host: memoryHost(), index: INDEX, write: true };
+    const triage = await open({
+      role: role({}),
+      profile: 'triage',
+      triageHost: { triageReport: vi.fn(async () => ({ ok: true as const })) },
+      memory,
+    });
+    const restricted = await open({ role: role({ tools: 'all' }), profile: 'restricted', memory });
+    for (const { session } of [triage, restricted]) {
+      expect(memoryTools(session.getActiveToolNames())).toEqual([]);
+      await session.prompt('hi');
+    }
+    expect(prompts).toHaveLength(2);
+    for (const prompt of prompts) expect(prompt).not.toContain('<project_memory>');
+  });
+
+  it('appends <project_memory> once, after the role section and before plan mode', async () => {
+    const prompts: string[] = [];
+    const reply = (context: TranscriptContext) => {
+      prompts.push(systemText(context));
+      return fauxAssistantMessage('ok');
+    };
+    faux.setResponses([reply, reply]);
+    const { session } = await open({
+      role: role({ tools: 'all', systemPrompt: 'ROLE_SECTION_MARKER' }),
+      planMode: () => true,
+      memory: { host: memoryHost(), index: INDEX, write: true },
+    });
+    await session.prompt('first');
+    await session.prompt('second');
+    const prompt = prompts[1] as string;
+    expect(count(prompt, '<project_memory>')).toBe(1);
+    expect(count(prompt, 'MEMORY_INDEX_MARKER')).toBe(1);
+    expect(prompt).toContain('project_memory_write');
+    const at = prompt.indexOf('<project_memory>');
+    expect(prompt.indexOf('ROLE_SECTION_MARKER')).toBeLessThan(at);
+    expect(prompt.indexOf(DIRECT_PLAN_MODE_PROMPT)).toBeGreaterThan(at);
+  });
+
+  it('runs the memory tools without approval even in supervised mode with no approval channel', async () => {
+    const host = memoryHost();
+    const { session } = await open({
+      role: role({ tools: 'readonly', approvalMode: 'supervised' }),
+      memory: { host, index: '', write: true },
+    });
+    faux.setResponses([
+      fauxAssistantMessage(
+        [
+          fauxToolCall('project_memory_search', { query: 'build' }, { id: 'call-0' }),
+          fauxToolCall('project_memory_feedback', { id: 1, verdict: 'useful' }, { id: 'call-1' }),
+          fauxToolCall(
+            'project_memory_write',
+            { action: 'add', category: 'rule', content: 'Use pnpm.' },
+            { id: 'call-2' }
+          ),
+        ],
+        { stopReason: 'toolUse' }
+      ),
+      fauxAssistantMessage('done'),
+    ]);
+    await session.prompt('Remember to use pnpm.');
+    expect(host.search).toHaveBeenCalledWith({ query: 'build', limit: 10 }, expect.anything());
+    expect(host.feedback).toHaveBeenCalledWith({ id: 1, verdict: 'useful' }, expect.anything());
+    expect(host.write).toHaveBeenCalledWith(
+      { action: 'add', category: 'rule', content: 'Use pnpm.' },
+      expect.anything()
+    );
   });
 });

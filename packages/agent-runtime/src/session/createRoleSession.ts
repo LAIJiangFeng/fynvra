@@ -28,10 +28,11 @@ import {
 import { type ApprovalPolicyHooks, createApprovalGate } from '../approval/gate';
 import { filterSensitiveResults } from '../approval/profilePolicy';
 import { type ExecFn, nodeExec } from '../exec';
-import type { ConfigHost, OrchestrationHost, WorkerHost } from '../host';
+import type { ConfigHost, MemoryHost, OrchestrationHost, WorkerHost } from '../host';
 import { appendSystemPromptExtension, beforeRunExtension } from '../pi/extensions';
 import { bindSessionExtensions, emitSessionShutdown } from '../pi/lifecycle';
 import { createRoleMcpExtensions, type McpServerConfig } from '../pi/mcp';
+import { memoryPrompt } from '../prompts/memoryPrompt';
 import {
   buildRolePromptAppend,
   DIRECT_PLAN_MODE_PROMPT,
@@ -41,6 +42,7 @@ import { profileLanguagePrompt } from '../prompts/profileLanguagePrompt';
 import { RESTRICTED_COORDINATOR_PROMPT } from '../prompts/restrictedPrompt';
 import { TRIAGE_PROMPT } from '../prompts/triagePrompt';
 import { createConfigTool } from '../tools/configTool';
+import { createMemoryTools } from '../tools/memoryTools';
 import {
   createOrchestrationTools,
   type RoleOption,
@@ -100,6 +102,12 @@ export interface CreateRoleSessionOptions {
   workerTools?: WorkerToolsOptions;
   /** 提供时加 fynvra_config（任何工具策略都加）：经宿主改 Fynvra 的技能 / MCP / 工作流 / 插件 / 角色技能 */
   configHost?: ConfigHost | null;
+  /**
+   * 项目记忆：提供时任何工具策略都加 project_memory_search / project_memory_feedback，
+   * `write` 为 true 且不是 worker 会话时再加 project_memory_write；`index` 是 Main 生成好的索引行，
+   * 包成 `<project_memory>` 段追加在角色段之后。档位会话忽略它
+   */
+  memory?: { host: MemoryHost; index: string; write: boolean } | null;
   /** dispatch_task 可选的角色（orchestrator 用） */
   roles?: readonly RoleOption[];
   /** dispatch_task 可选的工作流（orchestrator 用）；非空时工具参数与提示词说明它们 */
@@ -186,7 +194,7 @@ export interface RoleSession {
 export async function createRoleSession(input: CreateRoleSessionOptions): Promise<RoleSession> {
   // 档位会话不带用户的个人配置：即使宿主传了也在这里丢掉
   const options: CreateRoleSessionOptions = input.profile
-    ? { ...input, resourcePaths: { skills: [], mcpServers: [] }, configHost: null }
+    ? { ...input, resourcePaths: { skills: [], mcpServers: [] }, configHost: null, memory: null }
     : input;
   const { role, cwd, agentDir } = options;
   const triage = options.profile === 'triage';
@@ -199,12 +207,18 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
   // （write_plan + DIRECT_PLAN_MODE_PROMPT + 审批门拦截），worker 会话忽略开关
   const planMode = !triage && (orchestrator || !workerToolset) ? options.planMode : undefined;
   const directPlanMode = orchestrator ? undefined : planMode;
+  // worker 会话不论宿主怎么传都不可写（Main 侧还会再拦一次）
+  const memoryWrite = options.memory?.write === true && !workerToolset;
+  const memoryAppend = options.memory
+    ? memoryPrompt({ index: options.memory.index, write: memoryWrite })
+    : undefined;
   const settingsManager = options.settingsManager ?? createDefaultSettings();
   const selected = selectTools(
     options,
     workerToolset,
     settingsManager,
-    directPlanMode !== undefined
+    directPlanMode !== undefined,
+    memoryWrite
   );
   const { noTools } = selected;
   const customTools = options.profile
@@ -255,6 +269,8 @@ export async function createRoleSession(input: CreateRoleSessionOptions): Promis
     gate.extension,
     ...mcp.extensions,
     ...(promptAppend ? [appendSystemPromptExtension('fynvra-role-prompt', promptAppend)] : []),
+    // 稳定前缀：在角色段之后、计划模式段之前，会话中途不刷新
+    ...(memoryAppend ? [appendSystemPromptExtension('fynvra-project-memory', memoryAppend)] : []),
     // 每次 run 重新读开关：开着才追加，关掉后从下一次 run 起不再出现（pi 每次 run 都给新的 options 副本）
     ...(planMode
       ? [
@@ -336,7 +352,8 @@ function selectTools(
   options: CreateRoleSessionOptions,
   workerToolset: WorkerToolset | undefined,
   settings: SettingsManager,
-  writePlan: boolean
+  writePlan: boolean,
+  memoryWrite: boolean
 ): { customTools: ToolDefinition[]; noTools?: 'builtin' } {
   const { role, cwd } = options;
   // 受限会话：所有命令子进程先经过宿主的 commandEnv（如有），再只留白名单变量，去掉密钥
@@ -357,6 +374,7 @@ function selectTools(
   const workerTools = [
     ...(workerToolset?.tools ?? []),
     ...(options.configHost ? [createConfigTool(options.configHost)] : []),
+    ...(options.memory ? createMemoryTools(options.memory.host, { write: memoryWrite }) : []),
   ];
   // 描述不说「唯一能写的文件」：all 策略还有 pi 的 write / edit（名字不冲突）
   const planTools = writePlan ? [createWritePlanTool(cwd, { onlyWritableFile: false })] : [];
