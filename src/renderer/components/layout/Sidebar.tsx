@@ -33,7 +33,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
-import { confirmDialog } from '@/lib/appDialog';
+import { initGitWorkspace } from '@/lib/gitInit';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { CustomAppDialog } from './CustomAppDialog';
@@ -145,28 +145,6 @@ function WorkspaceItem({
         .status()
         .then((result) => result.ok && setGitAvailable(result.status.available))
         .catch(() => {});
-    }
-  };
-  const notify = (title: string, message: string) =>
-    useWorkspacesStore.setState({ notice: { title, message } });
-  const initGit = async () => {
-    const confirmed = await confirmDialog({
-      message: t('workspaces.initGitConfirm', { name: workspace.name }),
-      detail: t('workspaces.initGitDetail'),
-      confirmLabel: t('workspaces.initGit'),
-    });
-    if (!confirmed) return;
-    try {
-      const result = await window.fynvra.workspaces.initGit({ workspaceId: workspace.id });
-      if (result.ok)
-        notify(
-          t('workspaces.initGitDone'),
-          t('workspaces.initGitDoneDetail', { name: workspace.name })
-        );
-      else if (result.code === 'git-missing') useSettingsViewStore.getState().show('git');
-      else notify(t('workspaces.initGitFailed'), result.error);
-    } catch (error) {
-      notify(t('workspaces.initGitFailed'), errorMessage(error));
     }
   };
   const pickApp = async () => {
@@ -308,7 +286,9 @@ function WorkspaceItem({
           {workspace.vcs === 'none' && (
             <DropdownMenuItem
               onClick={() =>
-                gitAvailable ? void initGit() : useSettingsViewStore.getState().show('git')
+                gitAvailable
+                  ? void initGitWorkspace(workspace)
+                  : useSettingsViewStore.getState().showGitInstall(workspace.id)
               }
             >
               <GitBranch />

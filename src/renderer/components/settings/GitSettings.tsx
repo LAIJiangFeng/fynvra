@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/i18n/I18nProvider';
+import { runPendingGitInit } from '@/lib/gitInit';
 import { Field, InlineMessage, SectionHeader } from './common';
 import { GitCompatibilitySection, GitWorktreeSettings } from './GitWorktreeSettings';
 
@@ -86,6 +87,11 @@ export function GitSettings() {
   };
 
   const available = status?.available === true;
+
+  // git 变为可用时接续侧栏发起的初始化；没有待办时什么都不做
+  useEffect(() => {
+    if (available) void runPendingGitInit();
+  }, [available]);
   const identityDisabled = !available || saving;
 
   return (
