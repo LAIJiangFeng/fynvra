@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Fragment, useId, useState } from 'react';
 import { SessionList } from '@/components/chat/SessionList';
+import { useSettingsViewStore } from '@/components/settings/settingsViewStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,6 +33,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useT } from '@/i18n/I18nProvider';
+import { confirmDialog } from '@/lib/appDialog';
 import { cn } from '@/lib/utils';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { CustomAppDialog } from './CustomAppDialog';
@@ -132,9 +134,40 @@ function WorkspaceItem({
   const loadApps = useWorkspacesStore((state) => state.loadOpenWithApps);
   const openIn = useWorkspacesStore((state) => state.openIn);
   const copy = useWorkspacesStore((state) => state.copy);
+  // 普通文件夹菜单打开时查一次 git 是否可用；未知时按可用显示，Main 仍会报 git-missing
+  const [gitAvailable, setGitAvailable] = useState(true);
   const changeMenuOpen = (open: boolean) => {
     setMenuOpen(open);
-    if (open) void loadApps();
+    if (!open) return;
+    void loadApps();
+    if (workspace.vcs === 'none') {
+      window.fynvra.git
+        .status()
+        .then((result) => result.ok && setGitAvailable(result.status.available))
+        .catch(() => {});
+    }
+  };
+  const notify = (title: string, message: string) =>
+    useWorkspacesStore.setState({ notice: { title, message } });
+  const initGit = async () => {
+    const confirmed = await confirmDialog({
+      message: t('workspaces.initGitConfirm', { name: workspace.name }),
+      detail: t('workspaces.initGitDetail'),
+      confirmLabel: t('workspaces.initGit'),
+    });
+    if (!confirmed) return;
+    try {
+      const result = await window.fynvra.workspaces.initGit({ workspaceId: workspace.id });
+      if (result.ok)
+        notify(
+          t('workspaces.initGitDone'),
+          t('workspaces.initGitDoneDetail', { name: workspace.name })
+        );
+      else if (result.code === 'git-missing') useSettingsViewStore.getState().show('git');
+      else notify(t('workspaces.initGitFailed'), result.error);
+    } catch (error) {
+      notify(t('workspaces.initGitFailed'), errorMessage(error));
+    }
   };
   const pickApp = async () => {
     try {
@@ -270,6 +303,16 @@ function WorkspaceItem({
             <DropdownMenuItem onClick={() => void copy(workspace.id, 'branch')}>
               <GitBranch />
               {t('workspaces.copyBranch')}
+            </DropdownMenuItem>
+          )}
+          {workspace.vcs === 'none' && (
+            <DropdownMenuItem
+              onClick={() =>
+                gitAvailable ? void initGit() : useSettingsViewStore.getState().show('git')
+              }
+            >
+              <GitBranch />
+              {t(gitAvailable ? 'workspaces.initGit' : 'workspaces.installGit')}
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />

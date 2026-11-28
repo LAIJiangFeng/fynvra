@@ -85,7 +85,7 @@ export interface Role {
 // vcs：git 仓库根目录为 'git'；不是 git 仓库（或没装 git）的目录、按普通目录挂入的仓库子目录为 'none'（没有默认分支）。
 // 没有 vcs 的旧记录按 'git' 读。
 export type WorkspaceVcs = 'git' | 'none';
-export interface Workspace { id: string; name: string; repoPath: string; vcs: WorkspaceVcs; defaultBranch?: string; }
+export interface Workspace { id: string; name: string; repoPath: string; vcs: WorkspaceVcs; defaultBranch?: string; autoCommit?: boolean; }
 export interface SessionRef {
   id: string; workspaceId: string; roleId: string; cwd: string;
   worktreeId?: string; parentSessionId?: string;
@@ -316,6 +316,7 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 **没有 git 的工作区（`vcs: 'none'`）**：编排原地进行，Main 不调用任何 git。
 - git 用不了时派发不卡住：git 工作区派发时用不了 worktree（读不到分支、git 读不了或没装、建 worktree 失败）→ 原地派发，不改 vcs 记录；`.git/HEAD` 已不在时还会重新检测，已不是仓库就记为 none，服务空闲后按新 vcs 重开。受限协调者照旧拒绝；工作流任务此时报错，让主 agent 不带工作流重派；没有 worktree 的 worker 会话用原地契约。
 - 挂入：任意目录都能挂；git 仓库的子目录先问用户（改挂仓库根目录 / 仍然按普通目录挂入该子目录 / 取消）。
+- 一键初始化（侧栏菜单「初始化为 Git 仓库」，`workspaces:init-git { workspaceId }`，Main `gitInit.ts`）：没装 git 返回 `code: 'git-missing'`，菜单项显示为「安装 Git…」并打开 Git 设置页；目录已是仓库根目录只重新检测 vcs、不打标记，在外层仓库里报错；否则 `git init` → 生效配置里缺 `user.name` / `user.email` 哪项就在仓库本地配置补哪项（系统用户名或 `Fynvra`、`fynvra@localhost`）→ `git add -A` + `git commit --no-verify --allow-empty` → 记录写 `autoCommit: true` 并 `refreshVcs(force)` 转为 git。失败不删 `.git`，可重试。`autoCommit` 表示 Fynvra 一键初始化的仓库：编排在派发前、合并前自动提交其中未提交的改动。
 - `dispatch_task` 不建 worktree，worker 的 cwd 是工作区目录（并行的 worker 共用它，工具结果建议一次只派一个），
   Dispatch 记 `mode: 'in-place'`；`review_diff` 没有 diff，给出 worker 在 `report_done` 里汇报的改动文件；
   `run_checks` 在工作区目录里跑；`merge_worktree` 无需合并，把 in-review 的任务记为 completed；

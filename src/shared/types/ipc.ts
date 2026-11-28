@@ -37,6 +37,8 @@ export const IPC_CHANNELS = {
   WORKSPACES_OPEN_IN: 'workspaces:open-in',
   WORKSPACES_COPY: 'workspaces:copy',
   WORKSPACES_PICK_APP: 'workspaces:pick-app',
+  /** 参数 `{ workspaceId }`：把普通目录工作区一键初始化为 git 仓库；没装 git 时返回 code 'git-missing' */
+  WORKSPACES_INIT_GIT: 'workspaces:init-git',
   TERMINALS_CREATE: 'terminals:create',
   TERMINALS_WRITE: 'terminals:write',
   TERMINALS_RESIZE: 'terminals:resize',

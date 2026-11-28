@@ -14,6 +14,8 @@ export type OpenWithAppsResult = IpcResult<{ apps: OpenWithTarget[] }>;
 export type PickAppResult =
   | { ok: true; app: OpenWithApp }
   | { ok: false; code?: 'canceled'; error: string };
+/** 没装 git 时 code 为 'git-missing'，Renderer 据此打开 Git 设置页 */
+export type InitGitResult = { ok: true } | { ok: false; code?: 'git-missing'; error: string };
 
 export interface WorkspacesApi {
   list(): Promise<WorkspaceListResult>;
@@ -24,6 +26,7 @@ export interface WorkspacesApi {
   openIn(input: { workspaceId: string; appId: string }): Promise<IpcResult>;
   copy(input: { workspaceId: string; what: WorkspaceCopyKind }): Promise<IpcResult>;
   pickApp(): Promise<PickAppResult>;
+  initGit(input: { workspaceId: string }): Promise<InitGitResult>;
   onChanged(callback: () => void): Unsubscribe;
 }
 
@@ -44,6 +47,8 @@ export function createWorkspacesApi(
     copy: ({ workspaceId, what }) =>
       ipc.invoke(IPC_CHANNELS.WORKSPACES_COPY, { workspaceId, what }) as Promise<IpcResult>,
     pickApp: () => ipc.invoke(IPC_CHANNELS.WORKSPACES_PICK_APP) as Promise<PickAppResult>,
+    initGit: ({ workspaceId }) =>
+      ipc.invoke(IPC_CHANNELS.WORKSPACES_INIT_GIT, { workspaceId }) as Promise<InitGitResult>,
     onChanged: (callback) => subscribe(IPC_CHANNELS.WORKSPACES_CHANGED, callback),
   };
 }
