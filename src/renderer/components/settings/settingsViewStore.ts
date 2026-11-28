@@ -12,6 +12,7 @@ export const SETTINGS_SECTIONS = [
   'workflows',
   'instructions',
   'skills',
+  'memory',
   'mcp',
   'plugins',
   'git',
