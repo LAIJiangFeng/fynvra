@@ -3,6 +3,7 @@ import {
   Bell,
   Boxes,
   FileText,
+  GitBranch,
   Keyboard,
   type LucideIcon,
   Palette,
@@ -22,6 +23,7 @@ import { useT } from '@/i18n/I18nProvider';
 import { cn } from '@/lib/utils';
 import { AppearanceSettings } from './AppearanceSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { GitSettings } from './GitSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
@@ -45,6 +47,7 @@ interface SectionSpec {
 
 const SECTIONS: SectionSpec[] = [
   { value: 'general', icon: SlidersHorizontal, Component: GeneralSettings },
+  { value: 'git', icon: GitBranch, Component: GitSettings },
   { value: 'notifications', icon: Bell, Component: NotificationSettings },
   { value: 'providers', icon: Boxes, Component: ProvidersSettings },
   { value: 'roles', icon: UserCog, Component: RolesSettings, wide: true },

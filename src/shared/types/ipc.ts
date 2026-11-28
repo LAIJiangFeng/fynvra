@@ -9,6 +9,11 @@ export const IPC_CHANNELS = {
   UPDATES_INSTALL: 'updates:install',
   UPDATES_CHANGED: 'updates:changed',
 
+  /** git 环境：无参检测；安装只用 Main 写死的地址与校验值；身份只收 { name, email } */
+  GIT_STATUS: 'git:status',
+  GIT_INSTALL: 'git:install',
+  GIT_SET_IDENTITY: 'git:set-identity',
+
   SETTINGS_GET: 'settings:get',
   SETTINGS_UPDATE: 'settings:update',
   SETTINGS_TEST_NETWORK: 'settings:test-network',

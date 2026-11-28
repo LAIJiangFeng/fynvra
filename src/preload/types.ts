@@ -57,6 +57,7 @@ export interface WindowApi {
 export interface FynvraApi {
   appDialog: import('./domains/appDialog').AppDialogApi;
   updates: import('./domains/updates').UpdatesApi;
+  git: import('./domains/git').GitApi;
   settings: SettingsApi;
   workspaceUi: import('./domains/workspaceUi').WorkspaceUiApi;
   workspaces: WorkspacesApi;

@@ -428,6 +428,11 @@ Renderer 的 `ChangesView.tsx` 及对应测试；IPC 入参、返回形状不变
 - 纯环境转换 helper 只复制子进程环境，以 GIT_CONFIG_COUNT/KEY/VALUE 追加命令级 Git 配置并保留已有项；非法已有计数/缺项时安全失败，不记录配置内容。不改 process.env、gitconfig、系统代理或 profile。Main 新 Git / run_checks 命令现读设置；新 PTY 和新建/恢复的 Agent session 获取配置快照，已有进程不重启。
 - Main → Worker `SpawnSessionSpec.networkProxy` 为相同受限字段（system 模式可多带解析出的 `url`），双端解析；pi 官方 shell spawnHook 在 session metadata 注入后转换环境，保留默认工具集、角色限制和审批门，git_readonly 的 exec 同样接线。模型 API、MCP 和应用更新不因此改路由。
 - `settings:test-network` 仅接收严格校验的当前配置草稿，Main 固定探测 GitHub API HTTPS 与公开项目仓库的 HEAD（git ls-remote），无 fetch/push、无凭据交互；`settings:cancel-network-test` 无参数。每窗口最多一个检测，替换/取消/关闭时中止，有限超时，响应仅含分项状态码与 HTTP 状态，不返回原始错误或环境。Renderer 在草稿/保存设置改变或卸载时使旧结果失效。检测只说明连通性，不证明 push 权限；仅用户点击触发。
+- 便携 git（设置「Git」页，`src/main/services/gitSetup.ts`）：
+  - Windows 一键安装固定版本 MinGit 2.56.1（x64 / arm64，其他架构报不支持），文件名与 SHA-256 写死在代码里。Main 用 `net.fetch` 依次尝试 npmmirror 镜像与 GitHub release，边下边算 SHA-256，校验不过删临时文件换源；校验通过后用 `%SystemRoot%\System32\tar.exe` 解压到 `<userData>/git/` 下的临时目录，`cmd\git.exe --version` 能跑再改名为 `<userData>/git/MinGit-2.56.1-<arch>`。不需要管理员权限，不改系统。
+  - PATH 注入：启动时（`loadLoginShellPath()` 之前、任何 git 调用与 worker fork 之前）与安装成功后，把 `<目录>\cmd` **追加**到 `process.env.PATH` 末尾，系统装了 git 时仍优先用系统的；Main、worker、检查命令与内置终端继承它。来源判断：去掉自带目录后仍能跑 `git --version` 为 `system`，否则为 `bundled`。
+  - macOS 「安装」执行 `/usr/bin/xcode-select --install` 调起系统窗口；Linux 只显示包管理器命令。
+  - IPC：`git:status`（无参，返回可用性、版本、来源与全局 user.name / user.email）、`git:install`（无参，同一时间只有一次安装，成功后 `refreshVcs(undefined, { onlyPlain: true })`）、`git:set-identity`（`{ name, email }`，去首尾空白后非空、≤ 200 字符、无控制字符，邮箱含 `@`，用 `git config --global` 写入）。Renderer 不传任何 URL 或路径；外部命令一律 execFile 加参数数组。
 
 ### 7.8 上下文自动压缩
 

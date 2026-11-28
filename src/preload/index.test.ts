@@ -29,6 +29,7 @@ describe('preload bridge', () => {
       'appDialog',
       'appPlugins',
       'files',
+      'git',
       'instructions',
       'mcp',
       'notifications',
