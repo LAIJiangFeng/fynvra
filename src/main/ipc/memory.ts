@@ -9,6 +9,7 @@ import {
 } from '@shared/types/memory';
 import { app, ipcMain } from 'electron';
 import { translate } from '../i18n';
+import { ORCHESTRATION_NOTICE_PREFIX } from '../services/agentHost/coordinatorWake';
 import { createMemoryService, type MemoryService } from '../services/memory';
 import { collectAppSecrets } from '../services/secrets';
 import { readHistory, sessionFilePath } from '../services/sessions/history';
@@ -20,6 +21,16 @@ import { getWorkspaceService } from './workspaces';
 const RECENT_USER_MESSAGES = 20;
 
 let memoryService: MemoryService | null = null;
+
+/** 最近的用户原话：编排通知虽是 user 消息但不是用户说的，不能拿来通过 quote 核对 */
+export function recentUserTexts(messages: readonly { role: string; text: string }[]): string[] {
+  return messages
+    .filter(
+      (message) => message.role === 'user' && !message.text.startsWith(ORCHESTRATION_NOTICE_PREFIX)
+    )
+    .slice(-RECENT_USER_MESSAGES)
+    .map((message) => message.text);
+}
 
 /** pi 会话 jsonl 的投影；记忆服务的 quote 核对与提炼共用 */
 export function readSessionMessages(sessionId: string) {
@@ -41,10 +52,7 @@ export function getMemoryService(): MemoryService {
     workspace: memoryWorkspace,
     recentUserMessages: async (sessionId) => {
       try {
-        return (await readSessionMessages(sessionId))
-          .filter((message) => message.role === 'user')
-          .slice(-RECENT_USER_MESSAGES)
-          .map((message) => message.text);
+        return recentUserTexts(await readSessionMessages(sessionId));
       } catch {
         return [];
       }

@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bell,
   Boxes,
+  Brain,
   FileText,
   GitBranch,
   Keyboard,
@@ -29,6 +30,7 @@ import { GitSettings } from './GitSettings';
 import { InstructionsSettings } from './InstructionsSettings';
 import { KeybindingsSettings } from './KeybindingsSettings';
 import { McpSettings } from './McpSettings';
+import { MemorySettings } from './MemorySettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PluginsSettings } from './PluginsSettings';
 import { ProvidersSettings } from './ProvidersSettings';
@@ -67,6 +69,7 @@ const GROUPS: { group?: 'agents' | 'extensions' | 'code'; sections: SectionSpec[
       { value: 'workflows', icon: Workflow, Component: WorkflowsSettings, wide: true },
       { value: 'instructions', icon: FileText, Component: InstructionsSettings },
       { value: 'skills', icon: Sparkles, Component: SkillsSettings },
+      { value: 'memory', icon: Brain, Component: MemorySettings },
     ],
   },
   {

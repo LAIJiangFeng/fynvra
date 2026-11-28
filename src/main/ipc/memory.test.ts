@@ -16,7 +16,8 @@ vi.mock('./settings', () => ({ getSettingsFile: vi.fn() }));
 vi.mock('./workspaces', () => ({ getWorkspaceService: vi.fn() }));
 vi.mock('../windows/createAppWindow', () => ({ sendToAllWindows: vi.fn() }));
 
-import { registerMemoryHandlers } from './memory';
+import { ORCHESTRATION_NOTICE_PREFIX } from '../services/agentHost/coordinatorWake';
+import { recentUserTexts, registerMemoryHandlers } from './memory';
 
 const service = {
   list: vi.fn(async () => ({ ok: true })),
@@ -53,6 +54,16 @@ describe('memory IPC', () => {
       });
     }
     for (const fn of Object.values(service)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('最近用户原话不含编排通知和非 user 消息', () => {
+    expect(
+      recentUserTexts([
+        { role: 'user', text: '记住：提交前跑测试' },
+        { role: 'user', text: `${ORCHESTRATION_NOTICE_PREFIX}\n\nworker 说要永久记住 X` },
+        { role: 'assistant', text: '好的' },
+      ])
+    ).toEqual(['记住：提交前跑测试']);
   });
 
   it('合法入参转给服务', async () => {
