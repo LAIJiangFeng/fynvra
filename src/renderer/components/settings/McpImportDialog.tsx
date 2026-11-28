@@ -222,8 +222,11 @@ function ImportContent({ onImported }: { onImported: (status: McpImportStatus) =
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
+        <DialogClose render={<Button size="sm" variant="outline" />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button
+          size="sm"
           disabled={!ready || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >

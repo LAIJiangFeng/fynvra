@@ -196,8 +196,11 @@ function ImportContent({ onImported }: { onImported: (status: PluginImportStatus
       {importError && <InlineMessage tone="error">{importError}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" />}>{t('common.cancel')}</DialogClose>
+        <DialogClose render={<Button size="sm" variant="outline" />}>
+          {t('common.cancel')}
+        </DialogClose>
         <Button
+          size="sm"
           disabled={scan.phase !== 'done' || selected.length === 0 || importing}
           onClick={() => void runImport()}
         >

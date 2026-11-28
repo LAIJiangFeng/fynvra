@@ -398,10 +398,11 @@ export function FileWorkspace({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBulk(null)}>
+            <Button size="sm" variant="outline" onClick={() => setBulk(null)}>
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               variant="destructive"
               onClick={() => {
                 if (bulk) {
@@ -429,10 +430,11 @@ export function FileWorkspace({
             <DialogDescription>{t('terminals.closeHint')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setClosingTerminal(null)}>
+            <Button size="sm" variant="outline" onClick={() => setClosingTerminal(null)}>
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               variant="destructive"
               onClick={() => {
                 if (closingTerminal) void useTerminalsStore.getState().close(closingTerminal);
@@ -465,10 +467,16 @@ export function FileWorkspace({
             </p>
           )}
           <DialogFooter>
-            <Button variant="outline" disabled={pending?.saving} onClick={() => setConfirm(null)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending?.saving}
+              onClick={() => setConfirm(null)}
+            >
               {t('common.cancel')}
             </Button>
             <Button
+              size="sm"
               variant="outline"
               disabled={pending?.saving}
               onClick={() => {
@@ -482,6 +490,7 @@ export function FileWorkspace({
             </Button>
             {confirm?.action === 'close' && (
               <Button
+                size="sm"
                 disabled={pending?.saving}
                 onClick={async () => {
                   if (await store.getState().saveFile(confirm.file.id)) {

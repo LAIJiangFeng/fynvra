@@ -59,6 +59,7 @@ export function CloseWindowDialog() {
         )}
         <DialogFooter>
           <Button
+            size="sm"
             ref={cancel}
             variant="outline"
             disabled={busy}
@@ -66,10 +67,15 @@ export function CloseWindowDialog() {
           >
             {t('common.cancel')}
           </Button>
-          <Button disabled={busy} onClick={() => void respond('tray')}>
+          <Button size="sm" disabled={busy} onClick={() => void respond('tray')}>
             {t('app.minimizeToTray')}
           </Button>
-          <Button variant="destructive" disabled={busy} onClick={() => void respond('quit')}>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busy}
+            onClick={() => void respond('quit')}
+          >
             {t('app.quit')}
           </Button>
         </DialogFooter>

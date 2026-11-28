@@ -363,10 +363,10 @@ function ProviderForm({
       {error && <InlineMessage tone="error">{error}</InlineMessage>}
 
       <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>
+        <DialogClose render={<Button size="sm" type="button" variant="outline" />}>
           {t('common.cancel')}
         </DialogClose>
-        <Button type="submit" disabled={saving}>
+        <Button size="sm" type="submit" disabled={saving}>
           {t(saving ? 'common.saving' : 'common.save')}
         </Button>
       </DialogFooter>
