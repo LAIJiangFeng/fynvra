@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import type { DispatchTaskInput } from '@fynvra/agent-runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  type AcceptedTask,
   createOrchestrationService,
   type OrchestrationService,
   type OrchestrationServiceOptions,
@@ -1005,5 +1006,151 @@ describe('createOrchestrationService', () => {
       error: `dispatch ${dispatch.id} has no diff: the workspace has no git`,
     });
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe('onTaskAccepted（任务被验收的钩子）', () => {
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const HEAD = 'head1111111111111111111111111111111111111';
+
+  function withListener(overrides: Partial<OrchestrationServiceOptions> = {}) {
+    const accepted: AcceptedTask[] = [];
+    const service = make({ onTaskAccepted: (task) => accepted.push(task), ...overrides });
+    return { service, accepted };
+  }
+
+  /** worker 分支有新提交：合并时读到的 head 与 worktree 的 baseCommit 不同 */
+  const workerCommitted = () =>
+    fake.respond(({ args }) =>
+      args.join(' ').startsWith('rev-parse --verify --quiet refs/heads/fynvra/')
+        ? { stdout: `${HEAD}\n` }
+        : undefined
+    );
+
+  it('merge：打回后再合并，快照含全部尝试与打回意见，只触发一次且在下一个 tick', async () => {
+    workerCommitted();
+    const { service, accepted } = withListener();
+    const dispatch = await dispatchOn(service);
+    const host = service.hostFor('session_coord');
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'First.');
+    expect((await host.rejectWork({ dispatchId: dispatch.id, feedback: 'Use X.' })).ok).toBe(true);
+    await service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Second.', ['src/a.ts']);
+    const retry = service.coordinatorWork('session_coord').reviews[0]?.dispatch.id ?? '';
+    expect(await host.mergeWorktree({ dispatchId: retry })).toMatchObject({ merged: true });
+    expect(accepted).toEqual([]);
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      workspaceId: 'ws_1',
+      coordinatorSessionId: 'session_coord',
+      coordinatorRestricted: false,
+      acceptedVia: 'merge',
+      task: {
+        title: 'Add toggle',
+        spec: 'S',
+        workflow: false,
+        mergedDiff: { headCommit: HEAD },
+      },
+      dispatches: [
+        { dispatchId: dispatch.id, status: 'succeeded', summary: 'First.' },
+        { dispatchId: retry, status: 'succeeded', summary: 'Second.' },
+      ],
+      reviewFeedback: [{ body: 'Use X.' }],
+    });
+    // 已完成的任务再写不会重复触发
+    await service.flush();
+    await tick();
+    expect(accepted).toHaveLength(1);
+  });
+
+  it('无改动的合并记为 no-change', async () => {
+    const { service, accepted } = withListener();
+    const dispatch = await dispatchOn(service);
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Nothing.');
+    await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id });
+    await tick();
+    expect(accepted.map((task) => task.acceptedVia)).toEqual(['no-change']);
+  });
+
+  it('普通目录原地验收记为 in-place', async () => {
+    const { service, accepted } = withListener({
+      workspace: { id: 'ws_1', name: 'notes', repoPath: '/notes', vcs: 'none' },
+    });
+    const dispatch = await dispatchOn(service);
+    await service
+      .workerHostFor(dispatch.workerSessionId)
+      ?.reportDone('succeeded', 'Edited.', ['a.md']);
+    expect(
+      await service.hostFor('session_coord').mergeWorktree({ dispatchId: dispatch.id })
+    ).toMatchObject({ mode: 'in-place' });
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      acceptedVia: 'in-place',
+      dispatches: [{ filesModified: ['a.md'] }],
+    });
+    expect(accepted[0]?.task.mergedDiff).toBeUndefined();
+  });
+
+  it('开 PR 记为 pull-request', async () => {
+    const PR_URL = 'https://github.com/o/r/pull/7';
+    const MB = 'mb22222222222222222222222222222222222222222';
+    workerCommitted();
+    fake.respond(({ cmd, args }) => {
+      const line = args.join(' ');
+      if (cmd === 'gh' && line.startsWith('pr list')) return { stdout: '[]\n' };
+      if (cmd === 'gh' && line.startsWith('pr create')) return { stdout: `${PR_URL}\n` };
+      if (args[0] === 'merge-base') return { stdout: `${MB}\n` };
+      if (line.startsWith('rev-list --count')) return { stdout: '1\n' };
+      if (args[0] === 'log') return { stdout: 'Add toggle\n' };
+      return undefined;
+    });
+    const { service, accepted } = withListener({
+      pullRequestGate: {
+        knownSecrets: async () => [],
+        localInfo: async () => ({ paths: [], windows: false }),
+      },
+    });
+    const dispatch = await dispatchOn(service);
+    await service.workerHostFor(dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+    expect(
+      await service
+        .hostFor('session_coord')
+        .openPullRequest({ dispatchId: dispatch.id, title: 'Add toggle', summary: 'Adds it.' })
+    ).toMatchObject({ ok: true, url: PR_URL });
+    await tick();
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      acceptedVia: 'pull-request',
+      task: { pullRequestUrl: PR_URL, mergedDiff: { headCommit: HEAD } },
+    });
+  });
+
+  it('放弃不触发；监听器抛错不影响验收结果', async () => {
+    const log = vi.fn();
+    const service = make({
+      log,
+      onTaskAccepted: () => {
+        throw new Error('boom');
+      },
+    });
+    const first = await dispatchOn(service);
+    const host = service.hostFor('session_coord');
+    await service.workerHostFor(first.workerSessionId)?.reportDone('succeeded', 'Done.');
+    await host.cleanupWorktree({ dispatchId: first.id, abandon: true });
+    await tick();
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('task accepted listener'));
+
+    const second = await service.hostFor('session_coord').dispatchTask({ ...TASK, title: 'Two' });
+    if (!second.ok || !second.dispatch) throw new Error('dispatch failed');
+    await service.workerHostFor(second.dispatch.workerSessionId)?.reportDone('succeeded', 'Done.');
+    expect(await host.mergeWorktree({ dispatchId: second.dispatch.id })).toMatchObject({
+      ok: true,
+      merged: true,
+    });
+    await tick();
+    expect(log).toHaveBeenCalledWith('task accepted listener failed: boom');
   });
 });

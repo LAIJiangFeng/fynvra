@@ -84,6 +84,50 @@ export interface OrchestrationServiceOptions {
   isRestrictedCoordinator?: (coordinatorSessionId: string) => boolean;
   /** 重新检测本工作区的 vcs 并返回检测后的值；工作区已不存在时返回 undefined。缺省不重新检测 */
   refreshVcs?: () => Promise<Workspace['vcs'] | undefined>;
+  /** 任务被验收（状态改为 completed）：下一个 tick 异步调用，抛错只记日志（记忆提炼用） */
+  onTaskAccepted?: (task: AcceptedTask) => void;
+}
+
+/** 验收方式：merge 合并、pull-request 开 PR、in-place 普通目录原地验收、no-change 合并时 worker 没有新提交 */
+export type AcceptedVia = 'merge' | 'pull-request' | 'in-place' | 'no-change';
+
+/** 被验收任务的一次尝试 */
+export interface AcceptedDispatch {
+  dispatchId: string;
+  sessionId: string;
+  /** 未结算为 running */
+  status: 'running' | 'succeeded' | 'failed';
+  startedAt: number;
+  settledAt?: number;
+  /** worker 的 report_done 汇报 */
+  summary?: string;
+  filesModified?: string[];
+  /** 工作流节点（只有工作流任务有） */
+  nodeId?: string;
+  nodeName?: string;
+}
+
+/** 任务被验收时同步打包的快照（ARCHITECTURE §7.15「验收提炼」） */
+export interface AcceptedTask {
+  workspaceId: string;
+  runId: string;
+  coordinatorSessionId: string;
+  /** 主 agent 会话是受限档位（restricted）：提炼跳过 */
+  coordinatorRestricted: boolean;
+  acceptedVia: AcceptedVia;
+  acceptedAt: number;
+  task: {
+    id: string;
+    title: string;
+    spec: string;
+    mergedDiff?: { baseCommit: string; headCommit: string };
+    pullRequestUrl?: string;
+    workflow: boolean;
+  };
+  /** 该任务全部尝试，按插入顺序 */
+  dispatches: AcceptedDispatch[];
+  /** 全部打回意见（inbox 里 subject 为 'review feedback' 的 instruction），按时间顺序 */
+  reviewFeedback: { dispatchId?: string; body: string; createdAt: number }[];
 }
 
 /** Current successful attempt still awaiting a coordinator decision, independent of inbox delivery. */
@@ -211,11 +255,24 @@ function observe<T extends { id: string }>(
 function observeStore(
   store: OrchestrationStore,
   changed: () => void,
-  messagePosted?: (message: Message) => void
+  messagePosted?: (message: Message) => void,
+  taskCompleted?: (taskId: string) => void
 ): OrchestrationStore {
+  const tasks = observe(store.tasks, changed);
   return {
     runs: observe(store.runs, changed),
-    tasks: observe(store.tasks, changed),
+    tasks: {
+      ...tasks,
+      // 状态「改为」completed 时同步通知（原地、merge、PR 三条验收路径都经这里）
+      update: (id, patch) => {
+        const before = store.tasks.get(id)?.status;
+        const result = tasks.update(id, patch);
+        if (result.ok && patch.status === 'completed' && before !== 'completed') {
+          taskCompleted?.(id);
+        }
+        return result;
+      },
+    },
     dispatches: observe(store.dispatches, changed),
     worktrees: observe(store.worktrees, changed),
     messages: observe(store.messages, changed, messagePosted),
@@ -281,13 +338,99 @@ export function createOrchestrationService(
     });
   };
 
-  const store = observeStore(inner, changed, (message) => {
+  /** 同步打包快照（读的是内存状态），监听器放到下一个 tick；任何异常只记日志，不影响验收 */
+  const taskCompleted = (taskId: string): void => {
+    const listener = options.onTaskAccepted;
+    if (!listener) return;
+    let accepted: AcceptedTask | undefined;
     try {
-      options.onMessagePosted?.(message);
+      accepted = acceptedTaskOf(taskId);
     } catch (error) {
-      log(`message listener failed: ${errorMessage(error)}`);
+      log(`packing accepted task failed: ${errorMessage(error)}`);
     }
-  });
+    if (!accepted) return;
+    const snapshot = accepted;
+    setImmediate(() => {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        log(`task accepted listener failed: ${errorMessage(error)}`);
+      }
+    });
+  };
+  const acceptedTaskOf = (taskId: string): AcceptedTask | undefined => {
+    const task = inner.tasks.get(taskId);
+    const run = task ? inner.runs.get(task.runId) : undefined;
+    if (!task || !run) return undefined;
+    const attempts = inner.dispatches.list((entry) => entry.taskId === taskId);
+    const ids = new Set(attempts.map((entry) => entry.id));
+    const steps = task.workflow?.steps ?? [];
+    const { mergedDiff, pullRequest } = task;
+    const acceptedVia: AcceptedVia = pullRequest
+      ? 'pull-request'
+      : !mergedDiff
+        ? 'in-place'
+        : mergedDiff.baseCommit === mergedDiff.headCommit
+          ? 'no-change'
+          : 'merge';
+    return {
+      workspaceId: workspace.id,
+      runId: run.id,
+      coordinatorSessionId: run.coordinatorSessionId,
+      coordinatorRestricted: options.isRestrictedCoordinator?.(run.coordinatorSessionId) ?? false,
+      acceptedVia,
+      acceptedAt: now(),
+      task: {
+        id: task.id,
+        title: task.title,
+        spec: task.spec,
+        ...(mergedDiff ? { mergedDiff: { ...mergedDiff } } : {}),
+        ...(pullRequest ? { pullRequestUrl: pullRequest.url } : {}),
+        workflow: task.workflow !== undefined,
+      },
+      dispatches: attempts.map((entry) => {
+        const nodeName = steps.find((step) => step.id === entry.nodeId)?.name;
+        return {
+          dispatchId: entry.id,
+          sessionId: entry.workerSessionId,
+          status: entry.settledAt === undefined ? 'running' : (entry.outcome ?? 'failed'),
+          startedAt: entry.startedAt,
+          ...(entry.settledAt !== undefined ? { settledAt: entry.settledAt } : {}),
+          ...(entry.summary !== undefined ? { summary: entry.summary } : {}),
+          ...(entry.filesModified ? { filesModified: [...entry.filesModified] } : {}),
+          ...(entry.nodeId !== undefined ? { nodeId: entry.nodeId } : {}),
+          ...(nodeName !== undefined ? { nodeName } : {}),
+        };
+      }),
+      reviewFeedback: inner.messages
+        .list(
+          (message) =>
+            message.type === 'instruction' &&
+            message.subject === 'review feedback' &&
+            message.dispatchId !== undefined &&
+            ids.has(message.dispatchId)
+        )
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((message) => ({
+          ...(message.dispatchId !== undefined ? { dispatchId: message.dispatchId } : {}),
+          body: message.body,
+          createdAt: message.createdAt,
+        })),
+    };
+  };
+
+  const store = observeStore(
+    inner,
+    changed,
+    (message) => {
+      try {
+        options.onMessagePosted?.(message);
+      } catch (error) {
+        log(`message listener failed: ${errorMessage(error)}`);
+      }
+    },
+    taskCompleted
+  );
   const inbox = new Inbox({ messages: store.messages, now });
   // git worktree remove 删不掉超长路径时的兜底（Node/libuv 能处理 Windows 长路径）
   const git = new GitWorktreeManager({
