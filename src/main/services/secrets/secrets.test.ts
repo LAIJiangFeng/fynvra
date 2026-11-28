@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectKnownSecrets, registerSecretSource } from './known';
-import { findLocalInfo, sanitizeLocalInfo, scanSecrets } from './scan';
+import {
+  findLocalInfo,
+  REDACTED_SECRET,
+  redactSecrets,
+  sanitizeLocalInfo,
+  scanSecrets,
+} from './scan';
 
 // 测试用的假密钥按片段拼接，避免源码本身触发密钥扫描
 const SAMPLES: [kind: string, value: string][] = [
@@ -35,6 +41,26 @@ describe('scanSecrets', () => {
       'const time = "12:30:45";',
     ].join('\n');
     expect(scanSecrets(code, ['unrelated-secret-value'])).toEqual({ hit: false, kinds: [] });
+  });
+});
+
+describe('redactSecrets', () => {
+  it.each(SAMPLES)('替换 %s，前后文保留', (_kind, value) => {
+    const out = redactSecrets(`before ${value} after`, []);
+    expect(out).toBe(`before ${REDACTED_SECRET} after`);
+  });
+
+  it('已知密钥全部替换，长的优先；空值忽略', () => {
+    const known = ['abcdefgh', 'abcdefgh-longer', ''];
+    expect(redactSecrets('x abcdefgh-longer y abcdefgh z abcdefgh', known)).toBe(
+      `x ${REDACTED_SECRET} y ${REDACTED_SECRET} z ${REDACTED_SECRET}`
+    );
+  });
+
+  it('普通文本原样返回', () => {
+    expect(redactSecrets('用 pnpm test 跑测试，sk-short 不算', [])).toBe(
+      '用 pnpm test 跑测试，sk-short 不算'
+    );
   });
 });
 
