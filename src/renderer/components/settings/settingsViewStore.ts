@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export const SETTINGS_SECTIONS = [
   'general',
+  'git',
   'notifications',
   'providers',
   'roles',

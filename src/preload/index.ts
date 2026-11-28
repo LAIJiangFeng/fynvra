@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { createAppDialogApi } from './domains/appDialog';
 import { createAppPluginsApi } from './domains/appPlugins';
 import { createFilesApi } from './domains/files';
+import { createGitApi } from './domains/git';
 import { createInstructionsApi } from './domains/instructions';
 import { createMcpApi } from './domains/mcp';
 import { createNotificationsApi } from './domains/notifications';
@@ -34,6 +35,7 @@ const api: FynvraApi = {
   appDialog: createAppDialogApi(ipcRenderer, subscribe),
   updates: createUpdatesApi(ipcRenderer, subscribe),
   settings: createSettingsApi(ipcRenderer, subscribe),
+  git: createGitApi(ipcRenderer),
   workspaceUi: createWorkspaceUiApi(ipcRenderer, subscribe),
   workspaces: createWorkspacesApi(ipcRenderer, subscribe),
   orchestration: createOrchestrationApi(ipcRenderer),

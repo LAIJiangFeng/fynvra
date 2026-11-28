@@ -8,6 +8,7 @@ import appIcon from '../../resources/icon.png?asset';
 import { configureMainLocale, translate } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { getAppPluginRuntime, shutdownAppPlugins, startAppPlugins } from './ipc/appPlugins';
+import { getGitSetup } from './ipc/git';
 import { getOrchestrationRegistry } from './ipc/orchestration';
 import { getRoleStore } from './ipc/roles';
 import { getAgentHost, getSessionAttachments, getSessionStore } from './ipc/sessions';
@@ -132,6 +133,8 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      // Fynvra 自带的便携 git 追加到 PATH 末尾（同步），须在任何 git 调用与 worker fork 之前
+      getGitSetup().injectBundledPath();
       // 先开始读登录 shell 的 PATH，fork worker 之前再等它（失败不抛错）
       const shellPathReady = loadLoginShellPath();
       // toolkit 在 dev 下会改用 electron.exe 的身份；开发版也使用独立的 Fynvra 分组。
